@@ -1,0 +1,19 @@
+{
+    "name": "GeoCode-Web",
+    "short_name": "GeoCode-Web",
+    "icons": [
+        {
+            "src": "/assets/icon-192x192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "/assets/icon-512x512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ],
+    "start_url": "/",
+    "theme_color": "#59595e",
+    "display": "standalone"
+}

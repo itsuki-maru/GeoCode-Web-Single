@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT totp_temp_secret FROM user_model WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "name": "totp_temp_secret",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0aaa9db91764fa9dba984f4000fca110565627b222af93c4c2d5c161a1b496c6"
+}

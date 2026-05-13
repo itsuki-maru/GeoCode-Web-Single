@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- クロスオリジン対策でmanifest-tab.jsonを他の静的サーバーにホストする場合 -->
+    <link rel="manifest" href="https://geocode-web-mobile-app.pages.dev/assets/manifest-tab.json" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#59595e" />
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- QRCode.JSのライブラリファイルを読み込み -->
+    <script src="/qrcode.min.js"></script>
+    <title>GeoCode-Web</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
+
+<style>
+  html,
+  body {
+    overscroll-behavior: none;
+  }
+
+  body {
+    background-color: rgb(89, 89, 94);
+  }
+
+  /* 画像プレビューモーダル用 */
+  img#img-preview,
+  video#img-preview {
+    max-height: 80vh;
+  }
+
+  img,
+  video {
+    border: 1px solid #333;
+    box-shadow: 3px 3px 5px 0 rgba(0, 0, 0, 0.5);
+    max-width: 100%;
+  }
+</style>

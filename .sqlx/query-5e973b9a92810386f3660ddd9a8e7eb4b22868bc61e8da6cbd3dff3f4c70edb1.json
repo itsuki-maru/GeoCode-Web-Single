@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n            id,\n            layer_name,\n            label, url,\n            attribution,\n            include_foreign_tiles,\n            create_at,\n            updated_at\n        FROM tileserver_model",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "layer_name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "label",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "url",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "attribution",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "include_foreign_tiles",
+        "ordinal": 5,
+        "type_info": "Bool"
+      },
+      {
+        "name": "create_at",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 7,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5e973b9a92810386f3660ddd9a8e7eb4b22868bc61e8da6cbd3dff3f4c70edb1"
+}

@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="ja">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>初回セットアップ</title>
+        <style>
+            *,
+            *::before,
+            *::after {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+            body {
+                font-family: "Segoe UI", "Yu Gothic UI", sans-serif;
+                font-size: 14px;
+                background: #f0f2f5;
+                color: #333;
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 24px;
+            }
+            .card {
+                background: #fff;
+                border-radius: 8px;
+                box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+                width: 100%;
+                max-width: 560px;
+                padding: 32px 36px;
+            }
+            h1 {
+                font-size: 20px;
+                font-weight: 600;
+                margin-bottom: 4px;
+                color: #1a1a2e;
+            }
+            .subtitle {
+                font-size: 12px;
+                color: #888;
+                margin-bottom: 28px;
+            }
+            .section-title {
+                font-size: 11px;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                color: #666;
+                margin: 20px 0 10px;
+                padding-bottom: 6px;
+                border-bottom: 1px solid #eee;
+            }
+            .field {
+                margin-bottom: 14px;
+            }
+            label {
+                display: block;
+                font-size: 13px;
+                font-weight: 500;
+                margin-bottom: 4px;
+                color: #444;
+            }
+            input[type="text"],
+            input[type="number"],
+            input[type="password"] {
+                width: 100%;
+                padding: 8px 10px;
+                border: 1px solid #d0d5dd;
+                border-radius: 5px;
+                font-size: 13px;
+                color: #333;
+                transition: border-color 0.15s;
+                outline: none;
+            }
+            input:focus {
+                border-color: #4a6cf7;
+                box-shadow: 0 0 0 3px rgba(74, 108, 247, 0.12);
+            }
+            .hint {
+                font-size: 11px;
+                color: #999;
+                margin-top: 3px;
+            }
+            .row2 {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 12px;
+            }
+            .actions {
+                margin-top: 28px;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+            }
+            button[type="submit"] {
+                flex: 1;
+                padding: 10px;
+                background: #4a6cf7;
+                color: #fff;
+                border: none;
+                border-radius: 5px;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: background 0.15s;
+            }
+            button[type="submit"]:hover {
+                background: #3a5ce0;
+            }
+            button[type="submit"]:disabled {
+                background: #aaa;
+                cursor: not-allowed;
+            }
+            #error-msg {
+                display: none;
+                margin-top: 14px;
+                padding: 10px 14px;
+                background: #fff0f0;
+                border: 1px solid #f5c2c2;
+                border-radius: 5px;
+                color: #c0392b;
+                font-size: 12px;
+            }
+            #loading-msg {
+                display: none;
+                margin-top: 14px;
+                padding: 10px 14px;
+                background: #f0f4ff;
+                border: 1px solid #c2d0f5;
+                border-radius: 5px;
+                color: #4a6cf7;
+                font-size: 12px;
+                text-align: center;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h1>初回セットアップ</h1>
+            <p class="subtitle">
+                設定は
+                <code>~/..geocode-web-single/geocode-web-single.env.json</code>
+                に保存されます
+            </p>
+
+            <form id="setup-form" autocomplete="off">
+                <div class="section-title">アプリケーション</div>
+                <div class="field">
+                    <label for="app_title">アプリタイトル</label>
+                    <input
+                        type="text"
+                        id="app_title"
+                        name="app_title"
+                        value="GeoCode-Web"
+                        required
+                    />
+                </div>
+
+                <div class="section-title">管理者アカウント</div>
+                <div class="row2">
+                    <div class="field">
+                        <label for="admin_username">ユーザー名</label>
+                        <input
+                            pattern="^[A-Za-z0-9]{3,}$"
+                            title="3文字以上。半角英数字が使用可能。"
+                            placeholder="ユーザー名（3文字以上、半角英数字が使用可）"
+                            type="text"
+                            id="admin_username"
+                            name="admin_username"
+                            value="geocodeweb"
+                            required
+                        />
+                    </div>
+                    <div class="field">
+                        <label for="admin_password">パスワード</label>
+                        <input
+                            pattern=".{8,}"
+                            title="8文字以上で入力してください。"
+                            placeholder="パスワード（8文字以上）"
+                            type="password"
+                            id="admin_password"
+                            name="admin_password"
+                            value="geocodeweb"
+                            required
+                        />
+                    </div>
+                </div>
+
+                <div class="section-title">ログイン試行制限</div>
+                <div class="row2">
+                    <div class="field">
+                        <label for="failed_account_lock"
+                            >アカウントロック回数</label
+                        >
+                        <input
+                            type="number"
+                            id="failed_account_lock"
+                            name="failed_account_lock"
+                            value="15"
+                            min="1"
+                            required
+                        />
+                        <p class="hint">この回数失敗するとロック</p>
+                    </div>
+                    <div class="field">
+                        <label for="challenge_limit_time_failed_count"
+                            >待機制限開始回数</label
+                        >
+                        <input
+                            type="number"
+                            id="challenge_limit_time_failed_count"
+                            name="challenge_limit_time_failed_count"
+                            value="5"
+                            min="1"
+                            required
+                        />
+                        <p class="hint">この回数以上失敗で待機</p>
+                    </div>
+                </div>
+                <div class="field">
+                    <label for="next_challenge_minutes">待機時間（分）</label>
+                    <input
+                        type="number"
+                        id="next_challenge_minutes"
+                        name="next_challenge_minutes"
+                        value="5"
+                        min="1"
+                        required
+                    />
+                    <p class="hint">連続失敗後の再試行待機時間</p>
+                </div>
+
+                <div class="section-title">トークン有効期限</div>
+                <div class="row2">
+                    <div class="field">
+                        <label for="access_token_exp_minutes"
+                            >アクセストークン（分）</label
+                        >
+                        <input
+                            type="number"
+                            id="access_token_exp_minutes"
+                            name="access_token_exp_minutes"
+                            value="60"
+                            min="1"
+                            required
+                        />
+                    </div>
+                    <div class="field">
+                        <label for="refresh_token_exp_minutes"
+                            >リフレッシュトークン（分）</label
+                        >
+                        <input
+                            type="number"
+                            id="refresh_token_exp_minutes"
+                            name="refresh_token_exp_minutes"
+                            value="1440"
+                            min="1"
+                            required
+                        />
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <button type="submit" id="submit-btn">
+                        セットアップを完了する
+                    </button>
+                </div>
+            </form>
+
+            <div id="error-msg"></div>
+            <div id="loading-msg">セットアップ中... しばらくお待ちください</div>
+        </div>
+
+        <script>
+            document
+                .getElementById("setup-form")
+                .addEventListener("submit", async (e) => {
+                    e.preventDefault();
+
+                    const btn = document.getElementById("submit-btn");
+                    const errorEl = document.getElementById("error-msg");
+                    const loadingEl = document.getElementById("loading-msg");
+
+                    btn.disabled = true;
+                    errorEl.style.display = "none";
+                    loadingEl.style.display = "block";
+
+                    const fd = new FormData(e.target);
+                    const form = Object.fromEntries(fd.entries());
+
+                    try {
+                        await window.__TAURI__.core.invoke("complete_setup", {
+                            form,
+                        });
+                    } catch (err) {
+                        btn.disabled = false;
+                        loadingEl.style.display = "none";
+                        errorEl.style.display = "block";
+                        errorEl.textContent = "エラー: " + err;
+                    }
+                });
+        </script>
+    </body>
+</html>

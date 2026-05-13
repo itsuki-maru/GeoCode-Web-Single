@@ -1,0 +1,127 @@
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-weight: 400;
+  color-scheme: light;
+  color: #212121;
+  background-color: #f5f5f5;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button {
+  border-radius: 5px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  transition: border-color 0.25s;
+  color: #ffffff;
+  background-color: #5f5f5f;
+  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: #396cd8;
+}
+
+button:active {
+  border-color: #396cd8;
+  background-color: #e8e8e8;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
+}
+
+.pointer {
+  cursor: pointer;
+}
+
+.btn-close {
+  margin-top: 10px;
+  margin-bottom: 5px;
+  text-align: center;
+  align-items: center;
+}
+
+.btn-head-image {
+  width: 70px;
+  height: 35px;
+  font-size: 16px;
+  box-shadow: 3px 3px 5px 0 rgba(75, 75, 75, 0.5);
+  background: white;
+  color: #fff;
+  padding: 5px 5px;
+  text-decoration: none;
+  border: 1px;
+  border-radius: 5px;
+  transition-property: opacity;
+  -webkit-transition-property: opacity;
+  transition-duration: 0.5s;
+  -webkit-transition-duration: 0.5s;
+  margin-top: 3px;
+  margin-bottom: 3px;
+  margin-right: 10px;
+  margin-left: 5px;
+  text-align: center;
+  border-radius: 15px;
+  transition: background-color 0.3s;
+}
+
+.btn-head-image:hover,
+.btn-input-tools-util:hover {
+  background: rgb(192, 192, 192);
+}
+
+.btn-img {
+  border: none;
+  box-shadow: none;
+  width: 24px;
+}
+
+.input-tools-util-row {
+  position: absolute;
+  bottom: 2%;
+  left: 1%;
+}
+
+.btn-img-markdown {
+  border: none;
+  box-shadow: none;
+  width: 24px;
+}
+
+.btn-input-tools-util {
+  width: 55px;
+  height: 35px;
+  font-size: 16px;
+  box-shadow: 3px 3px 5px 0 rgba(75, 75, 75, 0.5);
+  background: white;
+  color: #fff;
+  padding: 5px 5px;
+  text-decoration: none;
+  border: 1px;
+  border-radius: 5px;
+  transition-property: opacity;
+  -webkit-transition-property: opacity;
+  transition-duration: 0.5s;
+  -webkit-transition-duration: 0.5s;
+  margin-top: 3px;
+  margin-bottom: 3px;
+  margin-right: 10px;
+  margin-left: 5px;
+  text-align: center;
+  border-radius: 15px;
+  transition: background-color 0.3s;
+}

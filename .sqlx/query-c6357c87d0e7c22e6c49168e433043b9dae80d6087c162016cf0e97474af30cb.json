@@ -1,0 +1,80 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n                marker_info_model.id,\n                marker_info_model.user_id,\n                layer_id,\n                marker_name,\n                latitude,\n                longitude,\n                detail,\n                layer_model.id as layer_model_id,\n                layer_model.user_id as layer_model_user_id,\n                layer_name,\n                is_master\n            FROM marker_info_model\n            INNER JOIN layer_model\n            ON marker_info_model.layer_id = layer_model.id\n            WHERE marker_info_model.user_id = $1 AND marker_info_model.layer_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "user_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "layer_id",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "marker_name",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "latitude",
+        "ordinal": 4,
+        "type_info": "Float"
+      },
+      {
+        "name": "longitude",
+        "ordinal": 5,
+        "type_info": "Float"
+      },
+      {
+        "name": "detail",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "layer_model_id",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "layer_model_user_id",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "layer_name",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_master",
+        "ordinal": 10,
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c6357c87d0e7c22e6c49168e433043b9dae80d6087c162016cf0e97474af30cb"
+}

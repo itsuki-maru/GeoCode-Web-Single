@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, layer_id, marker_name, latitude, longitude, detail\n                FROM marker_info_model\n                WHERE (user_id = $1 AND layer_id = $2)",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "layer_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "marker_name",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "latitude",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "longitude",
+        "ordinal": 4,
+        "type_info": "Float"
+      },
+      {
+        "name": "detail",
+        "ordinal": 5,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "94c14c1269c5b45030051ade246bcea4aba485f44dfd6ca7d5df09493c818ec2"
+}

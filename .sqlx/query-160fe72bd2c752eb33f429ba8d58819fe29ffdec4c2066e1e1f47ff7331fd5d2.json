@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE marker_info_model\n                 SET latitude = $1, longitude = $2, update_at = $3\n                 WHERE id = $4 AND user_id = $5\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "160fe72bd2c752eb33f429ba8d58819fe29ffdec4c2066e1e1f47ff7331fd5d2"
+}

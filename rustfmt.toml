@@ -1,0 +1,14 @@
+# インデント幅
+tab_spaces = 4
+
+# 行の最大幅
+max_width = 100
+
+# ハードタブを使うか
+hard_tabs = false
+
+# 関数の引数を縦に揃えるか
+fn_params_layout = "Tall"
+
+# matchアームのブロックを簡潔にする
+match_block_trailing_comma = true

@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, username, password, create_at, is_superuser, is_locked FROM user_model",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "username",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "password",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "create_at",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_superuser",
+        "ordinal": 4,
+        "type_info": "Bool"
+      },
+      {
+        "name": "is_locked",
+        "ordinal": 5,
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a1c6444ca5e176747b89cb2a0d95908016db92ed4bb7970240bda9ef31a99b04"
+}

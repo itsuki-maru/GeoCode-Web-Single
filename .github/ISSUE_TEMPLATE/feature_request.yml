@@ -1,0 +1,25 @@
+name: 機能提案
+description: 改善提案や新機能の要望
+title: "[提案] "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 背景や課題
+      description: どんな課題を解決したいか
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 提案内容
+      description: 望む振る舞いや案
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 検討した代替案
+      description: 代替案や回避策があれば記入してください

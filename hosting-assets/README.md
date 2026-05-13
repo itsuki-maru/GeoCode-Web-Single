@@ -1,0 +1,1 @@
+Use this if you want to host this icon image and manifest.json asset on a static server.

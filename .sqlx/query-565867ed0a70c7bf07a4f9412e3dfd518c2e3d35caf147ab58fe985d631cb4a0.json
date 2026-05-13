@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM marker_info_model\n         WHERE id = $1 AND user_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "565867ed0a70c7bf07a4f9412e3dfd518c2e3d35caf147ab58fe985d631cb4a0"
+}

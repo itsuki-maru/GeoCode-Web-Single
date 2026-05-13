@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO tileserver_model (layer_name, label, url, attribution, include_foreign_tiles, create_at, updated_at)\n        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6242a2aa3d83498f51525216f09c949af1c1d229b27981f0fab9e846f10008c5"
+}

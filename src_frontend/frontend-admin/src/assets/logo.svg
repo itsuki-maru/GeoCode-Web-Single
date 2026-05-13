@@ -1,0 +1,40 @@
+<svg width="400" height="400" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <!-- Penguin's body -->
+    <ellipse cx="100" cy="160" rx="80" ry="90" style="fill:#133463" />
+
+    <!-- Penguin's head -->
+    <ellipse cx="100" cy="85" rx="60" ry="40" style="fill:#133463" />
+
+    <!-- Penguin's belly -->
+    <ellipse cx="100" cy="175" rx="60" ry="65" style="fill:white" />
+
+    <!-- Penguin's eyes -->
+    <circle cx="80" cy="75" r="10" style="fill:white" />
+    <circle cx="120" cy="75" r="10" style="fill:white" />
+
+    <!-- Penguin's pupils -->
+    <circle cx="80" cy="75" r="5" style="fill:black" />
+    <circle cx="120" cy="75" r="5" style="fill:black" />
+
+    <!-- Penguin's beak -->
+    <polygon points="100,105 90,95 110,95" style="fill:orange" />
+
+    <!-- Penguin's feet -->
+    <polygon points="70,255 60,275 80,275" style="fill:orange" />
+    <polygon points="130,255 120,275 140,275" style="fill:orange" />
+
+    <!-- Penguin's left arm -->
+    <polygon points="20,140 60,110 60,170" style="fill:#133463" />
+
+    <!-- Pencil in right hand -->
+    <rect x="140" y="75" width="20" height="190" style="fill:green" />
+
+    <!-- Pencil tip wood -->
+    <polygon points="140,75 160,75 150,60" style="fill:#DEB887" />
+
+    <!-- Pencil tip graphite -->
+    <polygon points="148,65 152,65 150,60" style="fill:black" />
+
+    <!-- Penguin's right arm, covering pencil -->
+    <polygon points="180,140 140,110 140,170" style="fill:#133463" />
+</svg>

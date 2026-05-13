@@ -1,0 +1,37 @@
+import { baseUrl } from "@/settingMobile";
+
+export const getTokenUrl = baseUrl + "/account/token";
+export const disableTokenUrl = baseUrl + "/account/token/disable";
+export const getSecretQuestionUrl = baseUrl + "/account/secret-question";
+export const passwordResetUrl = baseUrl + "/account/password-reset";
+export const signupUrl = baseUrl + "/account/signup";
+export const logoutUrl = baseUrl + "/account/logout";
+export const authCheckUrl = baseUrl + "/account/auth";
+export const getAppIniturl = baseUrl + "/app-init";
+
+export const getGeocodeInitUrl = baseUrl + "/geocode-init";
+export const getMapObjectsUrl = baseUrl + "/marker/read/all";
+export const getLayersUrl = baseUrl + "/layer/read/all";
+export const updateMapObjectUrl = baseUrl + "/marker/update/";
+export const deleteMapObjectUrl = baseUrl + "/marker/delete/";
+export const addLayerUrl = baseUrl + "/layer";
+export const getMasterLayerIdUrl = baseUrl + "/layer/masterid";
+export const updateLayersUrl = baseUrl + "/layer/update/";
+export const deleteLayersUrl = baseUrl + "/layer/delete/";
+export const mapAnatherLayerUrl = baseUrl + "/map-another";
+export const mapQueryMarkerUrl = baseUrl + "/marker/read/query";
+export const licensesGetUrl = baseUrl + "/licanses";
+export const exportJsonUrl = baseUrl + "/file/export/";
+export const importJsonUrl = baseUrl + "/file/import";
+export const imageListGetUrl = baseUrl + "/images/eneble-images";
+export const imageUploadUrl = baseUrl + "/images/upload";
+export const imageDeleteUrl = baseUrl + "/images/delete";
+
+export const generateOnetimeMapUrl = baseUrl + "/onetimeurl/generate";
+export const getCurrentOnetimeMapUrl = baseUrl + "/onetimeurl/current";
+export const invalidateOntimeMapUrl = baseUrl + "/onetimeurl/delete/";
+export const refreshTokenUrl = baseUrl + "/account/refresh";
+export const getUserInfoUrl = baseUrl + "/account/info";
+export const userPrivacySettingUrl = baseUrl + "/account/privacy";
+export const userPasswordUpdateUrl = baseUrl + "/account/password-update";
+export const getTokenFromTotpUrl = baseUrl + "/account/totp/token";

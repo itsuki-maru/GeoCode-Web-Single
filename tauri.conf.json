@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "GeoCode-Web-SingleBin",
+  "version": "1.0.0",
+  "identifier": "com.itsuki.geocode-web-single-bin",
+  "build": {
+    "frontendDist": "dist"
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "icon": ["res/icon.ico"],
+    "windows": {
+      "nsis": {
+        "languages": ["Japanese"],
+        "installerIcon": "res/icon.ico"
+      },
+      "wix": {
+        "language": "ja-JP"
+      }
+    }
+  },
+  "app": {
+    "windows": [],
+    "withGlobalTauri": true,
+    "security": {
+      "csp": null
+    }
+  }
+}

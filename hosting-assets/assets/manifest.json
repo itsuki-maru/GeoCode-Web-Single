@@ -1,0 +1,32 @@
+{
+    "name": "GeoCode-Web",
+    "short_name": "GeoCode-Web",
+    "icons": [
+        {
+            "src": "/assets/icon-192x192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "/assets/icon-512x512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ],
+    "screenshots": [
+        {
+            "src": "/screenshots/screenshot-desktop.png",
+            "sizes": "1280x629",
+            "type": "image/png",
+            "form_factor": "wide"
+        },
+        {
+            "src": "/screenshots/screenshot-mobile.png",
+            "sizes": "657x1334",
+            "type": "image/png"
+        }
+    ],
+    "start_url": "https://www.geocode-web.com/",
+    "theme_color": "#59595e",
+    "display": "standalone"
+}

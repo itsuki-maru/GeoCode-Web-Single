@@ -1,0 +1,57 @@
+name: 不具合報告
+description: 不具合を報告する
+title: "[不具合] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        報告ありがとうございます。再現しやすいように、できるだけ具体的に記入してください。
+  - type: input
+    id: version
+    attributes:
+      label: バージョン
+      description: 利用しているバージョン
+      placeholder: 例: 2.1.2
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 利用環境
+      options:
+        - Windows 11
+        - Windows 10
+        - Linux 上のサーバーモード
+        - その他
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      description: 再現手順
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する動作
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 実際の動作
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: ログまたはスクリーンショット
+      description: 可能であれば添付してください

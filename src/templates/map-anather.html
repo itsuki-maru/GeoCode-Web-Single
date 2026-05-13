@@ -1,0 +1,1852 @@
+<!doctype html>
+<html lang="ja">
+    <head>
+        <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+
+        <script>
+            L_NO_TOUCH = false;
+            L_DISABLE_3D = false;
+        </script>
+
+        <style>
+            html,
+            body {
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+            }
+        </style>
+        <style>
+            #map {
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                right: 0;
+                left: 0;
+            }
+        </style>
+        <script src="/assets/marked.min.js"></script>
+        <script src="/assets/leaflet.js"></script>
+        <script src="/assets/jquery-1.12.4.min.js"></script>
+        <script src="/assets/bootstrap.bundle.min.js"></script>
+        <script src="/assets/leaflet.awesome-markers.js"></script>
+        <script src="/assets/xss.min.js"></script>
+        <link rel="stylesheet" href="/assets/leaflet.css" />
+        <link rel="stylesheet" href="/assets/bootstrap.min.css" />
+        <link rel="stylesheet" href="/assets/bootstrap3.0.0.min.css" />
+        <link rel="stylesheet" href="/assets/all.min.css" />
+        <link rel="stylesheet" href="/assets/leaflet.awesome-markers.css" />
+        <link rel="stylesheet" href="/assets/leaflet.awesome.rotate.min.css" />
+        <!-- Leaflet.markercluster -->
+        <script src="/assets/leaflet.markercluster.js"></script>
+        <link rel="stylesheet" href="/assets/MarkerCluster.css" />
+        <link rel="stylesheet" href="/assets/MarkerCluster.Default.css" />
+        <link rel="stylesheet" href="/assets/github.css" />
+        <meta
+            name="viewport"
+            content="width=device-width,
+                initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+        />
+        <style>
+            #map_f7ef1184c39fa762ecccbe60c42f012d {
+                position: relative;
+                width: 100%;
+                height: 100%;
+                left: 0%;
+                top: 0%;
+            }
+
+            .leaflet-container {
+                font-size: 1rem;
+            }
+            .leaflet-popup {
+                min-width: 500px;
+                max-width: 750px;
+            }
+            /* マークダウンコンテンツ（detail）のスタイル */
+            .md-detail-contents {
+                width: 476px;
+                min-width: 450px;
+                max-width: 700px;
+                max-height: 500px;
+                overflow-y: auto;
+                margin-top: 8%;
+                padding-top: 3%;
+                padding-right: 6%;
+            }
+
+            .md-detail-contents video {
+                width: 100%;
+                max-width: 100%;
+                height: auto;
+            }
+
+            /* ラジオボタンの全体 */
+            .radio-zone {
+                background-color: white; /* 背景色をWhiteにする */
+                padding: 5px 5px 5px 5px;
+            }
+            /* ラジオボタンのスタイル変更 */
+            .custom-radio {
+                width: 20px; /* 幅を大きくする */
+                height: 20px; /* 高さを大きくする */
+                background-color: white; /* 背景色をWhiteにする */
+            }
+            /* ラジオボタンのラベルのスタイル変更 */
+            .custom-radio-label {
+                font-size: 14px; /* テキストサイズを大きくする */
+                background-color: white; /* 背景色をWhiteにする */
+                padding-left: 5px; /* パディングを追加して余白を作る */
+                line-height: 20px; /* ラジオボタンの高さと同じにする */
+                margin-top: 10px;
+            }
+            /* ラジオボタンがチェックされたときのスタイル変更 */
+            .custom-radio:checked + .custom-radio-label {
+                font-weight: bold; /* チェックされたときのテキストを太字にする */
+            }
+            /* ラジオボタンとラベルの中央揃え */
+            .custom-radio,
+            .custom-radio-label {
+                vertical-align: middle;
+            }
+
+            /* カスタムツールチップ */
+            .custom-tooltip {
+                font-size: 14px;
+                color: black;
+                background-color: white;
+            }
+
+            /* ラジオボタンのスタイル変更 */
+            .tile-radio {
+                width: 20px; /* 幅を大きくする */
+                height: 20px; /* 高さを大きくする */
+                background-color: white; /* 背景色をWhiteにする */
+            }
+            /* ラジオボタンのラベルのスタイル変更 */
+            .tile-radio-label {
+                font-size: 14px; /* テキストサイズを大きくする */
+                background-color: white; /* 背景色をWhiteにする */
+                padding-left: 5px; /* パディングを追加して余白を作る */
+                line-height: 20px; /* ラジオボタンの高さと同じにする */
+                margin-top: 10px;
+            }
+            /* ラジオボタンがチェックされたときのスタイル変更 */
+            .tile-radio:checked + .tile-radio-label {
+                font-weight: bold; /* チェックされたときのテキストを太字にする */
+            }
+            /* ラジオボタンとラベルの中央揃え */
+            .tile-radio,
+            .tile-radio-label {
+                vertical-align: middle;
+            }
+
+            /* モード説明部分のスタイル */
+            .mode-desc-container {
+                z-index: 1000;
+                position: absolute;
+                bottom: 10px;
+                left: 10px;
+                background-color: white;
+                padding: 5px;
+                border-radius: 5px;
+            }
+
+            /* ツールチップの表示・非表示切替ボタン*/
+            .custom-control-button {
+                background-color: white;
+                border: none;
+                cursor: pointer;
+                padding: 5px 10px;
+                font-size: 14px;
+                font-weight: bold;
+                border-radius: 4px;
+            }
+
+            .custom-control-button:hover {
+                background-color: rgb(238, 238, 238);
+            }
+
+            .leaflet-control-layers-overlays {
+                font-size: 14px;
+            }
+
+            .leaflet-overlay-pane .leaflet-interactive {
+                cursor: default;
+            }
+
+            .shape-name-tooltip {
+                background: transparent;
+                border: none;
+                border-radius: 0;
+                box-shadow: none;
+                color: #7f1d1d;
+                font-size: 12px;
+                font-weight: bold;
+                pointer-events: auto;
+                padding: 0;
+            }
+
+            .shape-name-tooltip::before {
+                display: none;
+            }
+
+            .shape-name-label {
+                display: inline-block;
+                min-width: 1.5em;
+                min-height: 1.2em;
+            }
+
+            .shape-name-label.is-empty {
+                min-width: 1.5em;
+            }
+
+            .shape-name-editor-popup.leaflet-popup {
+                margin-bottom: 20px;
+                min-width: 0 !important;
+                max-width: 240px !important;
+            }
+
+            .shape-name-editor-popup .leaflet-popup-content-wrapper {
+                border-radius: 10px;
+                min-width: 0;
+                padding: 0;
+            }
+
+            .shape-name-editor-popup .leaflet-popup-content {
+                margin: 0;
+                width: auto !important;
+            }
+
+            .shape-name-editor {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                min-width: 0;
+                width: 210px;
+                padding: 10px;
+            }
+
+            .shape-name-editor-title {
+                font-size: 12px;
+                font-weight: bold;
+            }
+
+            .shape-name-editor-input {
+                border: 1px solid #b7c3d0;
+                border-radius: 6px;
+                font-size: 13px;
+                padding: 6px 8px;
+            }
+
+            .shape-name-editor-actions {
+                display: flex;
+                gap: 6px;
+                justify-content: flex-end;
+            }
+
+            .shape-name-editor-button {
+                border: 0.5px solid #9aa7b6;
+                background: white;
+                border-radius: 6px;
+                font-size: 12px;
+                padding: 4px 10px;
+            }
+
+            .shape-name-editor-button:hover {
+                background: #f4f6f8;
+            }
+
+            .shape-measure-marker {
+                background: transparent;
+                border: none;
+            }
+
+            .shape-measure-label {
+                background: rgba(255, 255, 255, 0.96);
+                border: 1px solid #d0d7de;
+                border-radius: 999px;
+                box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+                color: #0f172a;
+                display: inline-block;
+                font-size: 11px;
+                font-weight: 600;
+                line-height: 1.2;
+                padding: 2px 7px;
+                pointer-events: none;
+                transform: translate(-50%, -50%);
+                white-space: nowrap;
+            }
+
+            .shape-measure-label--summary {
+                border-radius: 10px;
+                box-shadow: 0 3px 10px rgba(15, 23, 42, 0.14);
+                font-size: 12px;
+                padding: 5px 8px;
+                transform: translate(-50%, 8px);
+            }
+
+            .shape-measure-label--summary-polyline {
+                transform: translate(-50%, 26px);
+            }
+
+            .shape-measure-label--summary-circle {
+                transform: translate(-50%, 36px);
+            }
+
+            .shape-measure-label--summary-rectangle {
+                transform: translate(-50%, 24px);
+            }
+
+            .shape-measure-label-line + .shape-measure-label-line {
+                margin-top: 2px;
+            }
+
+            .search-zone {
+                background-color: white; /* 背景色をWhiteにする */
+                padding: 5px 5px 5px 5px;
+            }
+            .custom-search {
+                width: 100%;
+            }
+            .search-input {
+                font-size: 14px;
+                text-align: center;
+                margin-bottom: 10px;
+                border: 0.5px solid;
+                border-radius: 5px;
+            }
+            #code-search-btn {
+                border: 0.5px solid;
+                font-size: 15px;
+                border-radius: 5px;
+            }
+
+            summary {
+                list-style: none; /* デフォルトの矢印を非表示 */
+                cursor: pointer;
+                font-size: 18px;
+            }
+
+            summary::-webkit-details-marker {
+                display: none; /* ChromeなどWebkit系ブラウザ対応 */
+            }
+
+            details > summary {
+                position: relative;
+                padding-left: 1.5em;
+            }
+
+            details > summary::before {
+                content: "▶"; /* 未展開時のアイコン */
+                position: absolute;
+                left: 0;
+                top: 0;
+                transform: rotate(0deg);
+                transition: transform 0.2s ease;
+            }
+
+            details[open] > summary::before {
+                transform: rotate(90deg); /* 展開時に90度矢印を下に変更 */
+            }
+
+            .box.note {
+                border-left: 4px solid #4caf50;
+                background: #e8f5e9;
+                padding: 0.5em;
+                margin: 1em 0;
+            }
+
+            .box.warning {
+                border-left: 4px solid #f44336;
+                background: #ffebee;
+                padding: 0.5em;
+                margin: 1em 0;
+            }
+        </style>
+        <title>GeoCode-Web</title>
+    </head>
+    <body>
+        <div class="folium-map" id="map"></div>
+    </body>
+    <script>
+        const tileServers = {{ tileServers | json_encode | safe }};
+        const isCluster = {{ is_cluster }};
+        const layersFromAxum = {{ layersFromAxum | json_encode | safe }}
+        const markersFromAxum = {{ markersFromAxum | json_encode | safe }}
+        const shapesFromAxum = {{ shapesFromAxum | json_encode | safe }}
+
+        // markedの設定
+        const videoToken = {
+            name: "video",
+            level: "inline",
+            start(src) {
+                return src.match(/\?\[.*\]\(.*\)/)?.index;
+            },
+
+            tokenizer(src, tokens) {
+                const rule = /^\?\[(.*?)\]\((.*?)\)/;
+                const match = rule.exec(src);
+                if (match) {
+                    return {
+                        type: "video",
+                        raw: match[0],
+                        text: match[1],
+                        href: match[2],
+                        tokens: this.lexer.inlineTokens(match[1], [])
+                    };
+                }
+            },
+            renderer(token) {
+                return `<video controls src="${token.href}" poster="${token.href}?thumb=true" preload="none">${token.text}</video>`;
+            }
+        }
+
+        // カスタムトークン"youtube"の定義（型は緩くanyとする）
+        const youtubeToken = {
+            name: "youtube",
+            level: "inline",
+            start(src) {
+                return src.match(/\?\[.*\]\(.*\)/)?.index;
+            },
+            tokenizer(src, tokens) {
+                const rule = /^\@\[(youtube)\]\((.*?)\)/;
+                const match = rule.exec(src);
+                if (match) {
+                    const id = extractYouTubeId(match[2]);
+                    if (!id) return null;
+                    return {
+                        type: "youtube", // カスタムトークンタイプ
+                        raw: match[0],
+                        text: id,
+                        href: match[2],
+                    }
+                }
+                return null;
+            },
+            renderer(token) {
+                // 生iframeではなく、自前テンプレートにする（例：Web Component）
+                return `<app-youtube video-id="${token.text}" data-src="${token.href}"></app-youtube>`;
+            }
+        };
+
+        // 11文字のYouTube ID検証
+        const ID_RE = /^[\w-]{11}$/;
+        // YouTube URL から動画IDを安全に取り出す
+        function extractYouTubeId(rawUrl) {
+            try {
+                const url = new URL(rawUrl);
+                const host = url.hostname.toLowerCase();
+                const allowYouTubeList = [
+                    "www.youtube.com",
+                    "youtube.com",
+                    "m.youtube.com",
+                    "youtu.be",
+                    "www.youtube-nocookie.com"
+                ]
+                if (!allowYouTubeList.includes(host)) return null;
+
+                // shorts / watch / youtu.be に対応
+                if (host === "youtu.be") {
+                    const id = url.pathname.slice(1);
+                    return ID_RE.test(id) ? id : null;
+                };
+                if (url.pathname.startsWith("/shorts/")) {
+                    const id = url.pathname.split("/")[2] ?? "";
+                    return ID_RE.test(id) ? id : null;
+                };
+                if (url.pathname === "/watch") {
+                    const id = url.searchParams.get("v") ?? "";
+                    return ID_RE.test(id) ? id : null;
+                };
+                if (url.pathname.startsWith("/embed/")) {
+                    const id = url.pathname.split("/")[2] ?? "";
+                    return ID_RE.test(id) ? id : null;
+                };
+                return null;
+            } catch { return null; }
+        }
+
+        // app-youtubeからiframeに置換（埋め込み要素を含む HTML を表示用に整形）
+        function renderIframe(html) {
+            return html.replace(
+                /<app-youtube\s+[^>]*video-id=["']([\w-]{11})["'][^>]*>(?:<\/app-youtube>)?/g,
+                (_, videoId) => {
+                    const src = `https://www.youtube-nocookie.com/embed/${videoId}`;
+                    return `
+                        <iframe
+                            src="${src}"
+                            title="YouTube video player"
+                            frameborder="0"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin"
+                            allowfullscreen
+                            width="100%" height="315"
+                            style="border:0;"
+                        ></iframe>
+                    `.trim();
+                }
+            );
+        };
+
+        // ネスト対応トークナイザの共通関数
+        function createNestedTokenizer(typeName) {
+            const self = this.lexer;
+            return {
+                name: typeName,
+                level: "block",
+                start(src) {
+                    const re = new RegExp(`^:::${typeName}\\s`, "m");
+                    return src.match(re)?.index;
+                },
+                tokenizer(src, tokens) {
+                    if (!src.startsWith(`:::${typeName}`)) return null;
+
+                    const lines = src.split(/\r?\n/);
+                    let nestLevel = 0;
+                    let endIndex = -1;
+
+                    for (let i = 0; i < lines.length; i++) {
+                        const line = lines[i].trim();
+                        if (/^:::(\w+)/.test(line)) {
+                            nestLevel++;
+                        } else if (/^:::\s*$/.test(line)) {
+                            nestLevel--;
+                            if (nestLevel === 0) {
+                                endIndex = i;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (endIndex === -1) return null;
+
+                    const rawLines = lines.slice(0, endIndex + 1);
+                    const raw = rawLines.join("\n");
+
+                    const titleMatch = lines[0].match(new RegExp(`^:::${typeName}\\s+(.+)`));
+                    const title = titleMatch ? titleMatch[1].trim() : typeName.toUpperCase();
+
+                    const content = lines.slice(1, endIndex).join("\n");
+
+                    return {
+                        type: typeName,
+                        raw,
+                        title,
+                        tokens: this.lexer.blockTokens(content),
+                    };
+                },
+                renderer(token) {
+                    const body = marked.parser(token.tokens);
+                    if (token.type === "details") {
+                        return `<details class="details">\n<summary>${token.title}</summary>\n${body}\n</details>\n`;
+                    } else {
+                        return `<div class="box ${token.type}">\n<summary>${token.title}</summary>\n${body}\n</div>\n`;
+                    }
+                },
+            };
+        }
+
+        // それぞれのトークンを生成
+        const detailsToken = createNestedTokenizer("details");
+        const noteToken = createNestedTokenizer("note");
+        const warningToken = createNestedTokenizer("warning");
+
+        marked.use({
+            extensions: [
+                videoToken,
+                detailsToken,
+                noteToken,
+                warningToken,
+                youtubeToken,
+            ]
+        });
+
+        marked.use(
+            {
+                mangle: false,
+                headerIds: false
+            }
+        );
+
+        // 画像クリック時に別ウィンドウで拡大表示できるようにカスタムレンダラを定義
+        const renderer = new marked.Renderer();
+        const originalImageRenderer = renderer.image;
+        renderer.image = function (href, title, text) {
+            const separator = href.includes("?") ? "&" : "?";
+            const newHref = href ? `${href}${separator}thumb=true` : "";
+            const titleAttr = title ? ` title="${title}"` : "";
+            return `<img src="${newHref}" style="cursor:pointer;" onclick="callParent('${href}')">`
+        };
+
+        // 実行環境が PWA かブラウザか判定する機能
+        function isRunningAsPWA() {
+            // matchMedia を使用（全般的な環境）
+            if (window.matchMedia("(display-mode: standalone)").matches) {
+                return true;
+            }
+
+            // iOS Safari の場合
+            if (window.navigator.standalone) {
+                return true;
+            }
+
+            // User-Agent を解析（WebView などの特殊ケース対応）
+            const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+            if (/WebView|wv/.test(userAgent)) {
+                return true;
+            }
+
+            // その他のケースはブラウザと判定
+            return false;
+        }
+
+        // リンク先がローカル環境かどうかを判定する
+        function isLocalhost(url) {
+            try {
+                const parsedUrl = new URL(url);
+                return parsedUrl.hostname === "localhost" || parsedUrl.hostname === "127.0.0.1" || parsedUrl.hostname === "[::1]";
+            } catch (e) {
+                return false;
+            }
+        }
+
+        // 対象ファイルが PDF かどうかを判定
+        function isPDF(filename) {
+            return /\.pdf$/i.test(filename);
+        }
+
+        // ダウンロード可能ファイルであるか検証
+        function isDownload(href) {
+            return /\.(pdf|zip|png|jpg|jpeg|gif|txt|csv|mp4|mp3)$/i.test(href);
+        }
+
+        // 指定 URL のファイルをブラウザ経由でダウンロードする
+        function downloadFile(href) {
+            console.log(`Download Start: ${href}`);
+            fetch(href)
+            .then(response => response.blob())
+            .then(blob => {
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(blob);
+                a.download = "document.pdf";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            })
+            .catch(console.error);
+        }
+
+        // [テキスト](URL)で定義された外部リンクを別タブで開かせるカスタムレンダラ設定
+        const originalLinkRenderer = renderer.link.bind(renderer);
+        // link関数をオーバーライド
+        renderer.link = (href, title, text) => {
+            // 外部リンクかどうかをチェック
+            const isExternal = /^https?:\/\//.test(href);
+            let isLocal = false;
+            let isPDFHref = false;
+            let isDownloadable = false;
+            if (href) {
+                isLocal = isLocalhost(href);
+                isPDFHref = isPDF(href);
+                isDownloadable = isDownload(href);
+            }
+            const html = originalLinkRenderer(href, title, text);
+
+            // 外部リンク時の処理
+            if (isExternal) {
+                if (isLocal && isPDFHref) {
+                    // PWAとしての実行時はPDFダウンロードを実行
+                    if (isRunningAsPWA()) {
+                        return html.replace(/^<a /, `<a href="#" title="PDFダウンロードリンク" onclick="downloadFile('${href}')"`);
+                    }
+                    return html.replace(/^<a /, '<a target="_blank" rel="noopener noreferrer" title="PDFリンク" ');
+                }
+                // リンクを別タブで起動
+                return html.replace(/^<a /, '<a target="_blank" rel="noopener noreferrer" title="外部リンク" ');
+            } else {
+                // 内部リンクかつPDFの場合
+                if (isPDFHref) {
+                    // PWAとしての実行時はダウンロードを実行
+                    if (isRunningAsPWA()) {
+                        return html.replace(/^<a /, `<a href="#" title="PDFダウンロードリンク" onclick="downloadFile('${href}')"`);
+                    }
+                    return html.replace(/^<a /, '<a target="_blank" rel="noopener noreferrer" title="PDFリンク" ');
+                }
+                // 内部リンクの場合、元の処理を使用
+                return originalLinkRenderer(href, title, text);
+            }
+        };
+
+        marked.setOptions({ renderer });
+
+        // detailsタグ内の img タグと video タグ内のネットワークコンテンツを遅延読み込みさせる処理
+        function setupDetailsLazyImages(root=document) {
+            const detailsList = root.querySelectorAll(".details");
+
+            detailsList.forEach(details => {
+                if (details.hasAttribute("data-lazy-img-initialized")) return;
+
+                details.setAttribute("data-lazy-img-initialized", "true");
+
+                // 初期化処理: src -> data-srcへ退避
+                const resources = details.querySelectorAll("img[src], video[src]");
+                resources.forEach(element => {
+                    const src = element.getAttribute("src");
+                    if (src) {
+                        element.setAttribute("data-src", src);
+                        element.removeAttribute("src");
+                    }
+                });
+
+                // toggleイベントで開かれたとき、自分の直下（= ネストしたdetails内は含めない）だけを処理
+                details.addEventListener("toggle", () => {
+                    if (!details.open) return;
+
+                    // 自分の中のすべてのimg/videoを取得するが、閉じたこのdetailsの中にあるものは除外
+                    const childDetails = details.querySelectorAll(".details");
+
+                    // 画像と動画の処理を共通化
+                    const loadVisibleMedia = (selector) => {
+                        const elements = details.querySelectorAll(selector);
+                        elements.forEach(el => {
+                            // elが閉じた子detailsの中に含まれるならスキップ
+                            for (const child of childDetails) {
+                                if (!child.open && child.contains(el)) return;
+                            }
+                            if (!el.getAttribute("src") && el.getAttribute("data-src")) {
+                                el.setAttribute("src", el.getAttribute("data-src"));
+                            }
+                        });
+                    };
+
+                    loadVisibleMedia("img[data-src]");
+                    loadVisibleMedia("video[data-src]");
+                });
+            });
+        }
+
+        // XSSフィルタのカスタマイズ
+        let xssOptions = {
+            whiteList: {
+                h1: ['id', 'class'], // h1タグのid属性を許可 class属性を許可
+                h2: ['id', 'class'], // h2タグのid属性を許可 class属性を許可
+                h3: ['id'], // h3タグのid属性を許可
+                h4: ['id'], // h4タグのid属性を許可
+                h5: ['id'], // h5タグのid属性を許可
+                h6: ['id'], // h6タグのid属性を許可
+                pre: ['class'],
+                a: ['target', 'rel', 'href', 'title', 'onclick'],
+                img: ['src', 'alt', 'onclick'],
+                video: ['src', 'controls', 'preload', 'poster'],
+                p: [],
+                div: ['class'],
+                span: [],
+                li: [],
+                strong: [],
+                ul: [],
+                ol: [],
+                li: [],
+                blockquote: [],
+                code: [],
+                table: [],
+                tbody: [],
+                th: [],
+                td: [],
+                tr: [],
+                details: ['class'],
+                summary: [],
+                "app-youtube": ['video-id', 'data-src'],
+            },
+            // iframeの確認（念のため、iframeはここで不許可）
+            onTag(tag, html) {
+                if (tag === "iframe") return "Not Allow iframe ";
+            },
+            stripIgnoreTag: true,
+            stripIgnoreTagBody: ["script"],
+        };
+
+
+        var map = L.map(
+            "map",
+            {
+                center: [37.650000, 138.000000],
+                crs: L.CRS.EPSG3857,
+                zoom: 6,
+                zoomControl: true,
+                preferCanvas: false,
+                // Leafletの著作権表示に_blank属性を追加するために、デフォルト値を無効化
+                attributionControl: false
+            }
+        );
+
+        // 日本の最南端と最北端の座標を使用して境界を設定
+        const southWest = L.latLng(20.25, 122.56), // 最南端の座標
+        northEast = L.latLng(45.55, 153.59); // 最北端の座標
+        const bounds = L.latLngBounds(southWest, northEast);
+
+        // 表示範囲の制限
+        if (!tileServers["1"]["include_foreign_tiles"]) {
+            map.setMaxBounds(bounds);
+        }
+
+        // leafletのライセンスリンクを別タブで開く設定を付与して追加
+        L.control.attribution({prefix: false}).addAttribution('&copy; <a href="https://leafletjs.com" target="_blank" rel="noopener noreferrer">Leaflet</a>').addTo(map);
+
+        // タイルレイヤーの制御
+        var TileControl = L.Control.extend({
+            options: {
+                position: 'topright'
+            },
+            onAdd: function(map) {
+                var container = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+
+                // ラジオボタンのHTMLを動的に生成
+                let radioHTML = '<div class="radio-zone"><form>';
+                    for (const key in tileServers) {
+                        let checkedAttribute = "";
+                        if (key === "1") {
+                            checkedAttribute = "checked"
+                        }
+                        radioHTML += `
+                        <input class="tile-radio" type="radio" id="${tileServers[key]["layer_name"]}" name="tile" value="${key}" ${checkedAttribute}>
+                        <label for="${tileServers[key]["layer_name"]}" class="tile-radio-label">${tileServers[key]["label"]}</label><br>
+                        `
+                    }
+                    radioHTML += '</form></div>';
+                    container.innerHTML = radioHTML;
+
+                // タイルのイベントリスナーを追加
+                const tileRadios = container.querySelectorAll(".tile-radio");
+                tileRadios.forEach(radio => {
+                    radio.addEventListener("change", handleTileChange);
+                });
+
+                // Leafletのクリックイベントとの干渉を避ける
+                L.DomEvent.disableClickPropagation(container);
+                return container;
+            }
+        });
+
+        // 地図にタイルコントロールを追加
+        map.addControl(new TileControl());
+
+        // 初期タイルの設定
+        var tileLayer = L.tileLayer(tileServers["1"]["url"], {
+            minZoom: tileServers["1"]["min_zoom"] ?? 5,
+            maxZoom: tileServers["1"]["max_zoom"] ?? 18,
+            attribution: tileServers["1"]["attribution"]
+        }).addTo(map);
+
+        // 選択されたタイルサーバーに地図表示を切り替える関数
+        function handleTileChange(event) {
+            // 現在のレイヤーを削除
+            map.removeLayer(tileLayer);
+
+            // 選択されたタイル情報を取得
+            const selectedTile = tileServers[event.target.value]
+
+            // タイルサーバーのフラグに基づいてsetMaxBoundsを設定または解除
+            if (selectedTile && selectedTile.include_foreign_tiles) {
+                map.setMaxBounds(null); // 制限を解除
+            } else {
+                map.setMaxBounds(bounds); // 制限を設定
+            }
+
+            // 新しいタイルレイヤーを設定
+            tileLayer = L.tileLayer(selectedTile.url, {
+                minZoom: selectedTile.min_zoom ?? 5,
+                maxZoom: selectedTile.max_zoom ?? 18,
+                attribution: selectedTile.attribution
+            }).addTo(map);
+        }
+
+        // 指定 ID のマーカーポップアップを開く
+        function openMarkerPopup(markerId) {
+            if (markers[`marker-${markerId}`]) {
+                // 新しいdivIconの定義
+                let newIcon = L.icon({
+                    iconUrl: "/assets/marker.png", // 新しいアイコンの画像のパス
+                    iconSize: [25, 41],    // アイコンのサイズ
+                    iconAnchor: [12, 41],  // アイコンのアンカーポイント
+                    popupAnchor: [1, -34], // ポップアップのアンカーポイント
+                    shadowUrl: null
+                });
+                // アイコンの変更
+                markers[`marker-${markerId}`].setIcon(newIcon);
+                markers[`marker-${markerId}`].openPopup();
+            }
+        }
+
+        // クラスターグループを管理するオブジェクト
+        const clusterGroups = {};
+        // マーカーにIDを振るためのオブジェクト
+        let markers = {};
+        // レイヤー名を格納するオブジェクト
+        let layerNames = {};
+
+        // 図形描画グループ
+        const drawnShapesGroup = L.featureGroup();
+        const shapeGroups = {};
+        let isMeasurementVisible = false;
+
+        // 図形のスタイル
+        const SHAPE_STYLE = {
+            color: "#d94841",
+            weight: 3,
+            fillColor: "#d94841",
+            fillOpacity: 0.16
+        };
+
+        // レイヤー名のマッピング
+        for (const key in layersFromAxum) {
+            if (!layerNames[layersFromAxum[key]["id"]]) {
+                layerNames[layersFromAxum[key]["id"]] = layersFromAxum[key]["layer_name"];
+            }
+        }
+
+        // レイヤ単位のマーカーグループを必要に応じて生成する
+        function createMarkerGroupForLayer(layerId) {
+            if (!layerId) {
+                return null;
+            }
+
+            if (!clusterGroups[layerId]) {
+                if (isCluster) {
+                    clusterGroups[layerId] = L.markerClusterGroup();
+                } else {
+                    clusterGroups[layerId] = L.featureGroup();
+                }
+            }
+
+            return clusterGroups[layerId];
+        }
+
+        // データごとにクラスターグループを作成
+        for (const key in markersFromAxum) {
+            // layer_id ごとに markerClusterGroup を作成する
+            createMarkerGroupForLayer(markersFromAxum[key]["layer_id"]);
+
+            // マーカーを作成してクラスターグループに追加する
+            const marker = L.marker([markersFromAxum[key]["latitude"], markersFromAxum[key]["longitude"]]).bindPopup(markersFromAxum[key]["marker_name"]);
+
+            // ポップアップオープン時に遅延読み込みの処理を追加
+            marker.on("popupopen", () => {
+                setupDetailsLazyImages(document);
+            });
+
+            clusterGroups[markersFromAxum[key]["layer_id"]].addLayer(marker);
+
+            if (!markersFromAxum[key]["marker_name"]) {
+                marker.bindTooltip(`<div class="custom-tooltip">No Name</div>`, {permanent: false});
+            } else {
+                marker.bindTooltip(`<div class="custom-tooltip">${markersFromAxum[key]["marker_name"]}</div>`, {permanent: false});
+            }
+            if (markersFromAxum[key]["detail"]) {
+                const mdText = `# ${markersFromAxum[key]["marker_name"]}\n\n${markersFromAxum[key]["detail"]}`;
+                const mdToHtml = marked.parse(mdText);
+                const cleanHtml = filterXSS(mdToHtml, xssOptions);
+                const renderHtml = renderIframe(cleanHtml);
+                const bindMDToHtml = `<div class="md-detail-contents">${renderHtml}</div>`;
+                marker.bindPopup(bindMDToHtml);
+            }
+            // マーカーのHTML要素を取得し、id属性を設定
+            let markerIcon = marker.getElement();
+            if (markerIcon) {
+                markerIcon.id = `marker-${markersFromAxum["id"]}`;
+            }
+            markers[`marker-${markersFromAxum["id"]}`] = marker;
+        }
+
+        if (Array.isArray(shapesFromAxum)) {
+            shapesFromAxum.forEach(shape => {
+                createMarkerGroupForLayer(shape.layer_id);
+            });
+        }
+
+        // すべてのクラスターグループ及びマーカーグループを地図に追加する 初期値でチェックとする場合はコメントアウトを解除
+        //Object.values(clusterGroups).forEach(group => group.addTo(map));
+
+        // L.control.layers にクラスターグループを追加する
+        const layersControl = L.control.layers(null, null, { collapsed: false });
+
+        // クラスターグループの名前を設定して、レイヤーコントロールに追加する
+        for (const layer_id in clusterGroups) {
+            const layerName = layerNames[layer_id];
+            layersControl.addOverlay(clusterGroups[layer_id], layerName);
+        }
+
+        layersControl.addTo(map);
+
+        // HTMLエスケープを行う関数
+        // ラベルやポップアップ表示用に HTML をエスケープする
+        function escapeHtml(text) {
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#39;");
+        }
+
+        // 図形名を表示しやすい形に正規化する関数
+        function normalizeShapeName(name) {
+            if (typeof name !== "string") {
+                return "";
+            }
+            return name.trim();
+        }
+
+        // 図形色を #RRGGBB 形式へ正規化する
+        function normalizeShapeColor(color, fallback = SHAPE_STYLE.color) {
+            if (typeof color !== "string") {
+                return fallback;
+            }
+
+            const trimmedColor = color.trim();
+            if (/^#[0-9a-fA-F]{6}$/.test(trimmedColor)) {
+                return trimmedColor.toLowerCase();
+            }
+
+            if (/^#[0-9a-fA-F]{3}$/.test(trimmedColor)) {
+                const expandedColor = trimmedColor
+                    .slice(1)
+                    .split("")
+                    .map(value => value + value)
+                    .join("");
+                return `#${expandedColor}`.toLowerCase();
+            }
+
+            return fallback;
+        }
+
+        // 図形種別ごとの既定スタイルを返す
+        function getDefaultShapeStyle(shapeType) {
+            if (shapeType === "polyline") {
+                return {
+                    color: SHAPE_STYLE.color,
+                    weight: SHAPE_STYLE.weight,
+                    fill: false,
+                };
+            }
+
+            return {
+                color: SHAPE_STYLE.color,
+                weight: SHAPE_STYLE.weight,
+                fillColor: SHAPE_STYLE.color,
+                fillOpacity: SHAPE_STYLE.fillOpacity,
+            };
+        }
+
+        // GeoJSON から図形スタイルを取り出す
+        function getShapeStyleFromGeoJson(shapeType, geojson) {
+            const defaultStyle = getDefaultShapeStyle(shapeType);
+            const styleRecord = geojson?.properties?.style;
+            if (!styleRecord || typeof styleRecord !== "object") {
+                return defaultStyle;
+            }
+
+            const nextColor = normalizeShapeColor(styleRecord.color, defaultStyle.color);
+            const nextWeight = Number(styleRecord.weight);
+            if (shapeType === "polyline") {
+                return {
+                    color: nextColor,
+                    weight: Number.isFinite(nextWeight) ? nextWeight : defaultStyle.weight,
+                    fill: false,
+                };
+            }
+
+            const nextFillOpacity = Number(styleRecord.fillOpacity);
+            return {
+                color: nextColor,
+                weight: Number.isFinite(nextWeight) ? nextWeight : defaultStyle.weight,
+                fillColor: nextColor,
+                fillOpacity: Number.isFinite(nextFillOpacity)
+                    ? nextFillOpacity
+                    : defaultStyle.fillOpacity,
+            };
+        }
+
+        // GeoJSON に保存された円の半径を取り出す
+        function getCircleRadiusFromGeoJson(geojson) {
+            const radius = Number(geojson?.properties?.radius);
+            return Number.isFinite(radius) && radius > 0 ? radius : null;
+        }
+
+        // レイヤ単位の図形グループを必要に応じて生成する
+        function ensureShapeGroup(layerId) {
+            if (!layerId) {
+                return null;
+            }
+
+            if (!shapeGroups[layerId]) {
+                shapeGroups[layerId] = L.featureGroup();
+            }
+
+            return shapeGroups[layerId];
+        }
+
+        // 図形を全体管理グループとレイヤ別グループへ登録する
+        function addShapeLayerToManagedGroups(layer, layerId) {
+            if (!layer) {
+                return;
+            }
+
+            drawnShapesGroup.addLayer(layer);
+            const targetShapeGroup = ensureShapeGroup(layerId);
+            if (targetShapeGroup) {
+                targetShapeGroup.addLayer(layer);
+            }
+        }
+
+        // マーカーグループから対応するレイヤ ID を逆引きする
+        function findLayerIdByMarkerGroup(targetGroup) {
+            for (const layerId in clusterGroups) {
+                if (clusterGroups[layerId] === targetGroup) {
+                    return layerId;
+                }
+            }
+
+            return null;
+        }
+
+        // 指定レイヤのチェック状態に合わせて図形表示を同期する
+        function syncShapeGroupVisibility(layerId) {
+            if (!layerId || !shapeGroups[layerId]) {
+                return;
+            }
+
+            if (map.hasLayer(clusterGroups[layerId])) {
+                if (!map.hasLayer(shapeGroups[layerId])) {
+                    shapeGroups[layerId].addTo(map);
+                }
+
+                shapeGroups[layerId].eachLayer(layer => {
+                    if (layer?.isMeasurementLabel === true) {
+                        setMeasurementMarkerVisibility(layer, isMeasurementVisible);
+                    }
+                    if (typeof layer.openTooltip === "function") {
+                        layer.openTooltip();
+                    }
+                });
+                return;
+            }
+
+            if (map.hasLayer(shapeGroups[layerId])) {
+                map.removeLayer(shapeGroups[layerId]);
+            }
+        }
+
+        // 全レイヤ分の図形表示を現在のチェック状態へ同期する
+        function syncAllShapeGroupsVisibility() {
+            Object.keys(shapeGroups).forEach(layerId => {
+                syncShapeGroupVisibility(layerId);
+            });
+        }
+
+        // 図形のスタイル適用
+        function applyShapeStyle(layer) {
+            if (!layer || typeof layer.setStyle !== "function") {
+                return;
+            }
+
+            const nextStyle = { ...(layer.shapeStyle || getDefaultShapeStyle(layer.shapeType)) };
+            layer.setStyle(nextStyle);
+        }
+
+        // 図形の座標を平坦化
+        function flattenShapeLatLngs(latLngs) {
+            if (!Array.isArray(latLngs)) {
+                return [];
+            }
+
+            if (latLngs.length === 0) {
+                return [];
+            }
+
+            if (Array.isArray(latLngs[0])) {
+                return flattenShapeLatLngs(latLngs[0]);
+            }
+
+            return latLngs;
+        }
+
+        // ポリラインの中心座標を取得
+        function getPolylineCenterLatLng(layer) {
+            const latLngs = flattenShapeLatLngs(layer.getLatLngs());
+            if (latLngs.length === 0) {
+                return null;
+            }
+
+            if (latLngs.length === 1) {
+                return latLngs[0];
+            }
+
+            let totalDistance = 0;
+            for (let i = 1; i < latLngs.length; i += 1) {
+                totalDistance += map.distance(latLngs[i - 1], latLngs[i]);
+            }
+
+            if (totalDistance === 0) {
+                return latLngs[Math.floor(latLngs.length / 2)];
+            }
+
+            const targetDistance = totalDistance / 2;
+            let accumulatedDistance = 0;
+
+            for (let i = 1; i < latLngs.length; i += 1) {
+                const start = latLngs[i - 1];
+                const end = latLngs[i];
+                const segmentDistance = map.distance(start, end);
+                if (accumulatedDistance + segmentDistance >= targetDistance) {
+                    const ratio = (targetDistance - accumulatedDistance) / segmentDistance;
+                    return L.latLng(
+                        start.lat + (end.lat - start.lat) * ratio,
+                        start.lng + (end.lng - start.lng) * ratio
+                    );
+                }
+                accumulatedDistance += segmentDistance;
+            }
+
+            return latLngs[Math.floor(latLngs.length / 2)];
+        }
+
+        // 図形ラベルを配置する中心座標を求める
+        function getShapeLabelLatLng(layer) {
+            if (!layer) {
+                return null;
+            }
+
+            if (layer.shapeType === "polyline") {
+                return getPolylineCenterLatLng(layer);
+            }
+
+            if (layer.shapeType === "circle" && typeof layer.getLatLng === "function") {
+                return layer.getLatLng();
+            }
+
+            if (typeof layer.getBounds === "function") {
+                return layer.getBounds().getCenter();
+            }
+
+            return null;
+        }
+
+        // 距離をメートル/キロメートル表記へ整形する
+        function formatDistance(distanceInMeters) {
+            if (!Number.isFinite(distanceInMeters)) {
+                return "-";
+            }
+
+            if (distanceInMeters >= 1000) {
+                return `${(distanceInMeters / 1000).toFixed(2)} km`;
+            }
+
+            if (distanceInMeters >= 100) {
+                return `${Math.round(distanceInMeters)} m`;
+            }
+
+            return `${distanceInMeters.toFixed(1)} m`;
+        }
+
+        // 面積を平方メートル/平方キロメートル表記へ整形する
+        function formatArea(areaInSquareMeters) {
+            if (!Number.isFinite(areaInSquareMeters)) {
+                return "-";
+            }
+
+            if (areaInSquareMeters >= 1000000) {
+                return `${(areaInSquareMeters / 1000000).toFixed(2)} km²`;
+            }
+
+            return `${Math.round(areaInSquareMeters)} m²`;
+        }
+
+        // 閉じたリングの終点重複を除去する
+        function trimClosedLatLngs(latLngs) {
+            if (!Array.isArray(latLngs) || latLngs.length < 2) {
+                return Array.isArray(latLngs) ? [...latLngs] : [];
+            }
+
+            const normalizedLatLngs = [...latLngs];
+            const first = normalizedLatLngs[0];
+            const last = normalizedLatLngs[normalizedLatLngs.length - 1];
+            if (first && last && first.lat === last.lat && first.lng === last.lng) {
+                normalizedLatLngs.pop();
+            }
+
+            return normalizedLatLngs;
+        }
+
+        // ポリラインの各区間距離と総延長を計算する
+        function measurePolyline(layer) {
+            const latLngs = flattenShapeLatLngs(layer?.getLatLngs?.());
+            const segments = [];
+            let totalDistance = 0;
+
+            for (let i = 1; i < latLngs.length; i += 1) {
+                const distance = map.distance(latLngs[i - 1], latLngs[i]);
+                segments.push({
+                    label: `${i}`,
+                    distance,
+                });
+                totalDistance += distance;
+            }
+
+            return {
+                segments,
+                totalDistance,
+            };
+        }
+
+        // ポリゴン面積を EPSG:3857 の平面近似で求める
+        function calculateProjectedPolygonArea(latLngs) {
+            const vertices = trimClosedLatLngs(latLngs);
+            if (vertices.length < 3) {
+                return 0;
+            }
+
+            let sum = 0;
+            for (let i = 0; i < vertices.length; i += 1) {
+                const current = map.options.crs.project(vertices[i]);
+                const next = map.options.crs.project(vertices[(i + 1) % vertices.length]);
+                sum += (current.x * next.y) - (next.x * current.y);
+            }
+
+            return Math.abs(sum) / 2;
+        }
+
+        // ポリゴン/短形の各辺距離・周長・面積を計算する
+        function measurePolygon(layer) {
+            const latLngs = trimClosedLatLngs(flattenShapeLatLngs(layer?.getLatLngs?.()));
+            const edges = [];
+            let perimeter = 0;
+
+            for (let i = 0; i < latLngs.length; i += 1) {
+                const start = latLngs[i];
+                const end = latLngs[(i + 1) % latLngs.length];
+                const distance = map.distance(start, end);
+                edges.push({
+                    label: `${i + 1}`,
+                    distance,
+                });
+                perimeter += distance;
+            }
+
+            return {
+                edges,
+                perimeter,
+                area: calculateProjectedPolygonArea(latLngs),
+            };
+        }
+
+        // 円の半径と面積を計算する
+        function measureCircle(layer) {
+            const radius = Number(layer?.getRadius?.());
+            return {
+                radius,
+                area: Number.isFinite(radius) ? Math.PI * radius * radius : 0,
+            };
+        }
+
+        // 線分の中点を求める
+        function getSegmentMidpoint(startLatLng, endLatLng) {
+            return L.latLng(
+                startLatLng.lat + ((endLatLng.lat - startLatLng.lat) / 2),
+                startLatLng.lng + ((endLatLng.lng - startLatLng.lng) / 2)
+            );
+        }
+
+        // 計測ラベルの HTML を組み立てる
+        function buildMeasurementLabelHtml(lines, variant = "segment") {
+            const classNameMap = {
+                segment: "shape-measure-label",
+                summary: "shape-measure-label shape-measure-label--summary",
+                "summary-polyline": "shape-measure-label shape-measure-label--summary shape-measure-label--summary-polyline",
+                "summary-circle": "shape-measure-label shape-measure-label--summary shape-measure-label--summary-circle",
+                "summary-rectangle": "shape-measure-label shape-measure-label--summary shape-measure-label--summary-rectangle",
+            };
+            const className = classNameMap[variant] || classNameMap.segment;
+            const lineHtml = lines
+                .map(line => `<div class="shape-measure-label-line">${escapeHtml(line)}</div>`)
+                .join("");
+            return `<div class="${className}">${lineHtml}</div>`;
+        }
+
+        // 指定位置に計測ラベルマーカーを置く
+        function createMeasurementLabelMarker(latLng, lines, variant = "segment") {
+            if (!latLng || !Array.isArray(lines) || lines.length === 0) {
+                return null;
+            }
+
+            const marker = L.marker(latLng, {
+                interactive: false,
+                keyboard: false,
+                zIndexOffset: 900,
+                icon: L.divIcon({
+                    className: "shape-measure-marker",
+                    html: buildMeasurementLabelHtml(lines, variant),
+                }),
+            });
+
+            marker.isMeasurementLabel = true;
+            return marker;
+        }
+
+        // 図形ごとの計測ラベル一覧を生成する
+        function createShapeMeasurementMarkers(layer) {
+            if (!layer) {
+                return [];
+            }
+
+            const markers = [];
+
+            if (layer.shapeType === "polyline") {
+                const latLngs = flattenShapeLatLngs(layer.getLatLngs());
+                const measurement = measurePolyline(layer);
+
+                measurement.segments.forEach((segment, index) => {
+                    const start = latLngs[index];
+                    const end = latLngs[index + 1];
+                    if (!start || !end) {
+                        return;
+                    }
+
+                    markers.push(
+                        createMeasurementLabelMarker(
+                            getSegmentMidpoint(start, end),
+                            [formatDistance(segment.distance)]
+                        )
+                    );
+                });
+
+                const summaryLatLng = getShapeLabelLatLng(layer);
+                if (summaryLatLng) {
+                    markers.push(
+                        createMeasurementLabelMarker(
+                            summaryLatLng,
+                            [`総延長 ${formatDistance(measurement.totalDistance)}`],
+                            "summary-polyline"
+                        )
+                    );
+                }
+            } else if (layer.shapeType === "polygon" || layer.shapeType === "rectangle") {
+                const latLngs = trimClosedLatLngs(flattenShapeLatLngs(layer.getLatLngs()));
+                const measurement = measurePolygon(layer);
+
+                measurement.edges.forEach((edge, index) => {
+                    const start = latLngs[index];
+                    const end = latLngs[(index + 1) % latLngs.length];
+                    if (!start || !end) {
+                        return;
+                    }
+
+                    markers.push(
+                        createMeasurementLabelMarker(
+                            getSegmentMidpoint(start, end),
+                            [formatDistance(edge.distance)]
+                        )
+                    );
+                });
+
+                const summaryLatLng = getShapeLabelLatLng(layer);
+                if (summaryLatLng) {
+                    const summaryVariant = layer.shapeType === "rectangle"
+                        ? "summary-rectangle"
+                        : "summary";
+                    markers.push(
+                        createMeasurementLabelMarker(
+                            summaryLatLng,
+                            [`面積 ${formatArea(measurement.area)}`],
+                            summaryVariant
+                        )
+                    );
+                }
+            } else if (layer.shapeType === "circle") {
+                const measurement = measureCircle(layer);
+                const centerLatLng = getShapeLabelLatLng(layer);
+                if (centerLatLng) {
+                    markers.push(
+                        createMeasurementLabelMarker(
+                            centerLatLng,
+                            [
+                                `半径 ${formatDistance(measurement.radius)}`,
+                                `面積 ${formatArea(measurement.area)}`
+                            ],
+                            "summary-circle"
+                        )
+                    );
+                }
+            }
+
+            return markers.filter(Boolean);
+        }
+
+        // 計測ラベルを図形と同じレイヤグループへ登録する
+        function attachShapeMeasurementMarkers(layer, layerId) {
+            if (!layer) {
+                return;
+            }
+
+            const markers = createShapeMeasurementMarkers(layer);
+            if (markers.length === 0) {
+                return;
+            }
+
+            layer.measurementMarkers = markers;
+            const targetShapeGroup = ensureShapeGroup(layerId);
+            if (targetShapeGroup) {
+                markers.forEach(marker => {
+                    targetShapeGroup.addLayer(marker);
+                });
+            }
+        }
+
+        // 計測ラベルマーカーの表示状態を反映する
+        function setMeasurementMarkerVisibility(marker, visible) {
+            if (!marker || marker.isMeasurementLabel !== true) {
+                return;
+            }
+
+            if (typeof marker.setOpacity === "function") {
+                marker.setOpacity(visible ? 1 : 0);
+            }
+
+            const markerElement = typeof marker.getElement === "function"
+                ? marker.getElement()
+                : null;
+            if (markerElement) {
+                markerElement.style.display = visible ? "" : "none";
+            }
+        }
+
+        // 指定レイヤ内の計測ラベルへ現在の表示状態を反映する
+        function applyMeasurementVisibilityToShapeGroup(layerId) {
+            if (!layerId || !shapeGroups[layerId]) {
+                return;
+            }
+
+            shapeGroups[layerId].eachLayer(layer => {
+                if (layer?.isMeasurementLabel === true) {
+                    setMeasurementMarkerVisibility(layer, isMeasurementVisible);
+                }
+            });
+        }
+
+        // すべての計測ラベルへ現在の表示状態を反映する
+        function applyMeasurementVisibilityToAllShapeGroups() {
+            Object.keys(shapeGroups).forEach(layerId => {
+                applyMeasurementVisibilityToShapeGroup(layerId);
+            });
+        }
+
+        // 図形のラベル名を更新
+        function updateShapeNameLabel(layer, name) {
+            if (!layer) {
+                return;
+            }
+
+            const normalizedName = normalizeShapeName(name);
+            layer.shapeName = normalizedName;
+
+            if (typeof layer.unbindTooltip === "function") {
+                layer.unbindTooltip();
+            }
+
+            if (typeof layer.bindTooltip !== "function") {
+                return;
+            }
+
+            const labelLatLng = getShapeLabelLatLng(layer);
+            const labelClassName = normalizedName ? "shape-name-label" : "shape-name-label is-empty";
+            const labelContent = normalizedName ? escapeHtml(normalizedName) : "&nbsp;";
+            const labelColor = normalizeShapeColor(
+                layer.shapeStyle ? layer.shapeStyle.color : null,
+                SHAPE_STYLE.color
+            );
+            layer.bindTooltip(
+                `<div class="${labelClassName}" style="background:rgba(255,255,255,0.92);border:1px solid ${labelColor};border-radius:999px;color:${labelColor};display:inline-block;padding:2px 8px;">${labelContent}</div>`,
+                {
+                    interactive: false,
+                    permanent: true,
+                    direction: "center",
+                    className: "shape-name-tooltip",
+                }
+            );
+
+            const tooltip = typeof layer.getTooltip === "function" ? layer.getTooltip() : null;
+            if (tooltip && labelLatLng && typeof tooltip.setLatLng === "function") {
+                tooltip.setLatLng(labelLatLng);
+            }
+            if (typeof layer.openTooltip === "function") {
+                layer.openTooltip();
+            }
+            const applyTooltipBorderColor = () => {
+                const tooltipElement = tooltip && typeof tooltip.getElement === "function"
+                    ? tooltip.getElement()
+                    : null;
+                if (!tooltipElement) {
+                    return;
+                }
+                tooltipElement.style.setProperty("background", "transparent", "important");
+                tooltipElement.style.setProperty("border", "none", "important");
+                tooltipElement.style.setProperty("box-shadow", "none", "important");
+                tooltipElement.style.setProperty("padding", "0", "important");
+                tooltipElement.style.setProperty("color", labelColor, "important");
+            };
+            applyTooltipBorderColor();
+            setTimeout(applyTooltipBorderColor, 0);
+        }
+
+        // 形状タイプと GeoJSON から Leaflet レイヤを生成する
+        function createLeafletShapeLayer(shapeType, geojson, shapeStyle) {
+            if (shapeType === "circle") {
+                const coordinates = geojson?.geometry?.coordinates;
+                const radius = getCircleRadiusFromGeoJson(geojson);
+                if (!Array.isArray(coordinates) || coordinates.length < 2 || !radius) {
+                    return null;
+                }
+                return L.circle(
+                    L.latLng(coordinates[1], coordinates[0]),
+                    {
+                        ...shapeStyle,
+                        radius,
+                    }
+                );
+            }
+
+            const geoJsonLayer = L.geoJSON(geojson, {
+                style: () => shapeStyle
+            });
+            const layers = geoJsonLayer.getLayers();
+            return layers.length === 0 ? null : layers[0];
+        }
+
+        // GeoJSON から描画用の図形レイヤを生成する
+        function createShapeLayer(shapeType, geojson, shapeName = "") {
+            const shapeStyle = getShapeStyleFromGeoJson(shapeType, geojson);
+            const layer = createLeafletShapeLayer(shapeType, geojson, shapeStyle);
+            if (!layer) {
+                return null;
+            }
+
+            layer.shapeType = shapeType;
+            layer.shapeStyle = shapeStyle;
+            applyShapeStyle(layer);
+            updateShapeNameLabel(layer, shapeName);
+            return layer;
+        }
+
+        // サーバーから渡された図形一覧を地図へ復元する
+        function restoreSavedShapes() {
+            if (!Array.isArray(shapesFromAxum)) {
+                return;
+            }
+
+            shapesFromAxum.forEach(shape => {
+                const shapeStyle = getShapeStyleFromGeoJson(shape.shape_type, shape.geojson);
+                const layer = createLeafletShapeLayer(shape.shape_type, shape.geojson, shapeStyle);
+                if (!layer) {
+                    return;
+                }
+
+                layer.shapeId = shape.id;
+                layer.layerId = shape.layer_id || null;
+                layer.shapeType = shape.shape_type;
+                layer.shapeName = shape.name || "";
+                layer.shapeStyle = shapeStyle;
+                applyShapeStyle(layer);
+                updateShapeNameLabel(layer, shape.name || "");
+                addShapeLayerToManagedGroups(layer, shape.layer_id);
+                attachShapeMeasurementMarkers(layer, shape.layer_id);
+            });
+
+            syncAllShapeGroupsVisibility();
+        }
+
+        restoreSavedShapes();
+        map.on("overlayadd", function (event) {
+            const layerId = findLayerIdByMarkerGroup(event.layer);
+            if (!layerId) {
+                return;
+            }
+
+            setTimeout(() => {
+                syncShapeGroupVisibility(layerId);
+            }, 0);
+        });
+        map.on("overlayremove", function (event) {
+            const layerId = findLayerIdByMarkerGroup(event.layer);
+            if (!layerId) {
+                return;
+            }
+
+            syncShapeGroupVisibility(layerId);
+        });
+
+        // 座標検索
+        var CodeSearchControl = L.Control.extend({
+            options: {
+                position: 'topleft'
+            },
+
+            onAdd: function(map) {
+                var container = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+                // ラジオボタンのHTMLを作成
+                container.innerHTML = `
+                <div class="search-zone">
+                    <input type="text" class="search-input" id="code-input" placeholder="緯度,経度" title="緯度経度を,区切りで入力してください。"><br>
+                    <button id="code-search-btn" class="custom-search">座標検索</button>
+                </div>`;
+
+                const searchBtn = container.querySelector(".custom-search");
+                // ボタンのクリックイベント
+                L.DomEvent.on(searchBtn, "click", function(e) {
+                    L.DomEvent.stop(e);
+                    onSearchCode();
+                });
+
+                // Leafletのクリックイベントとの干渉を避ける
+                L.DomEvent.disableClickPropagation(container);
+                return container;
+            }
+        });
+
+        // 緯度経度入力から対象地点へフォーカスする
+        function onSearchCode () {
+            const latLng = document.getElementById("code-input").value;
+            const cleandLatLng = latLng.replace(/[()\s]/g, "");
+            const parts = cleandLatLng.split(",");
+            if (parts.length === 2) {
+                const lat = parts[0];
+                const lng = parts[1];
+                if (lat === "" || lng == "") {
+                    console.log("Not value.");
+                    return;
+                }
+                if (isValidCoordinate(lat, lng)) {
+                    let latLng = new L.LatLng(lat, lng);
+                    map.setView(latLng, 14);
+
+                    // カスタムアイコン
+                    let newIcon = L.icon({
+                        iconUrl: "/assets/marker.png",
+                        iconSize: [25, 41],
+                        iconAnchor: [12, 41],
+                        popupAnchor: [1, -34],
+                        shadowUrl: null
+                    });
+
+                    L.marker([lat, lng], { icon: newIcon }).addTo(map)
+                        .bindPopup(`緯度：${lat}<br>経度：${lng}`)
+                        .openPopup();
+                    return;
+
+                } else {
+                    console.log("Not value.");
+                    return;
+                }
+            } else {
+                console.log("Value error.");
+                return;
+            }
+        }
+
+        // 緯度経度が妥当な数値範囲かを判定する
+        function isValidCoordinate(lat, lng) {
+            return !isNaN(lat) && lat >= -90 && lat <= 90 && !isNaN(lng) && lng >= -180 && lng <= 180;
+        }
+
+        // 地図にカスタムコントロールを追加
+        map.addControl(new CodeSearchControl());
+
+        // マーカー名表示・非表示コントロールツールチップの定義
+        const TooltipVisibleControl = L.Control.extend({
+            options: {
+                position: "topleft"
+            },
+            onAdd: function(map) {
+                const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
+
+                // ラジオボタンのHTMLを動的に生成
+                const button = L.DomUtil.create("button", "custom-control-button", container);
+                button.innerHTML = "マーカー名表示";
+
+                // ボタンのクリックイベント
+                L.DomEvent.on(button, "click", function(e) {
+                    L.DomEvent.stop(e);
+                    // ここにカスタム機能を実装
+                    toggleTooltips();
+                });
+
+                // Leafletのクリックイベントとの干渉を避ける
+                L.DomEvent.disableClickPropagation(container);
+                return container;
+            }
+        });
+
+        // 地図にタイルコントロールを追加
+        map.addControl(new TooltipVisibleControl());
+
+        // 測定結果ラベル表示・非表示コントロールの定義
+        const MeasurementVisibleControl = L.Control.extend({
+            options: {
+                position: "topleft"
+            },
+            onAdd: function(map) {
+                const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
+
+                const button = L.DomUtil.create("button", "custom-control-button", container);
+                button.innerHTML = "図形の計測";
+
+                L.DomEvent.on(button, "click", function(e) {
+                    L.DomEvent.stop(e);
+                    toggleMeasurementLabels();
+                });
+
+                L.DomEvent.disableClickPropagation(container);
+                return container;
+            }
+        });
+
+        // 地図に測定結果ラベルコントロールを追加
+        map.addControl(new MeasurementVisibleControl());
+
+
+        // ツールチップの表示・非表示を管理する
+        let isTooltipVisible = false;
+
+        // ツールチップの表示非表示を切り替える関数
+        function toggleTooltips () {
+            if (isTooltipVisible) {
+                map.eachLayer(function (layer) {
+                    if (layer.getTooltip) {
+                        var tooltip = layer.getTooltip();
+                        if (tooltip) {
+                            map.closeTooltip(tooltip);
+                        }
+                    }
+                });
+                isTooltipVisible = false;
+            } else {
+                map.eachLayer(function (layer) {
+                    if (layer.getTooltip) {
+                        layer.openTooltip();
+                    }
+                });
+                isTooltipVisible = true;
+            }
+        }
+
+        // 計測ラベルの表示非表示を切り替える関数
+        function toggleMeasurementLabels() {
+            isMeasurementVisible = !isMeasurementVisible;
+            applyMeasurementVisibilityToAllShapeGroups();
+        }
+
+        // 親ウィンドウへファイル表示要求を送る
+        function callParent(filename) {
+            window.parent.postMessage({ type: "callParentFunction", message: filename }, "*");
+        }
+    </script>
+</html>

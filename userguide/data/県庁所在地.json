@@ -1,0 +1,711 @@
+{
+  "version": 2,
+  "markers": [
+    {
+      "id": "019dcd90-62fa-7fa8-bda9-49946b20d43a",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "北海道",
+      "latitude": 43.06417,
+      "longitude": 141.34694,
+      "detail": "**道庁所在地:** 札幌市\n\n- 地方: 北海道地方\n- 概要: 北海道の行政と経済の中心です。\n- ひとこと: 大通公園や札幌駅周辺に主要な都市機能が集まっています。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fa-7c3e-b120-b087855dd8cc",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "青森県",
+      "latitude": 40.82444,
+      "longitude": 140.74,
+      "detail": "**県庁所在地:** 青森市\n\n- 地方: 東北地方\n- 概要: 青森県の行政の中心で、青森湾に面する県都です。\n- ひとこと: ねぶた祭で知られ、本州最北端の県庁所在地でもあります。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fa-7e05-b902-6ef10d3ecda8",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "岩手県",
+      "latitude": 39.70361,
+      "longitude": 141.1525,
+      "detail": "**県庁所在地:** 盛岡市\n\n- 地方: 東北地方\n- 概要: 岩手県の行政の中心で、北東北の拠点都市のひとつです。\n- ひとこと: 中津川や岩手山の景観と、城下町の落ち着いた街並みが魅力です。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fa-7107-9761-34163636d0cb",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "宮城県",
+      "latitude": 38.26889,
+      "longitude": 140.87194,
+      "detail": "**県庁所在地:** 仙台市\n\n- 地方: 東北地方\n- 概要: 宮城県の県庁所在地で、東北地方最大の都市です。\n- ひとこと: 定禅寺通や青葉城跡など、都市機能と緑の多さが共存しています。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fa-7c74-ad9b-3a03a0fd50dd",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "秋田県",
+      "latitude": 39.71861,
+      "longitude": 140.1025,
+      "detail": "**県庁所在地:** 秋田市\n\n- 地方: 東北地方\n- 概要: 秋田県の行政の中心で、日本海側に開けた県都です。\n- ひとこと: 竿燈まつりで有名で、海と川に近い開放的な市街地が広がります。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fa-7b49-99e6-989f139015b5",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "山形県",
+      "latitude": 38.24056,
+      "longitude": 140.36333,
+      "detail": "**県庁所在地:** 山形市\n\n- 地方: 東北地方\n- 概要: 山形県の県庁所在地で、山形盆地に位置する内陸都市です。\n- ひとこと: 蔵王への玄関口としても知られ、四季の変化を感じやすい街です。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fa-7019-8426-d4c20e86fcd5",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "福島県",
+      "latitude": 37.75,
+      "longitude": 140.46778,
+      "detail": "**県庁所在地:** 福島市\n\n- 地方: 東北地方\n- 概要: 福島県の行政の中心で、県北地域の中核都市です。\n- ひとこと: 吾妻連峰に近く、果樹園が多いことでも知られています。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fa-7505-839f-68bfc87fda42",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "茨城県",
+      "latitude": 36.34139,
+      "longitude": 140.44667,
+      "detail": "**県庁所在地:** 水戸市\n\n- 地方: 関東地方\n- 概要: 茨城県の県庁所在地で、歴史と行政機能が集まる都市です。\n- ひとこと: 偕楽園を代表とする水戸藩ゆかりの文化が今も色濃く残っています。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-78b9-ad35-3f64ce6212ef",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "栃木県",
+      "latitude": 36.56583,
+      "longitude": 139.88361,
+      "detail": "**県庁所在地:** 宇都宮市\n\n- 地方: 関東地方\n- 概要: 栃木県の行政の中心で、県央に位置する拠点都市です。\n- ひとこと: 餃子の街として有名で、日光方面への交通結節点でもあります。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-7d5f-a620-80be5fd9c74f",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "群馬県",
+      "latitude": 36.39111,
+      "longitude": 139.06083,
+      "detail": "**県庁所在地:** 前橋市\n\n- 地方: 関東地方\n- 概要: 群馬県の県庁所在地で、県中南部の行政拠点です。\n- ひとこと: 赤城山のふもとに広がり、利根川流域の都市として発展してきました。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-73da-940a-4fd692e28702",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "埼玉県",
+      "latitude": 35.85694,
+      "longitude": 139.64889,
+      "detail": "**県庁所在地:** さいたま市\n\n- 地方: 関東地方\n- 概要: 埼玉県の県庁所在地で、県南部の行政・商業の中心です。\n- ひとこと: 東京に近く、鉄道網が発達した首都圏の主要都市のひとつです。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-786e-84b2-ae6376ceb3d5",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "千葉県",
+      "latitude": 35.60472,
+      "longitude": 140.12333,
+      "detail": "**県庁所在地:** 千葉市\n\n- 地方: 関東地方\n- 概要: 千葉県の行政の中心で、東京湾沿いに発展した都市です。\n- ひとこと: 幕張新都心を含み、業務・イベント機能の集積地としても知られます。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-7809-9f6d-551ae144e752",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "東京都",
+      "latitude": 35.68944,
+      "longitude": 139.69167,
+      "detail": "**都庁所在地:** 新宿区\n\n- 地方: 関東地方\n- 概要: 東京都庁が置かれる特別区で、都政の中心です。\n- ひとこと: 高層ビル群が立ち並び、行政・商業・交通の機能が高度に集積しています。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-717e-b2be-085db6679dea",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "神奈川県",
+      "latitude": 35.44778,
+      "longitude": 139.6425,
+      "detail": "**県庁所在地:** 横浜市\n\n- 地方: 関東地方\n- 概要: 神奈川県の県庁所在地で、日本有数の大都市です。\n- ひとこと: 港町として発展し、みなとみらい地区に象徴される都市景観が広がります。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-7f3b-a0ff-9f4fb7bf79e0",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "新潟県",
+      "latitude": 37.90222,
+      "longitude": 139.02361,
+      "detail": "**県庁所在地:** 新潟市\n\n- 地方: 中部地方\n- 概要: 新潟県の行政の中心で、日本海側を代表する大都市です。\n- ひとこと: 信濃川河口に開け、港湾都市としての役割も大きい地域です。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-7371-83e2-9be3902d465a",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "富山県",
+      "latitude": 36.69528,
+      "longitude": 137.21139,
+      "detail": "**県庁所在地:** 富山市\n\n- 地方: 中部地方\n- 概要: 富山県の県庁所在地で、県中央部の行政・交通の拠点です。\n- ひとこと: 富山湾と立山連峰に囲まれた、自然の近さが印象的な都市です。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-71a4-bc41-1cab70a7af1f",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "石川県",
+      "latitude": 36.59444,
+      "longitude": 136.62556,
+      "detail": "**県庁所在地:** 金沢市\n\n- 地方: 中部地方\n- 概要: 石川県の行政の中心で、歴史文化の厚みを持つ城下町です。\n- ひとこと: 兼六園や伝統工芸で知られ、観光都市としても高い人気があります。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-7f26-a806-4e743663337f",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "福井県",
+      "latitude": 36.06528,
+      "longitude": 136.22194,
+      "detail": "**県庁所在地:** 福井市\n\n- 地方: 中部地方\n- 概要: 福井県の県庁所在地で、越前地域の中心都市です。\n- ひとこと: 足羽川沿いに市街地が広がり、落ち着いた行政都市の雰囲気があります。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-73b9-87f7-5ef37592348a",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "山梨県",
+      "latitude": 35.66389,
+      "longitude": 138.56833,
+      "detail": "**県庁所在地:** 甲府市\n\n- 地方: 中部地方\n- 概要: 山梨県の行政の中心で、甲府盆地に位置する都市です。\n- ひとこと: 武田氏ゆかりの歴史を持ち、周辺では果樹栽培も盛んです。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-773d-a981-81c50eda7615",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "長野県",
+      "latitude": 36.65139,
+      "longitude": 138.18111,
+      "detail": "**県庁所在地:** 長野市\n\n- 地方: 中部地方\n- 概要: 長野県の県庁所在地で、北信地域の中核都市です。\n- ひとこと: 善光寺の門前町として発展し、山々に囲まれた内陸都市です。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-76b3-8960-b742affc7b0d",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "岐阜県",
+      "latitude": 35.39111,
+      "longitude": 136.72222,
+      "detail": "**県庁所在地:** 岐阜市\n\n- 地方: 中部地方\n- 概要: 岐阜県の行政の中心で、濃尾平野の北部に位置します。\n- ひとこと: 長良川や金華山に近く、岐阜城を望む景観で知られています。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-75cf-84f4-0ced4dd2f715",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "静岡県",
+      "latitude": 34.97694,
+      "longitude": 138.38306,
+      "detail": "**県庁所在地:** 静岡市\n\n- 地方: 中部地方\n- 概要: 静岡県の県庁所在地で、駿河湾に面する都市です。\n- ひとこと: 県中部の行政拠点で、海と山の距離が近い地形が特徴です。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-7305-9582-65394428916b",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "愛知県",
+      "latitude": 35.18028,
+      "longitude": 136.90667,
+      "detail": "**県庁所在地:** 名古屋市\n\n- 地方: 中部地方\n- 概要: 愛知県の県庁所在地で、中部地方最大の都市です。\n- ひとこと: 商業・産業・交通の機能が集まり、東海地方の中心を担っています。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-79ac-9a27-7792d4f9cec9",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "三重県",
+      "latitude": 34.73028,
+      "longitude": 136.50861,
+      "detail": "**県庁所在地:** 津市\n\n- 地方: 近畿地方\n- 概要: 三重県の県庁所在地で、伊勢平野に位置する行政都市です。\n- ひとこと: 落ち着いた街並みを持ち、県内各地への移動の起点にもなります。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-707f-8e03-ca315347d3d5",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "滋賀県",
+      "latitude": 35.00444,
+      "longitude": 135.86833,
+      "detail": "**県庁所在地:** 大津市\n\n- 地方: 近畿地方\n- 概要: 滋賀県の県庁所在地で、琵琶湖の南西岸に広がる都市です。\n- ひとこと: 京都に近く、水辺の景観と交通利便性をあわせ持っています。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-7990-9f17-f7664055c138",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "京都府",
+      "latitude": 35.02139,
+      "longitude": 135.75556,
+      "detail": "**府庁所在地:** 京都市\n\n- 地方: 近畿地方\n- 概要: 京都府の府庁所在地で、日本を代表する歴史都市です。\n- ひとこと: 寺社や町家文化が色濃く残り、国内外から多くの人が訪れます。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fb-7656-8313-38f07fd817c7",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "大阪府",
+      "latitude": 34.68639,
+      "longitude": 135.52,
+      "detail": "**府庁所在地:** 大阪市\n\n- 地方: 近畿地方\n- 概要: 大阪府の府庁所在地で、西日本有数の大都市です。\n- ひとこと: 商業と交通の要衝として発展し、多様な都市文化を持っています。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-7500-b4ff-474a634473d4",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "兵庫県",
+      "latitude": 34.69139,
+      "longitude": 135.18306,
+      "detail": "**県庁所在地:** 神戸市\n\n- 地方: 近畿地方\n- 概要: 兵庫県の県庁所在地で、海と山に挟まれた港町です。\n- ひとこと: 異国情緒のある街並みと、国際港湾都市としての歴史が魅力です。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-773f-98e1-431b542759e5",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "奈良県",
+      "latitude": 34.68528,
+      "longitude": 135.83278,
+      "detail": "**県庁所在地:** 奈良市\n\n- 地方: 近畿地方\n- 概要: 奈良県の行政の中心で、古都として知られる都市です。\n- ひとこと: 寺社や史跡が多く、日本の古代文化を今に伝えています。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-73a8-adc3-8e4ec3db771d",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "和歌山県",
+      "latitude": 34.22611,
+      "longitude": 135.1675,
+      "detail": "**県庁所在地:** 和歌山市\n\n- 地方: 近畿地方\n- 概要: 和歌山県の県庁所在地で、紀伊半島北西部の拠点都市です。\n- ひとこと: 和歌山城を中心に市街地が広がり、海にも近い立地です。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-7bfb-b18c-b4dfa0738002",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "鳥取県",
+      "latitude": 35.50361,
+      "longitude": 134.23833,
+      "detail": "**県庁所在地:** 鳥取市\n\n- 地方: 中国地方\n- 概要: 鳥取県の行政の中心で、日本海に面する県都です。\n- ひとこと: 鳥取砂丘で広く知られ、自然景観の豊かさが大きな魅力です。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-7361-8436-9801cdb26771",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "島根県",
+      "latitude": 35.47222,
+      "longitude": 133.05056,
+      "detail": "**県庁所在地:** 松江市\n\n- 地方: 中国地方\n- 概要: 島根県の県庁所在地で、水辺の景観が美しい都市です。\n- ひとこと: 宍道湖や松江城に囲まれ、落ち着いた城下町の雰囲気があります。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-7e64-8d63-cf46a6d7c26b",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "岡山県",
+      "latitude": 34.66167,
+      "longitude": 133.935,
+      "detail": "**県庁所在地:** 岡山市\n\n- 地方: 中国地方\n- 概要: 岡山県の県庁所在地で、中国地方東部の中核都市です。\n- ひとこと: 旭川沿いに市街地が広がり、温暖で晴天が多い地域としても知られます。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-7520-8908-b10f89bf412f",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "広島県",
+      "latitude": 34.39639,
+      "longitude": 132.45944,
+      "detail": "**県庁所在地:** 広島市\n\n- 地方: 中国地方\n- 概要: 広島県の行政の中心で、中国地方最大の都市です。\n- ひとこと: 川が多いデルタ地形に発展し、平和都市として世界的に知られています。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-7121-870c-ec99094b6c8c",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "山口県",
+      "latitude": 34.18583,
+      "longitude": 131.47139,
+      "detail": "**県庁所在地:** 山口市\n\n- 地方: 中国地方\n- 概要: 山口県の県庁所在地で、県央部に位置する行政都市です。\n- ひとこと: 歴史的には西の京とも呼ばれ、文化財の多い落ち着いた街です。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-71a6-ab74-1dd75276dc4a",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "徳島県",
+      "latitude": 34.06583,
+      "longitude": 134.55944,
+      "detail": "**県庁所在地:** 徳島市\n\n- 地方: 四国地方\n- 概要: 徳島県の行政の中心で、吉野川河口に広がる都市です。\n- ひとこと: 阿波おどりで全国的に知られ、夏には大きなにぎわいを見せます。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-76da-a377-6a4d2d66a224",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "香川県",
+      "latitude": 34.34028,
+      "longitude": 134.04333,
+      "detail": "**県庁所在地:** 高松市\n\n- 地方: 四国地方\n- 概要: 香川県の県庁所在地で、瀬戸内海に面する港町です。\n- ひとこと: 四国の玄関口のひとつとして、交通と行政の機能が集まっています。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-7a38-b162-f5e76bfe45d6",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "愛媛県",
+      "latitude": 33.84167,
+      "longitude": 132.76611,
+      "detail": "**県庁所在地:** 松山市\n\n- 地方: 四国地方\n- 概要: 愛媛県の行政の中心で、四国有数の人口規模を持つ都市です。\n- ひとこと: 道後温泉や松山城で知られ、観光都市としての魅力も高いです。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-799c-be74-da13fee4cf77",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "高知県",
+      "latitude": 33.55972,
+      "longitude": 133.53111,
+      "detail": "**県庁所在地:** 高知市\n\n- 地方: 四国地方\n- 概要: 高知県の県庁所在地で、太平洋側に開けた都市です。\n- ひとこと: 坂本龍馬ゆかりの地として知られ、明るく開放的な雰囲気があります。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-7ec5-868d-fddd14c87a52",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "福岡県",
+      "latitude": 33.60639,
+      "longitude": 130.41806,
+      "detail": "**県庁所在地:** 福岡市\n\n- 地方: 九州地方\n- 概要: 福岡県の県庁所在地で、九州最大の都市です。\n- ひとこと: 博多地区と天神地区を中心に、商業・交通・文化が集積しています。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-7640-bc27-e3e3742d8dab",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "佐賀県",
+      "latitude": 33.24944,
+      "longitude": 130.29889,
+      "detail": "**県庁所在地:** 佐賀市\n\n- 地方: 九州地方\n- 概要: 佐賀県の行政の中心で、佐賀平野に位置する都市です。\n- ひとこと: 平坦な地形の中に市街地が広がり、県政の中枢を担っています。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-7490-b86a-5bffa28a2576",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "長崎県",
+      "latitude": 32.74472,
+      "longitude": 129.87361,
+      "detail": "**県庁所在地:** 長崎市\n\n- 地方: 九州地方\n- 概要: 長崎県の県庁所在地で、港町として発展してきた都市です。\n- ひとこと: 出島や稲佐山など、国際交流の歴史を感じる場所が多くあります。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-7fd4-9301-180bb6ffa8d4",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "熊本県",
+      "latitude": 32.78972,
+      "longitude": 130.74167,
+      "detail": "**県庁所在地:** 熊本市\n\n- 地方: 九州地方\n- 概要: 熊本県の行政の中心で、県中央部の中核都市です。\n- ひとこと: 熊本城を象徴とする歴史ある城下町として知られています。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-74d5-a35f-ff43613a9a1a",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "大分県",
+      "latitude": 33.23806,
+      "longitude": 131.6125,
+      "detail": "**県庁所在地:** 大分市\n\n- 地方: 九州地方\n- 概要: 大分県の県庁所在地で、別府湾沿いに広がる都市です。\n- ひとこと: 県内温泉地への玄関口としての役割も大きい地域です。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-7ffc-8a59-acca19a84032",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "宮崎県",
+      "latitude": 31.91111,
+      "longitude": 131.42389,
+      "detail": "**県庁所在地:** 宮崎市\n\n- 地方: 九州地方\n- 概要: 宮崎県の行政の中心で、日向灘に面する都市です。\n- ひとこと: 温暖な気候で知られ、南国的な景観を感じやすい街です。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-78df-a558-619a233c1047",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "鹿児島県",
+      "latitude": 31.56028,
+      "longitude": 130.55806,
+      "detail": "**県庁所在地:** 鹿児島市\n\n- 地方: 九州地方\n- 概要: 鹿児島県の県庁所在地で、南九州の中核都市です。\n- ひとこと: 錦江湾越しに望む桜島の景観が、この街の大きな特徴です。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    },
+    {
+      "id": "019dcd90-62fc-72fb-888f-f192f78b71a2",
+      "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+      "layer_id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+      "marker_name": "沖縄県",
+      "latitude": 26.2125,
+      "longitude": 127.68111,
+      "detail": "**県庁所在地:** 那覇市\n\n- 地方: 沖縄地方\n- 概要: 沖縄県の行政と経済の中心で、県内最大の都市です。\n- ひとこと: 首里や国際通りをはじめ、歴史と観光の要素が身近に共存しています。",
+      "layer": {
+        "id": "019dcd90-62f8-74b3-9c89-11708009fd5f",
+        "user_id": "019dcd90-0bac-72ce-b2bd-ff7818a9f33b",
+        "layer_name": "県庁所在地",
+        "is_master": false
+      }
+    }
+  ],
+  "shapes": []
+}

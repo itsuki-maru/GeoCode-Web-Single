@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO temporary_urls (id, user_id, url, expiration, layers, markers, create_at)\n                    VALUES ($1, $2, $3, $4, $5, $6, $7)\n                    RETURNING id, url, expiration",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "url",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "expiration",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c72f632dd640693d1bd14a09259084ebe30eb360ac91ad14ee34c5e9f031a6e7"
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO marker_info_model (id, user_id, layer_id, marker_name, latitude, longitude, detail, create_at, update_at)\n                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9e0aaf4ade2a375e381b0b6278a5f77678d14ea5883954e1611b6cf1b42546f0"
+}
