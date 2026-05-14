@@ -1,6 +1,19 @@
 FROM rust:latest
 
-RUN apt update && apt install -y curl pkg-config libssl-dev && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt install -y nodejs && apt clean
+RUN apt update && apt install -y \
+    build-essential \
+    curl \
+    pkg-config \
+    libssl-dev \
+    libgtk-3-dev \
+    libsoup-3.0-dev \
+    libwebkit2gtk-4.1-dev \
+    libayatana-appindicator3-dev \
+    librsvg2-dev \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt install -y nodejs \
+    && apt clean \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /web
 
@@ -19,10 +32,16 @@ WORKDIR /web
 
 RUN rustc --version && cargo --version && node --version && npm --version
 
-RUN cargo install sqlx-cli --no-default-features --features sqlite
+RUN cargo install sqlx-cli
 
-RUN sqlx database create && sqlx migrate run && cargo sqlx prepare
+RUN cargo install tauri-cli --version "^2.0.0" --locked
 
-RUN cargo build --release
+RUN sqlx database create
+
+RUN sqlx migrate run
+
+RUN cargo sqlx prepare
+
+RUN cargo tauri build
 
 CMD ["/bin/sh"]
