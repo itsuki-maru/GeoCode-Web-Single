@@ -124,7 +124,7 @@ a {
 }
 
 .main-content-zone {
-  margin: 0 -8px -8px -8px;
+  margin: 0;
 }
 
 .v-enter-active,
