@@ -1,7 +1,16 @@
 # 変更履歴
 
-## Version 2.3.0
+## Version 1.0.1
 
-このプロジェクトの過去の変更履歴は [release_notes.md](release_notes.md) に記録しています。
+PostgreSQL版 GeoCode-Web の修正を反映
 
-OSS として公開後はこの `CHANGELOG.md` を正本に寄せていく予定です。
+- フロントエンドのパッケージ依存関係を更新
+- モバイルUIの画面マージンを修正
+- 共有マップでセルフホストなど X-API-KEY を使用したタイルサーバへアクセスできない問題を修正
+  - Cookie をフレキシブルとして扱う方針に変更
+
+## Version 1.0.0
+
+このプロジェクトの過去の変更履歴は [release_notes.md](release_notes.md) に記録。
+
+OSS として公開後はこの `CHANGELOG.md` が正本。
