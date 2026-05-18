@@ -1,12 +1,12 @@
 use axum::{
-    Router,
     extract::{DefaultBodyLimit, Extension},
     http::{
-        Method,
         header::{self, HeaderName, HeaderValue},
+        Method,
     },
     middleware,
     routing::{delete, get, post, put},
+    Router,
 };
 use sqlx::sqlite::SqlitePool;
 use std::str::FromStr;
@@ -138,8 +138,7 @@ pub fn build_router(pool: SqlitePool, tera: Arc<Mutex<Tera>>) -> Router {
         .route("/account/totp/setup", get(totp_setup_handler))
         .route("/account/totp/verify", post(totp_verify_handler))
         .route("/account/totp/disable", get(totp_disable_handler))
-        .route("/account/token/disable", get(disable_token))
-        .route("/tile/{z}/{x}/{y_png}", get(proxy_tile_handler));
+        .route("/account/token/disable", get(disable_token));
 
     if CONFIG.allow_user_update_password {
         secured_routes = secured_routes.route(
@@ -183,6 +182,7 @@ pub fn build_router(pool: SqlitePool, tera: Arc<Mutex<Tera>>) -> Router {
     // アクセストークンを持たない場合においても内部サービスへ接続
     let flex_secured_routes = Router::new()
         .route("/static/images/{image_name}", get(serve_image_file))
+        .route("/tile/{z}/{x}/{y_png}", get(proxy_tile_handler))
         .layer(FlexibleCookieValidator);
 
     // 最終的なAPIルート
