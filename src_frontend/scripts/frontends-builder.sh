@@ -231,6 +231,8 @@ cd $mainDistDir
 mv -f ./*.js $mainDistAssetsDir
 # CSSファイルを全てmain/dist/assetsへ移動
 mv -f ./*.css $mainDistAssetsDir
+# SVGファイルを全てmain/dist/assetsへ移動
+mv -f ./*.svg $mainDistAssetsDir
 
 # manifest.jsonをassets配下に移動
 mv $manifestJsonDir $manifestJsonMovedDir

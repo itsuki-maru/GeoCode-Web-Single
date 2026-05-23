@@ -241,6 +241,14 @@
                 cursor: default;
             }
 
+            .leaflet-container.is-shape-drawing,
+            .leaflet-container.is-shape-drawing .leaflet-grab,
+            .leaflet-container.is-shape-drawing .leaflet-interactive {
+                cursor:
+                    url("/assets/pen.svg") 3 21,
+                    crosshair !important;
+            }
+
             .shape-name-tooltip {
                 background: rgba(255, 255, 255, 0.92);
                 border: 1px solid #d94841;
@@ -1381,6 +1389,15 @@
             });
         }
 
+        // 図形描画中は地図上のカーソルをペン表示へ切り替える
+        function updateShapeDrawingCursor() {
+            const mapContainer = map.getContainer();
+            if (!mapContainer) {
+                return;
+            }
+            mapContainer.classList.toggle("is-shape-drawing", Boolean(activeDrawMode));
+        }
+
         // 描画中の内部状態を初期化して通常状態へ戻す
         function resetDrawingState(message = "図形描画: オフ", isError = false) {
             activeDrawMode = null;
@@ -1388,6 +1405,7 @@
             rectangleStartLatLng = null;
             circleStartLatLng = null;
             clearDrawPreview();
+            updateShapeDrawingCursor();
             updateShapesInteractionStyle();
             setDrawStatus(message, isError);
             const drawControl = document.getElementById("draw-control");
@@ -1405,6 +1423,7 @@
             rectangleStartLatLng = null;
             circleStartLatLng = null;
             clearDrawPreview();
+            updateShapeDrawingCursor();
             if (mode === "rectangle") {
                 setDrawStatus("図形描画: 矩形の1点目をクリックしてください。");
             } else if (mode === "circle") {

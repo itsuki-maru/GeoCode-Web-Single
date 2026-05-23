@@ -33,6 +33,7 @@ pub async fn serve_static_file(Path(uri): Path<String>) -> Result<Response<Body>
                     Some("js") | Some("mjs") => "application/javascript",
                     Some("png") => "image/png",
                     Some("jpg") | Some("jpeg") => "image/jpeg",
+                    Some("svg") => "image/svg+xml",
                     Some("html") => "text/html",
                     // 他の拡張子があれば適宜追加
                     _ => "application/octet-stream", // 不明なファイルタイプ
