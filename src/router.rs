@@ -1,12 +1,12 @@
 use axum::{
+    Router,
     extract::{DefaultBodyLimit, Extension},
     http::{
-        header::{self, HeaderName, HeaderValue},
         Method,
+        header::{self, HeaderName, HeaderValue},
     },
     middleware,
     routing::{delete, get, post, put},
-    Router,
 };
 use sqlx::sqlite::SqlitePool;
 use std::str::FromStr;
