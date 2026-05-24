@@ -1,6 +1,8 @@
-# GeoCode-Web-SingleBin への貢献ガイド
+# GeoCode-Web-Single への貢献ガイド
 
-GeoCode-Web-SingleBin へのコントリビュートを歓迎します。大きな変更に入る前に、まず Issue を作成するか、既存 Issue で方針をすり合わせてください。
+GeoCode-Web-Single への提案を歓迎します。大きな変更に入る前に、まず Issue を作成するか、既存 Issue で方針をすり合わせてください。
+
+このリポジトリはソースコードを公開しており、誰でも閲覧・クローンできます。一方で、Pull Request による参加はメンテナーが許可したユーザー、Collaborator、または Organization member に限定します。未許可ユーザーからの提案は Issue で受け付け、必要に応じてメンテナーが作業ブランチへ反映します。
 
 > 特に、 macOS/Linux のクロスプラットフォーム対応、などは大歓迎です。
 
@@ -52,11 +54,15 @@ cargo test
 
 ## プルリクエスト
 
+- PR は許可済みユーザーからのみ受け付けます
+- 通常の作業ブランチからの PR は `develop` に向けてください
+- リリース時のみ、メンテナーが `develop` から `main` への PR を作成します
 - 変更理由を PR 本文に書いてください
 - UI 変更はスクリーンショットか短い説明を添えてください
 - 仕様変更を伴う場合は `SPECIFICATION.md` も更新してください
 - リリースノートに値する変更は `release_notes.md` への追記も検討してください
 - 関係のない整形やリファクタリングは、機能変更と分けるとレビューしやすいです
+- PR では GitHub Actions の CI が実行されます。詳細は [.github/CICD_PLAN.md](.github/CICD_PLAN.md) を参照してください
 
 ## ライセンスと著作権
 
@@ -75,4 +81,4 @@ cargo test
 
 ## 脆弱性に関する問題
 
-脆弱性と思われる内容は、公開 Issue ではなく `SECURITY.md` の案内に従って連絡してください。
+脆弱性と思われる内容は、公開 Issue ではなく `SECURITY_POLICY.md` の案内に従って連絡してください。

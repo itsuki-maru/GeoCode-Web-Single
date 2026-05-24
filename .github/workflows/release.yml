@@ -19,12 +19,47 @@ env:
   VITE_ASSET_PATH: "/assets/"
 
 jobs:
+  validate-release-source:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify release tag is on main
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag_name="${{ inputs.tag_name }}"
+          else
+            tag_name="${{ github.ref_name }}"
+          fi
+
+          git fetch origin main --tags
+
+          if ! git rev-parse -q --verify "refs/tags/${tag_name}" >/dev/null; then
+            echo "Release tag '${tag_name}' does not exist."
+            exit 1
+          fi
+
+          tag_commit="$(git rev-list -n 1 "refs/tags/${tag_name}")"
+
+          if ! git merge-base --is-ancestor "${tag_commit}" origin/main; then
+            echo "Release tag '${tag_name}' is not based on main."
+            exit 1
+          fi
+
   build:
+    needs: validate-release-source
     runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
