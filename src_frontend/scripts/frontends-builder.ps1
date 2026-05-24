@@ -50,6 +50,7 @@ $frontendMobileDistDir = Join-Path -Path $frontendMobileDir -ChildPath "dist"
 # templates ディレクトリ
 $rootDir = Split-Path -Path $projectDir -Parent
 $rustTemplatesDir = Join-Path -Path $rootDir -ChildPath "src/templates"
+$rustTemplateJsFiles = Join-Path -Path $rustTemplatesDir -ChildPath "js/*.js"
 
 # 最終的なフロントエンド成果物の配布用ディレクトリ
 $prepareDistributionDir = Split-Path -Path $projectDir -Parent
@@ -212,6 +213,7 @@ Move-Item -Path $mjsFiles -Destination $movedDir
 Move-Item -Path $cssFiles -Destination $movedDir
 Move-Item -Path $jsonFiles -Destination $movedDir
 Move-Item -Path $svgFiles -Destination $movedDir
+Copy-Item -Path $rustTemplateJsFiles -Destination $movedDir -Force
 
 # 最終的なフロントエンド成果物の配置ディレクトリを作成
 New-Item -Type Directory $distributionDir
