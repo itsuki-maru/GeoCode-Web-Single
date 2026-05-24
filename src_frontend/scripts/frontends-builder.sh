@@ -40,6 +40,7 @@ frontendMobileDistDir="$frontendMobileDir/dist"
 
 # templates ディレクトリ
 rustTemplatesDir="$projectRoot/src/templates"
+rustTemplateJsDir="$rustTemplatesDir/js/*.js"
 
 # 過去のビルドファイル
 distributionDirOld="$projectRoot/dist"
@@ -238,6 +239,7 @@ mv -f ./*.svg $mainDistAssetsDir
 mv $manifestJsonDir $manifestJsonMovedDir
 # manifest-tab.jsonをassets配下に移動
 mv $manifestJsonIPadDir $manifestJsonIPadMovedDir
+cp -f $rustTemplateJsDir $mainDistAssetsDir
 
 # フロントエンド成果物配布用ディレクトリ作成
 cd $mainDistDir
