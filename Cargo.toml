@@ -1,6 +1,6 @@
 [package]
 name = "geocode_web_single"
-version = "1.0.2"
+version = "1.0.3"
 edition = "2024"
 license = "MIT"
 description = "Windows-first offline/local mapping wiki app built with Rust, Axum, Vue 3, SQLite, and Tauri."
