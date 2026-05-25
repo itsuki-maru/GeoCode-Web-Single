@@ -1,7 +1,19 @@
 # 依存関係を更新するかのフラグオプション`-d`を引数で受け取る
 Param(
-    [switch]$d
+    [switch]$d,
+    [switch]$SkipCargoBuild
 )
+
+$ErrorActionPreference = "Stop"
+
+Function Invoke-ExternalCommand($command, $arguments)
+{
+    & $command @arguments
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "$command $($arguments -join ' ') failed with exit code $LASTEXITCODE"
+    }
+}
 
 $dependsDeleteFlag = $false
 
@@ -38,6 +50,7 @@ $frontendMobileDistDir = Join-Path -Path $frontendMobileDir -ChildPath "dist"
 # templates ディレクトリ
 $rootDir = Split-Path -Path $projectDir -Parent
 $rustTemplatesDir = Join-Path -Path $rootDir -ChildPath "src/templates"
+$rustTemplateJsFiles = Join-Path -Path $rustTemplatesDir -ChildPath "js/*.js"
 
 # 最終的なフロントエンド成果物の配布用ディレクトリ
 $prepareDistributionDir = Split-Path -Path $projectDir -Parent
@@ -76,11 +89,12 @@ if ($dependsDeleteFlag)
 # node_modulesが存在しなければnpm installを実行
 if (-Not (Test-Path $nodeModules))
 {
-    npm install
+    Invoke-ExternalCommand "npm" @("install")
 }
 
 # ビルド
-npm run build
+Invoke-ExternalCommand "npm" @("run", "type-check")
+Invoke-ExternalCommand "npm" @("run", "build-only")
 
 # HTMLファイルパス
 $targetHtml = Join-Path -Path $frontendDir -ChildPath "dist/index.html"
@@ -120,11 +134,12 @@ if ($dependsDeleteFlag)
 # node_modulesが存在しなければnpm installを実行
 if (-Not (Test-Path $nodeModules))
 {
-    npm install
+    Invoke-ExternalCommand "npm" @("install")
 }
 
 # ビルド
-npm run build
+Invoke-ExternalCommand "npm" @("run", "type-check")
+Invoke-ExternalCommand "npm" @("run", "build-only")
 # HTMLファイルパス
 $targetHtml = Join-Path -Path $frontendMobileDir -ChildPath "dist/index.html"
 
@@ -166,11 +181,12 @@ if ($dependsDeleteFlag)
 # node_modulesが存在しなければnpm installを実行
 if (-Not (Test-Path $nodeModules))
 {
-    npm install
+    Invoke-ExternalCommand "npm" @("install")
 }
 
 # ビルド
-npm run build
+Invoke-ExternalCommand "npm" @("run", "type-check")
+Invoke-ExternalCommand "npm" @("run", "build-only")
 # HTMLファイルパス
 $targetHtml = Join-Path -Path $frontendAdminDir -ChildPath "dist/index.html"
 
@@ -197,6 +213,7 @@ Move-Item -Path $mjsFiles -Destination $movedDir
 Move-Item -Path $cssFiles -Destination $movedDir
 Move-Item -Path $jsonFiles -Destination $movedDir
 Move-Item -Path $svgFiles -Destination $movedDir
+Copy-Item -Path $rustTemplateJsFiles -Destination $movedDir -Force
 
 # 最終的なフロントエンド成果物の配置ディレクトリを作成
 New-Item -Type Directory $distributionDir
@@ -206,4 +223,7 @@ Copy-Item -Path $rustTemplatesDir -Destination $distributionDir -Recurse -Force
 
 # プロジェクトディレクトリに移動し、Rustをコンパイル
 Set-Location $prepareDistributionDir
-cargo build --release
+if (-Not $SkipCargoBuild)
+{
+    Invoke-ExternalCommand "cargo" @("build", "--release")
+}

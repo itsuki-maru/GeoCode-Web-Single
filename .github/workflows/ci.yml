@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+  push:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  VITE_IP_ADDRESS: ""
+  VITE_ASSET_PATH: "/assets/"
+
+jobs:
+  frontend:
+    name: Frontend type-check and build
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - src_frontend/frontend
+          - src_frontend/frontend-mobile
+          - src_frontend/frontend-admin
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefix ${{ matrix.app }}
+
+      - name: Type-check
+        run: npm run type-check --prefix ${{ matrix.app }}
+
+      - name: Build
+        run: npm run build-only --prefix ${{ matrix.app }}
+
+  rust:
+    name: Rust format, test, and integration build
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            src_frontend/frontend/package-lock.json
+            src_frontend/frontend-admin/package-lock.json
+            src_frontend/frontend-mobile/package-lock.json
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: Generate CI .env
+        shell: pwsh
+        run: |
+          @"
+          DATABASE_URL=sqlite:./ci.sqlite
+          CREATEDATABASE_PATH=./ci.sqlite
+          VITE_IP_ADDRESS=
+          VITE_ASSET_PATH=/assets/
+          "@ | Set-Content -Path .env -Encoding UTF8
+
+      - name: Install SQLx CLI
+        shell: pwsh
+        run: cargo install sqlx-cli --no-default-features --features sqlite
+
+      - name: Create SQLite database and run migrations
+        shell: pwsh
+        run: |
+          sqlx database create
+          sqlx migrate run
+
+      - name: Install frontend dependencies
+        shell: pwsh
+        run: |
+          npm ci --prefix src_frontend/frontend
+          npm ci --prefix src_frontend/frontend-mobile
+          npm ci --prefix src_frontend/frontend-admin
+
+      - name: Build embedded frontend assets
+        shell: pwsh
+        run: ./src_frontend/scripts/frontends-builder.ps1 -SkipCargoBuild
+
+      - name: Check Rust formatting
+        run: cargo fmt --check
+
+      - name: Test Rust
+        run: cargo test --locked

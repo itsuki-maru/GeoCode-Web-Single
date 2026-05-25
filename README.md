@@ -276,14 +276,22 @@ GitHub Actions では [.github/workflows/release.yml](.github/workflows/release.
 - `cargo tauri build` で Windows NSIS インストーラ、MSI インストーラ、単体実行ファイルを生成する
 - 生成したインストーラ（`.exe` / `.msi`）と cargo 生成の単体 `.exe` を収集し、SHA-256 チェックサム付きで GitHub Release の draft に添付する
 
+## CI / PR 運用
+
+Pull Request と保護ブランチへの push では [.github/workflows/ci.yml](.github/workflows/ci.yml) により、フロントエンドの型チェック・ビルド、Tauri/Rust に埋め込む成果物生成、`cargo fmt --check`、`cargo test --locked` を実行する。
+
+通常の作業ブランチからの PR は `develop` に集約し、リリース時に `develop` から `main` へマージする。`main` 上の `v*` タグ、または手動実行により [.github/workflows/release.yml](.github/workflows/release.yml) で draft Release を作成する。
+
+このリポジトリは、SQLite のようにソースコードを公開して誰でも閲覧・クローンできる一方で、Pull Request による参加はメンテナーが許可したユーザー、Collaborator、または Organization member に限定する。詳細なCI/CD計画とGitHub側の設定項目は [.github/CICD_PLAN.md](.github/CICD_PLAN.md) を参照すること。
+
 ## OSS 公開とサポート方針
 
 GeoCode-Web-Single は、ソースコードを OSS として公開しつつ、一般利用者には Windows 向けリリース成果物をフリーソフトのように利用できる形で配布します。
 
 - 通常の不具合報告、機能要望、改善提案は GitHub Issue で受け付けます
 - 大きな変更に入る前は、Issue で方針を相談してください
-- Pull Request は歓迎します。詳しくは [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください
-- セキュリティ上の問題は公開 Issue に書かず、[SECURITY.md](SECURITY.md) の案内に従ってください
+- Pull Request は許可済みユーザーからのみ受け付けます。詳しくは [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください
+- セキュリティ上の問題は公開 Issue に書かず、[SECURITY_POLICY.md](SECURITY_POLICY.md) の案内に従ってください
 - 現時点の主なサポート対象は Windows 版とデフォルトブランチ上の最新版です
 
 ### 公開前・配布前の確認
