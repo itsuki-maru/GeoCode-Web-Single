@@ -248,7 +248,7 @@ let markers = {};
 let layerNames = {};
 const SHAPE_STYLE = {
     color: "#d94841",
-    weight: 3,
+    weight: 4,
     fillColor: "#d94841",
     fillOpacity: 0.16
 };

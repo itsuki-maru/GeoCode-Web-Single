@@ -287,6 +287,22 @@
                 cursor: default;
             }
 
+            .leaflet-container.is-shape-drawing:not(.is-shape-delete),
+            .leaflet-container.is-shape-drawing:not(.is-shape-delete) .leaflet-grab,
+            .leaflet-container.is-shape-drawing:not(.is-shape-delete) .leaflet-interactive,
+            .leaflet-container.is-shape-delete,
+            .leaflet-container.is-shape-delete .leaflet-grab,
+            .leaflet-container.is-shape-delete .leaflet-interactive {
+                touch-action: none;
+                user-select: none;
+            }
+
+            .leaflet-container.is-shape-delete,
+            .leaflet-container.is-shape-delete .leaflet-grab,
+            .leaflet-container.is-shape-delete .leaflet-interactive {
+                cursor: pointer !important;
+            }
+
             .shape-name-tooltip {
                 background: rgba(255, 255, 255, 0.92);
                 border: 1px solid #d94841;

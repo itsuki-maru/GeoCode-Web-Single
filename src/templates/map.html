@@ -269,12 +269,22 @@
                 cursor: default;
             }
 
-            .leaflet-container.is-shape-drawing,
-            .leaflet-container.is-shape-drawing .leaflet-grab,
-            .leaflet-container.is-shape-drawing .leaflet-interactive {
+            .leaflet-container.is-shape-drawing:not(.is-shape-delete),
+            .leaflet-container.is-shape-drawing:not(.is-shape-delete) .leaflet-grab,
+            .leaflet-container.is-shape-drawing:not(.is-shape-delete) .leaflet-interactive {
                 cursor:
-                    url("/assets/pen.svg") 3 21,
+                    url("/assets/pen.svg") 1 31,
                     crosshair !important;
+                touch-action: none;
+                user-select: none;
+            }
+
+            .leaflet-container.is-shape-delete,
+            .leaflet-container.is-shape-delete .leaflet-grab,
+            .leaflet-container.is-shape-delete .leaflet-interactive {
+                cursor: pointer !important;
+                touch-action: none;
+                user-select: none;
             }
 
             .shape-name-tooltip {
