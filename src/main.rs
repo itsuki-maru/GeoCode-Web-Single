@@ -24,11 +24,11 @@ const WINDOW_URL: &str = "http://localhost:3000/index";
 /// クリックイベントを捕捉して Tauri コマンド経由でブラウザを起動する。
 const OPEN_EXTERNAL_SCRIPT: &str = r#"
     document.addEventListener('click', function(e) {
-        var a = e.target.closest('a');
+        const a = e.target.closest('a');
         if (!a || !a.href) return;
         try {
-            var host = new URL(a.href).hostname;
-            if (host !== 'localhost' && host !== '127.0.0.1') {
+            const { hostname, pathname } = new URL(a.href);
+            if (((hostname !== 'localhost' && hostname !== '127.0.0.1')) || pathname === '/licanses') {
                 e.preventDefault();
                 window.__TAURI_INTERNALS__.invoke('open_url', { url: a.href });
             }
