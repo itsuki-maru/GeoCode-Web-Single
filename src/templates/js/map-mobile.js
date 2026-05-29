@@ -390,7 +390,7 @@ map.addLayer(markersClusterGroup);
 const drawnShapesGroup = L.featureGroup();
 const SHAPE_STYLE = {
     color: "#d94841",
-    weight: 3,
+    weight: 4,
     fillColor: "#d94841",
     fillOpacity: 0.16
 };
@@ -400,9 +400,11 @@ const DELETE_SHAPE_STYLE = {
     fillColor: "#f28482",
     fillOpacity: 0.28
 };
+const DELETE_HIT_TOLERANCE_PX = 18;
 const MEASUREMENT_SEGMENT_LABEL_GROUP_SIZE = 2;
 
 let activeDrawMode = null;
+let isCompletingActiveDrawing = false;
 let drawPoints = [];
 let drawPreviewLayer = null;
 let rectangleStartLatLng = null;
@@ -410,8 +412,14 @@ let circleStartLatLng = null;
 let deletedShapesStack = [];
 let editingShapeLayer = null;
 let editingShapePopup = null;
+let suppressMapClickUntil = 0;
+let suppressTouchEndUntil = 0;
+let activePenPointerId = null;
 let isMeasurementVisible = false;
 let isMeasurementSegmentMerged = false;
+let drawingInteractionState = null;
+const deletingShapeIds = new Set();
+const deletedShapeIds = new Set();
 
 // 図形描画用のステータスメッセージを更新する
 function setDrawStatus(message, isError = false) {
@@ -529,6 +537,153 @@ function clearDrawPreview() {
     }
 }
 
+// タッチ描画中だけ地図操作を止め、指の移動を図形プレビューに集中させる
+function setDrawingMapInteractionsDisabled(shouldDisable) {
+    if (shouldDisable && !drawingInteractionState) {
+        drawingInteractionState = {
+            dragging: Boolean(map.dragging?.enabled?.()),
+            touchZoom: Boolean(map.touchZoom?.enabled?.()),
+            doubleClickZoom: Boolean(map.doubleClickZoom?.enabled?.()),
+            boxZoom: Boolean(map.boxZoom?.enabled?.()),
+        };
+        map.dragging?.disable?.();
+        map.touchZoom?.disable?.();
+        map.doubleClickZoom?.disable?.();
+        map.boxZoom?.disable?.();
+        return;
+    }
+
+    if (!shouldDisable && drawingInteractionState) {
+        if (drawingInteractionState.dragging) {
+            map.dragging?.enable?.();
+        }
+        if (drawingInteractionState.touchZoom) {
+            map.touchZoom?.enable?.();
+        }
+        if (drawingInteractionState.doubleClickZoom) {
+            map.doubleClickZoom?.enable?.();
+        }
+        if (drawingInteractionState.boxZoom) {
+            map.boxZoom?.enable?.();
+        }
+        drawingInteractionState = null;
+    }
+}
+
+function updateShapeDrawingState() {
+    const mapContainer = map.getContainer();
+    if (mapContainer) {
+        mapContainer.classList.toggle("is-shape-drawing", Boolean(activeDrawMode));
+        mapContainer.classList.toggle("is-shape-delete", activeDrawMode === "delete");
+    }
+    setDrawingMapInteractionsDisabled(Boolean(activeDrawMode));
+}
+
+function suppressNextMapClick(durationMs = 700) {
+    suppressMapClickUntil = Date.now() + durationMs;
+}
+
+function isMapClickSuppressed() {
+    return Date.now() < suppressMapClickUntil;
+}
+
+function suppressNextTouchEnd(durationMs = 700) {
+    suppressTouchEndUntil = Date.now() + durationMs;
+}
+
+function isTouchEndSuppressed() {
+    return Date.now() < suppressTouchEndUntil;
+}
+
+function getLatLngFromTouchEvent(event) {
+    if (event.latlng) {
+        return event.latlng;
+    }
+
+    const originalEvent = event.originalEvent;
+    const touch = originalEvent?.changedTouches?.[0] || originalEvent?.touches?.[0];
+    if (!touch) {
+        return null;
+    }
+
+    const containerPoint = map.mouseEventToContainerPoint(touch);
+    return map.containerPointToLatLng(containerPoint);
+}
+
+function isPenPointerEvent(event) {
+    return event?.pointerType === "pen";
+}
+
+function isPenOptimizedDrawMode() {
+    return Boolean(activeDrawMode && activeDrawMode !== "delete");
+}
+
+function getLatLngFromPointerEvent(event) {
+    if (!event) {
+        return null;
+    }
+    const containerPoint = map.mouseEventToContainerPoint(event);
+    return map.containerPointToLatLng(containerPoint);
+}
+
+function stopNativeDrawingEvent(event) {
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    event.stopImmediatePropagation?.();
+}
+
+function updateExistingPreviewLayer(mode, latLngs) {
+    const previewStyle = {
+        ...buildShapeStyleFromColor(mode, getSelectedShapeColor()),
+        dashArray: "6,4"
+    };
+
+    if (mode === "rectangle") {
+        if (!rectangleStartLatLng || !latLngs?.[0]) {
+            return;
+        }
+        const bounds = L.latLngBounds(rectangleStartLatLng, latLngs[0]);
+        if (drawPreviewLayer?.previewMode === "rectangle" && typeof drawPreviewLayer.setBounds === "function") {
+            drawPreviewLayer.setBounds(bounds);
+            drawPreviewLayer.setStyle(previewStyle);
+            return;
+        }
+        clearDrawPreview();
+        drawPreviewLayer = L.rectangle(bounds, previewStyle).addTo(map);
+        drawPreviewLayer.previewMode = "rectangle";
+        return;
+    }
+
+    if (mode === "circle") {
+        if (!circleStartLatLng || !latLngs?.[0]) {
+            return;
+        }
+        const radius = map.distance(circleStartLatLng, latLngs[0]);
+        if (!(radius > 0)) {
+            return;
+        }
+        if (drawPreviewLayer?.previewMode === "circle" && typeof drawPreviewLayer.setRadius === "function") {
+            drawPreviewLayer.setLatLng(circleStartLatLng);
+            drawPreviewLayer.setRadius(radius);
+            drawPreviewLayer.setStyle(previewStyle);
+            return;
+        }
+        clearDrawPreview();
+        drawPreviewLayer = L.circle(circleStartLatLng, { ...previewStyle, radius }).addTo(map);
+        drawPreviewLayer.previewMode = "circle";
+        return;
+    }
+
+    if (drawPreviewLayer?.previewMode === mode && typeof drawPreviewLayer.setLatLngs === "function") {
+        drawPreviewLayer.setLatLngs(latLngs);
+        drawPreviewLayer.setStyle(previewStyle);
+        return;
+    }
+    clearDrawPreview();
+    drawPreviewLayer = createPreviewLayer(mode, latLngs).addTo(map);
+    drawPreviewLayer.previewMode = mode;
+}
+
 // 現在の描画モードに応じてボタン状態を更新する
 function updateDrawButtons(container) {
     const buttons = container.querySelectorAll("[data-draw-mode]");
@@ -595,10 +750,12 @@ function updateShapesInteractionStyle() {
 // 描画中の内部状態を初期化して通常状態へ戻す
 function resetDrawingState(message = "図形描画: オフ", isError = false) {
     activeDrawMode = null;
+    activePenPointerId = null;
     drawPoints = [];
     rectangleStartLatLng = null;
     circleStartLatLng = null;
     clearDrawPreview();
+    updateShapeDrawingState();
     updateShapesInteractionStyle();
     setDrawStatus(message, isError);
     const drawControl = document.getElementById("draw-control");
@@ -616,6 +773,7 @@ function beginDrawing(mode) {
     rectangleStartLatLng = null;
     circleStartLatLng = null;
     clearDrawPreview();
+    updateShapeDrawingState();
     if (mode === "rectangle") {
         setDrawStatus("図形描画: 矩形の1点目をタップしてください。");
     } else if (mode === "circle") {
@@ -927,13 +1085,15 @@ function attachShapeNameTooltipClick(layer) {
     }
 
     tooltipElement.dataset.shapeNameClickBound = "true";
-    L.DomEvent.on(tooltipElement, "click", (event) => {
+    const openEditorFromLabel = (event) => {
         L.DomEvent.stop(event);
         if (activeDrawMode) {
             return;
         }
         openShapeNameEditor(layer);
-    });
+    };
+    L.DomEvent.on(tooltipElement, "click", openEditorFromLabel);
+    L.DomEvent.on(tooltipElement, "touchend", openEditorFromLabel);
 }
 
 // 図形名ラベルの見た目と保持データを同期する
@@ -1292,8 +1452,18 @@ function bindVisibleShapeLabelEvents() {
 async function deleteShape(layer) {
     if (!layer?.shapeId) {
         setDrawStatus("図形描画: 削除対象のIDがありません。", true);
-        return;
+        return false;
     }
+    const shapeId = String(layer.shapeId);
+    if (deletingShapeIds.has(shapeId) || deletedShapeIds.has(shapeId)) {
+        return false;
+    }
+    deletingShapeIds.add(shapeId);
+    if (layer.isDeletingShape || layer.isDeletedShape) {
+        deletingShapeIds.delete(shapeId);
+        return false;
+    }
+    layer.isDeletingShape = true;
 
     const deletedShape = {
         layerId: layer.layerId || layer.options?.shapeRecord?.layer_id || null,
@@ -1303,33 +1473,188 @@ async function deleteShape(layer) {
             || buildShapeGeoJson(layer, layer.shapeType, layer.shapeStyle || getDefaultShapeStyle(layer.shapeType)),
     };
 
-    const response = await fetchWithAuth(`/shape/${layer.shapeId}`, {
-        method: "DELETE",
-    });
+    let response;
+    try {
+        response = await fetchWithAuth(`/shape/${layer.shapeId}`, {
+            method: "DELETE",
+        });
+    } catch (error) {
+        layer.isDeletingShape = false;
+        deletingShapeIds.delete(shapeId);
+        throw error;
+    }
 
     if (!response.ok) {
+        layer.isDeletingShape = false;
+        deletingShapeIds.delete(shapeId);
         throw new Error("shape delete failed");
     }
 
-    removeShapeMeasurementMarkers(layer);
-    drawnShapesGroup.removeLayer(layer);
-    deletedShapesStack.push(deletedShape);
-    updateUndoButtonState();
+    layer.isDeletedShape = true;
+    deletedShapeIds.add(shapeId);
+    try {
+        removeShapeMeasurementMarkers(layer);
+        drawnShapesGroup.removeLayer(layer);
+        deletedShapesStack.push(deletedShape);
+        updateUndoButtonState();
+    } catch (error) {
+        console.error("Shape deleted on server, but local cleanup failed:", error);
+    } finally {
+        layer.isDeletingShape = false;
+        deletingShapeIds.delete(shapeId);
+    }
     setDrawStatus("図形描画: 削除しました。");
+    return true;
+}
+
+function getPointToSegmentDistance(point, segmentStart, segmentEnd) {
+    const dx = segmentEnd.x - segmentStart.x;
+    const dy = segmentEnd.y - segmentStart.y;
+    if (dx === 0 && dy === 0) {
+        return point.distanceTo(segmentStart);
+    }
+
+    const ratio = Math.max(0, Math.min(1, (
+        ((point.x - segmentStart.x) * dx) + ((point.y - segmentStart.y) * dy)
+    ) / ((dx * dx) + (dy * dy))));
+
+    return point.distanceTo(L.point(
+        segmentStart.x + (ratio * dx),
+        segmentStart.y + (ratio * dy)
+    ));
+}
+
+function isPointInProjectedPolygon(point, polygonPoints) {
+    let isInside = false;
+    for (let i = 0, j = polygonPoints.length - 1; i < polygonPoints.length; j = i++) {
+        const current = polygonPoints[i];
+        const previous = polygonPoints[j];
+        const intersects = ((current.y > point.y) !== (previous.y > point.y))
+            && (point.x < ((previous.x - current.x) * (point.y - current.y) / (previous.y - current.y)) + current.x);
+        if (intersects) {
+            isInside = !isInside;
+        }
+    }
+    return isInside;
+}
+
+function getProjectedSegmentDistance(point, latLngs, isClosed = false) {
+    const projectedPoints = latLngs.map(latlng => map.latLngToLayerPoint(latlng));
+    if (projectedPoints.length === 0) {
+        return Infinity;
+    }
+    if (projectedPoints.length === 1) {
+        return point.distanceTo(projectedPoints[0]);
+    }
+
+    let minDistance = Infinity;
+    for (let i = 1; i < projectedPoints.length; i += 1) {
+        minDistance = Math.min(
+            minDistance,
+            getPointToSegmentDistance(point, projectedPoints[i - 1], projectedPoints[i])
+        );
+    }
+    if (isClosed) {
+        minDistance = Math.min(
+            minDistance,
+            getPointToSegmentDistance(point, projectedPoints[projectedPoints.length - 1], projectedPoints[0])
+        );
+    }
+    return minDistance;
+}
+
+function getDeleteHitDistance(layer, latlng) {
+    if (!layer || !latlng) {
+        return Infinity;
+    }
+
+    const point = map.latLngToLayerPoint(latlng);
+    if (layer.shapeType === "circle" && typeof layer.getLatLng === "function") {
+        const centerPoint = map.latLngToLayerPoint(layer.getLatLng());
+        const radius = Number(layer._radius);
+        return Number.isFinite(radius) && point.distanceTo(centerPoint) <= radius + DELETE_HIT_TOLERANCE_PX
+            ? 0
+            : Infinity;
+    }
+
+    const latLngs = flattenShapeLatLngs(layer.getLatLngs?.());
+    if (latLngs.length === 0) {
+        return Infinity;
+    }
+
+    if (layer.shapeType === "polygon" || layer.shapeType === "rectangle") {
+        const polygonLatLngs = trimClosedLatLngs(latLngs);
+        const polygonPoints = polygonLatLngs.map(polygonLatLng => map.latLngToLayerPoint(polygonLatLng));
+        if (polygonPoints.length >= 3 && isPointInProjectedPolygon(point, polygonPoints)) {
+            return 0;
+        }
+        return getProjectedSegmentDistance(point, polygonLatLngs, true);
+    }
+
+    return getProjectedSegmentDistance(point, latLngs, false);
+}
+
+function findDeleteHitShape(latlng) {
+    let hitLayer = null;
+    let hitDistance = DELETE_HIT_TOLERANCE_PX;
+
+    drawnShapesGroup.eachLayer(layer => {
+        const distance = getDeleteHitDistance(layer, latlng);
+        if (distance <= hitDistance) {
+            hitLayer = layer;
+            hitDistance = distance;
+        }
+    });
+
+    return hitLayer;
+}
+
+function isShapeIdDeleted(layer) {
+    return Boolean(layer?.shapeId && deletedShapeIds.has(String(layer.shapeId)));
+}
+
+async function deleteShapeAtLatLng(latlng) {
+    const hitLayer = findDeleteHitShape(latlng);
+    if (!hitLayer) {
+        setDrawStatus("図形描画: 削除対象の図形をクリックしてください。", true);
+        return;
+    }
+
+    try {
+        const didDelete = await deleteShape(hitLayer);
+        if (didDelete) {
+            resetDrawingState("図形描画: 削除しました。");
+        }
+    } catch (_error) {
+        if (isShapeIdDeleted(hitLayer)) {
+            resetDrawingState("図形描画: 削除しました。");
+            return;
+        }
+        setDrawStatus("図形描画: 削除に失敗しました。", true);
+    }
 }
 
 // 図形クリック時の削除や編集開始に必要なイベントを付与する
 function attachShapeEvents(layer) {
-    layer.on("click", async function (event) {
+    const handleDeleteEvent = async function (event, shouldSuppressClick = false) {
         if (activeDrawMode === "delete") {
             if (event.originalEvent) {
                 L.DomEvent.stop(event.originalEvent);
             }
+            if (shouldSuppressClick) {
+                suppressNextMapClick();
+            }
 
             try {
-                await deleteShape(layer);
-                resetDrawingState("図形描画: オフ");
+                const didDelete = await deleteShape(layer);
+                if (didDelete) {
+                    resetDrawingState("図形描画: 削除しました。");
+                }
             } catch (_error) {
+                if (isShapeIdDeleted(layer)) {
+                    resetDrawingState("図形描画: 削除しました。");
+                    return;
+                }
                 setDrawStatus("図形描画: 削除に失敗しました。", true);
             }
             return;
@@ -1340,6 +1665,14 @@ function attachShapeEvents(layer) {
         }
 
         return;
+    };
+
+    layer.on("click", async function (event) {
+        await handleDeleteEvent(event);
+    });
+
+    layer.on("touchend", async function (event) {
+        await handleDeleteEvent(event, true);
     });
 }
 
@@ -1463,6 +1796,32 @@ async function completeLineOrPolygon() {
     }
 }
 
+// 現在の描画モードに応じて「完了」と同じ処理を実行する
+async function completeActiveDrawing() {
+    if (isCompletingActiveDrawing) {
+        return;
+    }
+    if (activeDrawMode === "rectangle" || activeDrawMode === "circle") {
+        const shapeLabel = activeDrawMode === "circle" ? "円" : "矩形";
+        setDrawStatus(`図形描画: ${shapeLabel}は2点目をタップすると保存されます。`, true);
+        return;
+    }
+    if (activeDrawMode === "delete") {
+        setDrawStatus("図形描画: 削除モードでは図形をタップしてください。", true);
+        return;
+    }
+    if (!activeDrawMode) {
+        setDrawStatus("図形描画: モードを選択してください。", true);
+        return;
+    }
+    isCompletingActiveDrawing = true;
+    try {
+        await completeLineOrPolygon();
+    } finally {
+        isCompletingActiveDrawing = false;
+    }
+}
+
 // 円の描画を確定して保存する
 function completeCircleDrawing(targetLatLng) {
     if (!circleStartLatLng) {
@@ -1530,19 +1889,18 @@ function updateServer(id, lat, lng) {
     });
 }
 
-// 地図クリック時にサーバーに情報を送信しマーカー描画
-map.on("click", function (e) {
+function handleShapeDrawLatLng(latlng) {
     if (activeDrawMode === "rectangle") {
         if (!rectangleStartLatLng) {
-            rectangleStartLatLng = e.latlng;
+            rectangleStartLatLng = latlng;
             setDrawStatus("図形描画: 矩形の2点目をタップしてください。");
-            return;
+            return true;
         }
 
         closeShapeNameEditor();
         clearDrawPreview();
         const rectangle = L.rectangle(
-            L.latLngBounds(rectangleStartLatLng, e.latlng),
+            L.latLngBounds(rectangleStartLatLng, latlng),
             SHAPE_STYLE
         );
         rectangle.shapeStyle = buildShapeStyleFromColor("rectangle", getSelectedShapeColor());
@@ -1555,28 +1913,46 @@ map.on("click", function (e) {
             .catch(() => {
                 resetDrawingState("図形描画: 保存に失敗しました。", true);
             });
-        return;
+        return true;
     }
 
     if (activeDrawMode === "circle") {
         if (!circleStartLatLng) {
-            circleStartLatLng = e.latlng;
+            circleStartLatLng = latlng;
             setDrawStatus("図形描画: 円周上の点をタップしてください。");
-            return;
+            return true;
         }
 
-        completeCircleDrawing(e.latlng);
-        return;
+        completeCircleDrawing(latlng);
+        return true;
     }
 
     if (activeDrawMode === "polyline" || activeDrawMode === "polygon") {
         closeShapeNameEditor();
-        drawPoints.push(e.latlng);
+        drawPoints.push(latlng);
         setDrawStatus(`図形描画: ${drawPoints.length} 点を追加しました。`);
+        return true;
+    }
+
+    if (activeDrawMode === "delete") {
+        return true;
+    }
+
+    return false;
+}
+
+// 地図クリック時にサーバーに情報を送信しマーカー描画
+map.on("click", async function (e) {
+    if (isMapClickSuppressed()) {
         return;
     }
 
     if (activeDrawMode === "delete") {
+        await deleteShapeAtLatLng(e.latlng);
+        return;
+    }
+
+    if (handleShapeDrawLatLng(e.latlng)) {
         return;
     }
 
@@ -1621,24 +1997,16 @@ map.on("click", function (e) {
 });
 
 // モバイル操作に合わせて描画プレビューを更新する
-function updateDrawPreviewForEvent(e) {
-    if (!activeDrawMode) {
+function updateDrawPreviewForLatLng(latlng) {
+    if (!activeDrawMode || !latlng) {
         return;
     }
-
-    clearDrawPreview();
 
     if (activeDrawMode === "rectangle") {
         if (!rectangleStartLatLng) {
             return;
         }
-        drawPreviewLayer = L.rectangle(
-            L.latLngBounds(rectangleStartLatLng, e.latlng),
-            {
-                ...buildShapeStyleFromColor("rectangle", getSelectedShapeColor()),
-                dashArray: "6,4"
-            }
-        ).addTo(map);
+        updateExistingPreviewLayer("rectangle", [latlng]);
         return;
     }
 
@@ -1646,11 +2014,7 @@ function updateDrawPreviewForEvent(e) {
         if (!circleStartLatLng) {
             return;
         }
-        const circlePreviewLayer = createPreviewLayer("circle", [circleStartLatLng, e.latlng]);
-        if (!circlePreviewLayer) {
-            return;
-        }
-        drawPreviewLayer = circlePreviewLayer.addTo(map);
+        updateExistingPreviewLayer("circle", [latlng]);
         return;
     }
 
@@ -1658,20 +2022,119 @@ function updateDrawPreviewForEvent(e) {
         return;
     }
 
-    const previewLatLngs = [...drawPoints, e.latlng];
-    drawPreviewLayer = createPreviewLayer(activeDrawMode, previewLatLngs).addTo(map);
+    const previewLatLngs = [...drawPoints, latlng];
+    updateExistingPreviewLayer(activeDrawMode, previewLatLngs);
 }
 
 map.on("mousemove", function (e) {
-    updateDrawPreviewForEvent(e);
+    updateDrawPreviewForLatLng(e.latlng);
 });
 
 map.on("touchmove", function (e) {
-    if (!e.latlng) {
+    if (!activeDrawMode) {
         return;
     }
-    updateDrawPreviewForEvent(e);
+    if (e.originalEvent) {
+        L.DomEvent.preventDefault(e.originalEvent);
+    }
+    updateDrawPreviewForLatLng(getLatLngFromTouchEvent(e));
 });
+
+map.on("touchend", async function (e) {
+    if (!activeDrawMode || isTouchEndSuppressed()) {
+        return;
+    }
+    const latlng = getLatLngFromTouchEvent(e);
+    if (!latlng) {
+        return;
+    }
+    if (e.originalEvent) {
+        L.DomEvent.stop(e.originalEvent);
+    }
+    suppressNextMapClick();
+    if (activeDrawMode === "delete") {
+        await deleteShapeAtLatLng(latlng);
+        return;
+    }
+    handleShapeDrawLatLng(latlng);
+});
+
+document.addEventListener("keydown", async event => {
+    if (event.key !== "Escape" || event.isComposing || !activeDrawMode) {
+        return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    await completeActiveDrawing();
+});
+
+function installPenPointerDrawingHandlers() {
+    if (!window.PointerEvent) {
+        return;
+    }
+
+    const mapContainer = map.getContainer();
+    if (!mapContainer) {
+        return;
+    }
+
+    mapContainer.addEventListener("pointerdown", event => {
+        if (!isPenPointerEvent(event) || !isPenOptimizedDrawMode()) {
+            return;
+        }
+        activePenPointerId = event.pointerId;
+        mapContainer.setPointerCapture?.(event.pointerId);
+        suppressNextMapClick();
+        suppressNextTouchEnd();
+        stopNativeDrawingEvent(event);
+    }, true);
+
+    mapContainer.addEventListener("pointermove", event => {
+        if (!isPenPointerEvent(event) || !isPenOptimizedDrawMode()) {
+            return;
+        }
+        if (activePenPointerId !== null && event.pointerId !== activePenPointerId) {
+            return;
+        }
+        const latlng = getLatLngFromPointerEvent(event);
+        if (!latlng) {
+            return;
+        }
+        suppressNextMapClick();
+        suppressNextTouchEnd();
+        stopNativeDrawingEvent(event);
+        updateDrawPreviewForLatLng(latlng);
+    }, true);
+
+    mapContainer.addEventListener("pointerup", event => {
+        if (!isPenPointerEvent(event) || !isPenOptimizedDrawMode()) {
+            activePenPointerId = null;
+            return;
+        }
+        if (activePenPointerId !== null && event.pointerId !== activePenPointerId) {
+            return;
+        }
+        const latlng = getLatLngFromPointerEvent(event);
+        activePenPointerId = null;
+        mapContainer.releasePointerCapture?.(event.pointerId);
+        if (!latlng) {
+            return;
+        }
+        suppressNextMapClick();
+        suppressNextTouchEnd();
+        stopNativeDrawingEvent(event);
+        handleShapeDrawLatLng(latlng);
+    }, true);
+
+    mapContainer.addEventListener("pointercancel", event => {
+        if (isPenPointerEvent(event) && event.pointerId === activePenPointerId) {
+            activePenPointerId = null;
+            mapContainer.releasePointerCapture?.(event.pointerId);
+        }
+    }, true);
+}
+
+installPenPointerDrawingHandlers();
 
 
 // モードの説明を切り替える関数
@@ -2004,20 +2467,7 @@ const DrawShapeControl = L.Control.extend({
         });
 
         container.querySelector("#draw-complete-btn").addEventListener("click", async () => {
-            if (activeDrawMode === "rectangle" || activeDrawMode === "circle") {
-                const shapeLabel = activeDrawMode === "circle" ? "円" : "矩形";
-                setDrawStatus(`図形描画: ${shapeLabel}は2点目をタップすると保存されます。`, true);
-                return;
-            }
-            if (activeDrawMode === "delete") {
-                setDrawStatus("図形描画: 削除モードでは図形をタップしてください。", true);
-                return;
-            }
-            if (!activeDrawMode) {
-                setDrawStatus("図形描画: モードを選択してください。", true);
-                return;
-            }
-            await completeLineOrPolygon();
+            await completeActiveDrawing();
         });
 
         container.querySelector("#draw-cancel-btn").addEventListener("click", () => {

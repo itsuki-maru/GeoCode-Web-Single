@@ -1,45 +1,20 @@
 // Windowsでコンソールを非表示にする設定処理
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use axum::{
-    Json,
-    body::Body,
-    http::{HeaderMap, Request, Response, StatusCode, header::CONTENT_TYPE},
-    response::{Html, IntoResponse, Redirect},
+use geocode_web_single::{
+    build_tera_from_embed,
+    config::CONFIG,
+    db::{check_and_insert_initial_data, setup_database_pool},
+    init::{SetupForm, build_env_from_form, get_application_user_setup_path, read_env_json},
+    model::ApplicationInitSetup,
+    router, utils,
 };
-use rust_embed::RustEmbed;
 use std::env;
 use std::sync::{Arc, Mutex};
-use tera::Tera;
 use tokio::sync::Mutex as TokioMutex;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-mod auth;
-mod config;
-mod db;
-mod error;
-mod handler;
-mod image;
-mod init;
-mod middleware;
-mod model;
-mod router;
-mod utils;
-
-use config::CONFIG;
-use db::{check_and_insert_initial_data, setup_database_pool};
-use error::AppError;
-use init::{SetupForm, build_env_from_form, get_application_user_setup_path, read_env_json};
-use model::{AppInit, ApplicationInitSetup, MessageApi};
 use tauri::Manager;
-
-#[derive(RustEmbed)]
-#[folder = "dist/"]
-struct Asset;
-
-#[derive(RustEmbed)]
-#[folder = "dist/templates/"]
-struct Templates;
 
 const SERVER_ADDR: &str = "127.0.0.1:3000";
 const WINDOW_URL: &str = "http://localhost:3000/index";
@@ -49,11 +24,11 @@ const WINDOW_URL: &str = "http://localhost:3000/index";
 /// クリックイベントを捕捉して Tauri コマンド経由でブラウザを起動する。
 const OPEN_EXTERNAL_SCRIPT: &str = r#"
     document.addEventListener('click', function(e) {
-        var a = e.target.closest('a');
+        const a = e.target.closest('a');
         if (!a || !a.href) return;
         try {
-            var host = new URL(a.href).hostname;
-            if (host !== 'localhost' && host !== '127.0.0.1') {
+            const { hostname, pathname } = new URL(a.href);
+            if (((hostname !== 'localhost' && hostname !== '127.0.0.1')) || pathname === '/licanses') {
                 e.preventDefault();
                 window.__TAURI_INTERNALS__.invoke('open_url', { url: a.href });
             }
@@ -432,95 +407,4 @@ fn main() {
         .invoke_handler(tauri::generate_handler![complete_setup, open_url])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-// ルートへのアクセスは /index にリダイレクト
-pub async fn root_handler() -> impl IntoResponse {
-    Redirect::permanent("/index")
-}
-
-// ヘルスチェックAPI
-pub async fn health_check_handler() -> Json<MessageApi> {
-    Json(MessageApi {
-        message: "Hello, I'm administrator.".to_string(),
-    })
-}
-
-// アプリケーション初期設定情報の取得ハンドラ
-pub async fn get_app_init_handler(_: Request<Body>) -> Json<AppInit> {
-    Json(AppInit {
-        app_title: CONFIG.app_title.clone(),
-        allow_user_account_create: CONFIG.allow_user_create_account,
-        allow_user_update_password: CONFIG.allow_user_update_password,
-        allow_origins: CONFIG.allow_origins.clone(),
-    })
-}
-
-// エントリーポイントの index.html をレスポンス
-pub async fn index_handler(headers: HeaderMap) -> Result<Html<String>, AppError> {
-    // User-Agent取り出し
-    let user_agent = headers.get("user-agent").and_then(|ua| ua.to_str().ok());
-
-    // User-Agentに"Mobile"が含まれているか確認
-    let is_mobile = user_agent.map_or(false, |ua| ua.contains("Mobile"));
-
-    let render_html = if is_mobile {
-        "index-mobile.html"
-    } else {
-        "index.html"
-    };
-
-    match Asset::get(render_html) {
-        Some(content) => {
-            let html_content = String::from_utf8(content.data.into_owned()).unwrap();
-            Ok(Html(html_content))
-        },
-        None => Err(AppError::NotFound),
-    }
-}
-
-// ライセンス情報HTMLをレスポンス
-pub async fn licenses_get_handler() -> Result<Html<String>, AppError> {
-    match Asset::get("licenses.html") {
-        Some(content) => {
-            let html_content = String::from_utf8(content.data.into_owned()).unwrap();
-            Ok(Html(html_content))
-        },
-        None => Err(AppError::NotFound),
-    }
-}
-
-// 404 のハンドリング（ /index にリダイレクト）
-pub async fn custom_not_found_handler(_: Request<Body>) -> impl IntoResponse {
-    Redirect::permanent("/index")
-}
-
-// favicon.ico をレスポンス
-pub async fn serve_favicon() -> Result<Response<Body>, AppError> {
-    match Asset::get("assets/favicon.ico") {
-        Some(content) => {
-            let body = content.data.into_owned();
-            let response = Response::builder()
-                .status(StatusCode::OK)
-                .header(CONTENT_TYPE, "image/x-icon")
-                .body(body.into())
-                .expect("Failed to construct response");
-            Ok(response)
-        },
-        None => Err(AppError::NotFound),
-    }
-}
-
-// Teraに対してテンプレートファイルを rust_embed から登録
-fn build_tera_from_embed() -> anyhow::Result<Tera> {
-    let mut tera = Tera::default();
-    // RustEmbedに入っている全テンプレートを登録
-    for path in Templates::iter() {
-        let path_str = path.as_ref();
-        if let Some(file) = Templates::get(path_str) {
-            let content = std::str::from_utf8(file.data.as_ref())?; // UTF-8前提
-            tera.add_raw_template(path_str, content)?;
-        }
-    }
-    Ok(tera)
 }

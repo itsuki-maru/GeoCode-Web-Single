@@ -11,9 +11,11 @@ const appInitStore = useApplicationInitStore();
 const isAllowUserCreateAccount = ref(appInitStore.appInitData.allowUserAccountCreate);
 
 // App.vueで定義したアイコンの表示非表示管理変数をinject
+const isShowHelpIcon = inject("isShowHelpIcon") as Ref<boolean>;
 const isShowMemoIcon = inject("isShowMemoIcon") as Ref<boolean>;
 const isExitIcon = inject("isExitIcon") as Ref<boolean>;
 // サインアップ・ログイン画面では非表示にする
+isShowHelpIcon.value = false;
 isShowMemoIcon.value = false;
 isExitIcon.value = false;
 
@@ -66,6 +68,7 @@ const loginPost = async (): Promise<void> => {
     localStorage.setItem("loginuser", response.data["user"]);
 
     // ログインに成功したらメモとログアウトアイコンを表示状態に変更
+    isShowHelpIcon.value = true;
     isShowMemoIcon.value = true;
     isExitIcon.value = true;
 
@@ -115,6 +118,7 @@ const tokenPost = async (): Promise<void> => {
     // ログインユーザー名とデバイスIDをローカルストレージに保存
     localStorage.setItem("loginUser", response.data["user"]);
     // ログインに成功したらメモ機能アイコンを表示状態に変更
+    isShowHelpIcon.value = true;
     isShowMemoIcon.value = true;
     isExitIcon.value = true;
 
