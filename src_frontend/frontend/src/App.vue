@@ -18,9 +18,11 @@ const mapviewRedirect = (): void => {
 mapviewRedirect();
 
 // メモアイコンの表示非表示管理
+const isShowHelpIcon = ref(true);
 const isShowMemoIcon = ref(true);
 const isExitIcon = ref(true);
 // 他の子コンポーネントで表示・非表示を切り替えられるようにprovide
+provide("isShowHelpIcon", isShowHelpIcon);
 provide("isShowMemoIcon", isShowMemoIcon);
 provide("isExitIcon", isExitIcon);
 
@@ -110,6 +112,16 @@ onMounted(() => {
     <h1>{{ appTitle }}</h1>
   </div>
   <div class="other-function-btn-zone">
+    <a
+      v-if="isShowHelpIcon"
+      href="https://geocode-web-single.pages.dev/user-guide"
+      target="_blank"
+      ref="nooperner noreferer"
+      class="btn-memo-open-close"
+      title="Help"
+    >
+      <img :src="`${assetsUrl}help_24.png`" class="btn-img" alt="help_24.png" />
+    </a>
     <button
       v-if="isShowMemoIcon"
       class="btn-memo-open-close"
@@ -174,6 +186,7 @@ a {
 
 .other-function-btn-zone {
   display: flex;
+  gap: 18px;
   z-index: 5;
   position: fixed;
   top: 1%;
@@ -228,6 +241,10 @@ a {
 }
 
 .btn-memo-open-close {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 35px;
   height: 35px;
   background: whitesmoke;
@@ -235,12 +252,14 @@ a {
   padding: 5px 5px;
   text-decoration: none;
   border: 1px solid rgb(207, 207, 207);
-  border-radius: 20px;
+  border-radius: 50%;
   transition-property: opacity;
   -webkit-transition-property: opacity;
   transition-duration: 0.5s;
   -webkit-transition-duration: 0.5s;
-  margin: 5px 5px 10px 5px;
+  margin: 5px 0 10px 0;
+  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
 }
 
 .btn-memo-open-close:hover {
