@@ -732,9 +732,21 @@ function applyShapeStyle(layer, isDeleteMode = false) {
 
 // すでに描画済みの図形へ現在モードの見た目を反映する
 function updateShapesInteractionStyle() {
+    const measurementLayers = [];
+
     drawnShapesGroup.eachLayer(layer => {
+        if (layer?.isMeasurementLabel === true) {
+            measurementLayers.push(layer);
+            return;
+        }
         applyShapeStyle(layer, activeDrawMode === "delete");
         if (activeDrawMode === "delete" && typeof layer.bringToFront === "function") {
+            layer.bringToFront();
+        }
+    });
+
+    measurementLayers.forEach(layer => {
+        if (typeof layer.bringToFront === "function") {
             layer.bringToFront();
         }
     });
@@ -1496,6 +1508,8 @@ async function deleteShape(layer) {
     try {
         removeShapeMeasurementMarkers(layer);
         drawnShapesGroup.removeLayer(layer);
+        refreshAllShapeMeasurementMarkers();
+        applyMeasurementVisibilityToDrawnShapesGroup();
         deletedShapesStack.push(deletedShape);
         updateUndoButtonState();
     } catch (error) {

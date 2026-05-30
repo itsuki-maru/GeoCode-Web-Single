@@ -80,7 +80,7 @@ function saveQRCode(): void {
             v-model="qrCodeText"
           />
         </div>
-        <div :class="{ 'btn-zone': isGenerateOk, 'btn-close': !isGenerateOk }">
+        <div class="btn-zone">
           <button @click="emit('close')">閉じる</button>
           <button v-if="isGenerateOk" @click="saveQRCode()">保存</button>
         </div>
@@ -116,17 +116,5 @@ function saveQRCode(): void {
   height: 40px;
   text-align: center;
   border-radius: 5px;
-}
-
-.btn-zone {
-  margin-top: 20px;
-  display: flex;
-  justify-content: space-between;
-}
-
-.btn-close {
-  margin-top: 20px;
-  text-align: center;
-  align-items: center;
 }
 </style>
