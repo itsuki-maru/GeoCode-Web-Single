@@ -80,10 +80,10 @@ const importJsonData = async (): Promise<void> => {
     layersStore.initList();
     mapobjStore.initList();
     clearJson();
-    isJsonSendNow.value = false;
   } catch (error) {
-    isJsonSendNow.value = false;
     emit("message", "インポートに失敗しました。データ形式が正しくありません。");
+  } finally {
+    isJsonSendNow.value = false;
   }
 };
 
@@ -296,12 +296,6 @@ const clearJson = (): void => {
 .btn-secondary:disabled {
   opacity: 0.55;
   cursor: not-allowed;
-}
-
-.btn-zone {
-  margin-top: 20px;
-  display: flex;
-  justify-content: flex-end;
 }
 
 @media (max-width: 900px) {
