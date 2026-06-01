@@ -670,12 +670,66 @@ function setupDetailsLazyImages(root=document) {
     });
 }
 
+// 通常マップで最後に選択したタイルサーバーIDをブラウザに保存するためのキー
+const SELECTED_TILE_SERVER_STORAGE_KEY = "geocode-web:selected-tile-server-id";
+// 一時共有マップなどから通常マップの選択状態を書き換えないよう、必要な画面だけで有効化する
+let isTileServerSelectionPersistenceEnabled = false;
+
+// 通常マップの初期化時に呼び出し、タイルサーバー選択の保存・復元を有効にする
+function enableTileServerSelectionPersistence() {
+    isTileServerSelectionPersistenceEnabled = true;
+}
+
+// 従来の初期値 "1" を優先し、存在しない場合は取得した一覧の先頭を使用する
+function getDefaultTileServerId() {
+    if (tileServers["1"]) {
+        return "1";
+    }
+    return Object.keys(tileServers)[0];
+}
+
+// 保存済みIDが現在のタイルサーバー一覧に存在する場合だけ初期選択として復元する
+function getInitialTileServerId() {
+    const defaultTileServerId = getDefaultTileServerId();
+    if (!isTileServerSelectionPersistenceEnabled) {
+        return defaultTileServerId;
+    }
+
+    try {
+        const savedTileServerId = localStorage.getItem(SELECTED_TILE_SERVER_STORAGE_KEY);
+        if (savedTileServerId && tileServers[savedTileServerId]) {
+            return savedTileServerId;
+        }
+    } catch (error) {
+        console.warn("Failed to restore selected tile server:", error);
+    }
+
+    return defaultTileServerId;
+}
+
+// タイル切替後の選択IDを保存する。localStorageが利用できない環境でも地図表示は継続する
+function saveSelectedTileServerId(tileServerId) {
+    if (!isTileServerSelectionPersistenceEnabled || !tileServers[tileServerId]) {
+        return;
+    }
+
+    try {
+        localStorage.setItem(SELECTED_TILE_SERVER_STORAGE_KEY, tileServerId);
+    } catch (error) {
+        console.warn("Failed to save selected tile server:", error);
+    }
+}
+
 function handleTileChange(event) {
+    // 選択されたタイル情報を取得
+    const selectedTileServerId = event.target.value;
+    const selectedTile = tileServers[selectedTileServerId];
+    if (!selectedTile) {
+        return;
+    }
+
     // 現在のレイヤーを削除
     map.removeLayer(tileLayer);
-
-    // 選択されたタイル情報を取得
-    const selectedTile = tileServers[event.target.value]
 
     // タイルサーバーのフラグに基づいてsetMaxBoundsを設定または解除
     if (selectedTile && selectedTile.include_foreign_tiles) {
@@ -690,6 +744,8 @@ function handleTileChange(event) {
         maxZoom: selectedTile.max_zoom ?? 18,
         attribution: selectedTile.attribution
     }).addTo(map);
+
+    saveSelectedTileServerId(selectedTileServerId);
 }
 
 function escapeHtml(text) {

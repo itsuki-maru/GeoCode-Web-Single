@@ -238,9 +238,12 @@ var map = L.map(
 const southWest = L.latLng(20.25, 122.56), // 最南端の座標
 northEast = L.latLng(45.55, 153.59); // 最北端の座標
 const bounds = L.latLngBounds(southWest, northEast);
+enableTileServerSelectionPersistence();
+const initialTileServerId = getInitialTileServerId();
+const initialTileServer = tileServers[initialTileServerId];
 
 // 表示範囲の制限
-if (!tileServers["1"]["include_foreign_tiles"]) {
+if (!initialTileServer["include_foreign_tiles"]) {
     map.setMaxBounds(bounds);
 }
 
@@ -296,7 +299,7 @@ var TileControl = L.Control.extend({
         let radioHTML = '<div class="radio-zone"><form>';
             for (const key in tileServers) {
                 let checkedAttribute = "";
-                if (key === "1") {
+                if (key === initialTileServerId) {
                     checkedAttribute = "checked"
                 }
                 radioHTML += `
@@ -323,10 +326,10 @@ var TileControl = L.Control.extend({
 map.addControl(new TileControl());
 
 // 初期タイルの設定
-var tileLayer = L.tileLayer(tileServers["1"]["url"], {
-    minZoom: tileServers["1"]["min_zoom"] ?? 5,
-    maxZoom: tileServers["1"]["max_zoom"] ?? 18,
-    attribution: tileServers["1"]["attribution"]
+var tileLayer = L.tileLayer(initialTileServer["url"], {
+    minZoom: initialTileServer["min_zoom"] ?? 5,
+    maxZoom: initialTileServer["max_zoom"] ?? 18,
+    attribution: initialTileServer["attribution"]
 }).addTo(map);
 
 // 選択されたタイルサーバーに地図表示を切り替える関数
