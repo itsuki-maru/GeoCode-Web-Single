@@ -882,3 +882,5 @@ var CodeSearchControl = L.Control.extend({
   },
 }); // 地図にカスタムコントロールを追加
 map.addControl(new CodeSearchControl());
+
+initializeUserLocation(map);

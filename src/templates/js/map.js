@@ -2468,6 +2468,8 @@ var CodeSearchControl = L.Control.extend({
 // 地図にカスタムコントロールを追加
 map.addControl(new CodeSearchControl());
 
+initializeUserLocation(map, { position: "topright" });
+
 // 図形描画コントロールの定義
 const DrawShapeControl = L.Control.extend({
   options: {
