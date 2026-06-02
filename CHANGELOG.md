@@ -1,5 +1,10 @@
 # 変更履歴
 
+## Version 1.0.6
+
+- PC版にも現在位置取得機能を追加
+- 最後に選択されたタイルサーバを保持
+
 ## Version 1.0.5
 
 PostgreSQL版 GeoCode-Web の不具合修正を反映
