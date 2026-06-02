@@ -939,6 +939,8 @@ var CodeSearchControl = L.Control.extend({
 // 地図にカスタムコントロールを追加
 map.addControl(new CodeSearchControl());
 
+initializeUserLocation(map);
+
 // マーカー名表示・非表示コントロールツールチップの定義
 const TooltipVisibleControl = L.Control.extend({
   options: {
