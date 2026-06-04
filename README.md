@@ -2,7 +2,7 @@
 
 地図上にマーカー（テキスト、写真、動画、PDF）や図形などの情報を配置し、管理できる**マッピングアプリケーション**です。「**場所に紐付いた情報管理**」を実現します。
 
-![1-1_geocode-web.png](./userguide/images/1-1_geocode-web.png)
+![1-1_geocode-web.png](https://project.geocode-web.com/userguide/images/1-1_geocode-web.png)
 
 - 画像・PDF・動画の添付
 - ポリゴン/ライン/矩形の図形描画
@@ -17,7 +17,7 @@ Rust/Axum 製 API サーバーと Vue 3 製フロントエンドを Tauri 2 で�
 
 ## ドキュメント
 
-- ユーザーガイド: [USER-GUIDE.md](./userguide/USER-GUIDE.md)
+- ユーザーガイド: [USER-GUIDE.md](https://project.geocode-web.com/USER-GUIDE.md)
 - 仕様書: [SPECIFICATION.md](SPECIFICATION.md)
 - 変更履歴: [CHANGELOG.md](CHANGELOG.md), [release_notes.md](release_notes.md)
 - コントリビューションガイド: [CONTRIBUTING.md](CONTRIBUTING.md)
@@ -42,7 +42,7 @@ Rust/Axum 製 API サーバーと Vue 3 製フロントエンドを Tauri 2 で�
   - 図形の削除と削除直後の取り消しに対応
   - マスターレイヤでは全レイヤの図形を表示し、個別レイヤでは当該レイヤの図形のみ表示
 
-![8-2_geocode-web.gif](./userguide/images/8-2_geocode-web.gif)
+![8-2_geocode-web.gif](https://project.geocode-web.com/userguide/images/8-2_geocode-web.gif)
 
 ### レイヤ管理
 
@@ -70,7 +70,7 @@ Rust/Axum 製 API サーバーと Vue 3 製フロントエンドを Tauri 2 で�
 - ファイルは `~/.geocode-web-single/images/<先頭5文字>/<uuid>` に保存
 - サムネイル / poster は `~/.geocode-web-single/images/<先頭5文字>/thumb/` に保存
 
-![99-2_image.png](./userguide/images/99-2_image.png)
+![99-2_image.png](https://project.geocode-web.com/userguide/images/99-2_image.png)
 
 ### 公開・共有
 
@@ -137,7 +137,7 @@ Rust/Axum 製 API サーバーと Vue 3 製フロントエンドを Tauri 2 で�
 
 User-Agent に `Mobile` が含まれるアクセスにはモバイル向け UI (`index-mobile.html`) を返す。ツール群はフローティングボタンと全画面モーダル中心の操作に最適化されており、一時共有 URL のプレビューも同様にモバイル用レイアウトを使い分ける。
 
-![99-1_image.jpg](./userguide/images/99-1_mobile.jpg)
+![99-1_image.jpg](https://project.geocode-web.com/userguide/images/99-1_mobile.jpg)
 
 ## 技術スタック
 
