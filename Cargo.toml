@@ -42,6 +42,7 @@ dirs = "5.0"
 open = "5"
 windows = { version = "0.60", features = ["Win32_UI_WindowsAndMessaging", "Win32_System_Console"] }
 reqwest = "0.12"
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

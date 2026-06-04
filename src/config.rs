@@ -24,6 +24,10 @@ pub struct Config {
     pub allow_origins: String,
     pub tile_server_base_url: Option<String>,
     pub tile_server_api_key: Option<String>,
+    pub redis_url: Option<String>,
+    pub redis_connect_timeout_seconds: u64,
+    pub tile_cache_ttl_seconds: u64,
+    pub tile_cache_namespace: String,
 }
 
 pub static CONFIG: Lazy<Config> = Lazy::new(|| Config {
@@ -65,6 +69,17 @@ pub static CONFIG: Lazy<Config> = Lazy::new(|| Config {
     allow_origins: env::var("ALLOW_ORIGINS").expect("ALLOW_ORIGINS must be set"),
     tile_server_base_url: env::var("TILE_SERVER_BASE_URL").ok(),
     tile_server_api_key: env::var("TILE_SERVER_API_KEY").ok(),
+    redis_url: env::var("REDIS_URL").ok(),
+    redis_connect_timeout_seconds: env::var("REDIS_CONNECT_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(3),
+    tile_cache_ttl_seconds: env::var("TILE_CACHE_TTL_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(604800),
+    tile_cache_namespace: env::var("TILE_CACHE_NAMESPACE")
+        .unwrap_or_else(|_| "default".to_string()),
 });
 
 #[derive(Debug)]

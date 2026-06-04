@@ -75,6 +75,10 @@ pub fn build_env_from_form(
         allow_origins: format!("http://localhost:5173,http://127.0.0.1:3000,http://localhost:3000"),
         tile_server_base_url: None,
         tile_server_api_key: None,
+        redis_url: None,
+        redis_connect_timeout_seconds: "3".to_string(),
+        tile_cache_ttl_seconds: "604800".to_string(),
+        tile_cache_namespace: "default".to_string(),
     };
     let env_json_path = setup_dir.join("geocode-web-single.env.json");
     write_to_json_file(env_json_path, &env).map_err(|e| e.to_string())?;

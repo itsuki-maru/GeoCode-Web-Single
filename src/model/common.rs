@@ -27,6 +27,10 @@ pub struct ApplicationInitSetup {
     pub allow_origins: String,
     pub tile_server_base_url: Option<String>,
     pub tile_server_api_key: Option<String>,
+    pub redis_url: Option<String>,
+    pub redis_connect_timeout_seconds: String,
+    pub tile_cache_ttl_seconds: String,
+    pub tile_cache_namespace: String,
 }
 
 #[derive(Serialize, Deserialize, FromRow)]
