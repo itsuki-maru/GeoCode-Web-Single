@@ -95,11 +95,11 @@ onUnmounted(() => {
 
 const showSplashScreen = ref(true);
 provide("showSplashScreen", showSplashScreen);
-// スプラッシュスクリーンを3秒後に非表示にする
+// スプラッシュスクリーンを約1秒後に非表示にする
 onMounted(() => {
   setTimeout(() => {
     showSplashScreen.value = false;
-  }, 1800);
+  }, 1350);
 });
 </script>
 
