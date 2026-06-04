@@ -11,7 +11,9 @@ use geocode_web_single::{
 };
 use std::env;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::Mutex as TokioMutex;
+use tokio::time::timeout;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use tauri::Manager;
@@ -84,6 +86,16 @@ unsafe fn apply_env_vars(env: &ApplicationInitSetup, server_addr: &str) {
             "TILE_SERVER_API_KEY",
             &env.tile_server_api_key.as_deref().unwrap_or(""),
         );
+        match &env.redis_url.as_deref() {
+            Some(url) => env::set_var("REDIS_URL", url),
+            None => env::remove_var("REDIS_URL"),
+        }
+        env::set_var(
+            "REDIS_CONNECT_TIMEOUT_SECONDS",
+            &env.redis_connect_timeout_seconds,
+        );
+        env::set_var("TILE_CACHE_TTL_SECONDS", &env.tile_cache_ttl_seconds);
+        env::set_var("TILE_CACHE_NAMESPACE", &env.tile_cache_namespace);
     }
 }
 
@@ -142,8 +154,11 @@ async fn complete_setup(
     let tera = build_tera_from_embed().map_err(|e| e.to_string())?;
     let tera = Arc::new(TokioMutex::new(tera));
 
+    // Redisキャッシュ接続を作成（未設定または接続失敗時はキャッシュなしで継続）
+    let tile_cache = setup_tile_cache().await;
+
     // axum ルーター
-    let app_router = router::build_router(pool, tera);
+    let app_router = router::build_router(pool, tera, tile_cache);
 
     // TCP バインド
     let listener = tokio::net::TcpListener::bind(SERVER_ADDR)
@@ -232,7 +247,11 @@ fn run_server_mode(bind_addr: String) {
         check_and_insert_initial_data(&pool).await.unwrap();
 
         let tera = Arc::new(TokioMutex::new(build_tera_from_embed().unwrap()));
-        let app_router = router::build_router(pool, tera);
+
+        // Redisキャッシュ接続を作成（未設定または接続失敗時はキャッシュなしで継続）
+        let tile_cache = setup_tile_cache().await;
+
+        let app_router = router::build_router(pool, tera, tile_cache);
 
         let listener = match tokio::net::TcpListener::bind(&bind_addr).await {
             Ok(l) => l,
@@ -345,7 +364,10 @@ fn main() {
                     let tera = build_tera_from_embed().unwrap();
                     let tera = Arc::new(TokioMutex::new(tera));
 
-                    let app_router = router::build_router(pool, tera);
+                    // Redisキャッシュ接続を作成（未設定または接続失敗時はキャッシュなしで継続）
+                    let tile_cache = setup_tile_cache().await;
+
+                    let app_router = router::build_router(pool, tera, tile_cache);
 
                     let listener = match tokio::net::TcpListener::bind(SERVER_ADDR).await {
                         Ok(l) => l,
@@ -407,4 +429,52 @@ fn main() {
         .invoke_handler(tauri::generate_handler![complete_setup, open_url])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+async fn setup_tile_cache() -> Option<redis::aio::ConnectionManager> {
+    // タイルキャッシュは任意機能。Redis が未設定または利用できない場合も、
+    // タイルプロキシは継続し、キャッシュの読み書きだけをスキップする。
+    let redis_url = match CONFIG.redis_url.as_deref() {
+        Some(redis_url) if CONFIG.tile_cache_ttl_seconds > 0 => redis_url,
+        Some(_) => {
+            tracing::info!("Redis tile cache is disabled because TILE_CACHE_TTL_SECONDS is 0.");
+            return None;
+        },
+        None => {
+            tracing::info!("Redis is not configured; tiles will be served without cache.");
+            return None;
+        },
+    };
+
+    println!("====== USE REDIS ======");
+
+    // URL の不正はキャッシュ設定の問題として扱い、アプリケーション起動自体は失敗させない。
+    let client = match redis::Client::open(redis_url) {
+        Ok(client) => client,
+        Err(error) => {
+            tracing::warn!(error = %error, "Redis tile cache URL is invalid; tiles will be served without cache.");
+            return None;
+        },
+    };
+
+    // Docker Compose 以外の構成では Redis が存在しない場合もあるため、
+    // 接続待ちは短く打ち切り、上流プロキシ経由のタイル配信を継続する。
+    let connect_timeout = Duration::from_secs(CONFIG.redis_connect_timeout_seconds);
+    match timeout(connect_timeout, client.get_connection_manager()).await {
+        Ok(Ok(connection_manager)) => {
+            tracing::info!("Redis tile cache is enabled.");
+            Some(connection_manager)
+        },
+        Ok(Err(error)) => {
+            tracing::warn!(error = %error, "Redis is unavailable; tiles will be served without cache.");
+            None
+        },
+        Err(_) => {
+            tracing::warn!(
+                timeout_seconds = CONFIG.redis_connect_timeout_seconds,
+                "Redis connection timed out; tiles will be served without cache."
+            );
+            None
+        },
+    }
 }

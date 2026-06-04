@@ -56,7 +56,11 @@ use crate::middleware::{
     print_req_res::print_request_response, refresh_cookie_validator::RefreshCookieValidator,
 };
 
-pub fn build_router(pool: SqlitePool, tera: Arc<Mutex<Tera>>) -> Router {
+pub fn build_router(
+    pool: SqlitePool,
+    tera: Arc<Mutex<Tera>>,
+    tile_cache: Option<redis::aio::ConnectionManager>,
+) -> Router {
     // タイルプロキシ用のクライアントを作成
     let tile_proxy_client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
@@ -194,6 +198,7 @@ pub fn build_router(pool: SqlitePool, tera: Arc<Mutex<Tera>>) -> Router {
         .layer(cors)
         .layer(Extension(pool))
         .layer(Extension(tile_proxy_client))
+        .layer(Extension(tile_cache))
         .layer(Extension(tera))
         .layer(middleware::from_fn(print_request_response))
         .layer(DefaultBodyLimit::max(100 * 1024 * 1024))
