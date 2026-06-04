@@ -94,14 +94,8 @@ unsafe fn apply_env_vars(env: &ApplicationInitSetup, server_addr: &str) {
             "REDIS_CONNECT_TIMEOUT_SECONDS",
             &env.redis_connect_timeout_seconds,
         );
-        env::set_var(
-            "TILE_CACHE_TTL_SECONDS",
-            &env.tile_cache_ttl_seconds,
-        );
-        env::set_var(
-            "TILE_CACHE_NAMESPACE",
-            &env.tile_cache_namespace,
-        );
+        env::set_var("TILE_CACHE_TTL_SECONDS", &env.tile_cache_ttl_seconds);
+        env::set_var("TILE_CACHE_NAMESPACE", &env.tile_cache_namespace);
     }
 }
 
