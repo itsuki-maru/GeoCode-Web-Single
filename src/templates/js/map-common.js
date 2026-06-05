@@ -701,6 +701,9 @@ function setupDetailsLazyImages(root = document) {
 
 // 通常マップで最後に選択したタイルサーバーIDをブラウザに保存するためのキー
 const SELECTED_TILE_SERVER_STORAGE_KEY = "geocode-web:selected-tile-server-id";
+const USER_LOCATION_VISIBILITY_STORAGE_KEY =
+  "geocode-web:user-location-visible";
+const SHAPE_LAYER_VISIBILITY_STORAGE_KEY = "geocode-web:shape-layer-visible";
 // 一時共有マップなどから通常マップの選択状態を書き換えないよう、必要な画面だけで有効化する
 let isTileServerSelectionPersistenceEnabled = false;
 
@@ -748,6 +751,68 @@ function saveSelectedTileServerId(tileServerId) {
     localStorage.setItem(SELECTED_TILE_SERVER_STORAGE_KEY, tileServerId);
   } catch (error) {
     console.warn("Failed to save selected tile server:", error);
+  }
+}
+
+// 通常マップの現在位置レイヤー表示状態を復元する。保存値がない場合は従来どおり表示する
+function getInitialUserLocationVisibility() {
+  try {
+    const savedVisibility = localStorage.getItem(
+      USER_LOCATION_VISIBILITY_STORAGE_KEY,
+    );
+    if (savedVisibility === "false") {
+      return false;
+    }
+    if (savedVisibility === "true") {
+      return true;
+    }
+  } catch (error) {
+    console.warn("Failed to restore user location visibility:", error);
+  }
+
+  return true;
+}
+
+// 現在位置レイヤーの表示状態を保存する。localStorageが利用できない環境でも地図表示は継続する
+function saveUserLocationVisibility(isVisible) {
+  try {
+    localStorage.setItem(
+      USER_LOCATION_VISIBILITY_STORAGE_KEY,
+      isVisible ? "true" : "false",
+    );
+  } catch (error) {
+    console.warn("Failed to save user location visibility:", error);
+  }
+}
+
+// 通常マップの図形レイヤー表示状態を復元する。保存値がない場合は従来どおり表示する
+function getInitialShapeLayerVisibility() {
+  try {
+    const savedVisibility = localStorage.getItem(
+      SHAPE_LAYER_VISIBILITY_STORAGE_KEY,
+    );
+    if (savedVisibility === "false") {
+      return false;
+    }
+    if (savedVisibility === "true") {
+      return true;
+    }
+  } catch (error) {
+    console.warn("Failed to restore shape layer visibility:", error);
+  }
+
+  return true;
+}
+
+// 図形レイヤーの表示状態を保存する。localStorageが利用できない環境でも地図表示は継続する
+function saveShapeLayerVisibility(isVisible) {
+  try {
+    localStorage.setItem(
+      SHAPE_LAYER_VISIBILITY_STORAGE_KEY,
+      isVisible ? "true" : "false",
+    );
+  } catch (error) {
+    console.warn("Failed to save shape layer visibility:", error);
   }
 }
 
@@ -807,12 +872,13 @@ function openMarkerPopup(markerId) {
 // 現在地の継続監視と「現在位置へ移動」コントロールを初期化する
 function initializeUserLocation(map, options = {}) {
   if (!navigator.geolocation || map._userLocationInitialized) {
-    return;
+    return null;
   }
 
   map._userLocationInitialized = true;
 
   // 現在地の監視とマーカーの表示を管理するための変数
+  const userLocationLayer = L.layerGroup().addTo(map);
   let userLocationMarker = null;
   let userLocationAccuracyCircle = null;
   let userLocationWatchId = null;
@@ -829,7 +895,7 @@ function initializeUserLocation(map, options = {}) {
       fillOpacity: 1,
       color: "#ffffff",
       weight: 3,
-    }).addTo(map);
+    }).addTo(userLocationLayer);
   }
 
   // ユーザー位置の精度円を作成する関数
@@ -842,7 +908,7 @@ function initializeUserLocation(map, options = {}) {
       weight: 1,
       opacity: 0.25,
       interactive: false,
-    }).addTo(map);
+    }).addTo(userLocationLayer);
   }
 
   // 取得した現在地を地図上へ反映する
@@ -961,4 +1027,6 @@ function initializeUserLocation(map, options = {}) {
       userLocationWatchId = null;
     }
   });
+
+  return userLocationLayer;
 }
