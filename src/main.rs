@@ -220,11 +220,12 @@ fn run_server_mode(bind_addr: String) {
     rt.block_on(async move {
         let setup_dir = get_application_user_setup_path();
         let env = match read_env_json(&setup_dir) {
-            Some(env) => env,
-            None => {
+            Ok(env) => env,
+            Err(error) => {
                 eprintln!(
-                    "Error: 設定ファイルが見つかりません。\
-                     先に通常起動 (Tauri GUI) でセットアップを完了してください。"
+                    "Error: {}。\
+                     設定ファイルがない場合は、先に通常起動 (Tauri GUI) でセットアップを完了してください。",
+                    error
                 );
                 std::process::exit(1);
             },
@@ -329,7 +330,8 @@ fn main() {
                 .build()?;
             } else {
                 // 通常起動: 設定を読み込んで axum を起動
-                let env = read_env_json(&setup_dir).expect("設定ファイルの読み込みに失敗しました");
+                let env = read_env_json(&setup_dir)
+                    .map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!(e.to_string())))?;
 
                 // 環境変数設定
                 unsafe {
