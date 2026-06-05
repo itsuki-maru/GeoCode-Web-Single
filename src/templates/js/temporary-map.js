@@ -883,4 +883,12 @@ var CodeSearchControl = L.Control.extend({
 }); // 地図にカスタムコントロールを追加
 map.addControl(new CodeSearchControl());
 
-initializeUserLocation(map);
+const userLocationLayer = initializeUserLocation(map);
+if (userLocationLayer) {
+  L.control
+    .layers(null, { 現在位置: userLocationLayer }, {
+      collapsed: false,
+      position: "topleft",
+    })
+    .addTo(map);
+}

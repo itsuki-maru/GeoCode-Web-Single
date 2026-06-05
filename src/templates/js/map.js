@@ -2468,7 +2468,10 @@ var CodeSearchControl = L.Control.extend({
 // 地図にカスタムコントロールを追加
 map.addControl(new CodeSearchControl());
 
-initializeUserLocation(map, { position: "topright" });
+const userLocationLayer = initializeUserLocation(map, { position: "topright" });
+if (userLocationLayer && !getInitialUserLocationVisibility()) {
+  map.removeLayer(userLocationLayer);
+}
 
 // 図形描画コントロールの定義
 const DrawShapeControl = L.Control.extend({
@@ -2554,22 +2557,45 @@ const DrawShapeControl = L.Control.extend({
 map.addControl(new DrawShapeControl());
 restoreSavedShapes();
 drawnShapesGroup.addTo(map);
+if (!getInitialShapeLayerVisibility()) {
+  map.removeLayer(drawnShapesGroup);
+}
 applyMeasurementVisibilityToDrawnShapesGroup();
+const shapeLayerOverlays = { 図形: drawnShapesGroup };
+if (userLocationLayer) {
+  shapeLayerOverlays["現在位置"] = userLocationLayer;
+}
 const shapeLayersControl = L.control.layers(
   null,
-  { 図形: drawnShapesGroup },
+  shapeLayerOverlays,
   { collapsed: false },
 );
 shapeLayersControl.addTo(map);
 map.on("overlayadd", function (event) {
+  if (event.layer === userLocationLayer) {
+    saveUserLocationVisibility(true);
+    return;
+  }
+
   if (event.layer !== drawnShapesGroup) {
     return;
   }
 
+  saveShapeLayerVisibility(true);
   setTimeout(() => {
     bindVisibleShapeLabelEvents();
     applyMeasurementVisibilityToDrawnShapesGroup();
   }, 0);
+});
+map.on("overlayremove", function (event) {
+  if (event.layer === userLocationLayer) {
+    saveUserLocationVisibility(false);
+    return;
+  }
+
+  if (event.layer === drawnShapesGroup) {
+    saveShapeLayerVisibility(false);
+  }
 });
 // 測定結果ラベル表示・非表示コントロールの定義
 const MeasurementVisibleControl = L.Control.extend({

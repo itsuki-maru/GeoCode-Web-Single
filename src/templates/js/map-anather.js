@@ -311,6 +311,10 @@ let layerNames = {};
 // 図形描画グループ
 const drawnShapesGroup = L.featureGroup();
 const shapeGroups = {};
+const shapeVisibilityLayer = L.layerGroup().addTo(map);
+if (!getInitialShapeLayerVisibility()) {
+  map.removeLayer(shapeVisibilityLayer);
+}
 let isMeasurementVisible = false;
 let isMeasurementSegmentMerged = false;
 
@@ -461,7 +465,10 @@ function syncShapeGroupVisibility(layerId) {
     return;
   }
 
-  if (map.hasLayer(clusterGroups[layerId])) {
+  if (
+    map.hasLayer(shapeVisibilityLayer) &&
+    map.hasLayer(clusterGroups[layerId])
+  ) {
     if (!map.hasLayer(shapeGroups[layerId])) {
       shapeGroups[layerId].addTo(map);
     }
@@ -888,6 +895,12 @@ function restoreSavedShapes() {
 
 restoreSavedShapes();
 map.on("overlayadd", function (event) {
+  if (event.layer === shapeVisibilityLayer) {
+    saveShapeLayerVisibility(true);
+    syncAllShapeGroupsVisibility();
+    return;
+  }
+
   const layerId = findLayerIdByMarkerGroup(event.layer);
   if (!layerId) {
     return;
@@ -898,6 +911,12 @@ map.on("overlayadd", function (event) {
   }, 0);
 });
 map.on("overlayremove", function (event) {
+  if (event.layer === shapeVisibilityLayer) {
+    saveShapeLayerVisibility(false);
+    syncAllShapeGroupsVisibility();
+    return;
+  }
+
   const layerId = findLayerIdByMarkerGroup(event.layer);
   if (!layerId) {
     return;
@@ -939,7 +958,32 @@ var CodeSearchControl = L.Control.extend({
 // 地図にカスタムコントロールを追加
 map.addControl(new CodeSearchControl());
 
-initializeUserLocation(map);
+const userLocationLayer = initializeUserLocation(map);
+if (userLocationLayer && !getInitialUserLocationVisibility()) {
+  map.removeLayer(userLocationLayer);
+}
+const mapVisibilityOverlays = { 図形: shapeVisibilityLayer };
+if (userLocationLayer) {
+  mapVisibilityOverlays["現在位置"] = userLocationLayer;
+}
+L.control
+  .layers(null, mapVisibilityOverlays, {
+    collapsed: false,
+    position: "topleft",
+  })
+  .addTo(map);
+if (userLocationLayer) {
+  map.on("overlayadd", function (event) {
+    if (event.layer === userLocationLayer) {
+      saveUserLocationVisibility(true);
+    }
+  });
+  map.on("overlayremove", function (event) {
+    if (event.layer === userLocationLayer) {
+      saveUserLocationVisibility(false);
+    }
+  });
+}
 
 // マーカー名表示・非表示コントロールツールチップの定義
 const TooltipVisibleControl = L.Control.extend({
