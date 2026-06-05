@@ -115,10 +115,87 @@ PostgreSQL から SQLite を使用することによる差分吸収は **全て�
 - `ALLOW_ORIGINS`
 - `TILE_SERVER_BASE_URL`
 - `TILE_SERVER_API_KEY`
+- `REDIS_URL`
+- `REDIS_CONNECT_TIMEOUT_SECONDS`
+- `TILE_CACHE_TTL_SECONDS`
+- `TILE_CACHE_NAMESPACE`
 
-### 5.2 ファイル保存先
+設定 JSON は `src/model/common.rs` の `ApplicationInitSetup` に対応する。起動時の読み込みは `src/init.rs` の `read_env_json` が行い、環境変数への注入は `src/main.rs` の `apply_env_vars` が行う。
+
+### 5.2 設定 JSON の必須項目と任意項目
+
+設定 JSON の項目は、欠落時に起動を止める必須項目と、既定値で補完できる任意項目に分ける。
+
+必須項目:
+
+- `app_title`
+- `access_token_exp_minutes`
+- `refresh_token_exp_minutes`
+- `secret_key`
+- `admin_username`
+- `admin_passwotd`
+- `failed_account_lock`
+- `next_challenge_minutes`
+- `challenge_limit_time_failed_count`
+
+任意項目:
+
+- `sqlite_database_path`
+- `database_url`
+- `image_file_path`
+- `upload_file_path`
+- `cache_control`
+- `secure_cookie`
+- `service_name`
+- `rust_log`
+- `allow_user_create_account`
+- `allow_user_update_password`
+- `allow_origins`
+- `tile_server_base_url`
+- `tile_server_api_key`
+- `redis_url`
+- `redis_connect_timeout_seconds`
+- `tile_cache_ttl_seconds`
+- `tile_cache_namespace`
+
+任意項目が欠落している場合、`read_env_json` は現在の既定値で補完し、元ファイルを `geocode-web-single.env.json.bak` としてバックアップしたうえで、補完済みの `geocode-web-single.env.json` を保存する。バックアップファイルが既に存在する場合は上書きしない。
+
+JSON として不正な場合、または必須項目が欠落している場合は、自動補完せず起動エラーとする。これにより、管理者認証情報やトークン署名鍵など、推測生成すると既存環境を壊す項目を保護する。
+
+### 5.3 設定項目追加時の更新箇所
+
+新しい設定項目を追加する場合は、必須項目か任意項目かを先に決める。
+
+任意項目として追加する場合:
+
+- `src/model/common.rs`
+  - `ApplicationInitSetup` にフィールドを追加する
+- `src/init.rs`
+  - `ApplicationInitSetupPartial` に `Option<T>` としてフィールドを追加する
+  - `EnvDefaults` と `env_defaults` に既定値を追加する
+  - `env_json_requires_migration` の移行対象一覧にフィールド名を追加する
+  - `complete_env` で既存値優先、欠落時は既定値を使うように追加する
+  - `build_env_from_form` で初回セットアップ時の値を設定する
+  - `read_env_json` 系のテストに、欠落時補完または既存値維持の確認を追加する
+- `src/main.rs`
+  - `apply_env_vars` で対応する環境変数へ注入する
+- `src/config.rs`
+  - `Config` にフィールドを追加し、環境変数から読み込む
+  - 任意機能の場合は `ok()` や `unwrap_or` などで安全な既定値を持たせる
+- `SPECIFICATION.md`
+  - `5.1 主な設定値` と `5.2 設定 JSON の必須項目と任意項目` を更新する
+
+必須項目として追加する場合:
+
+- 任意項目の更新箇所に加えて、`src/init.rs` の `complete_env` で `required!` 対象に追加する
+- `env_json_requires_migration` には追加しない。必須項目は欠落時に補完せず、起動エラーとして扱う
+- 初回セットアップ画面から入力させる値であれば、`setup/index.html` と `SetupForm`、`build_env_from_form` を更新する
+- 既存環境を起動不能にする変更になるため、可能な限り任意項目として安全な既定値を用意できないか検討する
+
+### 5.4 ファイル保存先
 
 - 設定: `~/.geocode-web-single/geocode-web-single.env.json`
+- 設定バックアップ: `~/.geocode-web-single/geocode-web-single.env.json.bak`
 - DB: `~/.geocode-web-single/geocode-web.sqlite`
 - アップロードファイル: `~/.geocode-web-single/images/<先頭5文字>/<uuid_filename>`
 
