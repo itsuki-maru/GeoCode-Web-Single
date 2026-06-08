@@ -114,7 +114,7 @@ onMounted(() => {
   <div class="other-function-btn-zone">
     <a
       v-if="isShowHelpIcon"
-      href="https://geocode-web-single.pages.dev/user-guide"
+      href="https://project.geocode-web.com/user-guide.html"
       target="_blank"
       ref="nooperner noreferer"
       class="btn-memo-open-close"
