@@ -549,6 +549,344 @@ function onSearchCode() {
   }
 }
 
+function createCodeSearchControl(options = {}) {
+  const CodeSearchControl = L.Control.extend({
+    options: {
+      position: options.position ?? "topleft",
+    },
+
+    onAdd: function () {
+      const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
+      container.innerHTML = `
+        <div class="search-zone">
+            <input type="text" class="search-input" id="code-input" placeholder="緯度,経度" title="緯度経度を,区切りで入力してください。"><br>
+            <button id="code-search-btn" class="custom-search">座標検索</button>
+        </div>`;
+
+      const searchBtn = container.querySelector(".custom-search");
+      L.DomEvent.on(searchBtn, "click", function (event) {
+        L.DomEvent.stop(event);
+        onSearchCode();
+      });
+
+      L.DomEvent.disableClickPropagation(container);
+      return container;
+    },
+  });
+
+  return new CodeSearchControl();
+}
+
+function normalizeMarkerSearchText(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function matchesMarkerSearch(record, query) {
+  const normalizedQuery = normalizeMarkerSearchText(query);
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  const searchableText = [
+    record?.marker_name,
+    record?.detail,
+    record?.latitude,
+    record?.longitude,
+  ]
+    .map(normalizeMarkerSearchText)
+    .join(" ");
+
+  return searchableText.includes(normalizedQuery);
+}
+
+function filterLayeredMarkersByQuery({
+  markerRecords,
+  markers,
+  clusterGroups,
+  query,
+}) {
+  if (!markerRecords || !markers || !clusterGroups) {
+    return;
+  }
+
+  if (!normalizeMarkerSearchText(query)) {
+    clearLayeredMarkerSearch({
+      markerRecords,
+      markers,
+      clusterGroups,
+    });
+    return;
+  }
+
+  Object.values(clusterGroups).forEach((group) => {
+    group.clearLayers();
+  });
+
+  Object.keys(markerRecords).forEach((key) => {
+    const record = markerRecords[key];
+    const markerId = record?.id;
+    const layerId = record?.layer_id;
+    const marker = markers[`marker-${markerId}`];
+    const targetGroup = clusterGroups[layerId];
+
+    if (!marker || !targetGroup || !matchesMarkerSearch(record, query)) {
+      return;
+    }
+
+    targetGroup.addLayer(marker);
+  });
+
+  if (map && typeof map.closePopup === "function") {
+    map.closePopup();
+  }
+}
+
+function restoreLayeredMarkers({ markerRecords, markers, clusterGroups }) {
+  if (!markerRecords || !markers || !clusterGroups) {
+    return;
+  }
+
+  Object.values(clusterGroups).forEach((group) => {
+    group.clearLayers();
+  });
+
+  Object.keys(markerRecords).forEach((key) => {
+    const record = markerRecords[key];
+    const markerId = record?.id;
+    const layerId = record?.layer_id;
+    const marker = markers[`marker-${markerId}`];
+    const targetGroup = clusterGroups[layerId];
+
+    if (!marker || !targetGroup) {
+      return;
+    }
+
+    targetGroup.addLayer(marker);
+  });
+}
+
+function clearLayeredMarkerSearch({
+  markerRecords,
+  markers,
+  clusterGroups,
+  inputId = "marker-search-input",
+}) {
+  restoreLayeredMarkers({ markerRecords, markers, clusterGroups });
+
+  const input = document.getElementById(inputId);
+  if (input) {
+    input.value = "";
+  }
+
+  if (map && typeof map.closePopup === "function") {
+    map.closePopup();
+  }
+}
+
+function createMarkerSearchControl(options = {}) {
+  const MarkerSearchControl = L.Control.extend({
+    options: {
+      position: options.position ?? "topleft",
+    },
+
+    onAdd: function () {
+      const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
+      const inputId = options.inputId ?? "marker-search-input";
+      container.innerHTML = `
+        <div class="search-zone">
+            <input type="text" class="search-input marker-search-input" id="${inputId}" placeholder="マーカー検索" title="マーカー名や詳細を検索します。">
+        </div>`;
+
+      const input = container.querySelector(`#${inputId}`);
+      let isComposing = false;
+      const search = function (event) {
+        if (event) {
+          L.DomEvent.stop(event);
+        }
+        filterLayeredMarkersByQuery({
+          markerRecords: options.markerRecords,
+          markers: options.markers,
+          clusterGroups: options.clusterGroups,
+          query: input?.value ?? "",
+        });
+      };
+      const searchFromInput = function () {
+        if (isComposing) {
+          return;
+        }
+
+        if (!normalizeMarkerSearchText(input?.value ?? "")) {
+          clearLayeredMarkerSearch({
+            markerRecords: options.markerRecords,
+            markers: options.markers,
+            clusterGroups: options.clusterGroups,
+            inputId,
+          });
+          return;
+        }
+
+        search();
+      };
+
+      L.DomEvent.on(input, "keydown", function (event) {
+        if (event.key === "Enter") {
+          search(event);
+        }
+      });
+      L.DomEvent.on(input, "compositionstart", function () {
+        isComposing = true;
+      });
+      L.DomEvent.on(input, "compositionend", function () {
+        isComposing = false;
+        searchFromInput();
+      });
+      L.DomEvent.on(input, "input", function () {
+        searchFromInput();
+      });
+
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.disableScrollPropagation(container);
+      return container;
+    },
+  });
+
+  return new MarkerSearchControl();
+}
+
+function restoreFlatMarkers({ markers, markerGroup, baseMarkerIds = null }) {
+  if (!markers || !markerGroup) {
+    return;
+  }
+
+  markerGroup.clearLayers();
+
+  const baseMarkerIdSet = Array.isArray(baseMarkerIds)
+    ? new Set(baseMarkerIds.map((id) => `marker-${id}`))
+    : null;
+
+  Object.entries(markers).forEach(([key, marker]) => {
+    if (baseMarkerIdSet && !baseMarkerIdSet.has(key)) {
+      return;
+    }
+    markerGroup.addLayer(marker);
+  });
+}
+
+function filterFlatMarkersByQuery({
+  markerRecords,
+  markers,
+  markerGroup,
+  query,
+  baseMarkerIds = null,
+}) {
+  if (!markerRecords || !markers || !markerGroup) {
+    return;
+  }
+
+  if (!normalizeMarkerSearchText(query)) {
+    restoreFlatMarkers({ markers, markerGroup, baseMarkerIds });
+    return;
+  }
+
+  markerGroup.clearLayers();
+
+  const baseMarkerIdSet = Array.isArray(baseMarkerIds)
+    ? new Set(baseMarkerIds.map((id) => `marker-${id}`))
+    : null;
+
+  Object.keys(markerRecords).forEach((key) => {
+    const record = markerRecords[key];
+    const markerId = record?.id;
+    const markerKey = `marker-${markerId}`;
+    const marker = markers[markerKey];
+
+    if (baseMarkerIdSet && !baseMarkerIdSet.has(markerKey)) {
+      return;
+    }
+
+    if (!marker || !matchesMarkerSearch(record, query)) {
+      return;
+    }
+
+    markerGroup.addLayer(marker);
+  });
+
+  if (map && typeof map.closePopup === "function") {
+    map.closePopup();
+  }
+}
+
+function createFlatMarkerSearchControl(options = {}) {
+  const FlatMarkerSearchControl = L.Control.extend({
+    options: {
+      position: options.position ?? "topleft",
+    },
+
+    onAdd: function () {
+      const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
+      const inputId = options.inputId ?? "marker-search-input";
+      container.innerHTML = `
+        <div class="search-zone">
+            <input type="text" class="search-input marker-search-input" id="${inputId}" placeholder="マーカー検索" title="マーカー名や詳細を検索します。">
+        </div>`;
+
+      const input = container.querySelector(`#${inputId}`);
+      let isComposing = false;
+      const emitSearch = function (event) {
+        if (event) {
+          L.DomEvent.stop(event);
+        }
+
+        if (typeof options.onSearch === "function") {
+          options.onSearch(input?.value ?? "");
+          return;
+        }
+
+        filterFlatMarkersByQuery({
+          markerRecords: options.markerRecords,
+          markers: options.markers,
+          markerGroup: options.markerGroup,
+          query: input?.value ?? "",
+          baseMarkerIds:
+            typeof options.getBaseMarkerIds === "function"
+              ? options.getBaseMarkerIds()
+              : options.baseMarkerIds,
+        });
+      };
+      const searchFromInput = function () {
+        if (isComposing) {
+          return;
+        }
+        emitSearch();
+      };
+
+      L.DomEvent.on(input, "keydown", function (event) {
+        if (event.key === "Enter") {
+          emitSearch(event);
+        }
+      });
+      L.DomEvent.on(input, "compositionstart", function () {
+        isComposing = true;
+      });
+      L.DomEvent.on(input, "compositionend", function () {
+        isComposing = false;
+        searchFromInput();
+      });
+      L.DomEvent.on(input, "input", function () {
+        searchFromInput();
+      });
+
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.disableScrollPropagation(container);
+      return container;
+    },
+  });
+
+  return new FlatMarkerSearchControl();
+}
+
 function isValidCoordinate(lat, lng) {
   return (
     !isNaN(lat) &&

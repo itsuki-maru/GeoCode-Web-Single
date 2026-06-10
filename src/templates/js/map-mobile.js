@@ -351,6 +351,8 @@ var tileLayer = L.tileLayer(initialTileServer["url"], {
 let markers = {};
 // Leaflet.markerclusterの使用
 let markersClusterGroup = L.markerClusterGroup();
+let externalMarkerFilterIds = null;
+let localMarkerSearchQuery = "";
 
 // HTMLと同時に取得したマーカーデータをプロット配備
 for (const key in markersFromAxum) {
@@ -400,6 +402,48 @@ for (const key in markersFromAxum) {
 
 // クラスターをレイヤーに追加
 map.addLayer(markersClusterGroup);
+
+function renderVisibleMarkers() {
+  markersClusterGroup.clearLayers();
+
+  const externalMarkerIdSet = Array.isArray(externalMarkerFilterIds)
+    ? new Set(externalMarkerFilterIds.map((id) => `marker-${id}`))
+    : null;
+
+  Object.keys(markersFromAxum).forEach((key) => {
+    const record = markersFromAxum[key];
+    const markerKey = `marker-${record?.id}`;
+    const marker = markers[markerKey];
+
+    if (!marker) {
+      return;
+    }
+
+    if (externalMarkerIdSet && !externalMarkerIdSet.has(markerKey)) {
+      return;
+    }
+
+    if (!matchesMarkerSearch(record, localMarkerSearchQuery)) {
+      return;
+    }
+
+    markersClusterGroup.addLayer(marker);
+  });
+
+  if (map && typeof map.closePopup === "function") {
+    map.closePopup();
+  }
+}
+
+function applyMarkerFilter(markerIds) {
+  externalMarkerFilterIds = Array.isArray(markerIds) ? markerIds : null;
+  renderVisibleMarkers();
+}
+
+function applyLocalMarkerSearch(query) {
+  localMarkerSearchQuery = query;
+  renderVisibleMarkers();
+}
 
 // 描画した形状を管理するレイヤーを作成
 const drawnShapesGroup = L.featureGroup();
@@ -2433,38 +2477,15 @@ function toggleMeasurementLabels() {
 
 // 計測コントロールの表示状態を反映する
 // 辺を結合する表示へ切り替える
-// 座標検索
-const CodeSearchControl = L.Control.extend({
-  options: {
-    position: "topleft",
-  },
-
-  onAdd: function (map) {
-    var container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
-    // ラジオボタンのHTMLを作成
-    container.innerHTML = `
-        <div class="search-zone">
-            <input type="text" class="search-input" id="code-input" placeholder="緯度,経度" title="緯度経度を,区切りで入力してください。"><br>
-            <button id="code-search-btn" class="custom-search">座標検索</button>
-        </div>`;
-
-    const searchBtn = container.querySelector(".custom-search");
-    // ボタンのクリックイベント
-    L.DomEvent.on(searchBtn, "click", function (e) {
-      L.DomEvent.stop(e);
-      onSearchCode();
-    });
-
-    // Leafletのクリックイベントとの干渉を避ける
-    L.DomEvent.disableClickPropagation(container);
-    return container;
-  },
-});
-
 // 緯度経度入力から対象地点へフォーカスする
 // 座標の入力値検査（緯度経度が妥当な数値範囲かを判定する）
-// 地図にカスタムコントロールを追加
-map.addControl(new CodeSearchControl());
+// 地図に検索コントロールを追加
+map.addControl(createCodeSearchControl());
+map.addControl(
+  createFlatMarkerSearchControl({
+    onSearch: applyLocalMarkerSearch,
+  }),
+);
 
 const userLocationLayer = initializeUserLocation(map);
 if (userLocationLayer && !getInitialUserLocationVisibility()) {
@@ -2662,6 +2683,8 @@ window.addEventListener("message", function (event) {
     const messageData = event.data;
     if (messageData["type"] === "focus") {
       onFocusMarker(messageData["id"], messageData["lat"], messageData["lng"]);
+    } else if (messageData["type"] === "markerFilter") {
+      applyMarkerFilter(messageData["ids"]);
     }
   }
 });

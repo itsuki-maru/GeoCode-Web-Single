@@ -657,34 +657,35 @@ for (const key in layers) {
 // マーカーを作成
 // データごとにクラスターグループを作成
 for (const key in markersObj) {
+  const markerData = markersObj[key];
   // layer_id ごとに markerClusterGroup を作成する
-  createMarkerGroupForLayer(markersObj[key]["layer_id"]);
+  createMarkerGroupForLayer(markerData["layer_id"]);
 
   // マーカーを作成してクラスターグループに追加する
   const marker = L.marker([
-    markersObj[key]["latitude"],
-    markersObj[key]["longitude"],
-  ]).bindPopup(markersObj[key]["marker_name"]);
+    markerData["latitude"],
+    markerData["longitude"],
+  ]).bindPopup(markerData["marker_name"]);
 
   // ポップアップオープン時に遅延読み込みの処理を追加
   marker.on("popupopen", () => {
     setupDetailsLazyImages(document);
   });
 
-  clusterGroups[markersObj[key]["layer_id"]].addLayer(marker);
+  clusterGroups[markerData["layer_id"]].addLayer(marker);
 
-  if (!markersObj[key]["marker_name"]) {
+  if (!markerData["marker_name"]) {
     marker.bindTooltip(`<div class="custom-tooltip">No Name</div>`, {
       permanent: false,
     });
   } else {
     marker.bindTooltip(
-      `<div class="custom-tooltip">${markersObj[key]["marker_name"]}</div>`,
+      `<div class="custom-tooltip">${markerData["marker_name"]}</div>`,
       { permanent: false },
     );
   }
-  if (markersObj[key]["detail"]) {
-    const mdText = `# ${markersObj[key]["marker_name"]}\n\n${markersObj[key]["detail"]}`;
+  if (markerData["detail"]) {
+    const mdText = `# ${markerData["marker_name"]}\n\n${markerData["detail"]}`;
     const mdToHtml = marked.parse(mdText);
     const cleanHtml = filterXSS(mdToHtml, xssOptions);
     const renderHtml = renderIframe(cleanHtml);
@@ -694,9 +695,9 @@ for (const key in markersObj) {
   // マーカーのHTML要素を取得し、id属性を設定
   let markerIcon = marker.getElement();
   if (markerIcon) {
-    markerIcon.id = `marker-${markersObj["id"]}`;
+    markerIcon.id = `marker-${markerData["id"]}`;
   }
-  markers[`marker-${markersObj["id"]}`] = marker;
+  markers[`marker-${markerData["id"]}`] = marker;
 }
 
 for (const key in shapesObj) {
@@ -757,6 +758,12 @@ map.on("overlayadd", function (event) {
   if (!layerId) {
     return;
   }
+
+  clearLayeredMarkerSearch({
+    markerRecords: markersObj,
+    markers: markers,
+    clusterGroups: clusterGroups,
+  });
 
   setTimeout(() => {
     syncShapeGroupVisibility(layerId);
@@ -861,33 +868,14 @@ function toggleMeasurementLabels() {
 // 計測コントロールの表示状態を反映する
 // 辺を結合する表示へ切り替える
 
-// 座標検索
-var CodeSearchControl = L.Control.extend({
-  options: {
-    position: "topleft",
-  },
-
-  onAdd: function (map) {
-    var container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
-    // ラジオボタンのHTMLを作成
-    container.innerHTML = `
-        <div class="search-zone">
-            <input type="text" class="search-input" id="code-input" placeholder="緯度,経度" title="緯度経度を,区切りで入力してください。"><br>
-            <button id="code-search-btn" class="custom-search">座標検索</button>
-        </div>`;
-
-    const searchBtn = container.querySelector(".custom-search");
-    // ボタンのクリックイベント
-    L.DomEvent.on(searchBtn, "click", function (e) {
-      L.DomEvent.stop(e);
-      onSearchCode();
-    });
-
-    // Leafletのクリックイベントとの干渉を避ける
-    L.DomEvent.disableClickPropagation(container);
-    return container;
-  },
-}); // 地図にカスタムコントロールを追加
-map.addControl(new CodeSearchControl());
+// 地図に検索コントロールを追加
+map.addControl(createCodeSearchControl());
+map.addControl(
+  createMarkerSearchControl({
+    markerRecords: markersObj,
+    markers: markers,
+    clusterGroups: clusterGroups,
+  }),
+);
 
 initializeUserLocation(map);

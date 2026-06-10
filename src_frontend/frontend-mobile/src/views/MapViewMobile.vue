@@ -3,7 +3,7 @@ import { ref, computed, watch, inject } from "vue";
 import type { Ref } from "vue";
 import { AxiosError } from "axios";
 import { useRouter } from "vue-router";
-import type { UploadProgressState } from "@/interface";
+import type { QueryForm, UploadProgressState } from "@/interface";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useLayersStore } from "@/stores/layers";
 import { useImageStore } from "@/stores/images";
@@ -73,6 +73,7 @@ const layerList = computed(() => layersStore.layersList);
 const activeLayer = ref("");
 const masterLayerId = ref("");
 const srcUrl = ref("");
+const markerQueryFormData = ref<QueryForm>({ query1: "", query2: "" });
 
 const getMasterLayerId = async (): Promise<void> => {
   try {
@@ -117,8 +118,10 @@ const reloadMap = async (mapUrl: string, absolute: boolean = false): Promise<voi
   await apiClient.get(authCheckUrl);
   srcUrl.value = mapUrl;
   if (absolute) {
+    markerQueryFormData.value = { query1: "", query2: "" };
     const isMaster = activeLayer.value === masterLayerId.value;
     await mapobjStore.queryMapObject(activeLayer.value, isMaster);
+    mapIframeRef.value?.filterMarkers(null);
   }
 };
 
@@ -136,6 +139,25 @@ const focusMarker = (id: string, lat: number, lng: number): void => {
   mapIframeRef.value?.focusMarker(id, lat, lng);
   if (isHttpsProtocol.value) {
     navigator.clipboard.writeText(`${lat},${lng}`);
+  }
+};
+
+const filterMapMarkers = (): void => {
+  const markerIds = [...mapobjStore.mapObjectList.keys()];
+  mapIframeRef.value?.filterMarkers(markerIds);
+};
+
+const handleMarkerSearch = async (query: QueryForm, reset: boolean = false): Promise<void> => {
+  try {
+    markerQueryFormData.value = { ...query };
+    if (reset) {
+      await mapobjStore.queryWordMapObject("", "", activeLayer.value);
+    } else {
+      await mapobjStore.queryWordMapObject(query.query1, query.query2, activeLayer.value);
+    }
+    filterMapMarkers();
+  } catch (error) {
+    console.error(error);
   }
 };
 
@@ -571,10 +593,13 @@ watch(
 
           <MarkerTable
             :activeLayer="activeLayer"
+            :markerQueryFormData="markerQueryFormData"
             @editMarker="openEditModal"
             @focusMarker="focusMarker"
             @deleteMarker="handleDeleteMarker"
             @message="showMessage"
+            @markerSearch="handleMarkerSearch"
+            @update:markerQueryFormData="markerQueryFormData = $event"
           />
         </div>
         <button id="function-close-elm" @click="onOpenCloseFunctionModal">閉じる</button>

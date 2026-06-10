@@ -121,8 +121,10 @@ const reloadMap = async (mapUrl: string, absolute: boolean = false): Promise<voi
   srcUrl.value = mapUrl;
   if (absolute) {
     isReload.value = true;
+    markerQueryFormData.value = { query1: "", query2: "" };
     const isMaster = activeLayer.value === masterLayerId.value;
     await mapobjStore.queryMapObject(activeLayer.value, isMaster);
+    mapIframeRef.value?.filterMarkers(null);
     showProgressModal.value = false;
   }
 };
@@ -144,6 +146,25 @@ const focusMarker = (id: string, lat: number, lng: number): void => {
   mapIframeRef.value?.focusMarker(id, lat, lng);
   if (isHttpsProtocol.value) {
     navigator.clipboard.writeText(`${lat},${lng}`);
+  }
+};
+
+const filterMapMarkers = (): void => {
+  const markerIds = [...mapobjStore.mapObjectList.keys()];
+  mapIframeRef.value?.filterMarkers(markerIds);
+};
+
+const handleMarkerSearch = async (query: QueryForm, reset: boolean = false): Promise<void> => {
+  try {
+    markerQueryFormData.value = { ...query };
+    if (reset) {
+      await mapobjStore.queryWordMapObject("", "", activeLayer.value);
+    } else {
+      await mapobjStore.queryWordMapObject(query.query1, query.query2, activeLayer.value);
+    }
+    filterMapMarkers();
+  } catch (error) {
+    console.error(error);
   }
 };
 
@@ -500,6 +521,8 @@ const onImageDeleteRequest = (id: string): void => {
     @userSetting="userPrivacySettingFunction()"
     @reloadMap="reloadMap"
     @layerList="openLayerList()"
+    @markerSearch="handleMarkerSearch"
+    @update:markerQueryFormData="markerQueryFormData = $event"
     @update:activeLayer="activeLayer = $event"
   />
 

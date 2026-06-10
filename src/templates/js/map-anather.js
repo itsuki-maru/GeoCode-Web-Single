@@ -353,34 +353,35 @@ function createMarkerGroupForLayer(layerId) {
 
 // データごとにクラスターグループを作成
 for (const key in markersFromAxum) {
+  const markerData = markersFromAxum[key];
   // layer_id ごとに markerClusterGroup を作成する
-  createMarkerGroupForLayer(markersFromAxum[key]["layer_id"]);
+  createMarkerGroupForLayer(markerData["layer_id"]);
 
   // マーカーを作成してクラスターグループに追加する
   const marker = L.marker([
-    markersFromAxum[key]["latitude"],
-    markersFromAxum[key]["longitude"],
-  ]).bindPopup(markersFromAxum[key]["marker_name"]);
+    markerData["latitude"],
+    markerData["longitude"],
+  ]).bindPopup(markerData["marker_name"]);
 
   // ポップアップオープン時に遅延読み込みの処理を追加
   marker.on("popupopen", () => {
     setupDetailsLazyImages(document);
   });
 
-  clusterGroups[markersFromAxum[key]["layer_id"]].addLayer(marker);
+  clusterGroups[markerData["layer_id"]].addLayer(marker);
 
-  if (!markersFromAxum[key]["marker_name"]) {
+  if (!markerData["marker_name"]) {
     marker.bindTooltip(`<div class="custom-tooltip">No Name</div>`, {
       permanent: false,
     });
   } else {
     marker.bindTooltip(
-      `<div class="custom-tooltip">${markersFromAxum[key]["marker_name"]}</div>`,
+      `<div class="custom-tooltip">${markerData["marker_name"]}</div>`,
       { permanent: false },
     );
   }
-  if (markersFromAxum[key]["detail"]) {
-    const mdText = `# ${markersFromAxum[key]["marker_name"]}\n\n${markersFromAxum[key]["detail"]}`;
+  if (markerData["detail"]) {
+    const mdText = `# ${markerData["marker_name"]}\n\n${markerData["detail"]}`;
     const mdToHtml = marked.parse(mdText);
     const cleanHtml = filterXSS(mdToHtml, xssOptions);
     const renderHtml = renderIframe(cleanHtml);
@@ -390,9 +391,9 @@ for (const key in markersFromAxum) {
   // マーカーのHTML要素を取得し、id属性を設定
   let markerIcon = marker.getElement();
   if (markerIcon) {
-    markerIcon.id = `marker-${markersFromAxum["id"]}`;
+    markerIcon.id = `marker-${markerData["id"]}`;
   }
-  markers[`marker-${markersFromAxum["id"]}`] = marker;
+  markers[`marker-${markerData["id"]}`] = marker;
 }
 
 if (Array.isArray(shapesFromAxum)) {
@@ -906,6 +907,12 @@ map.on("overlayadd", function (event) {
     return;
   }
 
+  clearLayeredMarkerSearch({
+    markerRecords: markersFromAxum,
+    markers: markers,
+    clusterGroups: clusterGroups,
+  });
+
   setTimeout(() => {
     syncShapeGroupVisibility(layerId);
   }, 0);
@@ -925,38 +932,15 @@ map.on("overlayremove", function (event) {
   syncShapeGroupVisibility(layerId);
 });
 
-// 座標検索
-var CodeSearchControl = L.Control.extend({
-  options: {
-    position: "topleft",
-  },
-
-  onAdd: function (map) {
-    var container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
-    // ラジオボタンのHTMLを作成
-    container.innerHTML = `
-        <div class="search-zone">
-            <input type="text" class="search-input" id="code-input" placeholder="緯度,経度" title="緯度経度を,区切りで入力してください。"><br>
-            <button id="code-search-btn" class="custom-search">座標検索</button>
-        </div>`;
-
-    const searchBtn = container.querySelector(".custom-search");
-    // ボタンのクリックイベント
-    L.DomEvent.on(searchBtn, "click", function (e) {
-      L.DomEvent.stop(e);
-      onSearchCode();
-    });
-
-    // Leafletのクリックイベントとの干渉を避ける
-    L.DomEvent.disableClickPropagation(container);
-    return container;
-  },
-});
-
-// 緯度経度入力から対象地点へフォーカスする
-// 緯度経度が妥当な数値範囲かを判定する
-// 地図にカスタムコントロールを追加
-map.addControl(new CodeSearchControl());
+// 地図に検索コントロールを追加
+map.addControl(createCodeSearchControl());
+map.addControl(
+  createMarkerSearchControl({
+    markerRecords: markersFromAxum,
+    markers: markers,
+    clusterGroups: clusterGroups,
+  }),
+);
 
 const userLocationLayer = initializeUserLocation(map);
 if (userLocationLayer && !getInitialUserLocationVisibility()) {
