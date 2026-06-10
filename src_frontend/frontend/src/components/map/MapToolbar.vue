@@ -2,9 +2,6 @@
 import { ref, computed, watch } from "vue";
 import type { LayersData, QueryForm } from "@/interface";
 import { baseUrl, assetsUrl } from "@/setting";
-import { useMapObjectStore } from "@/stores/mapobjects";
-
-const mapobjStore = useMapObjectStore();
 
 const props = defineProps<{
   activeLayer: string;
@@ -27,33 +24,43 @@ const emit = defineEmits<{
   userSetting: [];
   reloadMap: [url: string, absolute: boolean];
   layerList: [];
+  markerSearch: [query: QueryForm, reset: boolean];
+  "update:markerQueryFormData": [query: QueryForm];
   "update:activeLayer": [id: string];
 }>();
 
-const markerQueryFormData = ref<QueryForm>({
-  query1: "",
-  query2: "",
-});
+const markerQueryFormData = ref<QueryForm>({ ...props.markerQueryFormData });
+let suppressNextWatchSearch = false;
 
-const onMarkerSearch = (reset: boolean = false): void => {
-  try {
-    if (reset) {
-      mapobjStore.queryWordMapObject("", "", props.activeLayer);
-    } else {
-      mapobjStore.queryWordMapObject(
-        markerQueryFormData.value.query1,
-        markerQueryFormData.value.query2,
-        props.activeLayer,
-      );
-    }
-  } catch (error) {
-    console.error(error);
-  }
+const isSameQuery = (a: QueryForm, b: QueryForm): boolean => {
+  return a.query1 === b.query1 && a.query2 === b.query2;
 };
 
-watch(markerQueryFormData.value, () => {
+const onMarkerSearch = (reset: boolean = false): void => {
+  if (reset) {
+    suppressNextWatchSearch = true;
+    markerQueryFormData.value = { query1: "", query2: "" };
+  }
+  emit("markerSearch", { ...markerQueryFormData.value }, reset);
+};
+
+watch(
+  () => props.markerQueryFormData,
+  (query) => {
+    if (isSameQuery(query, markerQueryFormData.value)) return;
+    suppressNextWatchSearch = true;
+    markerQueryFormData.value = { ...query };
+  },
+);
+
+watch(markerQueryFormData, () => {
+  emit("update:markerQueryFormData", { ...markerQueryFormData.value });
+  if (suppressNextWatchSearch) {
+    suppressNextWatchSearch = false;
+    return;
+  }
   onMarkerSearch();
-});
+}, { deep: true });
 
 const selectedLayer = computed({
   get: () => props.activeLayer,

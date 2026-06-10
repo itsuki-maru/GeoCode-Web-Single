@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
-import type { MapObjectData } from "@/interface";
+import type { MapObjectData, QueryForm } from "@/interface";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useLayersStore } from "@/stores/layers";
 
 const props = defineProps<{
   activeLayer: string;
+  markerQueryFormData: QueryForm;
 }>();
 
 const emit = defineEmits<{
@@ -13,6 +14,8 @@ const emit = defineEmits<{
   focusMarker: [id: string, lat: number, lng: number];
   deleteMarker: [id: string];
   message: [text: string];
+  markerSearch: [query: QueryForm, reset: boolean];
+  "update:markerQueryFormData": [query: QueryForm];
 }>();
 
 const mapobjStore = useMapObjectStore();
@@ -22,26 +25,38 @@ const mapobjList = computed((): Map<string, MapObjectData> => {
   return mapobjStore.mapObjectList;
 });
 
-const markerQueryFormData = ref({ query1: "", query2: "" });
-watch(markerQueryFormData.value, () => {
-  onMarkerSearch();
-});
+const markerQueryFormData = ref<QueryForm>({ ...props.markerQueryFormData });
+let suppressNextWatchSearch = false;
+
+const isSameQuery = (a: QueryForm, b: QueryForm): boolean => {
+  return a.query1 === b.query1 && a.query2 === b.query2;
+};
 
 const onMarkerSearch = (reset: boolean = false): void => {
-  try {
-    if (reset) {
-      mapobjStore.queryWordMapObject("", "", props.activeLayer);
-    } else {
-      mapobjStore.queryWordMapObject(
-        markerQueryFormData.value.query1,
-        markerQueryFormData.value.query2,
-        props.activeLayer,
-      );
-    }
-  } catch (error) {
-    console.error(error);
+  if (reset) {
+    suppressNextWatchSearch = true;
+    markerQueryFormData.value = { query1: "", query2: "" };
   }
+  emit("markerSearch", { ...markerQueryFormData.value }, reset);
 };
+
+watch(
+  () => props.markerQueryFormData,
+  (query) => {
+    if (isSameQuery(query, markerQueryFormData.value)) return;
+    suppressNextWatchSearch = true;
+    markerQueryFormData.value = { ...query };
+  },
+);
+
+watch(markerQueryFormData, () => {
+  emit("update:markerQueryFormData", { ...markerQueryFormData.value });
+  if (suppressNextWatchSearch) {
+    suppressNextWatchSearch = false;
+    return;
+  }
+  onMarkerSearch();
+}, { deep: true });
 
 const getLayerForId = (layer_id: string): string | void => {
   const layerObj = layersStore.getById(layer_id);
