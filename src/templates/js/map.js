@@ -394,6 +394,24 @@ for (const key in markersFromAxum) {
 // クラスターをレイヤーに追加
 map.addLayer(markersClusterGroup);
 
+function applyMarkerFilter(markerIds) {
+  markersClusterGroup.clearLayers();
+
+  if (!Array.isArray(markerIds)) {
+    Object.values(markers).forEach((marker) => {
+      markersClusterGroup.addLayer(marker);
+    });
+    return;
+  }
+
+  const markerIdSet = new Set(markerIds.map((id) => `marker-${id}`));
+  Object.entries(markers).forEach(([key, marker]) => {
+    if (markerIdSet.has(key)) {
+      markersClusterGroup.addLayer(marker);
+    }
+  });
+}
+
 const drawnShapesGroup = L.featureGroup();
 const SHAPE_STYLE = {
   color: "#d94841",
@@ -2663,6 +2681,8 @@ window.addEventListener("message", function (event) {
     const messageData = event.data;
     if (messageData["type"] === "focus") {
       onFocusMarker(messageData["id"], messageData["lat"], messageData["lng"]);
+    } else if (messageData["type"] === "markerFilter") {
+      applyMarkerFilter(messageData["ids"]);
     }
   }
 });
