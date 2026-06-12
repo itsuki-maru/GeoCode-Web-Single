@@ -32,6 +32,13 @@ pub struct UploadResponseImage {
     pub uuid_filename: String,
 }
 
+// 画像検索クエリパラメータ
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ImageQuerySearchParams {
+    pub query: String,
+    pub limit: Option<i64>,
+}
+
 // サムネイル画像を返却するかハンドリングするクエリパラメータ
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ThumbnailQueryParams {

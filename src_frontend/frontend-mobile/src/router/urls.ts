@@ -24,6 +24,7 @@ export const licensesGetUrl = baseUrl + "/licanses";
 export const exportJsonUrl = baseUrl + "/file/export/";
 export const importJsonUrl = baseUrl + "/file/import";
 export const imageListGetUrl = baseUrl + "/images/eneble-images";
+export const imageSearchUrl = baseUrl + "/images/eneble-images/search";
 export const imageUploadUrl = baseUrl + "/images/upload";
 export const imageDeleteUrl = baseUrl + "/images/delete";
 
