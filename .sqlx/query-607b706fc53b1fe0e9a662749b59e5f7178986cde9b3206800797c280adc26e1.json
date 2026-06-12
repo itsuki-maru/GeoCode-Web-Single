@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT\n            is_private,\n            totp_secret\n        FROM user_model WHERE id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "is_private",
+        "ordinal": 0,
+        "type_info": "Bool"
+      },
+      {
+        "name": "totp_secret",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "607b706fc53b1fe0e9a662749b59e5f7178986cde9b3206800797c280adc26e1"
+}

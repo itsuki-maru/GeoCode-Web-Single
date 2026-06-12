@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT\n            id,\n            layer_name,\n            label,\n            url,\n            attribution,\n            include_foreign_tiles,\n            min_zoom,\n            max_zoom,\n            create_at,\n            updated_at\n        FROM tileserver_model\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "layer_name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "label",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "url",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "attribution",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "include_foreign_tiles",
+        "ordinal": 5,
+        "type_info": "Bool"
+      },
+      {
+        "name": "min_zoom",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "max_zoom",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "create_at",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 9,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "7adec7aafe0ed378208236f8e861a4d6699c14c8f41a95eb0d8a213d1875053a"
+}

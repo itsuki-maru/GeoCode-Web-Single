@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                SELECT is_private\n                FROM user_model\n                WHERE id = $1\n                ",
+  "describe": {
+    "columns": [
+      {
+        "name": "is_private",
+        "ordinal": 0,
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "75d4ed4cfc697dd847de6467e7754d91b8954802b2f158d049242c6cea90cb52"
+}

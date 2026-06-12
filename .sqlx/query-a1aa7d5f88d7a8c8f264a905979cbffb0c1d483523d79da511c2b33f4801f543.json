@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE layer_model\n        SET layer_name = $1, update_at = $2\n        WHERE id = $3 AND user_id = $4 AND is_master = false\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "a1aa7d5f88d7a8c8f264a905979cbffb0c1d483523d79da511c2b33f4801f543"
+}

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT\n            setting_key,\n            setting_value\n        FROM application_settings\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "setting_key",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "setting_value",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "b57cc7704295c494bb59297c668ab9404899827a30532961bb6b3b7182db2696"
+}

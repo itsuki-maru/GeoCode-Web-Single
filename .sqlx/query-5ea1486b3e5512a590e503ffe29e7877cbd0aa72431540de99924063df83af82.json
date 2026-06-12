@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        DELETE FROM temporary_urls\n        WHERE user_id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "5ea1486b3e5512a590e503ffe29e7877cbd0aa72431540de99924063df83af82"
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE user_model\n        SET password = $1\n        WHERE id = $2\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0fd7604fdf94b4276535a925bfe263207f0033f81450d36d12702b387efee2a4"
+}

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        DELETE FROM image_model\n        WHERE id = $1 AND user_id = $2\n        RETURNING id, uuid_filename\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "uuid_filename",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "fd547068171c92c9159a606bd8a0196b634837d15969ad416b261e611660305d"
+}

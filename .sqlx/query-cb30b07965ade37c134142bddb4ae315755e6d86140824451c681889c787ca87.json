@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                        UPDATE user_model\n                        SET failed_count = $1, next_challenge_time = $2\n                        WHERE id = $3\n                        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "cb30b07965ade37c134142bddb4ae315755e6d86140824451c681889c787ca87"
+}

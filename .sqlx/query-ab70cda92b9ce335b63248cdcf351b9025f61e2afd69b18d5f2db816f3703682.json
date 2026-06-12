@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE temporary_urls\n        SET expiration = $1, password_hash = $2, layers = $3, markers = $4, shapes = $5\n        WHERE user_id = $6\n        RETURNING id, url, expiration\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "url",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "expiration",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ab70cda92b9ce335b63248cdcf351b9025f61e2afd69b18d5f2db816f3703682"
+}

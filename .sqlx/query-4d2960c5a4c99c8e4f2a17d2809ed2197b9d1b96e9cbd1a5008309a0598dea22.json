@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT id, url, expiration, password_hash IS NOT NULL as \"is_password_protected: bool\"\n        FROM temporary_urls\n        WHERE user_id = $1\n        ORDER BY create_at DESC\n        LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "url",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "expiration",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_password_protected: bool",
+        "ordinal": 3,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4d2960c5a4c99c8e4f2a17d2809ed2197b9d1b96e9cbd1a5008309a0598dea22"
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT is_master\n        FROM layer_model\n        WHERE id = $1 AND user_id = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "is_master",
+        "ordinal": 0,
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "78c9c7c4d54ed08c73b3cb80ae55f75b9607b6d7719734a7e3f7f9c1b5cd6044"
+}
