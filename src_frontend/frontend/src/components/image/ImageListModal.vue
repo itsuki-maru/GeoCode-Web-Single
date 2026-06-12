@@ -23,12 +23,12 @@ const imageList = computed((): Map<string, ImageData> => imageStore.imageList);
 
 const queryFormData = ref("");
 
-const onSearch = (reset: boolean = false): void => {
+const onSearch = async (reset: boolean = false): Promise<void> => {
   try {
     if (reset) {
-      imageStore.queryImage("");
+      await imageStore.queryImage("");
     } else {
-      imageStore.queryImage(queryFormData.value);
+      await imageStore.queryImage(queryFormData.value);
     }
   } catch (error) {
     console.error(error);

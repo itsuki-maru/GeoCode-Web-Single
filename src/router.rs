@@ -29,7 +29,7 @@ use crate::handler::assets::{image_preview_html_get_handler, serve_image_file, s
 use crate::handler::files::{export_json_handler, import_json_handler};
 use crate::handler::images::{
     delete_image_handler, get_enable_images_handler, get_enable_images_limit_handler,
-    upload_image_handler,
+    query_image_handler, upload_image_handler,
 };
 use crate::handler::layers::{
     create_layer_handler, delete_layer_handler, get_all_layers_handler, master_layer_get_handler,
@@ -91,6 +91,7 @@ pub fn build_router(
         .route("/map-another", get(map_another_get_handler))
         .route("/account/auth", get(auth_check_handler))
         .route("/images/eneble-images", get(get_enable_images_handler))
+        .route("/images/eneble-images/search", get(query_image_handler))
         .route(
             "/images/eneble-images/{limit}",
             get(get_enable_images_limit_handler),

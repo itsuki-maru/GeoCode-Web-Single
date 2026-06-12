@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import type { ImageData } from "@/interface";
-import { imageListGetUrl } from "@/router/urls";
+import { imageListGetUrl, imageSearchUrl } from "@/router/urls";
 import apiClient from "@/axiosClient";
 
 interface State {
@@ -22,22 +22,25 @@ export const useImageStore = defineStore("images", {
     },
   },
   actions: {
+    setImageList(imagesData: Record<string, ImageData>): void {
+      this.imageList.clear();
+      for (const image of Object.values(imagesData)) {
+        this.imageList.set(image.id, {
+          id: image.id,
+          filename: image.filename,
+          uuid_filename: image.uuid_filename,
+        });
+      }
+      let sortedDsc = new Map(
+        [...this.imageList.entries()].sort((a, b) => (a[0] > b[0] ? 1 : -1)).reverse(),
+      );
+      this.imageList = sortedDsc;
+    },
     async initList(): Promise<void> {
       try {
-        const response = await apiClient.get(imageListGetUrl);
-        this.imageList.clear();
-        const imagesData = response.data;
-        for (let key in imagesData) {
-          this.imageList.set(imagesData[key]["id"], {
-            id: imagesData[key]["id"],
-            filename: imagesData[key]["filename"],
-            uuid_filename: imagesData[key]["uuid_filename"],
-          });
-        }
-        let sortedDsc = new Map(
-          [...this.imageList.entries()].sort((a, b) => (a[0] > b[0] ? 1 : -1)).reverse(),
-        );
-        this.imageList = sortedDsc;
+        const url = `${imageListGetUrl}/50`; // 50件のみ取得
+        const response = await apiClient.get(url);
+        this.setImageList(response.data);
       } catch (error) {
         console.error(`Images Store: Init List Error.`);
         throw error;
@@ -54,27 +57,23 @@ export const useImageStore = defineStore("images", {
       console.log("Delete image.");
       this.imageList.delete(image_id);
     },
-    queryImage(query: string): void {
+    async queryImage(query: string): Promise<void> {
       if (query === "") {
-        this.initList();
+        await this.initList();
         return;
       }
-      let result: { id: string; filename: string; uuid_filename: string }[] = [];
-      this.imageList.forEach((value, key) => {
-        if (value.filename.includes(query)) {
-          result.push(value);
-        }
-      });
-
-      // Sort by id in descending order
-      result.sort((a, b) => b.id.localeCompare(a.id));
-
-      let resultMap: Map<string, { id: string; filename: string; uuid_filename: string }> =
-        new Map();
-      for (let item of result) {
-        resultMap.set(item.id, item);
+      try {
+        const response = await apiClient.get(imageSearchUrl, {
+          params: {
+            query,
+            limit: 50,
+          },
+        });
+        this.setImageList(response.data);
+      } catch (error) {
+        console.error(`Images Store: Query Image Error.`);
+        throw error;
       }
-      this.imageList = resultMap;
     },
   },
 });

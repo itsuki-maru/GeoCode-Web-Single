@@ -3,12 +3,13 @@ use crate::error::AppError;
 use crate::image::resize::resizer;
 use crate::image::validator::check_file_extension;
 use crate::model::{
-    DeletedImageResponse, ImageData, ImageIdNameDeleted, ReturningId, UploadResponseImage,
+    DeletedImageResponse, ImageData, ImageIdNameDeleted, ImageQuerySearchParams, ReturningId,
+    UploadResponseImage,
 };
 use crate::utils::{ensure_dir, vec_to_hashmap};
 use axum::{
     Json,
-    extract::{Extension, Path},
+    extract::{Extension, Path, Query},
 };
 use chrono::Utc;
 use futures_util::TryStreamExt as _;
@@ -27,6 +28,24 @@ use tokio_util::io::StreamReader;
 use uuid::Uuid;
 
 const MAX_UPLOAD_FILE_SIZE_BYTES: usize = 100 * 1024 * 1024;
+const DEFAULT_IMAGE_LIST_LIMIT: i64 = 50;
+
+fn normalize_image_list_limit(limit: Option<i64>) -> i64 {
+    limit
+        .unwrap_or(DEFAULT_IMAGE_LIST_LIMIT)
+        .clamp(1, DEFAULT_IMAGE_LIST_LIMIT)
+}
+
+fn escape_like_query(query: &str) -> String {
+    let mut escaped = String::new();
+    for ch in query.chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    format!("%{}%", escaped)
+}
 
 // 100MB の制限機構
 async fn write_field_to_file_with_limit(
@@ -91,6 +110,64 @@ pub async fn get_enable_images_limit_handler(
     )
     .fetch_all(&pool)
     .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "database error.");
+        AppError::Sqlx(e)
+    })?;
+
+    let images_hash_map = vec_to_hashmap(images, |i| i.id.clone());
+    Ok(Json(images_hash_map))
+}
+
+// SEARCH IMAGES
+pub async fn query_image_handler(
+    Extension(user_id): Extension<String>,
+    Extension(pool): Extension<SqlitePool>,
+    Query(params): Query<ImageQuerySearchParams>,
+) -> Result<Json<HashMap<String, ImageData>>, AppError> {
+    let limit = normalize_image_list_limit(params.limit);
+    let query = params.query.trim();
+
+    let images = if query.is_empty() {
+        query_as!(
+            ImageData,
+            r#"
+            SELECT
+                id,
+                user_id,
+                filename,
+                uuid_filename
+            FROM image_model
+            WHERE user_id = $1
+            ORDER BY id DESC
+            LIMIT $2
+            "#,
+            user_id,
+            limit,
+        )
+        .fetch_all(&pool)
+        .await
+    } else {
+        let like_query = escape_like_query(query);
+        query_as!(
+            ImageData,
+            r#"
+            SELECT
+                id,
+                user_id,
+                filename,
+                uuid_filename
+            FROM image_model
+            WHERE user_id = $1
+                AND filename LIKE $2 ESCAPE '\'
+            ORDER BY id DESC
+            "#,
+            user_id,
+            like_query,
+        )
+        .fetch_all(&pool)
+        .await
+    }
     .map_err(|e| {
         tracing::error!(error = %e, "database error.");
         AppError::Sqlx(e)
