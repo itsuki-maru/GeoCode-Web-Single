@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE user_model\n            SET is_basic_authed = $1, is_basic_authed_at = $2\n            WHERE id = $3\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "31e841297ae9267490b1b69f76f62323156bbca3b4eb3fd7191d1db30c5586ee"
+}

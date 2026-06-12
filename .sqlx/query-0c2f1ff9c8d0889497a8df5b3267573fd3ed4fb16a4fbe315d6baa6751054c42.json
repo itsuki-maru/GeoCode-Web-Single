@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT user_id\n            FROM image_model\n            WHERE uuid_filename = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "user_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0c2f1ff9c8d0889497a8df5b3267573fd3ed4fb16a4fbe315d6baa6751054c42"
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT is_superuser FROM user_model WHERE id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "is_superuser",
+        "ordinal": 0,
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cc52f7d34745cd55380f0edcd6704947db5e637069bc6434bfd2649b203cb898"
+}

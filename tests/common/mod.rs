@@ -1,5 +1,5 @@
 use bcrypt::{DEFAULT_COST, hash};
-use geocode_web_single::db::create_user_with_master_layer;
+use geocode_web_single::db::{create_user_with_master_layer, run_migrations};
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 use std::{path::PathBuf, sync::Once};
 
@@ -48,10 +48,9 @@ pub async fn test_pool() -> SqlitePool {
         .await
         .expect("test sqlite pool should connect");
 
-    sqlx::migrate!("./migrations")
-        .run(&pool)
+    run_migrations(&pool)
         .await
-        .expect("migrations should run");
+        .expect("pool.rs migrations should run");
 
     pool
 }

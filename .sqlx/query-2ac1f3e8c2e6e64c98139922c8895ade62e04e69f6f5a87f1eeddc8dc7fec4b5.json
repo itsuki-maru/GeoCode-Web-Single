@@ -34,8 +34,18 @@
         "type_info": "Text"
       },
       {
-        "name": "create_at",
+        "name": "shapes",
         "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "create_at",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "password_hash",
+        "ordinal": 8,
         "type_info": "Text"
       }
     ],
@@ -49,7 +59,9 @@
       false,
       false,
       false,
-      false
+      false,
+      false,
+      true
     ]
   },
   "hash": "2ac1f3e8c2e6e64c98139922c8895ade62e04e69f6f5a87f1eeddc8dc7fec4b5"

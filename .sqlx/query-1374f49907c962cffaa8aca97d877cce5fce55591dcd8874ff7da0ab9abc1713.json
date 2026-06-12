@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE user_model\n        SET is_private = $1\n        WHERE id = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "1374f49907c962cffaa8aca97d877cce5fce55591dcd8874ff7da0ab9abc1713"
+}

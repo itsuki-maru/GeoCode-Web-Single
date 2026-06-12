@@ -106,7 +106,7 @@ pub async fn current_url_handler(
     let current_url = query_as!(
         CurrentTemporaryUrlResponse,
         r#"
-        SELECT id, url, expiration, password_hash IS NOT NULL as "is_password_protected: bool"
+        SELECT id, url, expiration, password_hash IS NOT NULL as "is_password_protected!: bool"
         FROM temporary_urls
         WHERE user_id = $1
         ORDER BY create_at DESC

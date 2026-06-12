@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        DELETE FROM layer_model\n        WHERE id = $1 AND user_id = $2 AND is_master = false\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "fde574e838a22704c23753d336608709c14a617b3139b7291e0053ab929b0f97"
+}

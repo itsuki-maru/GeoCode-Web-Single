@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT\n            id,\n            user_id,\n            layer_name,\n            is_master\n        FROM layer_model\n        WHERE user_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "user_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "layer_name",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_master",
+        "ordinal": 3,
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "dea29475ad6d7d922d5a6300b0838469ab47052484c2da3b7e09921635c4b4b7"
+}

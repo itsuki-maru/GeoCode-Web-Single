@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE user_model\n            SET is_locked = $1, failed_count = $2\n            WHERE id = $3\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "1045b6b5efaf2e4a1f51f110fc809b1924648e999d50c6e0460c6693cbdad98d"
+}

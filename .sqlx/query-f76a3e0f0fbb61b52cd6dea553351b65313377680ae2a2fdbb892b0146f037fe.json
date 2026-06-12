@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE user_model\n        SET totp_secret = $1, totp_temp_secret = $2\n        WHERE id = $3\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "f76a3e0f0fbb61b52cd6dea553351b65313377680ae2a2fdbb892b0146f037fe"
+}
