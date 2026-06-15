@@ -43,7 +43,19 @@ async fn migrations_create_schema_and_record_versions() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 2);
+    assert_eq!(migration_count, 3);
+
+    let external_site_urls_table_count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'external_site_urls'
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("external_site_urls table count should be returned");
+    assert_eq!(external_site_urls_table_count, 1);
 }
 
 #[tokio::test]
@@ -61,7 +73,7 @@ async fn migrations_are_idempotent() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 2);
+    assert_eq!(migration_count, 3);
 }
 
 #[tokio::test]
@@ -144,10 +156,16 @@ async fn migrations_record_versions_for_existing_schema() {
     .await
     .expect("migration rows should be returned");
 
-    assert_eq!(rows.len(), 2);
+    assert_eq!(rows.len(), 3);
     assert_eq!(rows[0].get::<i64, _>("version"), 1);
     assert_eq!(rows[0].get::<String, _>("name"), "create_initial_schema");
     assert_eq!(rows[1].get::<i64, _>("version"), 2);
+    assert_eq!(rows[1].get::<String, _>("name"), "add_btree_indexes");
+    assert_eq!(rows[2].get::<i64, _>("version"), 3);
+    assert_eq!(
+        rows[2].get::<String, _>("name"),
+        "create_external_site_urls"
+    );
 
     let legacy_user_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM user_model WHERE id = 'legacy-user'")

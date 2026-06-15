@@ -4,24 +4,16 @@ use sqlx::FromRow;
 
 #[derive(Debug, Deserialize, Serialize, FromRow)]
 pub struct ExportJsonScheme {
-    pub id: String,
-    pub user_id: String,
-    pub layer_id: String,
     pub marker_name: String,
     pub latitude: f64,
     pub longitude: f64,
     pub detail: String,
-    pub layer_model_id: String,
-    pub layer_model_user_id: String,
     pub layer_name: String,
     pub is_master: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, FromRow)]
 pub struct ExportShapeJsonScheme {
-    pub id: String,
-    pub user_id: String,
-    pub layer_id: String,
     pub shape_type: String,
     pub name: Option<String>,
     pub geojson: Value,
@@ -31,9 +23,6 @@ pub struct ExportShapeJsonScheme {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ExportMarkers {
-    pub id: String,
-    pub user_id: String,
-    pub layer_id: String,
     pub marker_name: String,
     pub latitude: f64,
     pub longitude: f64,
@@ -43,8 +32,6 @@ pub struct ExportMarkers {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ExportLayers {
-    pub id: String,
-    pub user_id: String,
     pub layer_name: String,
     pub is_master: bool,
 }
@@ -57,9 +44,6 @@ pub struct ImportLayers {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ExportShapes {
-    pub id: String,
-    pub user_id: String,
-    pub layer_id: String,
     pub shape_type: String,
     pub name: Option<String>,
     pub geojson: Value,

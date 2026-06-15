@@ -448,8 +448,6 @@ async fn setup_tile_cache() -> Option<redis::aio::ConnectionManager> {
         },
     };
 
-    println!("====== USE REDIS ======");
-
     // URL の不正はキャッシュ設定の問題として扱い、アプリケーション起動自体は失敗させない。
     let client = match redis::Client::open(redis_url) {
         Ok(client) => client,
