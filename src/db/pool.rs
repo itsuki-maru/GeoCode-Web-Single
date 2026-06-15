@@ -165,6 +165,19 @@ const MIGRATIONS: &[Migration] = &[
             "#,
         ],
     },
+    Migration {
+        version: 3,
+        name: "create_external_site_urls",
+        statements: &[r#"
+            CREATE TABLE IF NOT EXISTS external_site_urls (
+                user_id TEXT PRIMARY KEY NOT NULL,
+                url TEXT NOT NULL,
+                create_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES user_model(id) ON DELETE CASCADE
+            );
+            "#],
+    },
 ];
 
 // データベース接続の確立

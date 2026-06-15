@@ -139,15 +139,10 @@ pub async fn export_json_handler(
         query_as::<_, ExportJsonScheme>(
             r#"
             SELECT
-                marker_info_model.id,
-                marker_info_model.user_id,
-                marker_info_model.layer_id,
                 marker_name,
                 latitude,
                 longitude,
                 detail,
-                layer_model.id as layer_model_id,
-                layer_model.user_id as layer_model_user_id,
                 layer_name,
                 is_master
             FROM marker_info_model
@@ -163,15 +158,10 @@ pub async fn export_json_handler(
         query_as::<_, ExportJsonScheme>(
             r#"
             SELECT
-                marker_info_model.id,
-                marker_info_model.user_id,
-                marker_info_model.layer_id,
                 marker_name,
                 latitude,
                 longitude,
                 detail,
-                layer_model.id as layer_model_id,
-                layer_model.user_id as layer_model_user_id,
                 layer_name,
                 is_master
             FROM marker_info_model
@@ -194,9 +184,6 @@ pub async fn export_json_handler(
         query_as::<_, ExportShapeJsonScheme>(
             r#"
             SELECT
-                shape_model.id,
-                shape_model.user_id,
-                shape_model.layer_id,
                 shape_type,
                 name,
                 geojson,
@@ -216,9 +203,6 @@ pub async fn export_json_handler(
         query_as::<_, ExportShapeJsonScheme>(
             r#"
             SELECT
-                shape_model.id,
-                shape_model.user_id,
-                shape_model.layer_id,
                 shape_type,
                 name,
                 geojson,
@@ -245,16 +229,11 @@ pub async fn export_json_handler(
         .into_iter()
         .map(|row| {
             let layer = ExportLayers {
-                id: row.layer_model_id,
-                user_id: row.layer_model_user_id,
                 layer_name: row.layer_name,
                 is_master: row.is_master,
             };
 
             ExportMarkers {
-                id: row.id,
-                user_id: row.user_id,
-                layer_id: row.layer_id,
                 marker_name: row.marker_name,
                 latitude: row.latitude,
                 longitude: row.longitude,
@@ -267,15 +246,10 @@ pub async fn export_json_handler(
     let shapes_vec: Vec<ExportShapes> = shape_records
         .into_iter()
         .map(|row| ExportShapes {
-            id: row.id,
-            user_id: row.user_id.clone(),
-            layer_id: row.layer_id.clone(),
             shape_type: row.shape_type,
             name: row.name,
             geojson: row.geojson,
             layer: ExportLayers {
-                id: row.layer_id,
-                user_id: row.user_id,
                 layer_name: row.layer_name,
                 is_master: row.is_master,
             },
