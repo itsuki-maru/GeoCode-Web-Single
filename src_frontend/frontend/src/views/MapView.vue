@@ -2,7 +2,13 @@
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { AxiosError } from "axios";
 import { useRouter } from "vue-router";
-import type { MapObjectData, LayersData, ImageData, QueryForm, UploadProgressState } from "@/interface";
+import type {
+  MapObjectData,
+  LayersData,
+  ImageData,
+  QueryForm,
+  UploadProgressState,
+} from "@/interface";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useLayersStore } from "@/stores/layers";
 import { useImageStore } from "@/stores/images";
@@ -341,7 +347,12 @@ const openOnetimeSetting = (): void => {
   isOnetimeSettingModal.value = true;
 };
 
-const onOnetimeGenerated = (generatedUrl: string, uuid: string, _updateUrl: boolean, expiration: string): void => {
+const onOnetimeGenerated = (
+  generatedUrl: string,
+  uuid: string,
+  _updateUrl: boolean,
+  expiration: string,
+): void => {
   oneTimeUrl.value = generatedUrl;
   oneTimeUuid.value = uuid;
   oneTimeExpiration.value = expiration;
@@ -697,13 +708,8 @@ const onImageDeleteRequest = (id: string): void => {
 
   <MessageModal :isOpen="isMessageModal" :message="messageText" @close="closeMessage" />
 
-  <ProgressSpinner
-    :isOpen="showProgressModal"
-  />
-  <UploadProgressModal
-    :isOpen="uploadProgressState.isOpen"
-    :progress="uploadProgressState"
-  />
+  <ProgressSpinner :isOpen="showProgressModal" />
+  <UploadProgressModal :isOpen="uploadProgressState.isOpen" :progress="uploadProgressState" />
 </template>
 
 <style>

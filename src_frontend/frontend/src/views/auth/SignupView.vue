@@ -5,13 +5,12 @@ import { useRouter } from "vue-router";
 import { signupUrl, licensesGetUrl } from "@/router/urls";
 import axios from "axios";
 
-// App.vueで定義したメモアイコンの表示非表示管理変数をinject
-const isShowMemoIcon = inject("isShowMemoIcon") as Ref<boolean>;
-const isExitIcon = inject("isExitIcon") as Ref<boolean>;
-
+// App.vueで定義した画面右上の機能ボタンゾーン表示非表示管理変数をinject
+const isShowOtherFunctionButtonZone = inject("isShowOtherFunctionButtonZone") as Ref<boolean>;
+const resetExternalSiteHref = inject("resetExternalSiteHref") as () => void;
 // サインアップ・ログイン画面では非表示にする
-isShowMemoIcon.value = false;
-isExitIcon.value = false;
+isShowOtherFunctionButtonZone.value = false;
+resetExternalSiteHref();
 
 // Signup ok next page.
 const router = useRouter();

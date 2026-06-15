@@ -26,6 +26,9 @@ use crate::handler::admin::{
     update_users_handler,
 };
 use crate::handler::assets::{image_preview_html_get_handler, serve_image_file, serve_static_file};
+use crate::handler::external_site::{
+    get_external_site_url_handler, update_external_site_url_handler,
+};
 use crate::handler::files::{export_json_handler, import_json_handler};
 use crate::handler::images::{
     delete_image_handler, get_enable_images_handler, get_enable_images_limit_handler,
@@ -143,6 +146,10 @@ pub fn build_router(
         .route("/account/totp/setup", get(totp_setup_handler))
         .route("/account/totp/verify", post(totp_verify_handler))
         .route("/account/totp/disable", get(totp_disable_handler))
+        .route(
+            "/external-site-url",
+            get(get_external_site_url_handler).put(update_external_site_url_handler),
+        )
         .route("/account/token/disable", get(disable_token));
 
     if CONFIG.allow_user_update_password {

@@ -39,3 +39,4 @@ export const userTotpSettingUrl = baseUrl + "/account/totp/setup";
 export const userTotpVerifyUrl = baseUrl + "/account/totp/verify";
 export const getTokenFromTotpUrl = baseUrl + "/account/totp/token";
 export const userTotpDisableUrl = baseUrl + "/account/totp/disable";
+export const externalSiteUrl = baseUrl + "/external-site-url";

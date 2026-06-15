@@ -2,9 +2,11 @@
 import { useRouter } from "vue-router";
 import { provide, onMounted, onUnmounted, ref } from "vue";
 import { assetsUrl } from "@/setting";
-import { disableTokenUrl } from "@/router/urls";
+import { disableTokenUrl, externalSiteUrl } from "@/router/urls";
 import { useApplicationInitStore } from "./stores/appInits";
 import apiClient from "@/axiosClient";
+import ExternalSiteUrlSettingModal from "@/components/site/ExternalSiteUrlSettingModal.vue";
+import MessageModal from "@/components/common/MessageModal.vue";
 
 const appInitStore = useApplicationInitStore();
 const appTitle = ref(appInitStore.appInitData.appTitle);
@@ -17,17 +19,18 @@ const mapviewRedirect = (): void => {
 
 mapviewRedirect();
 
-// メモアイコンの表示非表示管理
-const isShowHelpIcon = ref(true);
-const isShowMemoIcon = ref(true);
-const isExitIcon = ref(true);
+// 画面右上の機能ボタンゾーンの表示非表示管理
+const isShowOtherFunctionButtonZone = ref(true);
 // 他の子コンポーネントで表示・非表示を切り替えられるようにprovide
-provide("isShowHelpIcon", isShowHelpIcon);
-provide("isShowMemoIcon", isShowMemoIcon);
-provide("isExitIcon", isExitIcon);
+provide("isShowOtherFunctionButtonZone", isShowOtherFunctionButtonZone);
 
 // メモモーダルの描画
 const showMemoContent = ref(false);
+const showExternalSiteUrlSettingModal = ref(false);
+const isMessageModal = ref(false);
+const messageText = ref("");
+const defaultExternalSiteHref = "https://project.geocode-web.com";
+const externalSiteHref = ref(defaultExternalSiteHref);
 const onOpenCloseMemoModal = (): void => {
   if (showMemoContent.value === true) {
     showMemoContent.value = false;
@@ -46,8 +49,36 @@ async function loginRedirect(): Promise<void> {
   } catch (error) {
     console.error(error);
   }
+  resetExternalSiteHref();
+  isShowOtherFunctionButtonZone.value = false;
   router.push("/account/login");
 }
+
+const showAppMessage = (message: string): void => {
+  messageText.value = message;
+  isMessageModal.value = true;
+};
+
+const closeAppMessage = (): void => {
+  messageText.value = "";
+  isMessageModal.value = false;
+};
+
+const resetExternalSiteHref = (): void => {
+  externalSiteHref.value = defaultExternalSiteHref;
+};
+
+const fetchExternalSiteHref = async (): Promise<void> => {
+  try {
+    const response = await apiClient.get(externalSiteUrl);
+    externalSiteHref.value = response.data["url"];
+  } catch (error) {
+    console.error("External site URL get error.", error);
+  }
+};
+
+provide("fetchExternalSiteHref", fetchExternalSiteHref);
+provide("resetExternalSiteHref", resetExternalSiteHref);
 
 // メモモーダル表示時に灰色の部分のクリック時にもメモモーダルを閉じる処理
 // HTMLが描画後に組み込む（onmoutedを利用）
@@ -85,6 +116,7 @@ const handleKeyDown = (event: KeyboardEvent) => {
 
 // コンポーネントマウント時にイベントリスナーを追加
 onMounted(() => {
+  fetchExternalSiteHref();
   window.addEventListener("keydown", handleKeyDown);
 });
 
@@ -111,27 +143,36 @@ onMounted(() => {
   <div class="app-header">
     <h1>{{ appTitle }}</h1>
   </div>
-  <div class="other-function-btn-zone">
+  <div v-if="isShowOtherFunctionButtonZone" class="other-function-btn-zone">
     <a
-      v-if="isShowHelpIcon"
       href="https://project.geocode-web.com/user-guide.html"
       target="_blank"
       ref="nooperner noreferer"
       class="btn-memo-open-close"
-      title="Help"
+      title="ユーザーガイドを開く"
     >
       <img :src="`${assetsUrl}help_24.png`" class="btn-img" alt="help_24.png" />
     </a>
-    <button
-      v-if="isShowMemoIcon"
-      class="btn-memo-open-close"
-      title="Memo"
-      v-on:click="onOpenCloseMemoModal"
-    >
+    <button class="btn-memo-open-close" title="Memo" v-on:click="onOpenCloseMemoModal">
       <img :src="`${assetsUrl}memo_24.png`" class="btn-img" alt="memo_24.png" />
     </button>
+    <a
+      :href="externalSiteHref"
+      target="_blank"
+      rel="noopener noreferrer"
+      class="btn-memo-open-close"
+      title="外部サイトを開く"
+    >
+      <img :src="`${assetsUrl}new_window_fill24.png`" class="btn-img" alt="new_window_fill24.png" />
+    </a>
     <button
-      v-if="isExitIcon"
+      class="btn-memo-open-close"
+      title="外部サイトURL設定"
+      v-on:click="showExternalSiteUrlSettingModal = true"
+    >
+      <img :src="`${assetsUrl}link_24.png`" class="btn-img" alt="link_24.png" />
+    </button>
+    <button
       class="btn-memo-open-close"
       title="ログアウト&#10;アカウントを変更します。"
       v-on:click="loginRedirect"
@@ -152,6 +193,16 @@ onMounted(() => {
         </div>
       </div>
     </transition>
+
+    <ExternalSiteUrlSettingModal
+      :isOpen="showExternalSiteUrlSettingModal"
+      @close="showExternalSiteUrlSettingModal = false"
+      @message="showAppMessage"
+      @loginRedirect="loginRedirect()"
+      @saved="fetchExternalSiteHref()"
+    />
+
+    <MessageModal :isOpen="isMessageModal" :message="messageText" @close="closeAppMessage" />
   </div>
 </template>
 
@@ -195,7 +246,7 @@ a {
 
 /* メモモーダル */
 #overlay-memo {
-  z-index: 4;
+  z-index: 10;
   position: fixed;
   top: 0;
   left: 0;
@@ -209,7 +260,7 @@ a {
 
 /* メモモーダルのコンテンツ */
 #content-memo {
-  z-index: 5;
+  z-index: 11;
   height: 100%;
   width: 80%;
   padding: 1em;
