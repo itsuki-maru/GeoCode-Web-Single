@@ -1560,7 +1560,7 @@ dependencies = [
 
 [[package]]
 name = "geocode_web_single"
-version = "1.0.10"
+version = "1.0.11"
 dependencies = [
  "anyhow",
  "axum",
