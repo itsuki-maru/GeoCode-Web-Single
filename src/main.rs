@@ -28,9 +28,12 @@ const OPEN_EXTERNAL_SCRIPT: &str = r#"
     document.addEventListener('click', function(e) {
         const a = e.target.closest('a');
         if (!a || !a.href) return;
+        if (a.hasAttribute('download')) return;
         try {
-            const { hostname, pathname } = new URL(a.href);
-            if (((hostname !== 'localhost' && hostname !== '127.0.0.1')) || pathname === '/licanses') {
+            const { protocol, hostname, pathname } = new URL(a.href);
+            if (protocol !== 'http:' && protocol !== 'https:') return;
+            const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+            if (!isLocalhost || pathname === '/licanses') {
                 e.preventDefault();
                 window.__TAURI_INTERNALS__.invoke('open_url', { url: a.href });
             }
