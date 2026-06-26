@@ -1,6 +1,7 @@
 use crate::config::CONFIG;
 use crate::error::AppError;
 use crate::model::ReturningId;
+use crate::utils::validate_username;
 use chrono::{TimeDelta, Utc};
 use sqlx::query_as;
 use sqlx::sqlite::SqlitePool;
@@ -201,6 +202,8 @@ pub async fn create_user_with_master_layer(
     hashed_password: &str,
     is_superuser: bool,
 ) -> Result<ReturningId, AppError> {
+    validate_username(username)?;
+
     let now = Utc::now().naive_utc();
     let yesterday = match TimeDelta::try_days(1) {
         Some(one_day_delta) => now - one_day_delta,

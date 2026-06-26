@@ -15,6 +15,8 @@ import { baseUrl, assetsUrl } from "@/setting";
 import { AxiosError } from "axios";
 
 const MIN_PASSWORD_LENGTH = 8;
+const USERNAME_PATTERN = /^[A-Za-z0-9@_.-]{3,}$/;
+const USERNAME_VALIDATION_MESSAGE = "ユーザー名は3文字以上で、半角英数字、@、_、-、.のみ使用できます。";
 
 // 認証のコントロール
 const authStore = useAuthStore();
@@ -177,47 +179,62 @@ const openCloseUserCreateModal = (): void => {
     showCreateUserContent.value = true;
   }
 };
-// サインアップ処理
-const signupPost = async (): Promise<void> => {
-  const username = signupInfoInit.username;
-  const password = signupInfoInit.password;
+const validateSignupInput = (): boolean => {
+  const username = signupInfo.value.username;
+  const password = signupInfo.value.password;
 
-  if (username == "" || password == "") {
+  if (username === "" || password === "") {
     messageModalOpenClose("入力は全て必須です。");
-    return;
+    return false;
+  }
+
+  if (!USERNAME_PATTERN.test(username)) {
+    messageModalOpenClose(USERNAME_VALIDATION_MESSAGE);
+    return false;
   }
 
   if (password.length < MIN_PASSWORD_LENGTH) {
     messageModalOpenClose(`パスワードは${MIN_PASSWORD_LENGTH}文字以上で入力してください。`);
+    return false;
+  }
+
+  return true;
+};
+
+// サインアップ処理
+const signupPost = async (): Promise<void> => {
+  if (!validateSignupInput()) {
     return;
   }
 
   const payload = {
-    username: username,
-    password: password,
+    username: signupInfo.value.username,
+    password: signupInfo.value.password,
   };
 
   try {
-    const response = await apiClient.post(createUserUrl, payload);
+    await apiClient.post(createUserUrl, payload);
     messageModalOpenClose("ユーザーの作成に成功しました。");
     usersStore.initList();
     signupInfo.value.username = "";
     signupInfo.value.password = "";
-    return;
   } catch (error) {
     if (apiClient.isAxiosError(error)) {
-      // エラーオブジェクトがAxiosError型であることが保証
       const axiosError = error as AxiosError<any>;
-      if (axiosError.response) {
-        const errorStatus = axiosError.response.data["error"];
+      const errorStatus = axiosError.response?.data?.["error"];
 
-        if (errorStatus === "unauthorized error: Conflict") {
-          messageModalOpenClose("既に使用されているユーザー名です。");
-        } else {
-          messageModalOpenClose("ユーザーの作成に失敗しました。");
-        }
+      if (axiosError.response?.status === 409 || errorStatus === "conflict") {
+        messageModalOpenClose("既に使用されているユーザー名です。");
+        return;
+      }
+
+      if (axiosError.response?.status === 400 && typeof errorStatus === "string") {
+        messageModalOpenClose("ユーザー名またはパスワードの形式が正しくありません。");
+        return;
       }
     }
+
+    messageModalOpenClose("ユーザーの作成に失敗しました。");
   }
 };
 
@@ -321,13 +338,13 @@ const signupInfo = ref(signupInfoInit);
     <div id="overlay-create-user" v-if="showCreateUserContent">
       <div id="content-create-user">
         <h2 style="text-align: center">ユーザー作成</h2>
-        <div>
+        <form v-on:submit.prevent="signupPost">
           <input
             type="text"
-            pattern="^[A-Za-z0-9]{3,}$"
-            title="3文字以上。半角英数字が使用可能。"
+            pattern="^[A-Za-z0-9@_.-]{3,}$"
+            :title="USERNAME_VALIDATION_MESSAGE"
             class="input-text user-list-password"
-            placeholder="ユーザー名（3文字以上、半角英数字が使用可）"
+            placeholder="ユーザー名（3文字以上、半角英数字、@、_、-、.）"
             autocomplete="username"
             required
             v-model="signupInfo.username"
@@ -342,11 +359,11 @@ const signupInfo = ref(signupInfoInit);
             v-model="signupInfo.password"
             class="input-text user-list-password"
           />
-        </div>
-        <div class="btn-zone">
-          <button v-on:click="openCloseUserCreateModal()">閉じる</button>
-          <button v-on:click="signupPost()">アカウント作成</button>
-        </div>
+          <div class="btn-zone">
+            <button type="button" v-on:click="openCloseUserCreateModal()">閉じる</button>
+            <button type="submit">アカウント作成</button>
+          </div>
+        </form>
       </div>
     </div>
   </transition>

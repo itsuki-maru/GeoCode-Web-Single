@@ -10,6 +10,8 @@ use tokio::fs;
 use tokio::io;
 
 const MIN_PASSWORD_LENGTH: usize = 8;
+const MIN_USERNAME_LENGTH: usize = 3;
+const MAX_USERNAME_LENGTH: usize = 256;
 
 pub fn validate_password(password: &str) -> Result<(), AppError> {
     if password.chars().count() < MIN_PASSWORD_LENGTH {
@@ -20,6 +22,34 @@ pub fn validate_password(password: &str) -> Result<(), AppError> {
     } else {
         Ok(())
     }
+}
+
+pub fn validate_username(username: &str) -> Result<(), AppError> {
+    let username_length = username.chars().count();
+    if username_length < MIN_USERNAME_LENGTH {
+        return Err(AppError::Validation(format!(
+            "Username must be at least {} characters.",
+            MIN_USERNAME_LENGTH
+        )));
+    }
+
+    if username_length > MAX_USERNAME_LENGTH {
+        return Err(AppError::Validation(format!(
+            "Username must be at most {} characters.",
+            MAX_USERNAME_LENGTH
+        )));
+    }
+
+    if !username
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '@' | '_' | '-' | '.'))
+    {
+        return Err(AppError::Validation(
+            "Username can contain only letters, numbers, @, _, -, and .".to_string(),
+        ));
+    }
+
+    Ok(())
 }
 
 pub async fn check_ismaster_handler(
@@ -80,5 +110,33 @@ pub fn ensure_console() {
                 AllocConsole().unwrap();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_username;
+
+    #[test]
+    fn validate_username_accepts_allowed_characters() {
+        assert!(validate_username("User123@_.-").is_ok());
+    }
+
+    #[test]
+    fn validate_username_rejects_short_username() {
+        assert!(validate_username("ab").is_err());
+    }
+
+    #[test]
+    fn validate_username_rejects_over_length_username() {
+        let username = "a".repeat(257);
+        assert!(validate_username(&username).is_err());
+    }
+
+    #[test]
+    fn validate_username_rejects_disallowed_characters() {
+        assert!(validate_username("user name").is_err());
+        assert!(validate_username("user#name").is_err());
+        assert!(validate_username("ユーザー名").is_err());
     }
 }
