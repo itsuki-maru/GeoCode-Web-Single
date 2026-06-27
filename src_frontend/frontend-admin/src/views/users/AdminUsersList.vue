@@ -15,7 +15,7 @@ import { baseUrl, assetsUrl } from "@/setting";
 import { AxiosError } from "axios";
 
 const MIN_PASSWORD_LENGTH = 8;
-const USERNAME_PATTERN = /^[A-Za-z0-9@_.-]{3,}$/;
+const USERNAME_PATTERN = /^[A-Za-z0-9@_.\x2D]{3,}$/;
 const USERNAME_VALIDATION_MESSAGE = "ユーザー名は3文字以上で、半角英数字、@、_、-、.のみ使用できます。";
 
 // 認証のコントロール
@@ -341,7 +341,7 @@ const signupInfo = ref(signupInfoInit);
         <form v-on:submit.prevent="signupPost">
           <input
             type="text"
-            pattern="^[A-Za-z0-9@_.-]{3,}$"
+            pattern="^[A-Za-z0-9@_.\x2D]{3,}$"
             :title="USERNAME_VALIDATION_MESSAGE"
             class="input-text user-list-password"
             placeholder="ユーザー名（3文字以上、半角英数字、@、_、-、.）"
