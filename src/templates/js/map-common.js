@@ -2,6 +2,80 @@
 
 // This file is intentionally non-module so existing inline template scripts can use globals.
 
+function createLayerBulkToggleControl({
+  map,
+  overlayLayers,
+  position = "topright",
+}) {
+  const targetLayers = Array.isArray(overlayLayers)
+    ? overlayLayers.filter(Boolean)
+    : [];
+
+  const LayerBulkToggleControl = L.Control.extend({
+    options: {
+      position,
+    },
+    onAdd: function () {
+      const container = L.DomUtil.create(
+        "div",
+        "leaflet-bar leaflet-control layer-bulk-toggle-control",
+      );
+      const button = L.DomUtil.create(
+        "button",
+        "custom-control-button",
+        container,
+      );
+      button.type = "button";
+
+      const hasVisibleLayer = () =>
+        targetLayers.some((layer) => map.hasLayer(layer));
+
+      const updateButtonState = () => {
+        const shouldClear = hasVisibleLayer();
+        button.textContent = shouldClear ? "全解除" : "全選択";
+        button.setAttribute("aria-label", button.textContent);
+      };
+
+      const toggleAllLayers = () => {
+        const shouldClear = hasVisibleLayer();
+        targetLayers.forEach((layer) => {
+          if (shouldClear) {
+            if (map.hasLayer(layer)) {
+              map.removeLayer(layer);
+            }
+            return;
+          }
+
+          if (!map.hasLayer(layer)) {
+            map.addLayer(layer);
+          }
+        });
+        updateButtonState();
+      };
+
+      L.DomEvent.on(button, "click", (event) => {
+        L.DomEvent.stop(event);
+        toggleAllLayers();
+      });
+
+      map.on("overlayadd overlayremove", (event) => {
+        if (!targetLayers.includes(event.layer)) {
+          return;
+        }
+        updateButtonState();
+      });
+
+      L.DomEvent.disableClickPropagation(container);
+      if (L.DomEvent.disableScrollPropagation) {
+        L.DomEvent.disableScrollPropagation(container);
+      }
+      updateButtonState();
+      return container;
+    },
+  });
+
+  return new LayerBulkToggleControl();
+}
 function extractYouTubeId(rawUrl) {
   try {
     const url = new URL(rawUrl);
@@ -601,6 +675,87 @@ function matchesMarkerSearch(record, query) {
   return searchableText.includes(normalizedQuery);
 }
 
+// レイヤのチェック状態と検索条件から、表示用の単一マーカーグループを再構築する
+function createLayeredMarkerDisplayManager({
+  map,
+  markerRecords,
+  markers,
+  visibleMarkerGroup,
+  layerVisibilityGroups,
+  inputId = "marker-search-input",
+}) {
+  let searchQuery = "";
+
+  // layersControl 用の管理レイヤが地図上にあるかでチェック状態を判定する
+  const isLayerVisible = (layerId) => {
+    const visibilityGroup = layerVisibilityGroups?.[layerId];
+    return Boolean(visibilityGroup && map.hasLayer(visibilityGroup));
+  };
+
+  const findLayerIdByVisibilityGroup = (targetGroup) => {
+    for (const layerId in layerVisibilityGroups) {
+      if (layerVisibilityGroups[layerId] === targetGroup) {
+        return layerId;
+      }
+    }
+
+    return null;
+  };
+
+  // チェック済みレイヤと検索条件に一致するマーカーだけを表示用グループへ入れ直す
+  const rebuildVisibleMarkers = () => {
+    if (!markerRecords || !markers || !visibleMarkerGroup) {
+      return;
+    }
+
+    visibleMarkerGroup.clearLayers();
+
+    Object.keys(markerRecords).forEach((key) => {
+      const record = markerRecords[key];
+      const layerId = record?.layer_id;
+      if (
+        !isLayerVisible(layerId) ||
+        !matchesMarkerSearch(record, searchQuery)
+      ) {
+        return;
+      }
+
+      const marker = markers[`marker-${record?.id}`];
+      if (marker) {
+        visibleMarkerGroup.addLayer(marker);
+      }
+    });
+
+    if (map && typeof map.closePopup === "function") {
+      map.closePopup();
+    }
+  };
+
+  const setSearchQuery = (query) => {
+    searchQuery = normalizeMarkerSearchText(query) ? query : "";
+    rebuildVisibleMarkers();
+  };
+
+  const clearSearch = ({ clearInput = true } = {}) => {
+    searchQuery = "";
+    if (clearInput) {
+      const input = document.getElementById(inputId);
+      if (input) {
+        input.value = "";
+      }
+    }
+    rebuildVisibleMarkers();
+  };
+
+  return {
+    clearSearch,
+    findLayerIdByVisibilityGroup,
+    isLayerVisible,
+    rebuildVisibleMarkers,
+    setSearchQuery,
+  };
+}
+
 function filterLayeredMarkersByQuery({
   markerRecords,
   markers,
@@ -705,6 +860,11 @@ function createMarkerSearchControl(options = {}) {
         if (event) {
           L.DomEvent.stop(event);
         }
+        // 画面側で独自の再構築処理を持つ場合はそちらへ委譲する
+        if (typeof options.onSearch === "function") {
+          options.onSearch(input?.value ?? "");
+          return;
+        }
         filterLayeredMarkersByQuery({
           markerRecords: options.markerRecords,
           markers: options.markers,
@@ -718,6 +878,11 @@ function createMarkerSearchControl(options = {}) {
         }
 
         if (!normalizeMarkerSearchText(input?.value ?? "")) {
+          // 検索解除時も画面側の表示用グループを復元できるようにする
+          if (typeof options.onClear === "function") {
+            options.onClear({ clearInput: false });
+            return;
+          }
           clearLayeredMarkerSearch({
             markerRecords: options.markerRecords,
             markers: options.markers,
@@ -1042,6 +1207,7 @@ const SELECTED_TILE_SERVER_STORAGE_KEY = "geocode-web:selected-tile-server-id";
 const USER_LOCATION_VISIBILITY_STORAGE_KEY =
   "geocode-web:user-location-visible";
 const SHAPE_LAYER_VISIBILITY_STORAGE_KEY = "geocode-web:shape-layer-visible";
+const MAP_MOBILE_UI_HIDDEN_STORAGE_KEY = "geocode-web:map-mobile-ui-hidden";
 // 一時共有マップなどから通常マップの選択状態を書き換えないよう、必要な画面だけで有効化する
 let isTileServerSelectionPersistenceEnabled = false;
 
@@ -1151,6 +1317,35 @@ function saveShapeLayerVisibility(isVisible) {
     );
   } catch (error) {
     console.warn("Failed to save shape layer visibility:", error);
+  }
+}
+
+// モバイルマップの操作 UI 表示状態を復元する。保存値がない場合は従来どおり表示する
+function getInitialMapMobileUiHidden() {
+  try {
+    const savedHidden = localStorage.getItem(MAP_MOBILE_UI_HIDDEN_STORAGE_KEY);
+    if (savedHidden === "true") {
+      return true;
+    }
+    if (savedHidden === "false") {
+      return false;
+    }
+  } catch (error) {
+    console.warn("Failed to restore mobile map UI visibility:", error);
+  }
+
+  return false;
+}
+
+// モバイルマップの操作 UI 表示状態を保存する。localStorageが利用できない環境でも地図表示は継続する
+function saveMapMobileUiHidden(isHidden) {
+  try {
+    localStorage.setItem(
+      MAP_MOBILE_UI_HIDDEN_STORAGE_KEY,
+      isHidden ? "true" : "false",
+    );
+  } catch (error) {
+    console.warn("Failed to save mobile map UI visibility:", error);
   }
 }
 
@@ -1334,7 +1529,7 @@ function initializeUserLocation(map, options = {}) {
   // 現在位置の取得ボタン
   const UserLocationControl = L.Control.extend({
     options: {
-      position: options.position ?? "topleft",
+      position: options.position ?? "topright",
     },
     onAdd: function () {
       const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
@@ -1343,7 +1538,7 @@ function initializeUserLocation(map, options = {}) {
         "custom-control-button",
         container,
       );
-      button.innerHTML = "現在位置へ移動";
+      button.innerHTML = "現在位置";
 
       // ボタンのクリックイベント
       L.DomEvent.on(button, "click", function (event) {

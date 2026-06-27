@@ -265,6 +265,109 @@ L.control
   )
   .addTo(map);
 
+// 地図を見やすくするため、操作 UI の表示状態をまとめて管理する
+const hideableMapUiContainers = new Set();
+let isMapUiHidden = getInitialMapMobileUiHidden();
+let mapUiVisibilityToggleButton = null;
+
+// UI 表示切替ボタンの文言とアクセシビリティ属性を更新する
+function updateMapUiVisibilityToggleButton() {
+  if (!mapUiVisibilityToggleButton) {
+    return;
+  }
+
+  const buttonText = isMapUiHidden ? "機能を表示" : "機能を非表示";
+  mapUiVisibilityToggleButton.textContent = buttonText;
+  mapUiVisibilityToggleButton.setAttribute("aria-label", buttonText);
+  mapUiVisibilityToggleButton.setAttribute(
+    "aria-pressed",
+    String(isMapUiHidden),
+  );
+}
+
+// 登録済みの操作 UI を一括で表示・非表示にする
+function setMapUiHidden(hidden) {
+  isMapUiHidden = hidden;
+  hideableMapUiContainers.forEach((container) => {
+    container.classList.toggle("is-hidden", isMapUiHidden);
+  });
+  updateMapUiVisibilityToggleButton();
+  saveMapMobileUiHidden(isMapUiHidden);
+}
+
+// 非表示対象の Leaflet コントロール DOM を登録する
+function registerHideableMapUiContainer(container) {
+  if (!container) {
+    return;
+  }
+
+  container.classList.add("map-mobile-hideable-ui");
+  container.classList.toggle("is-hidden", isMapUiHidden);
+  hideableMapUiContainers.add(container);
+}
+
+// Leaflet コントロールから非表示対象の DOM を取り出して登録する
+function registerHideableMapControl(control) {
+  if (control && typeof control.getContainer === "function") {
+    registerHideableMapUiContainer(control.getContainer());
+  }
+  return control;
+}
+
+// 共通ヘルパー内で追加されるコントロールを検出するため、追加前の状態を控える
+function getMapControlContainersSnapshot() {
+  return new Set(
+    Array.from(
+      document.querySelectorAll(".leaflet-control-container .leaflet-control"),
+    ),
+  );
+}
+
+// 追加前の状態と比較し、新しく増えたコントロールだけを非表示対象にする
+function registerNewHideableMapControlContainers(previousContainers) {
+  document
+    .querySelectorAll(".leaflet-control-container .leaflet-control")
+    .forEach((container) => {
+      if (!previousContainers.has(container)) {
+        registerHideableMapUiContainer(container);
+      }
+    });
+}
+
+// 操作 UI の表示・非表示を切り替えるボタン
+const MapUiVisibilityToggleControl = L.Control.extend({
+  options: {
+    position: "topleft",
+  },
+  onAdd: function () {
+    const container = L.DomUtil.create(
+      "div",
+      "leaflet-bar leaflet-control map-ui-visibility-toggle-control",
+    );
+    const button = L.DomUtil.create(
+      "button",
+      "custom-control-button",
+      container,
+    );
+    button.type = "button";
+    mapUiVisibilityToggleButton = button;
+
+    L.DomEvent.on(button, "click", function (event) {
+      L.DomEvent.stop(event);
+      setMapUiHidden(!isMapUiHidden);
+    });
+
+    L.DomEvent.disableClickPropagation(container);
+    if (L.DomEvent.disableScrollPropagation) {
+      L.DomEvent.disableScrollPropagation(container);
+    }
+    updateMapUiVisibilityToggleButton();
+    return container;
+  },
+});
+
+map.addControl(new MapUiVisibilityToggleControl());
+
 // 入力モードと閲覧モードの制御
 var ModeControl = L.Control.extend({
   options: {
@@ -299,7 +402,9 @@ var ModeControl = L.Control.extend({
 });
 
 // 地図にカスタムコントロールを追加
-map.addControl(new ModeControl());
+const modeControl = new ModeControl();
+map.addControl(modeControl);
+registerHideableMapControl(modeControl);
 
 // タイルレイヤーの制御
 var TileControl = L.Control.extend({
@@ -337,7 +442,9 @@ var TileControl = L.Control.extend({
 });
 
 // 地図にタイルコントロールを追加
-map.addControl(new TileControl());
+const tileControl = new TileControl();
+map.addControl(tileControl);
+registerHideableMapControl(tileControl);
 
 // 初期タイルの設定
 var tileLayer = L.tileLayer(initialTileServer["url"], {
@@ -2434,7 +2541,7 @@ function handleRadioChange(event) {
 // ツールチップの制御
 const TooltipVisibleControl = L.Control.extend({
   options: {
-    position: "topright",
+    position: "topleft",
   },
   onAdd: function (map) {
     const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
@@ -2461,7 +2568,8 @@ const TooltipVisibleControl = L.Control.extend({
 });
 
 // 地図にタイルコントロールを追加
-map.addControl(new TooltipVisibleControl());
+const tooltipVisibleControl = new TooltipVisibleControl();
+map.addControl(tooltipVisibleControl);
 
 // ツールチップの表示・非表示を管理する
 let isTooltipVisible = false;
@@ -2480,14 +2588,18 @@ function toggleMeasurementLabels() {
 // 緯度経度入力から対象地点へフォーカスする
 // 座標の入力値検査（緯度経度が妥当な数値範囲かを判定する）
 // 地図に検索コントロールを追加
-map.addControl(createCodeSearchControl());
-map.addControl(
-  createFlatMarkerSearchControl({
-    onSearch: applyLocalMarkerSearch,
-  }),
-);
+const codeSearchControl = createCodeSearchControl();
+map.addControl(codeSearchControl);
+registerHideableMapControl(codeSearchControl);
+const markerSearchControl = createFlatMarkerSearchControl({
+  onSearch: applyLocalMarkerSearch,
+});
+map.addControl(markerSearchControl);
 
+// 現在位置コントロールは共通処理内で追加されるため、追加前後の差分から登録する
+const controlsBeforeUserLocation = getMapControlContainersSnapshot();
 const userLocationLayer = initializeUserLocation(map);
+registerNewHideableMapControlContainers(controlsBeforeUserLocation);
 if (userLocationLayer && !getInitialUserLocationVisibility()) {
   map.removeLayer(userLocationLayer);
 }
@@ -2573,7 +2685,9 @@ const DrawShapeControl = L.Control.extend({
   },
 });
 
-map.addControl(new DrawShapeControl());
+const drawShapeControl = new DrawShapeControl();
+map.addControl(drawShapeControl);
+registerHideableMapControl(drawShapeControl);
 restoreSavedShapes();
 drawnShapesGroup.addTo(map);
 if (!getInitialShapeLayerVisibility()) {
@@ -2584,12 +2698,11 @@ const shapeLayerOverlays = { 図形: drawnShapesGroup };
 if (userLocationLayer) {
   shapeLayerOverlays["現在位置"] = userLocationLayer;
 }
-const shapeLayersControl = L.control.layers(
-  null,
-  shapeLayerOverlays,
-  { collapsed: false },
-);
+const shapeLayersControl = L.control.layers(null, shapeLayerOverlays, {
+  collapsed: false,
+});
 shapeLayersControl.addTo(map);
+registerHideableMapControl(shapeLayersControl);
 map.on("overlayadd", function (event) {
   if (event.layer === userLocationLayer) {
     saveUserLocationVisibility(true);
@@ -2659,7 +2772,9 @@ const MeasurementVisibleControl = L.Control.extend({
   },
 });
 
-map.addControl(new MeasurementVisibleControl());
+const measurementVisibleControl = new MeasurementVisibleControl();
+map.addControl(measurementVisibleControl);
+registerHideableMapControl(measurementVisibleControl);
 
 // 指定地点へ地図を移動し、必要ならマーカーを強調表示する
 function onFocusMarker(markerId, lat, lng) {

@@ -241,7 +241,13 @@ var tileLayer = L.tileLayer(tileServers["1"]["url"], {
 // ポップアップを開く関数
 // クラスターグループを管理するオブジェクト
 const clusterGroups = {};
+// layersControl のチェック状態を管理するための空レイヤ
+const layerVisibilityGroups = {};
+// チェック済みレイヤのマーカーを集約して、レイヤ横断でクラスタ化する表示用グループ
+const visibleMarkerGroup = L.markerClusterGroup();
+visibleMarkerGroup.addTo(map);
 const shapeGroups = {};
+const shapeVisibilityLayer = L.layerGroup().addTo(map);
 let isMeasurementVisible = false;
 let isMeasurementSegmentMerged = false;
 // マーカーにIDを振るためのオブジェクト
@@ -269,7 +275,10 @@ function createMarkerGroupForLayer(layerId) {
   }
 
   if (!clusterGroups[layerId]) {
-    clusterGroups[layerId] = L.markerClusterGroup();
+    clusterGroups[layerId] = L.featureGroup();
+  }
+  if (!layerVisibilityGroups[layerId]) {
+    layerVisibilityGroups[layerId] = L.layerGroup();
   }
 
   return clusterGroups[layerId];
@@ -290,13 +299,7 @@ function ensureShapeGroup(layerId) {
 
 // マーカーグループから対応するレイヤ ID を逆引きする
 function findLayerIdByMarkerGroup(targetGroup) {
-  for (const layerId in clusterGroups) {
-    if (clusterGroups[layerId] === targetGroup) {
-      return layerId;
-    }
-  }
-
-  return null;
+  return layeredMarkerDisplay.findLayerIdByVisibilityGroup(targetGroup);
 }
 
 // 指定レイヤのチェック状態に合わせて図形表示を同期する
@@ -305,7 +308,10 @@ function syncShapeGroupVisibility(layerId) {
     return;
   }
 
-  if (map.hasLayer(clusterGroups[layerId])) {
+  if (
+    map.hasLayer(shapeVisibilityLayer) &&
+    layeredMarkerDisplay.isLayerVisible(layerId)
+  ) {
     if (!map.hasLayer(shapeGroups[layerId])) {
       shapeGroups[layerId].addTo(map);
     }
@@ -699,7 +705,7 @@ for (const key in shapesObj) {
 
 // isChecked が true の場合のみ、初期表示で共有レイヤを地図に追加する
 if (isChecked) {
-  Object.values(clusterGroups).forEach((group) => group.addTo(map));
+  Object.values(layerVisibilityGroups).forEach((group) => group.addTo(map));
 }
 
 // 共有図形の復元
@@ -736,40 +742,65 @@ for (const key in shapesObj) {
 // L.control.layers にクラスターグループを追加する
 const layersControl = L.control.layers(null, null, { collapsed: false });
 
-// クラスターグループの名前を設定して、レイヤーコントロールに追加する
+// 表示切替用の空レイヤをレイヤーコントロールに追加する
+const layerControlOverlayLayers = [];
 for (const layer_id in clusterGroups) {
   const layerName = layerNames[layer_id];
   if (!layerName) {
     continue;
   }
-  layersControl.addOverlay(clusterGroups[layer_id], layerName);
+  layersControl.addOverlay(layerVisibilityGroups[layer_id], layerName);
+  layerControlOverlayLayers.push(layerVisibilityGroups[layer_id]);
 }
 
 // レイヤーコントロールをマップに追加
 layersControl.addTo(map);
+// チェック状態に応じて単一の表示用グループへマーカーを集約する
+const layeredMarkerDisplay = createLayeredMarkerDisplayManager({
+  map,
+  markerRecords: markersObj,
+  markers,
+  visibleMarkerGroup,
+  layerVisibilityGroups,
+});
+layeredMarkerDisplay.rebuildVisibleMarkers();
+map.addControl(
+  createLayerBulkToggleControl({
+    map,
+    overlayLayers: layerControlOverlayLayers,
+  }),
+);
 syncAllShapeGroupsVisibility();
 map.on("overlayadd", function (event) {
+  if (event.layer === shapeVisibilityLayer) {
+    syncAllShapeGroupsVisibility();
+    return;
+  }
+
   const layerId = findLayerIdByMarkerGroup(event.layer);
   if (!layerId) {
     return;
   }
 
-  clearLayeredMarkerSearch({
-    markerRecords: markersObj,
-    markers: markers,
-    clusterGroups: clusterGroups,
-  });
+  // レイヤ切替時は検索状態を解除し、表示用グループを作り直す
+  layeredMarkerDisplay.clearSearch();
 
   setTimeout(() => {
     syncShapeGroupVisibility(layerId);
   }, 0);
 });
 map.on("overlayremove", function (event) {
+  if (event.layer === shapeVisibilityLayer) {
+    syncAllShapeGroupsVisibility();
+    return;
+  }
+
   const layerId = findLayerIdByMarkerGroup(event.layer);
   if (!layerId) {
     return;
   }
 
+  layeredMarkerDisplay.rebuildVisibleMarkers();
   syncShapeGroupVisibility(layerId);
 });
 
@@ -870,19 +901,20 @@ map.addControl(
     markerRecords: markersObj,
     markers: markers,
     clusterGroups: clusterGroups,
+    // 検索時も表示用グループの再構築へ委譲する
+    onSearch: layeredMarkerDisplay.setSearchQuery,
+    onClear: layeredMarkerDisplay.clearSearch,
   }),
 );
 
 const userLocationLayer = initializeUserLocation(map);
+const mapVisibilityOverlays = { 図形: shapeVisibilityLayer };
 if (userLocationLayer) {
-  L.control
-    .layers(
-      null,
-      { 現在位置: userLocationLayer },
-      {
-        collapsed: false,
-        position: "topleft",
-      },
-    )
-    .addTo(map);
+  mapVisibilityOverlays["現在位置"] = userLocationLayer;
 }
+L.control
+  .layers(null, mapVisibilityOverlays, {
+    collapsed: false,
+    position: "topleft",
+  })
+  .addTo(map);

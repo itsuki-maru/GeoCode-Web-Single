@@ -199,6 +199,106 @@ L.control
   )
   .addTo(map);
 
+// 地図を見やすくするため、操作 UI の表示状態をまとめて管理する
+const hideableMapUiContainers = new Set();
+let isMapUiHidden = true;
+let mapUiVisibilityToggleButton = null;
+
+// UI 表示切替ボタンの文言とアクセシビリティ属性を更新する
+function updateMapUiVisibilityToggleButton() {
+  if (!mapUiVisibilityToggleButton) {
+    return;
+  }
+
+  const buttonText = isMapUiHidden ? "機能を表示" : "地図だけを表示";
+  mapUiVisibilityToggleButton.textContent = buttonText;
+  mapUiVisibilityToggleButton.setAttribute("aria-label", buttonText);
+  mapUiVisibilityToggleButton.setAttribute(
+    "aria-pressed",
+    String(isMapUiHidden),
+  );
+}
+
+// 登録済みの操作 UI を一括で表示・非表示にする
+function setMapUiHidden(hidden) {
+  isMapUiHidden = hidden;
+  hideableMapUiContainers.forEach((container) => {
+    container.classList.toggle("is-hidden", isMapUiHidden);
+  });
+  updateMapUiVisibilityToggleButton();
+}
+
+// 非表示対象の Leaflet コントロール DOM を登録する
+function registerHideableMapUiContainer(container) {
+  if (!container) {
+    return;
+  }
+
+  container.classList.add("temporary-map-hideable-ui");
+  container.classList.toggle("is-hidden", isMapUiHidden);
+  hideableMapUiContainers.add(container);
+}
+
+// Leaflet コントロールから非表示対象の DOM を取り出して登録する
+function registerHideableMapControl(control) {
+  if (control && typeof control.getContainer === "function") {
+    registerHideableMapUiContainer(control.getContainer());
+  }
+  return control;
+}
+
+// 共通ヘルパー内で追加されるコントロールを検出するため、追加前の状態を控える
+function getMapControlContainersSnapshot() {
+  return new Set(
+    Array.from(
+      document.querySelectorAll(".leaflet-control-container .leaflet-control"),
+    ),
+  );
+}
+
+// 追加前の状態と比較し、新しく増えたコントロールだけを非表示対象にする
+function registerNewHideableMapControlContainers(previousContainers) {
+  document
+    .querySelectorAll(".leaflet-control-container .leaflet-control")
+    .forEach((container) => {
+      if (!previousContainers.has(container)) {
+        registerHideableMapUiContainer(container);
+      }
+    });
+}
+
+// 操作 UI の表示・非表示を切り替えるボタン
+const MapUiVisibilityToggleControl = L.Control.extend({
+  options: {
+    position: "bottomleft",
+  },
+  onAdd: function () {
+    const container = L.DomUtil.create(
+      "div",
+      "leaflet-bar leaflet-control map-ui-visibility-toggle-control",
+    );
+    const button = L.DomUtil.create(
+      "button",
+      "custom-control-button",
+      container,
+    );
+    button.type = "button";
+    mapUiVisibilityToggleButton = button;
+
+    L.DomEvent.on(button, "click", function (event) {
+      L.DomEvent.stop(event);
+      setMapUiHidden(!isMapUiHidden);
+    });
+
+    L.DomEvent.disableClickPropagation(container);
+    if (L.DomEvent.disableScrollPropagation) {
+      L.DomEvent.disableScrollPropagation(container);
+    }
+    updateMapUiVisibilityToggleButton();
+    return container;
+  },
+});
+
 // タイルレイヤーの制御
 var TileControl = L.Control.extend({
   options: {
@@ -235,7 +335,9 @@ var TileControl = L.Control.extend({
 });
 
 // 地図にタイルコントロールを追加
-map.addControl(new TileControl());
+const tileControl = new TileControl();
+map.addControl(tileControl);
+registerHideableMapControl(tileControl);
 
 // 初期タイルの設定
 var tileLayer = L.tileLayer(tileServers["1"]["url"], {
@@ -248,7 +350,13 @@ var tileLayer = L.tileLayer(tileServers["1"]["url"], {
 // ポップアップを開く関数
 // クラスターグループを管理するオブジェクト
 const clusterGroups = {};
+// layersControl のチェック状態を管理するための空レイヤ
+const layerVisibilityGroups = {};
+// チェック済みレイヤのマーカーを集約して、レイヤ横断でクラスタ化する表示用グループ
+const visibleMarkerGroup = L.markerClusterGroup();
+visibleMarkerGroup.addTo(map);
 const shapeGroups = {};
+const shapeVisibilityLayer = L.layerGroup().addTo(map);
 let isMeasurementVisible = false;
 let isMeasurementSegmentMerged = false;
 // マーカーにIDを振るためのオブジェクト
@@ -276,7 +384,10 @@ function createMarkerGroupForLayer(layerId) {
   }
 
   if (!clusterGroups[layerId]) {
-    clusterGroups[layerId] = L.markerClusterGroup();
+    clusterGroups[layerId] = L.featureGroup();
+  }
+  if (!layerVisibilityGroups[layerId]) {
+    layerVisibilityGroups[layerId] = L.layerGroup();
   }
 
   return clusterGroups[layerId];
@@ -297,13 +408,7 @@ function ensureShapeGroup(layerId) {
 
 // マーカーグループから対応するレイヤ ID を逆引きする
 function findLayerIdByMarkerGroup(targetGroup) {
-  for (const layerId in clusterGroups) {
-    if (clusterGroups[layerId] === targetGroup) {
-      return layerId;
-    }
-  }
-
-  return null;
+  return layeredMarkerDisplay.findLayerIdByVisibilityGroup(targetGroup);
 }
 
 // 指定レイヤのチェック状態に合わせて図形表示を同期する
@@ -312,7 +417,10 @@ function syncShapeGroupVisibility(layerId) {
     return;
   }
 
-  if (map.hasLayer(clusterGroups[layerId])) {
+  if (
+    map.hasLayer(shapeVisibilityLayer) &&
+    layeredMarkerDisplay.isLayerVisible(layerId)
+  ) {
     if (!map.hasLayer(shapeGroups[layerId])) {
       shapeGroups[layerId].addTo(map);
     }
@@ -706,7 +814,7 @@ for (const key in shapesObj) {
 
 // isChecked が true の場合のみ、初期表示で共有レイヤを地図に追加する
 if (isChecked) {
-  Object.values(clusterGroups).forEach((group) => group.addTo(map));
+  Object.values(layerVisibilityGroups).forEach((group) => group.addTo(map));
 }
 
 // 共有図形の復元
@@ -740,50 +848,147 @@ for (const key in shapesObj) {
   attachShapeMeasurementMarkers(layer, layerId);
 }
 
+function initializeCollapsibleLayerControl(layersControl, overlayCount) {
+  if (overlayCount < 4) {
+    return;
+  }
+
+  const container = layersControl.getContainer();
+  if (!container) {
+    return;
+  }
+
+  const overlayContainer = container.querySelector(
+    ".leaflet-control-layers-overlays",
+  );
+  if (!overlayContainer) {
+    return;
+  }
+
+  const applyCollapsibleItems = () => {
+    const overlayItems = Array.from(overlayContainer.querySelectorAll("label"));
+    overlayItems.forEach((item) => {
+      item.classList.remove("temporary-layer-control-collapsible-item");
+    });
+    overlayItems.slice(2).forEach((item) => {
+      item.classList.add("temporary-layer-control-collapsible-item");
+    });
+    return overlayItems.length;
+  };
+
+  if (applyCollapsibleItems() < 4) {
+    return;
+  }
+
+  container.classList.add("temporary-layer-control");
+
+  const toggleButton = L.DomUtil.create(
+    "button",
+    "temporary-layer-control-toggle",
+    container,
+  );
+  toggleButton.type = "button";
+
+  const updateToggleState = () => {
+    const isCollapsed = container.classList.contains("is-collapsed");
+    toggleButton.textContent = isCollapsed ? "すべて表示" : "折り畳む";
+    toggleButton.setAttribute("aria-expanded", String(!isCollapsed));
+  };
+
+  L.DomEvent.on(toggleButton, "click", (event) => {
+    L.DomEvent.stop(event);
+    applyCollapsibleItems();
+    container.classList.toggle("is-collapsed");
+    updateToggleState();
+  });
+
+  map.on("overlayadd overlayremove", () => {
+    setTimeout(() => {
+      applyCollapsibleItems();
+    }, 0);
+  });
+
+  L.DomEvent.disableClickPropagation(container);
+  if (L.DomEvent.disableScrollPropagation) {
+    L.DomEvent.disableScrollPropagation(container);
+  }
+  updateToggleState();
+}
+
 // L.control.layers にクラスターグループを追加する
 const layersControl = L.control.layers(null, null, { collapsed: false });
 
-// クラスターグループの名前を設定して、レイヤーコントロールに追加する
+// 表示切替用の空レイヤをレイヤーコントロールに追加する
+const layerControlOverlayLayers = [];
 for (const layer_id in clusterGroups) {
   const layerName = layerNames[layer_id];
   if (!layerName) {
     continue;
   }
-  layersControl.addOverlay(clusterGroups[layer_id], layerName);
+  layersControl.addOverlay(layerVisibilityGroups[layer_id], layerName);
+  layerControlOverlayLayers.push(layerVisibilityGroups[layer_id]);
 }
 
 // レイヤーコントロールをマップに追加
 layersControl.addTo(map);
+registerHideableMapControl(layersControl);
+// チェック状態に応じて単一の表示用グループへマーカーを集約する
+const layeredMarkerDisplay = createLayeredMarkerDisplayManager({
+  map,
+  markerRecords: markersObj,
+  markers,
+  visibleMarkerGroup,
+  layerVisibilityGroups,
+});
+layeredMarkerDisplay.rebuildVisibleMarkers();
+const layerBulkToggleControl = createLayerBulkToggleControl({
+  map,
+  overlayLayers: layerControlOverlayLayers,
+});
+map.addControl(layerBulkToggleControl);
+registerHideableMapControl(layerBulkToggleControl);
+initializeCollapsibleLayerControl(
+  layersControl,
+  layerControlOverlayLayers.length,
+);
 syncAllShapeGroupsVisibility();
 map.on("overlayadd", function (event) {
+  if (event.layer === shapeVisibilityLayer) {
+    syncAllShapeGroupsVisibility();
+    return;
+  }
+
   const layerId = findLayerIdByMarkerGroup(event.layer);
   if (!layerId) {
     return;
   }
 
-  clearLayeredMarkerSearch({
-    markerRecords: markersObj,
-    markers: markers,
-    clusterGroups: clusterGroups,
-  });
+  // レイヤ切替時は検索状態を解除し、表示用グループを作り直す
+  layeredMarkerDisplay.clearSearch();
 
   setTimeout(() => {
     syncShapeGroupVisibility(layerId);
   }, 0);
 });
 map.on("overlayremove", function (event) {
+  if (event.layer === shapeVisibilityLayer) {
+    syncAllShapeGroupsVisibility();
+    return;
+  }
+
   const layerId = findLayerIdByMarkerGroup(event.layer);
   if (!layerId) {
     return;
   }
 
+  layeredMarkerDisplay.rebuildVisibleMarkers();
   syncShapeGroupVisibility(layerId);
 });
 
 // ツールチップの制御
 const TooltipVisibleControl = L.Control.extend({
   options: {
-    position: "topright",
+    position: "topleft",
   },
   onAdd: function (map) {
     const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
@@ -810,7 +1015,8 @@ const TooltipVisibleControl = L.Control.extend({
 });
 
 // 地図にタイルコントロールを追加
-map.addControl(new TooltipVisibleControl());
+const tooltipVisibleControl = new TooltipVisibleControl();
+map.addControl(tooltipVisibleControl);
 
 // 測定結果ラベル表示・非表示コントロールの定義
 const MeasurementVisibleControl = L.Control.extend({
@@ -854,7 +1060,9 @@ const MeasurementVisibleControl = L.Control.extend({
   },
 });
 
-map.addControl(new MeasurementVisibleControl());
+const measurementVisibleControl = new MeasurementVisibleControl();
+map.addControl(measurementVisibleControl);
+registerHideableMapControl(measurementVisibleControl);
 
 // ツールチップの表示・非表示を管理する
 let isTooltipVisible = false;
@@ -871,13 +1079,31 @@ function toggleMeasurementLabels() {
 // 辺を結合する表示へ切り替える
 
 // 地図に検索コントロールを追加
-map.addControl(createCodeSearchControl());
-map.addControl(
-  createMarkerSearchControl({
-    markerRecords: markersObj,
-    markers: markers,
-    clusterGroups: clusterGroups,
-  }),
-);
+const codeSearchControl = createCodeSearchControl();
+map.addControl(codeSearchControl);
+registerHideableMapControl(codeSearchControl);
+const markerSearchControl = createMarkerSearchControl({
+  markerRecords: markersObj,
+  markers: markers,
+  clusterGroups: clusterGroups,
+  // 検索時も表示用グループの再構築へ委譲する
+  onSearch: layeredMarkerDisplay.setSearchQuery,
+  onClear: layeredMarkerDisplay.clearSearch,
+});
+map.addControl(markerSearchControl);
 
-initializeUserLocation(map);
+// 現在位置コントロールは共通処理内で追加されるため、追加前後の差分から登録する
+const controlsBeforeUserLocation = getMapControlContainersSnapshot();
+const userLocationLayer = initializeUserLocation(map);
+registerNewHideableMapControlContainers(controlsBeforeUserLocation);
+const mapVisibilityOverlays = { 図形: shapeVisibilityLayer };
+if (userLocationLayer) {
+  mapVisibilityOverlays["現在位置"] = userLocationLayer;
+}
+const mapVisibilityControl = L.control.layers(null, mapVisibilityOverlays, {
+  collapsed: false,
+  position: "topleft",
+});
+mapVisibilityControl.addTo(map);
+registerHideableMapControl(mapVisibilityControl);
+map.addControl(new MapUiVisibilityToggleControl());
