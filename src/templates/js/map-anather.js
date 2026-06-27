@@ -303,6 +303,11 @@ var tileLayer = L.tileLayer(tileServers["1"]["url"], {
 // 指定 ID のマーカーポップアップを開く
 // クラスターグループを管理するオブジェクト
 const clusterGroups = {};
+// layersControl のチェック状態を管理するための空レイヤ
+const layerVisibilityGroups = {};
+// チェック済みレイヤのマーカーを集約して、レイヤ横断でクラスタ化する表示用グループ
+const visibleMarkerGroup = isCluster ? L.markerClusterGroup() : L.featureGroup();
+visibleMarkerGroup.addTo(map);
 // マーカーにIDを振るためのオブジェクト
 let markers = {};
 // レイヤー名を格納するオブジェクト
@@ -341,11 +346,10 @@ function createMarkerGroupForLayer(layerId) {
   }
 
   if (!clusterGroups[layerId]) {
-    if (isCluster) {
-      clusterGroups[layerId] = L.markerClusterGroup();
-    } else {
-      clusterGroups[layerId] = L.featureGroup();
-    }
+    clusterGroups[layerId] = L.featureGroup();
+  }
+  if (!layerVisibilityGroups[layerId]) {
+    layerVisibilityGroups[layerId] = L.layerGroup();
   }
 
   return clusterGroups[layerId];
@@ -408,13 +412,30 @@ if (Array.isArray(shapesFromAxum)) {
 // L.control.layers にクラスターグループを追加する
 const layersControl = L.control.layers(null, null, { collapsed: false });
 
-// クラスターグループの名前を設定して、レイヤーコントロールに追加する
+// 表示切替用の空レイヤをレイヤーコントロールに追加する
+const layerControlOverlayLayers = [];
 for (const layer_id in clusterGroups) {
   const layerName = layerNames[layer_id];
-  layersControl.addOverlay(clusterGroups[layer_id], layerName);
+  layersControl.addOverlay(layerVisibilityGroups[layer_id], layerName);
+  layerControlOverlayLayers.push(layerVisibilityGroups[layer_id]);
 }
 
 layersControl.addTo(map);
+// チェック状態に応じて単一の表示用グループへマーカーを集約する
+const layeredMarkerDisplay = createLayeredMarkerDisplayManager({
+  map,
+  markerRecords: markersFromAxum,
+  markers,
+  visibleMarkerGroup,
+  layerVisibilityGroups,
+});
+layeredMarkerDisplay.rebuildVisibleMarkers();
+map.addControl(
+  createLayerBulkToggleControl({
+    map,
+    overlayLayers: layerControlOverlayLayers,
+  }),
+);
 
 // HTMLエスケープを行う関数
 // ラベルやポップアップ表示用に HTML をエスケープする
@@ -451,13 +472,7 @@ function addShapeLayerToManagedGroups(layer, layerId) {
 
 // マーカーグループから対応するレイヤ ID を逆引きする
 function findLayerIdByMarkerGroup(targetGroup) {
-  for (const layerId in clusterGroups) {
-    if (clusterGroups[layerId] === targetGroup) {
-      return layerId;
-    }
-  }
-
-  return null;
+  return layeredMarkerDisplay.findLayerIdByVisibilityGroup(targetGroup);
 }
 
 // 指定レイヤのチェック状態に合わせて図形表示を同期する
@@ -468,7 +483,7 @@ function syncShapeGroupVisibility(layerId) {
 
   if (
     map.hasLayer(shapeVisibilityLayer) &&
-    map.hasLayer(clusterGroups[layerId])
+    layeredMarkerDisplay.isLayerVisible(layerId)
   ) {
     if (!map.hasLayer(shapeGroups[layerId])) {
       shapeGroups[layerId].addTo(map);
@@ -907,11 +922,8 @@ map.on("overlayadd", function (event) {
     return;
   }
 
-  clearLayeredMarkerSearch({
-    markerRecords: markersFromAxum,
-    markers: markers,
-    clusterGroups: clusterGroups,
-  });
+  // レイヤ切替時は検索状態を解除し、表示用グループを作り直す
+  layeredMarkerDisplay.clearSearch();
 
   setTimeout(() => {
     syncShapeGroupVisibility(layerId);
@@ -929,6 +941,7 @@ map.on("overlayremove", function (event) {
     return;
   }
 
+  layeredMarkerDisplay.rebuildVisibleMarkers();
   syncShapeGroupVisibility(layerId);
 });
 
@@ -939,6 +952,9 @@ map.addControl(
     markerRecords: markersFromAxum,
     markers: markers,
     clusterGroups: clusterGroups,
+    // 検索時も表示用グループの再構築へ委譲する
+    onSearch: layeredMarkerDisplay.setSearchQuery,
+    onClear: layeredMarkerDisplay.clearSearch,
   }),
 );
 

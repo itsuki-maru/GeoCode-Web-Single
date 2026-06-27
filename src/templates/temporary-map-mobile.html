@@ -247,6 +247,19 @@
                 background-color: rgb(238, 238, 238);
             }
 
+            /* 地図だけを見せる時に対象 UI を隠す */
+            .temporary-map-hideable-ui.is-hidden {
+                display: none;
+            }
+
+            /* 画面左下の UI 表示切替ボタン */
+            .map-ui-visibility-toggle-control .custom-control-button {
+                box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+                font-size: 16px;
+                min-width: 116px;
+                padding: 8px 14px;
+            }
+
             .measurement-control {
                 display: flex;
                 flex-direction: column;
@@ -277,6 +290,44 @@
 
             .leaflet-control-layers-overlays {
                 font-size: 14px;
+                max-height: calc(100vh - 220px);
+                overflow-y: auto;
+                padding-bottom: 0;
+            }
+
+            .leaflet-control-layers-overlays label {
+                margin-bottom: 8px;
+            }
+
+            .leaflet-control-layers-overlays label:last-child {
+                margin-bottom: 0;
+            }
+
+            .temporary-layer-control {
+                padding-bottom: 4px;
+            }
+
+            .temporary-layer-control.is-collapsed
+                .temporary-layer-control-collapsible-item {
+                display: none;
+            }
+
+            .temporary-layer-control-toggle {
+                background-color: white;
+                border: 1px solid #b7c3d0;
+                border-radius: 4px;
+                color: #0f172a;
+                cursor: pointer;
+                display: block;
+                font-size: 12px;
+                font-weight: bold;
+                line-height: 1.2;
+                margin: 4px 6px 2px auto;
+                padding: 4px 8px;
+            }
+
+            .temporary-layer-control-toggle:hover {
+                background-color: rgb(238, 238, 238);
             }
 
             .search-zone {

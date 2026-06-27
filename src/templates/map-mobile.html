@@ -184,6 +184,16 @@
                 background-color: rgb(238, 238, 238);
             }
 
+            /* 地図だけを見せる時に対象 UI を隠す */
+            .map-mobile-hideable-ui.is-hidden {
+                display: none;
+            }
+
+            /* 画面左上の UI 表示切替ボタン */
+            .map-ui-visibility-toggle-control .custom-control-button {
+                box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+            }
+
             .measurement-control {
                 display: flex;
                 flex-direction: column;
@@ -288,8 +298,10 @@
             }
 
             .leaflet-container.is-shape-drawing:not(.is-shape-delete),
-            .leaflet-container.is-shape-drawing:not(.is-shape-delete) .leaflet-grab,
-            .leaflet-container.is-shape-drawing:not(.is-shape-delete) .leaflet-interactive,
+            .leaflet-container.is-shape-drawing:not(.is-shape-delete)
+                .leaflet-grab,
+            .leaflet-container.is-shape-drawing:not(.is-shape-delete)
+                .leaflet-interactive,
             .leaflet-container.is-shape-delete,
             .leaflet-container.is-shape-delete .leaflet-grab,
             .leaflet-container.is-shape-delete .leaflet-interactive {
@@ -573,8 +585,6 @@
         var layersFromAxum = {{ layersFromAxum | json_encode | safe }}
         var markersFromAxum = {{ markersFromAxum | json_encode | safe }}
         var shapesFromAxum = {{ shapesFromAxum | json_encode | safe }}
-
-
     </script>
     <script src="/assets/map-common.js"></script>
     <script src="/assets/map-mobile.js"></script>
