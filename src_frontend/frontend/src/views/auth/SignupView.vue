@@ -86,7 +86,7 @@ const signupInfo = ref(signupInfoInit);
         <input
           class="form-input"
           id="username"
-          pattern="^[A-Za-z0-9@_.-]{3,}$"
+          pattern="^[A-Za-z0-9@_.\x2D]{3,}$"
           title="The username must be at least 3 characters and can contain letters, numbers, @, _, -, and ."
           type="text"
           placeholder="Username"
