@@ -704,8 +704,10 @@ for (const key in shapesObj) {
   createMarkerGroupForLayer(shapesObj[key]["layer_id"]);
 }
 
-// すべてのクラスターグループを地図に追加する
-Object.values(clusterGroups).forEach((group) => group.addTo(map));
+// isChecked が true の場合のみ、初期表示で共有レイヤを地図に追加する
+if (isChecked) {
+  Object.values(clusterGroups).forEach((group) => group.addTo(map));
+}
 
 // 共有図形の復元
 for (const key in shapesObj) {

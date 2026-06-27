@@ -114,3 +114,8 @@ pub struct CurrentTemporaryUrlResponse {
 pub struct OnetimePasswordForm {
     pub password: String,
 }
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct MapStateParams {
+    pub is_checked: Option<String>,
+}
