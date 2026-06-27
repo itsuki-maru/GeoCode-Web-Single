@@ -46,12 +46,12 @@ use geocode_web_single::{
     },
     model::{
         ExportPackage, GenarateUrlPayload, LayerCreateQueryParams, LayerNameUpdatePayload,
-        LoginPayload, MapAnotherWindowQueryParams, MapReadQueryPrams, MarkerCreateRequestParams,
-        MarkerInfoUpdateJsonData, MarkerMoveRequestParams, MarkerQuerySearchParams,
-        MarkerReadQueryPrams, OnetimePasswordForm, ShapeCreateJsonData, ShapeReadQueryParams,
-        ShapeUpdateJsonData, SignupPayload, ThumbnailQueryParams, TotpLoginPayload,
-        TotpVerifyRequest, UpdateAccountPasswordPayload, UpdateAccountPrivacyPayload,
-        UpdateUserData,
+        LoginPayload, MapAnotherWindowQueryParams, MapReadQueryPrams, MapStateParams,
+        MarkerCreateRequestParams, MarkerInfoUpdateJsonData, MarkerMoveRequestParams,
+        MarkerQuerySearchParams, MarkerReadQueryPrams, OnetimePasswordForm, ShapeCreateJsonData,
+        ShapeReadQueryParams, ShapeUpdateJsonData, SignupPayload, ThumbnailQueryParams,
+        TotpLoginPayload, TotpVerifyRequest, UpdateAccountPasswordPayload,
+        UpdateAccountPrivacyPayload, UpdateUserData,
     },
 };
 use serde_json::json;
@@ -120,6 +120,16 @@ fn test_tera() -> Arc<Mutex<Tera>> {
     Arc::new(Mutex::new(
         geocode_web_single::build_tera_from_embed().expect("embedded templates should load"),
     ))
+}
+
+// 共有URLハンドラーからテンプレートへ渡される値を検証するための最小テンプレート。
+fn onetime_url_test_tera() -> Arc<Mutex<Tera>> {
+    let mut tera = Tera::default();
+    tera.add_raw_template("temporary-password.html", "{{ url_id }}|{{ isChecked }}")
+        .expect("password template should load");
+    tera.add_raw_template("temporary-map.html", "{{ isChecked }}")
+        .expect("temporary map template should load");
+    Arc::new(Mutex::new(tera))
 }
 
 // レイヤの取得・作成・更新・削除と、master layer が削除拒否されることを確認する。
@@ -692,7 +702,7 @@ async fn map_handlers_render_templates_with_sqlite_data() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-// 共有URLの生成、現在URL取得、パスワード付き共有ページ表示、パスワード認証、無効化を確認する。
+// 共有URLの生成、現在URL取得、表示状態を維持したパスワード認証、無効化を確認する。
 #[tokio::test]
 async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
     let pool = common::test_pool().await;
@@ -741,18 +751,29 @@ async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
     let response = temporary_map_get_handler(
         HeaderMap::new(),
         Extension(pool.clone()),
-        Extension(test_tera()),
+        Extension(onetime_url_test_tera()),
+        Query(MapStateParams {
+            is_checked: Some("false".to_string()),
+        }),
         Ok(Path(created.id)),
     )
     .await
     .expect("temporary map request should render password page")
     .into_response();
     assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("password page body should be readable");
+    let body = String::from_utf8(bytes.to_vec()).expect("password page should be utf-8");
+    assert_eq!(body, format!("{}|false", current.id));
 
     let response = temporary_map_auth_handler(
         HeaderMap::new(),
         Extension(pool.clone()),
-        Extension(test_tera()),
+        Extension(onetime_url_test_tera()),
+        Query(MapStateParams {
+            is_checked: Some("false".to_string()),
+        }),
         Path(current.id),
         Form(OnetimePasswordForm {
             password: "pass1234".to_string(),
@@ -762,6 +783,11 @@ async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
     .expect("temporary map password auth should render map")
     .into_response();
     assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("temporary map body should be readable");
+    let body = String::from_utf8(bytes.to_vec()).expect("temporary map should be utf-8");
+    assert_eq!(body, "false");
 
     let status = invalidate_url_handler(Extension(user_id), Extension(pool))
         .await

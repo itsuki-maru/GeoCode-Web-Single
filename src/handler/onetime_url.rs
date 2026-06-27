@@ -1,13 +1,13 @@
 use crate::error::AppError;
 use crate::model::{
     CreateUpdatedTemporaryUrlResponse, CurrentTemporaryUrlResponse, GenarateUrlPayload,
-    LayerObjectFromRow, MarkerObjectFromRow, OnetimePasswordForm, ShapeObject, TemporaryUrl,
-    TemporaryUrlFromDB, TileServers,
+    LayerObjectFromRow, MapStateParams, MarkerObjectFromRow, OnetimePasswordForm, ShapeObject,
+    TemporaryUrl, TemporaryUrlFromDB, TileServers,
 };
 use crate::utils::vec_to_hashmap;
 use axum::{
     Form, Json,
-    extract::{Extension, Path, rejection::PathRejection},
+    extract::{Extension, Path, Query, rejection::PathRejection},
     http::{StatusCode, header::HeaderMap},
     response::{Html, IntoResponse},
 };
@@ -427,6 +427,7 @@ pub async fn temporary_map_get_handler(
     headers: HeaderMap,
     Extension(pool): Extension<SqlitePool>,
     Extension(tera): Extension<Arc<Mutex<Tera>>>,
+    Query(params): Query<MapStateParams>,
     url_id: Result<Path<String>, PathRejection>,
 ) -> Result<impl IntoResponse, AppError> {
     // User-Agent取り出し
@@ -437,6 +438,9 @@ pub async fn temporary_map_get_handler(
 
     // notfound.html用
     let viewport_content = if is_mobile { "0.7" } else { "1.0" };
+
+    // レイヤのチェック有無
+    let is_checked = resolve_is_checked(params.is_checked.as_deref());
 
     match url_id {
         // 正常な UUID が渡された場合
@@ -466,11 +470,24 @@ pub async fn temporary_map_get_handler(
                             .map_err(|_| AppError::InternalServerError)?;
                         return render_not_found_page(&tera, viewport_content).await;
                     } else if temp_url.password_hash.is_some() {
-                        return render_password_required_page(&tera, viewport_content, None).await;
+                        return render_password_required_page(
+                            &tera,
+                            viewport_content,
+                            None,
+                            url_id,
+                            is_checked,
+                        )
+                        .await;
                     // 正常に 共有URLを返却できる場合
                     } else {
-                        return render_temporary_map_page(&pool, &tera, render_html, temp_url)
-                            .await;
+                        return render_temporary_map_page(
+                            &pool,
+                            &tera,
+                            render_html,
+                            temp_url,
+                            is_checked,
+                        )
+                        .await;
                     }
                 },
                 // DBから共有URLの取得に失敗した場合
@@ -491,6 +508,7 @@ pub async fn temporary_map_auth_handler(
     headers: HeaderMap,
     Extension(pool): Extension<SqlitePool>,
     Extension(tera): Extension<Arc<Mutex<Tera>>>,
+    Query(params): Query<MapStateParams>,
     Path(url_id): Path<String>,
     Form(form): Form<OnetimePasswordForm>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -502,6 +520,8 @@ pub async fn temporary_map_auth_handler(
     } else {
         "temporary-map.html"
     };
+
+    let is_checked = resolve_is_checked(params.is_checked.as_deref());
 
     let temp_url = query_as!(
         TemporaryUrlFromDB,
@@ -532,7 +552,7 @@ pub async fn temporary_map_auth_handler(
     // パスワードが設定されている場合、認証を行う
     let Some(password_hash) = temp_url.password_hash.as_deref() else {
         // パスワードが設定されていない場合は直接表示
-        return render_temporary_map_page(&pool, &tera, render_html, temp_url).await;
+        return render_temporary_map_page(&pool, &tera, render_html, temp_url, is_checked).await;
     };
 
     // パスワードが正しいか検証
@@ -543,12 +563,18 @@ pub async fn temporary_map_auth_handler(
             &tera,
             viewport_content,
             Some("パスワードが正しくありません。"),
+            url_id,
+            is_checked,
         )
         .await;
     }
 
     // パスワードが正しい場合はマップを表示
-    render_temporary_map_page(&pool, &tera, render_html, temp_url).await
+    render_temporary_map_page(&pool, &tera, render_html, temp_url, is_checked).await
+}
+
+fn resolve_is_checked(is_checked: Option<&str>) -> bool {
+    !matches!(is_checked, Some(value) if value.eq_ignore_ascii_case("false"))
 }
 
 // 一時URLの削除（ユーザーは一つの共有URLしか持っていないため、user_idだけで削除）
@@ -593,6 +619,7 @@ async fn render_temporary_map_page(
     tera: &Arc<Mutex<Tera>>,
     render_html: &str,
     temp_url: TemporaryUrlFromDB,
+    is_checked: bool,
 ) -> Result<axum::response::Response, AppError> {
     let tile_servers = query_as!(
         TileServers,
@@ -628,6 +655,7 @@ async fn render_temporary_map_page(
     context.insert("markersObj", &markers);
     context.insert("shapesObj", &shapes);
     context.insert("tileServers", &tile_servers_hash_map);
+    context.insert("isChecked", &is_checked);
 
     let tera = tera.lock().await;
     match tera.render(render_html, &context) {
@@ -672,10 +700,14 @@ async fn render_password_required_page(
     tera: &Arc<Mutex<Tera>>,
     viewport_content: &str,
     error_message: Option<&str>,
+    url_id: String,
+    is_checked: bool,
 ) -> Result<axum::response::Response, AppError> {
     let mut context = Context::new();
     context.insert("viewport_content", viewport_content);
     context.insert("error_message", &error_message.unwrap_or(""));
+    context.insert("url_id", &url_id);
+    context.insert("isChecked", &is_checked);
 
     let tera = tera.lock().await;
     match tera.render("temporary-password.html", &context) {
