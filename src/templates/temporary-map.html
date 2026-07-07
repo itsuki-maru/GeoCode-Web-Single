@@ -341,6 +341,9 @@
         var tileServers = {{ tileServers | json_encode | safe }};
         var isMaster = false;
         var isChecked = {{ isChecked | json_encode | safe }};
+        var latitude = {{ latitude }};
+        var longitude = {{ longitude }};
+        var zoom = {{ zoom }};
     </script>
     <script src="/assets/map-common.js"></script>
     <script src="/assets/temporary-map.js"></script>

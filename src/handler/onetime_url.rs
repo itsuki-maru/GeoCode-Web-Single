@@ -441,6 +441,8 @@ pub async fn temporary_map_get_handler(
 
     // レイヤのチェック有無
     let is_checked = resolve_is_checked(params.is_checked.as_deref());
+    let initial_view = resolve_initial_view(&params);
+    let map_state_query = build_map_state_query(is_checked, initial_view);
 
     match url_id {
         // 正常な UUID が渡された場合
@@ -476,6 +478,7 @@ pub async fn temporary_map_get_handler(
                             None,
                             url_id,
                             is_checked,
+                            &map_state_query,
                         )
                         .await;
                     // 正常に 共有URLを返却できる場合
@@ -486,6 +489,7 @@ pub async fn temporary_map_get_handler(
                             render_html,
                             temp_url,
                             is_checked,
+                            initial_view,
                         )
                         .await;
                     }
@@ -522,6 +526,8 @@ pub async fn temporary_map_auth_handler(
     };
 
     let is_checked = resolve_is_checked(params.is_checked.as_deref());
+    let initial_view = resolve_initial_view(&params);
+    let map_state_query = build_map_state_query(is_checked, initial_view);
 
     let temp_url = query_as!(
         TemporaryUrlFromDB,
@@ -552,7 +558,15 @@ pub async fn temporary_map_auth_handler(
     // パスワードが設定されている場合、認証を行う
     let Some(password_hash) = temp_url.password_hash.as_deref() else {
         // パスワードが設定されていない場合は直接表示
-        return render_temporary_map_page(&pool, &tera, render_html, temp_url, is_checked).await;
+        return render_temporary_map_page(
+            &pool,
+            &tera,
+            render_html,
+            temp_url,
+            is_checked,
+            initial_view,
+        )
+        .await;
     };
 
     // パスワードが正しいか検証
@@ -565,16 +579,62 @@ pub async fn temporary_map_auth_handler(
             Some("パスワードが正しくありません。"),
             url_id,
             is_checked,
+            &map_state_query,
         )
         .await;
     }
 
     // パスワードが正しい場合はマップを表示
-    render_temporary_map_page(&pool, &tera, render_html, temp_url, is_checked).await
+    render_temporary_map_page(
+        &pool,
+        &tera,
+        render_html,
+        temp_url,
+        is_checked,
+        initial_view,
+    )
+    .await
+}
+
+const DEFAULT_TEMPORARY_MAP_LATITUDE: f64 = 39.2;
+const DEFAULT_TEMPORARY_MAP_LONGITUDE: f64 = 138.5;
+const DEFAULT_TEMPORARY_MAP_ZOOM: i32 = 6;
+const MIN_TEMPORARY_MAP_ZOOM: i32 = 0;
+const MAX_TEMPORARY_MAP_ZOOM: i32 = 22;
+
+#[derive(Clone, Copy)]
+struct TemporaryMapInitialView {
+    latitude: f64,
+    longitude: f64,
+    zoom: i32,
 }
 
 fn resolve_is_checked(is_checked: Option<&str>) -> bool {
     !matches!(is_checked, Some(value) if value.eq_ignore_ascii_case("false"))
+}
+
+fn resolve_initial_view(params: &MapStateParams) -> TemporaryMapInitialView {
+    TemporaryMapInitialView {
+        latitude: params
+            .lat
+            .filter(|lat| lat.is_finite() && (-90.0..=90.0).contains(lat))
+            .unwrap_or(DEFAULT_TEMPORARY_MAP_LATITUDE),
+        longitude: params
+            .lng
+            .filter(|lng| lng.is_finite() && (-180.0..=180.0).contains(lng))
+            .unwrap_or(DEFAULT_TEMPORARY_MAP_LONGITUDE),
+        zoom: params
+            .zoom
+            .filter(|zoom| (MIN_TEMPORARY_MAP_ZOOM..=MAX_TEMPORARY_MAP_ZOOM).contains(zoom))
+            .unwrap_or(DEFAULT_TEMPORARY_MAP_ZOOM),
+    }
+}
+
+fn build_map_state_query(is_checked: bool, initial_view: TemporaryMapInitialView) -> String {
+    format!(
+        "is_checked={}&lat={}&lng={}&zoom={}",
+        is_checked, initial_view.latitude, initial_view.longitude, initial_view.zoom
+    )
 }
 
 // 一時URLの削除（ユーザーは一つの共有URLしか持っていないため、user_idだけで削除）
@@ -620,6 +680,7 @@ async fn render_temporary_map_page(
     render_html: &str,
     temp_url: TemporaryUrlFromDB,
     is_checked: bool,
+    initial_view: TemporaryMapInitialView,
 ) -> Result<axum::response::Response, AppError> {
     let tile_servers = query_as!(
         TileServers,
@@ -656,6 +717,9 @@ async fn render_temporary_map_page(
     context.insert("shapesObj", &shapes);
     context.insert("tileServers", &tile_servers_hash_map);
     context.insert("isChecked", &is_checked);
+    context.insert("latitude", &initial_view.latitude);
+    context.insert("longitude", &initial_view.longitude);
+    context.insert("zoom", &initial_view.zoom);
 
     let tera = tera.lock().await;
     match tera.render(render_html, &context) {
@@ -702,12 +766,14 @@ async fn render_password_required_page(
     error_message: Option<&str>,
     url_id: String,
     is_checked: bool,
+    map_state_query: &str,
 ) -> Result<axum::response::Response, AppError> {
     let mut context = Context::new();
     context.insert("viewport_content", viewport_content);
     context.insert("error_message", &error_message.unwrap_or(""));
     context.insert("url_id", &url_id);
     context.insert("isChecked", &is_checked);
+    context.insert("mapStateQuery", map_state_query);
 
     let tera = tera.lock().await;
     match tera.render("temporary-password.html", &context) {

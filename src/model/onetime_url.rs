@@ -118,4 +118,7 @@ pub struct OnetimePasswordForm {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct MapStateParams {
     pub is_checked: Option<String>,
+    pub lat: Option<f64>,
+    pub lng: Option<f64>,
+    pub zoom: Option<i32>,
 }
