@@ -165,9 +165,9 @@ let xssOptions = {
 };
 
 var map = L.map("map", {
-  center: [39.2, 138.5],
+  center: [latitude, longitude],
   crs: L.CRS.EPSG3857,
-  zoom: 6,
+  zoom: zoom,
   zoomControl: true,
   preferCanvas: false,
   // Leafletの著作権表示に_blank属性を追加するために、デフォルト値を無効化
