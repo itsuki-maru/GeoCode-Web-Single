@@ -754,6 +754,9 @@ async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
         Extension(onetime_url_test_tera()),
         Query(MapStateParams {
             is_checked: Some("false".to_string()),
+            lat: Some(35.681236),
+            lng: Some(139.767125),
+            zoom: Some(14),
         }),
         Ok(Path(created.id)),
     )
@@ -773,6 +776,9 @@ async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
         Extension(onetime_url_test_tera()),
         Query(MapStateParams {
             is_checked: Some("false".to_string()),
+            lat: None,
+            lng: None,
+            zoom: None,
         }),
         Path(current.id),
         Form(OnetimePasswordForm {
