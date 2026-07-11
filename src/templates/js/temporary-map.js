@@ -248,6 +248,7 @@ const visibleMarkerGroup = L.markerClusterGroup();
 visibleMarkerGroup.addTo(map);
 const shapeGroups = {};
 const shapeVisibilityLayer = L.layerGroup().addTo(map);
+let hasSharedShapes = false;
 let isMeasurementVisible = false;
 let isMeasurementSegmentMerged = false;
 // マーカーにIDを振るためのオブジェクト
@@ -735,6 +736,7 @@ for (const key in shapesObj) {
   const targetShapeGroup = ensureShapeGroup(layerId);
   if (targetShapeGroup) {
     targetShapeGroup.addLayer(layer);
+    hasSharedShapes = true;
   }
   attachShapeMeasurementMarkers(layer, layerId);
 }
@@ -878,7 +880,9 @@ const MeasurementVisibleControl = L.Control.extend({
   },
 });
 
-map.addControl(new MeasurementVisibleControl());
+if (hasSharedShapes) {
+  map.addControl(new MeasurementVisibleControl());
+}
 
 // ツールチップの表示・非表示を管理する
 let isTooltipVisible = false;
@@ -908,13 +912,24 @@ map.addControl(
 );
 
 const userLocationLayer = initializeUserLocation(map);
-const mapVisibilityOverlays = { 図形: shapeVisibilityLayer };
+const mapVisibilityOverlays = {};
+if (hasSharedShapes) {
+  mapVisibilityOverlays["図形"] = shapeVisibilityLayer;
+}
 if (userLocationLayer) {
   mapVisibilityOverlays["現在位置"] = userLocationLayer;
 }
-L.control
-  .layers(null, mapVisibilityOverlays, {
+if (Object.keys(mapVisibilityOverlays).length > 0) {
+  const mapVisibilityControl = L.control.layers(null, mapVisibilityOverlays, {
     collapsed: false,
     position: "topleft",
-  })
-  .addTo(map);
+  });
+  mapVisibilityControl.addTo(map);
+
+  if (!hasSharedShapes && userLocationLayer) {
+    const container = mapVisibilityControl.getContainer();
+    if (container) {
+      container.classList.add("temporary-map-visibility-control--single");
+    }
+  }
+}

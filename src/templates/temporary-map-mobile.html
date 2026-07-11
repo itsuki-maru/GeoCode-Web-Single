@@ -252,12 +252,18 @@
                 display: none;
             }
 
-            /* 画面左下の UI 表示切替ボタン */
+            /* 画面左下の現在位置ボタンと UI 表示切替ボタン */
+            .temporary-user-location-control .custom-control-button,
             .map-ui-visibility-toggle-control .custom-control-button {
                 box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
                 font-size: 18px;
                 min-width: 116px;
                 padding: 8px 14px;
+            }
+
+            .leaflet-bottom.leaflet-left
+                .temporary-user-location-control.leaflet-control {
+                margin-bottom: 6px;
             }
 
             .measurement-control {

@@ -1533,6 +1533,9 @@ function initializeUserLocation(map, options = {}) {
     },
     onAdd: function () {
       const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
+      if (options.controlClassName) {
+        container.classList.add(options.controlClassName);
+      }
       const button = L.DomUtil.create(
         "button",
         "custom-control-button",
