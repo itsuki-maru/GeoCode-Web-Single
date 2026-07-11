@@ -357,6 +357,7 @@ const visibleMarkerGroup = L.markerClusterGroup();
 visibleMarkerGroup.addTo(map);
 const shapeGroups = {};
 const shapeVisibilityLayer = L.layerGroup().addTo(map);
+let hasSharedShapes = false;
 let isMeasurementVisible = false;
 let isMeasurementSegmentMerged = false;
 // マーカーにIDを振るためのオブジェクト
@@ -844,6 +845,7 @@ for (const key in shapesObj) {
   const targetShapeGroup = ensureShapeGroup(layerId);
   if (targetShapeGroup) {
     targetShapeGroup.addLayer(layer);
+    hasSharedShapes = true;
   }
   attachShapeMeasurementMarkers(layer, layerId);
 }
@@ -1060,9 +1062,11 @@ const MeasurementVisibleControl = L.Control.extend({
   },
 });
 
-const measurementVisibleControl = new MeasurementVisibleControl();
-map.addControl(measurementVisibleControl);
-registerHideableMapControl(measurementVisibleControl);
+if (hasSharedShapes) {
+  const measurementVisibleControl = new MeasurementVisibleControl();
+  map.addControl(measurementVisibleControl);
+  registerHideableMapControl(measurementVisibleControl);
+}
 
 // ツールチップの表示・非表示を管理する
 let isTooltipVisible = false;
@@ -1092,18 +1096,23 @@ const markerSearchControl = createMarkerSearchControl({
 });
 map.addControl(markerSearchControl);
 
-// 現在位置コントロールは共通処理内で追加されるため、追加前後の差分から登録する
-const controlsBeforeUserLocation = getMapControlContainersSnapshot();
-const userLocationLayer = initializeUserLocation(map);
-registerNewHideableMapControlContainers(controlsBeforeUserLocation);
-const mapVisibilityOverlays = { 図形: shapeVisibilityLayer };
+map.addControl(new MapUiVisibilityToggleControl());
+const userLocationLayer = initializeUserLocation(map, {
+  position: "bottomleft",
+  controlClassName: "temporary-user-location-control",
+});
+const mapVisibilityOverlays = {};
+if (hasSharedShapes) {
+  mapVisibilityOverlays["図形"] = shapeVisibilityLayer;
+}
 if (userLocationLayer) {
   mapVisibilityOverlays["現在位置"] = userLocationLayer;
 }
-const mapVisibilityControl = L.control.layers(null, mapVisibilityOverlays, {
-  collapsed: false,
-  position: "topleft",
-});
-mapVisibilityControl.addTo(map);
-registerHideableMapControl(mapVisibilityControl);
-map.addControl(new MapUiVisibilityToggleControl());
+if (Object.keys(mapVisibilityOverlays).length > 0) {
+  const mapVisibilityControl = L.control.layers(null, mapVisibilityOverlays, {
+    collapsed: false,
+    position: "topleft",
+  });
+  mapVisibilityControl.addTo(map);
+  registerHideableMapControl(mapVisibilityControl);
+}
