@@ -442,7 +442,8 @@ pub async fn temporary_map_get_handler(
     // レイヤのチェック有無
     let is_checked = resolve_is_checked(params.is_checked.as_deref());
     let initial_view = resolve_initial_view(&params);
-    let map_state_query = build_map_state_query(is_checked, initial_view);
+    let is_map_ui_hidden = resolve_is_map_ui_hidden(params.is_map_ui_hidden.as_deref());
+    let map_state_query = build_map_state_query(is_checked, initial_view, is_map_ui_hidden);
 
     match url_id {
         // 正常な UUID が渡された場合
@@ -490,6 +491,7 @@ pub async fn temporary_map_get_handler(
                             temp_url,
                             is_checked,
                             initial_view,
+                            is_map_ui_hidden,
                         )
                         .await;
                     }
@@ -527,7 +529,8 @@ pub async fn temporary_map_auth_handler(
 
     let is_checked = resolve_is_checked(params.is_checked.as_deref());
     let initial_view = resolve_initial_view(&params);
-    let map_state_query = build_map_state_query(is_checked, initial_view);
+    let is_map_ui_hidden = resolve_is_map_ui_hidden(params.is_map_ui_hidden.as_deref());
+    let map_state_query = build_map_state_query(is_checked, initial_view, is_map_ui_hidden);
 
     let temp_url = query_as!(
         TemporaryUrlFromDB,
@@ -565,6 +568,7 @@ pub async fn temporary_map_auth_handler(
             temp_url,
             is_checked,
             initial_view,
+            is_map_ui_hidden,
         )
         .await;
     };
@@ -592,6 +596,7 @@ pub async fn temporary_map_auth_handler(
         temp_url,
         is_checked,
         initial_view,
+        is_map_ui_hidden,
     )
     .await
 }
@@ -613,6 +618,10 @@ fn resolve_is_checked(is_checked: Option<&str>) -> bool {
     !matches!(is_checked, Some(value) if value.eq_ignore_ascii_case("false"))
 }
 
+fn resolve_is_map_ui_hidden(is_map_ui_hidden: Option<&str>) -> bool {
+    !matches!(is_map_ui_hidden, Some(value) if value.eq_ignore_ascii_case("false"))
+}
+
 fn resolve_initial_view(params: &MapStateParams) -> TemporaryMapInitialView {
     TemporaryMapInitialView {
         latitude: params
@@ -630,10 +639,18 @@ fn resolve_initial_view(params: &MapStateParams) -> TemporaryMapInitialView {
     }
 }
 
-fn build_map_state_query(is_checked: bool, initial_view: TemporaryMapInitialView) -> String {
+fn build_map_state_query(
+    is_checked: bool,
+    initial_view: TemporaryMapInitialView,
+    is_map_ui_hidden: bool,
+) -> String {
     format!(
-        "is_checked={}&lat={}&lng={}&zoom={}",
-        is_checked, initial_view.latitude, initial_view.longitude, initial_view.zoom
+        "is_checked={}&lat={}&lng={}&zoom={}&isMapUiHidden={}",
+        is_checked,
+        initial_view.latitude,
+        initial_view.longitude,
+        initial_view.zoom,
+        is_map_ui_hidden
     )
 }
 
@@ -681,6 +698,7 @@ async fn render_temporary_map_page(
     temp_url: TemporaryUrlFromDB,
     is_checked: bool,
     initial_view: TemporaryMapInitialView,
+    is_map_ui_hidden: bool,
 ) -> Result<axum::response::Response, AppError> {
     let tile_servers = query_as!(
         TileServers,
@@ -720,6 +738,7 @@ async fn render_temporary_map_page(
     context.insert("latitude", &initial_view.latitude);
     context.insert("longitude", &initial_view.longitude);
     context.insert("zoom", &initial_view.zoom);
+    context.insert("isMapUiHidden", &is_map_ui_hidden);
 
     let tera = tera.lock().await;
     match tera.render(render_html, &context) {

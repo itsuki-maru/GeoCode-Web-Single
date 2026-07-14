@@ -757,6 +757,7 @@ async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
             lat: Some(35.681236),
             lng: Some(139.767125),
             zoom: Some(14),
+            is_map_ui_hidden: Some("false".to_string()),
         }),
         Ok(Path(created.id)),
     )
@@ -779,6 +780,7 @@ async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
             lat: None,
             lng: None,
             zoom: None,
+            is_map_ui_hidden: Some("false".to_string()),
         }),
         Path(current.id),
         Form(OnetimePasswordForm {

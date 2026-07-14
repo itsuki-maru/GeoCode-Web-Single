@@ -419,6 +419,7 @@
         var latitude = {{ latitude }};
         var longitude = {{ longitude }};
         var zoom = {{ zoom }};
+        var initialIsMapUiHidden = {{ isMapUiHidden | json_encode | safe }};
     </script>
     <script src="/assets/map-common.js"></script>
     <script src="/assets/temporary-map-mobile.js"></script>
