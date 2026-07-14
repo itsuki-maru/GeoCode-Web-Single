@@ -201,7 +201,7 @@ L.control
 
 // 地図を見やすくするため、操作 UI の表示状態をまとめて管理する
 const hideableMapUiContainers = new Set();
-let isMapUiHidden = true;
+let isMapUiHidden = initialIsMapUiHidden;
 let mapUiVisibilityToggleButton = null;
 
 // UI 表示切替ボタンの文言とアクセシビリティ属性を更新する

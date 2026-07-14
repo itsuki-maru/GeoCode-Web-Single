@@ -121,4 +121,6 @@ pub struct MapStateParams {
     pub lat: Option<f64>,
     pub lng: Option<f64>,
     pub zoom: Option<i32>,
+    #[serde(rename = "isMapUiHidden", alias = "is_map_ui_hidden")]
+    pub is_map_ui_hidden: Option<String>,
 }
