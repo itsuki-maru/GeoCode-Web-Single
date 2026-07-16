@@ -59,7 +59,11 @@ pub struct AuthenticatedUser {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AccountPrivacyInfo {
     pub is_private: bool,
-    pub totp_secret: String,
+    pub is_totp_enabled: bool,
+
+    // 旧フロントエンドとの互換用。実際のTOTP secretは決して格納しない。
+    #[serde(rename = "totp_secret")]
+    pub legacy_totp_status: String,
 }
 
 // アカウントのプライバシー設定構造体

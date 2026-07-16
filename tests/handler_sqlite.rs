@@ -160,6 +160,8 @@ async fn layer_handlers_cover_create_read_update_delete() {
         Path(created.id.clone()),
         Json(LayerNameUpdatePayload {
             name: "renamed layer".to_string(),
+            marker_icon_id: None,
+            update_marker_icon: false,
         }),
     )
     .await
@@ -380,10 +382,20 @@ async fn account_handlers_cover_signup_login_profile_and_tokens() {
     .await
     .expect("privacy should update");
 
-    let Json(info) = get_account_info_handler(Extension(user_id.clone()), Extension(pool.clone()))
+    let response = get_account_info_handler(Extension(user_id.clone()), Extension(pool.clone()))
         .await
-        .expect("account info should be returned");
-    assert!(!info.is_private);
+        .expect("account info should be returned")
+        .into_response();
+    assert_eq!(
+        response.headers().get(header::CACHE_CONTROL).unwrap(),
+        "no-store"
+    );
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("account info body should be readable");
+    let info: serde_json::Value =
+        serde_json::from_slice(&bytes).expect("account info should be json");
+    assert_eq!(info["is_private"], false);
 
     let _ = account_password_update_handler(
         Extension(user_id.clone()),

@@ -1566,3 +1566,62 @@ function initializeUserLocation(map, options = {}) {
 
   return userLocationLayer;
 }
+
+// レイヤに設定されたアイコンをLeafletのオプションへ変換する。
+function markerOptionsForLayer(layerId, layerRecords, extraOptions = {}) {
+  const layerRecord = layerRecords && layerId ? layerRecords[layerId] : null;
+  const filename = layerRecord?.marker_icon_filename;
+  if (!filename) {
+    return { ...extraOptions };
+  }
+  return {
+    ...extraOptions,
+    icon: L.icon({
+      iconUrl: `/static/marker-icons/${encodeURIComponent(filename)}`,
+      iconSize: [30, 30],
+      iconAnchor: [20, 40],
+      popupAnchor: [0, -40],
+      tooltipAnchor: [0, -20],
+    }),
+  };
+}
+
+// カスタムアイコンを読み込めない場合、Leafletの標準アイコンへ切り替える。
+function enableMarkerIconFallback(marker, layerId, layerRecords) {
+  const layerRecord = layerRecords && layerId ? layerRecords[layerId] : null;
+  if (!layerRecord?.marker_icon_filename) {
+    return marker;
+  }
+
+  let fallbackApplied = false;
+  const bindFallback = () => {
+    if (fallbackApplied) {
+      return;
+    }
+
+    const iconElement = marker.getElement();
+    if (
+      !iconElement ||
+      iconElement.dataset.markerIconFallbackBound === "true"
+    ) {
+      return;
+    }
+
+    iconElement.dataset.markerIconFallbackBound = "true";
+    iconElement.addEventListener(
+      "error",
+      () => {
+        if (fallbackApplied) {
+          return;
+        }
+        fallbackApplied = true;
+        marker.setIcon(new L.Icon.Default());
+      },
+      { once: true },
+    );
+  };
+
+  marker.on("add", bindFallback);
+  bindFallback();
+  return marker;
+}

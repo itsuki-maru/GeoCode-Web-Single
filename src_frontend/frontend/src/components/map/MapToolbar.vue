@@ -53,14 +53,18 @@ watch(
   },
 );
 
-watch(markerQueryFormData, () => {
-  emit("update:markerQueryFormData", { ...markerQueryFormData.value });
-  if (suppressNextWatchSearch) {
-    suppressNextWatchSearch = false;
-    return;
-  }
-  onMarkerSearch();
-}, { deep: true });
+watch(
+  markerQueryFormData,
+  () => {
+    emit("update:markerQueryFormData", { ...markerQueryFormData.value });
+    if (suppressNextWatchSearch) {
+      suppressNextWatchSearch = false;
+      return;
+    }
+    onMarkerSearch();
+  },
+  { deep: true },
+);
 
 const selectedLayer = computed({
   get: () => props.activeLayer,
@@ -78,7 +82,11 @@ defineExpose({ markerQueryFormData, onMarkerSearch });
         class="btn-head-image"
         title="新規レイヤの追加&#10;マーカーを保存するグループを作成します。"
       >
-        <img :src="`${assetsUrl}layer_add_24.png`" class="btn-img" alt="layer_add_24.png" />
+        <img
+          :src="`${assetsUrl}layer_add_combined_24.png`"
+          class="btn-img"
+          alt="layer_add_combined_24.png"
+        />
       </button>
       <button
         @click="emit('imageUpload')"
@@ -190,9 +198,9 @@ defineExpose({ markerQueryFormData, onMarkerSearch });
       <button
         @click="emit('layerList')"
         class="btn-head-image-search"
-        title="レイヤ一覧&#10;作成したレイヤ一覧を確認したり、レイヤを検索したりできます。"
+        title="レイヤ一覧&#10;作成したレイヤ一覧を確認したり、マーカーを変更したりできます。"
       >
-        <img :src="`${assetsUrl}list_24.png`" class="btn-img" alt="list_24.png" />
+        <img :src="`${assetsUrl}layer_add_24.png`" class="btn-img" alt="layer_add_24.png" />
       </button>
       <select
         class="select-elm"

@@ -179,6 +179,34 @@ const MIGRATIONS: &[Migration] = &[
             );
             "#],
     },
+    Migration {
+        version: 4,
+        name: "add_marker_icon_id_to_layer_model",
+        statements: &[
+            r#"
+            CREATE TABLE IF NOT EXISTS marker_icon_model (
+                id TEXT PRIMARY KEY NOT NULL,
+                user_id TEXT NOT NULL,
+                filename CHARACTER VARYING(100) NOT NULL,
+                uuid_filename CHARACTER VARYING(100) NOT NULL UNIQUE,
+                create_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES user_model(id) ON DELETE CASCADE
+            );
+            "#,
+            r#"
+            ALTER TABLE layer_model
+            ADD COLUMN marker_icon_id TEXT NULL
+            REFERENCES marker_icon_model(id) ON DELETE SET NULL;
+            "#,
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_marker_icon_model_user_id_desc
+            ON marker_icon_model(user_id, create_at DESC);
+            "#,
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_layer_model_marker_icon_id ON layer_model(marker_icon_id);
+            "#,
+        ],
+    },
 ];
 
 // データベース接続の確立

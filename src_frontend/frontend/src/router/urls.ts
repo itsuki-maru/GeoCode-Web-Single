@@ -27,6 +27,10 @@ export const imageListGetUrl = baseUrl + "/images/eneble-images";
 export const imageSearchUrl = baseUrl + "/images/eneble-images/search";
 export const imageUploadUrl = baseUrl + "/images/upload";
 export const imageDeleteUrl = baseUrl + "/images/delete";
+export const markerIconListUrl = baseUrl + "/marker-icons";
+export const markerIconSearchUrl = baseUrl + "/marker-icons/search";
+export const markerIconUploadUrl = baseUrl + "/marker-icons/upload";
+export const markerIconDeleteUrl = baseUrl + "/marker-icons/";
 
 export const generateOnetimeMapUrl = baseUrl + "/onetimeurl/generate";
 export const getCurrentOnetimeMapUrl = baseUrl + "/onetimeurl/current";

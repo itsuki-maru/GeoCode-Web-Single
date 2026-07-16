@@ -34,6 +34,8 @@ export const useLayersStore = defineStore("layers", {
             user_id: layersData[key]["user_id"],
             name: layersData[key]["layer_name"],
             is_master: layersData[key]["is_master"],
+            marker_icon_id: layersData[key]["marker_icon_id"],
+            marker_icon_filename: layersData[key]["marker_icon_filename"],
           });
         }
         let sortedDsc = new Map(
@@ -59,15 +61,17 @@ export const useLayersStore = defineStore("layers", {
       //     console.log(error);
       // }
     },
-    async updateLayer(id: string, name: string): Promise<void> {
+    async updateLayer(id: string, name: string, markerIconId?: string | null): Promise<void> {
       const updateURL = `${updateLayersUrl}${id}`;
       const payload = {
         name: name,
+        marker_icon_id: markerIconId ?? null,
+        update_marker_icon: markerIconId !== undefined,
       };
       try {
         const response = await apiClient.put(updateURL, payload);
         this.clearLayers();
-        this.initList();
+        await this.initList();
       } catch (error) {
         console.error(error);
       }

@@ -25,9 +25,7 @@ onMounted(async () => {
   try {
     const response = await apiClient.get(getUserInfoUrl);
     isUserPrivate.value = response.data["is_private"];
-    if (response.data["totp_secret"] !== "") {
-      isTotpAuth.value = true;
-    }
+    isTotpAuth.value = response.data["is_totp_enabled"] === true;
   } catch (error) {
     isUserPrivate.value = false;
   }

@@ -298,6 +298,10 @@ async fn get_layer_hash_map(
     user_id: String,
     layer_ids: Vec<String>,
 ) -> Result<HashMap<String, LayerObjectFromRow>, AppError> {
+    if layer_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
     let placeholders = layer_ids
         .iter()
         .enumerate()
@@ -308,7 +312,18 @@ async fn get_layer_hash_map(
     // レイヤ取得（パラメータバインド使用）
     // SQLite では　ANY が使えないため IN を使用
     let layers_sql = format!(
-        "SELECT id, user_id, layer_name, is_master FROM layer_model WHERE user_id = $1 AND id IN ({})",
+        r#"SELECT
+            layer_model.id,
+            layer_model.user_id,
+            layer_model.layer_name,
+            layer_model.is_master,
+            layer_model.marker_icon_id,
+            marker_icon_model.uuid_filename AS marker_icon_filename
+        FROM layer_model
+        LEFT JOIN marker_icon_model
+            ON marker_icon_model.id = layer_model.marker_icon_id
+        WHERE layer_model.user_id = $1
+            AND layer_model.id IN ({})"#,
         placeholders
     );
     let mut layers_query = sqlx::query_as::<_, LayerObjectFromRow>(&layers_sql).bind(&user_id);
@@ -342,85 +357,6 @@ async fn delete_temporary_url(pool: &SqlitePool, user_id: String) -> Result<(), 
 
     Ok(())
 }
-
-//     // マーカー取得（パラメータバインド使用）
-//     // SQLite では　ANY が使えないため IN を使用
-//     let layer_ids: Vec<String> = payload.layers.clone();
-
-//     let placeholders = layer_ids
-//         .iter()
-//         .enumerate()
-//         .map(|(i, _)| format!("${}", i + 2))
-//         .collect::<Vec<_>>()
-//         .join(", ");
-
-//     let markers_sql = format!(
-//         "SELECT id, layer_id, marker_name, latitude, longitude, detail FROM marker_info_model WHERE user_id = $1 AND layer_id IN ({})",
-//         placeholders
-//     );
-//     let mut markers_query = sqlx::query_as::<_, MarkerObjectFromRow>(&markers_sql).bind(&user_id);
-//     for id in &layer_ids {
-//         markers_query = markers_query.bind(id);
-//     }
-//     let markers: Vec<MarkerObjectFromRow> = markers_query.fetch_all(&pool).await.map_err(|e| {
-//         tracing::error!(error = %e, "database error.");
-//         AppError::Sqlx(e)
-//     })?;
-
-//     let markers_hash_map = vec_to_hashmap(markers, |m| m.id.clone());
-
-//     // レイヤ取得（パラメータバインド使用）
-//     // SQLite では　ANY が使えないため IN を使用
-//     let layers_sql = format!(
-//         "SELECT id, user_id, layer_name, is_master FROM layer_model WHERE user_id = $1 AND id IN ({})",
-//         placeholders
-//     );
-//     let mut layers_query = sqlx::query_as::<_, LayerObjectFromRow>(&layers_sql).bind(&user_id);
-//     for id in &layer_ids {
-//         layers_query = layers_query.bind(id);
-//     }
-//     let layers: Vec<LayerObjectFromRow> = layers_query.fetch_all(&pool).await.map_err(|e| {
-//         tracing::error!(error = %e, "database error.");
-//         AppError::Sqlx(e)
-//     })?;
-
-//     let json_layers_data =
-//         serde_json::to_value(temp_url.layers).map_err(|_| AppError::InternalServerError)?;
-
-//     let json_markers_data =
-//         serde_json::to_value(temp_url.markers).map_err(|_| AppError::InternalServerError)?;
-
-//     let created_url_response = sqlx::query_as!(
-//         CreatedTemporaryUrlResponse,
-//         r#"
-//         INSERT INTO temporary_urls (
-//             id,
-//             user_id,
-//             url,
-//             expiration,
-//             layers,
-//             markers,
-//             create_at
-//         )
-//         VALUES ($1, $2, $3, $4, $5, $6, $7)
-//         RETURNING id, url, expiration
-//         "#,
-//         temp_url.id,
-//         temp_url.user_id,
-//         temp_url.url,
-//         temp_url.expiration,
-//         json_layers_data,
-//         json_markers_data,
-//         now,
-//     )
-//     .fetch_one(&pool)
-//     .await
-//     .map_err(|e| {
-//         tracing::error!(error = %e, "database error.");
-//         AppError::Sqlx(e)
-//     })?;
-//     Ok(Json(created_url_response))
-// }
 
 // 一時URLからmapを取得
 pub async fn temporary_map_get_handler(

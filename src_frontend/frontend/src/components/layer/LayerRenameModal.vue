@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import BaseModal from "@/components/common/BaseModal.vue";
+import MarkerIconPicker from "@/components/layer/MarkerIconPicker.vue";
 import { useLayersStore } from "@/stores/layers";
 
 const props = defineProps<{
@@ -17,43 +18,48 @@ const emit = defineEmits<{
 
 const layersStore = useLayersStore();
 const editLayerName = ref("");
+const selectedIconId = ref<string | null>(null);
 
 watch(
-  () => props.currentName,
-  (name) => {
-    editLayerName.value = name;
+  () => [props.currentName, props.layerId, props.isOpen],
+  () => {
+    editLayerName.value = props.currentName;
+    selectedIconId.value = layersStore.layersList.get(props.layerId)?.marker_icon_id ?? null;
   },
+  { immediate: true },
 );
 
-const layerNameChange = (): void => {
-  if (props.masterLayerId === props.layerId) {
-    emit("message", "masterレイヤは名前を変更できません。");
-    return;
-  }
+const layerNameChange = async (): Promise<void> => {
   if (editLayerName.value === "") {
     emit("message", "レイヤ名が入力されていません。");
     return;
   }
-  layersStore.updateLayer(props.layerId, editLayerName.value);
+  await layersStore.updateLayer(props.layerId, editLayerName.value, selectedIconId.value);
   emit("close");
-  emit("message", "レイヤ名を変更しました。");
+  emit("message", "レイヤ設定を変更しました。");
 };
 </script>
 
 <template>
   <BaseModal :isOpen="isOpen" @close="emit('close')">
     <div class="rename-content">
-      <h2 class="modal-h2">レイヤ名の変更（15字以内）</h2>
+      <h2 class="modal-h2">レイヤ設定</h2>
       <div class="setting-contents">
-        <input
-          type="text"
-          maxlength="15"
-          title="設定できるレイヤ名は15文字以内です。"
-          placeholder="New Layer name"
-          class="input-textbox"
-          required
-          v-model="editLayerName"
-        />
+        <div class="name-setting">
+          <label for="layer-name">レイヤ名</label>
+          <input
+            id="layer-name"
+            type="text"
+            maxlength="15"
+            title="設定できるレイヤ名は15文字以内です。"
+            placeholder="レイヤ名称（15字以内）"
+            class="input-textbox"
+            required
+            v-model="editLayerName"
+            :disabled="masterLayerId === layerId"
+          />
+        </div>
+        <MarkerIconPicker v-model="selectedIconId" @message="emit('message', $event)" />
         <div class="btn-zone">
           <button @click="emit('close')">閉じる</button>
           <button @click="layerNameChange()">変更</button>
@@ -65,7 +71,9 @@ const layerNameChange = (): void => {
 
 <style scoped>
 .rename-content {
-  width: 45vw;
+  width: min(72vw, 820px);
+  max-height: 85vh;
+  overflow-y: auto;
   text-align: center;
 }
 
@@ -90,5 +98,27 @@ const layerNameChange = (): void => {
   margin-top: 20px;
   display: flex;
   justify-content: space-between;
+}
+.name-setting {
+  padding: 14px 16px;
+  border: 1px solid #d5dce8;
+  border-radius: 14px;
+  background: #f8fafc;
+  text-align: left;
+}
+
+.name-setting label {
+  display: block;
+  margin-bottom: 7px;
+  color: #39465d;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.name-setting .input-textbox {
+  box-sizing: border-box;
+  width: 100%;
+  height: 44px;
+  font-size: 18px;
 }
 </style>

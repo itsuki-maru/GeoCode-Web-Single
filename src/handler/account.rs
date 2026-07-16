@@ -1,7 +1,7 @@
 use crate::config::CONFIG;
 use axum::{
     Extension, Json,
-    http::StatusCode,
+    http::{HeaderValue, StatusCode, header::CACHE_CONTROL},
     response::{IntoResponse, Response},
 };
 use bcrypt::{DEFAULT_COST, hash, verify};
@@ -442,13 +442,18 @@ pub async fn account_password_update_handler(
 pub async fn get_account_info_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
-) -> Result<Json<AccountPrivacyInfo>, AppError> {
+) -> Result<impl IntoResponse, AppError> {
+    struct AccountPrivacyRow {
+        is_private: bool,
+        is_totp_enabled: bool,
+    }
+
     let user_info = query_as!(
-        AccountPrivacyInfo,
+        AccountPrivacyRow,
         r#"
         SELECT
             is_private,
-            totp_secret
+            totp_secret <> '' AS "is_totp_enabled!: bool"
         FROM user_model WHERE id = $1
         "#,
         user_id,
@@ -460,7 +465,20 @@ pub async fn get_account_info_handler(
         AppError::Sqlx(e)
     })?;
 
-    Ok(Json(user_info))
+    let response = AccountPrivacyInfo {
+        is_private: user_info.is_private,
+        is_totp_enabled: user_info.is_totp_enabled,
+        legacy_totp_status: if user_info.is_totp_enabled {
+            "configured".to_string()
+        } else {
+            String::new()
+        },
+    };
+
+    Ok((
+        [(CACHE_CONTROL, HeaderValue::from_static("no-store"))],
+        Json(response),
+    ))
 }
 
 fn parse_naive_datetime(s: &str) -> Option<NaiveDateTime> {

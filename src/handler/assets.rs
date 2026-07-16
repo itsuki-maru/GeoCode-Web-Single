@@ -213,6 +213,51 @@ pub async fn serve_image_file(
     }
 }
 
+// USER MARKER ICON RESPONSE
+pub async fn serve_marker_icon_file(
+    Extension(pool): Extension<SqlitePool>,
+    Path(icon_name): Path<String>,
+) -> Result<Response<Body>, AppError> {
+    let safe_file_name = sanitize_filename(&icon_name).ok_or(AppError::NotFound)?;
+    let icon_exists = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM marker_icon_model
+            WHERE uuid_filename = $1
+        )
+        "#,
+    )
+    .bind(&safe_file_name)
+    .fetch_one(&pool)
+    .await?;
+    if !icon_exists {
+        return Err(AppError::NotFound);
+    }
+    let file_path = PathBuf::from(&CONFIG.images_path)
+        .join("marker-icons")
+        .join(&safe_file_name);
+    if file_path.is_dir() {
+        return Err(AppError::NotFound);
+    }
+    let file = File::open(file_path)
+        .await
+        .map_err(|_| AppError::NotFound)?;
+    let stream = FramedRead::new(file, BytesCodec::new());
+    let mut builder = HttpResponse::builder();
+    if let Some(headers) = builder.headers_mut() {
+        headers.append(
+            "Cache-Control",
+            HeaderValue::from_static(&CONFIG.cache_control),
+        );
+        headers.append(CONTENT_TYPE, HeaderValue::from_static("image/png"));
+    }
+    builder
+        .status(StatusCode::OK)
+        .body(Body::from_stream(stream))
+        .map_err(|_| AppError::InternalServerError)
+}
+
 // SANITAIZE UPLOAD IMAGE FILENAME
 fn sanitize_filename(file_name: &str) -> Option<String> {
     let file_name = file_name.split('/').last()?;
