@@ -665,7 +665,8 @@ for (const key in markersObj) {
   const marker = L.marker([
     markerData["latitude"],
     markerData["longitude"],
-  ]).bindPopup(markerData["marker_name"]);
+  ], markerOptionsForLayer(markerData["layer_id"], layers)).bindPopup(markerData["marker_name"]);
+  enableMarkerIconFallback(marker, markerData["layer_id"], layers);
 
   // ポップアップオープン時に遅延読み込みの処理を追加
   marker.on("popupopen", () => {

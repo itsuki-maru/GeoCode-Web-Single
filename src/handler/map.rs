@@ -125,19 +125,22 @@ pub async fn map_get_handler(
 
     let markers_hash_map = vec_to_hashmap(markers, |m| m.id.clone());
 
-    let layers = query_as!(
-        LayerObject,
+    let layers = sqlx::query_as::<_, LayerObject>(
         r#"
         SELECT
-            id,
-            user_id,
-            layer_name,
-            is_master
+            layer_model.id,
+            layer_model.user_id,
+            layer_model.layer_name,
+            layer_model.is_master,
+            layer_model.marker_icon_id,
+            marker_icon_model.uuid_filename AS marker_icon_filename
         FROM layer_model
-        WHERE user_id = $1
+        LEFT JOIN marker_icon_model
+        ON marker_icon_model.id = layer_model.marker_icon_id
+        WHERE layer_model.user_id = $1
         "#,
-        user_id,
     )
+    .bind(&user_id)
     .fetch_all(&pool)
     .await
     .map_err(|e| {
@@ -277,19 +280,22 @@ pub async fn map_another_get_handler(
     let markers_hash_map = vec_to_hashmap(markers, |m| m.id.clone());
 
     // レイヤーを取得
-    let layers = query_as!(
-        LayerObject,
+    let layers = sqlx::query_as::<_, LayerObject>(
         r#"
         SELECT
-            id,
-            user_id,
-            layer_name,
-            is_master
+            layer_model.id,
+            layer_model.user_id,
+            layer_model.layer_name,
+            layer_model.is_master,
+            layer_model.marker_icon_id,
+            marker_icon_model.uuid_filename AS marker_icon_filename
         FROM layer_model
-        WHERE user_id = $1
+        LEFT JOIN marker_icon_model
+        ON marker_icon_model.id = layer_model.marker_icon_id
+        WHERE layer_model.user_id = $1
         "#,
-        user_id,
     )
+    .bind(&user_id)
     .fetch_all(&pool)
     .await
     .map_err(|e| {

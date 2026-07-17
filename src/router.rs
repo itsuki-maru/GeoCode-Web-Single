@@ -25,7 +25,9 @@ use crate::handler::admin::{
     admin_index_get_handler, create_users_handler, get_users_handler, unlock_account_handler,
     update_users_handler,
 };
-use crate::handler::assets::{image_preview_html_get_handler, serve_image_file, serve_static_file};
+use crate::handler::assets::{
+    image_preview_html_get_handler, serve_image_file, serve_marker_icon_file, serve_static_file,
+};
 use crate::handler::external_site::{
     get_external_site_url_handler, update_external_site_url_handler,
 };
@@ -39,6 +41,10 @@ use crate::handler::layers::{
     update_layername_handler,
 };
 use crate::handler::map::{map_another_get_handler, map_get_handler};
+use crate::handler::marker_icons::{
+    delete_marker_icon_handler, get_marker_icons_handler, search_marker_icons_handler,
+    upload_marker_icon_handler,
+};
 use crate::handler::markers::{
     create_marker_handler, delete_marker_handler, marker_get_handler, query_marker_handler,
     update_marker_info_handler, update_marker_position_handler,
@@ -103,6 +109,13 @@ pub fn build_router(
         .route("/images/delete/{image_id}", delete(delete_image_handler))
         .route("/layer", post(create_layer_handler))
         .route("/layer/masterid", get(master_layer_get_handler))
+        .route("/marker-icons", get(get_marker_icons_handler))
+        .route("/marker-icons/search", get(search_marker_icons_handler))
+        .route("/marker-icons/upload", post(upload_marker_icon_handler))
+        .route(
+            "/marker-icons/{icon_id}",
+            delete(delete_marker_icon_handler),
+        )
         .route("/layer/read/all", get(get_all_layers_handler))
         .route("/layer/delete/{layer_id}", delete(delete_layer_handler))
         .route("/layer/update/{layer_id}", put(update_layername_handler))
@@ -194,6 +207,10 @@ pub fn build_router(
     // アクセストークンを持たない場合においても内部サービスへ接続
     let flex_secured_routes = Router::new()
         .route("/static/images/{image_name}", get(serve_image_file))
+        .route(
+            "/static/marker-icons/{icon_name}",
+            get(serve_marker_icon_file),
+        )
         .route("/tile/{z}/{x}/{y_png}", get(proxy_tile_handler))
         .layer(FlexibleCookieValidator);
 

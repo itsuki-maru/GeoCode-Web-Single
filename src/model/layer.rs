@@ -2,12 +2,16 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
 // レイヤ情報構造体
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct LayerObject {
     pub id: String,
     pub user_id: String,
     pub layer_name: String,
     pub is_master: bool,
+    #[serde(default)]
+    pub marker_icon_id: Option<String>,
+    #[serde(default)]
+    pub marker_icon_filename: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -35,6 +39,10 @@ pub struct LayerCreatedResponse {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct LayerNameUpdatePayload {
     pub name: String,
+    #[serde(default)]
+    pub marker_icon_id: Option<String>,
+    #[serde(default)]
+    pub update_marker_icon: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -49,4 +57,8 @@ pub struct LayerObjectFromRow {
     pub user_id: String,
     pub layer_name: String,
     pub is_master: bool,
+    #[serde(default)]
+    pub marker_icon_id: Option<String>,
+    #[serde(default)]
+    pub marker_icon_filename: Option<String>,
 }

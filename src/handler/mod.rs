@@ -6,6 +6,7 @@ pub mod files;
 pub mod images;
 pub mod layers;
 pub mod map;
+pub mod marker_icons;
 pub mod markers;
 pub mod onetime_url;
 pub mod shapes;

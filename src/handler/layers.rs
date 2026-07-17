@@ -48,19 +48,22 @@ pub async fn get_all_layers_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
 ) -> Result<Json<HashMap<String, LayerObject>>, AppError> {
-    let layer_objects = query_as!(
-        LayerObject,
+    let layer_objects = sqlx::query_as::<_, LayerObject>(
         r#"
         SELECT
-            id,
-            user_id,
-            layer_name,
-            is_master
+            layer_model.id,
+            layer_model.user_id,
+            layer_model.layer_name,
+            layer_model.is_master,
+            layer_model.marker_icon_id,
+            marker_icon_model.uuid_filename AS marker_icon_filename
         FROM layer_model
-        WHERE user_id = $1
+        LEFT JOIN marker_icon_model
+        ON marker_icon_model.id = layer_model.marker_icon_id
+        WHERE layer_model.user_id = $1
         "#,
-        user_id,
     )
+    .bind(user_id)
     .fetch_all(&pool)
     .await
     .map_err(|e| {
@@ -161,21 +164,47 @@ pub async fn update_layername_handler(
     Path(layer_id): Path<String>,
     Json(payload): Json<LayerNameUpdatePayload>,
 ) -> Result<Json<MessageApi>, AppError> {
-    // 現在時刻を取得
     let now = Utc::now().naive_utc();
-
-    // レイヤのID、ユーザーIDが一致し、マスタレイヤでないもののみ変更可能
-    let query_result = query!(
+    if payload.name.trim().is_empty() {
+        return Err(AppError::Validation(
+            "layer name must not be empty".to_string(),
+        ));
+    }
+    if payload.update_marker_icon {
+        if let Some(ref icon_id) = payload.marker_icon_id {
+            let owned = sqlx::query_scalar::<_, bool>(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1
+                    FROM marker_icon_model
+                    WHERE id = $1 AND user_id = $2
+                )
+                "#,
+            )
+            .bind(&icon_id)
+            .bind(&user_id)
+            .fetch_one(&pool)
+            .await?;
+            if !owned {
+                return Err(AppError::BadRequest);
+            }
+        }
+    }
+    let query_result = sqlx::query(
         r#"
         UPDATE layer_model
-        SET layer_name = $1, update_at = $2
-        WHERE id = $3 AND user_id = $4 AND is_master = false
+        SET layer_name = CASE WHEN is_master THEN layer_name ELSE $1 END,
+            marker_icon_id = CASE WHEN $2 THEN $3 ELSE marker_icon_id END,
+            update_at = $4
+        WHERE id = $5 AND user_id = $6
         "#,
-        payload.name,
-        now,
-        layer_id,
-        user_id,
     )
+    .bind(payload.name.trim())
+    .bind(payload.update_marker_icon)
+    .bind(payload.marker_icon_id)
+    .bind(now)
+    .bind(layer_id)
+    .bind(user_id)
     .execute(&pool)
     .await
     .map_err(|e| {
@@ -183,8 +212,7 @@ pub async fn update_layername_handler(
         AppError::Sqlx(e)
     })?;
 
-    let affected_rows = query_result.rows_affected();
-    if affected_rows > 0 {
+    if query_result.rows_affected() > 0 {
         Ok(Json(MessageApi {
             message: "Layer successfully updated.".to_string(),
         }))

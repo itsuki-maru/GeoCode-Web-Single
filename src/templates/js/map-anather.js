@@ -365,7 +365,7 @@ for (const key in markersFromAxum) {
   const marker = L.marker([
     markerData["latitude"],
     markerData["longitude"],
-  ]).bindPopup(markerData["marker_name"]);
+  ], markerOptionsForLayer(markerData["layer_id"], layersFromAxum)).bindPopup(markerData["marker_name"]);
 
   // ポップアップオープン時に遅延読み込みの処理を追加
   marker.on("popupopen", () => {

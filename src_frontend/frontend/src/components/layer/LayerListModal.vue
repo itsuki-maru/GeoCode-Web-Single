@@ -55,7 +55,7 @@ defineExpose({ initSearch });
 <template>
   <BaseModal :isOpen="isOpen" @close="emit('close')">
     <div class="layer-list-content">
-      <h2 class="modal-h2">レイヤリスト</h2>
+      <h2 class="modal-h2">レイヤグループリスト</h2>
       <div class="search-form">
         <div>
           <input
@@ -91,7 +91,7 @@ defineExpose({ initSearch });
           <thead>
             <tr>
               <th>LayerName</th>
-              <th>Rename</th>
+              <th>Edit</th>
               <th>Delete</th>
             </tr>
           </thead>

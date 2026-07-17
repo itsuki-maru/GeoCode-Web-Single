@@ -527,10 +527,14 @@ watch(
           class="btn-function-image"
           title="新規レイヤの追加"
         >
-          <img :src="`${assetsUrl}layer_add_24.png`" class="function-img" alt="layer_add_24.png" />
+          <img
+            :src="`${assetsUrl}layer_add_combined_24.png`"
+            class="function-img"
+            alt="layer_add_combined_24.png"
+          />
         </button>
         <button @click="openLayerListModal()" class="btn-function-image" title="レイヤ一覧">
-          <img :src="`${assetsUrl}list_24.png`" class="function-img" alt="list_24.png" />
+          <img :src="`${assetsUrl}layer_add_24.png`" class="function-img" alt="layer_add_24.png" />
         </button>
       </div>
     </div>
@@ -781,13 +785,8 @@ watch(
   <MessageModal :isOpen="isMessageModal" :message="messageText" @close="closeMessage" />
 
   <!-- プログレスモーダル -->
-  <ProgressSpinner
-    :isOpen="showProgressModal"
-  />
-  <UploadProgressModal
-    :isOpen="uploadProgressState.isOpen"
-    :progress="uploadProgressState"
-  />
+  <ProgressSpinner :isOpen="showProgressModal" />
+  <UploadProgressModal :isOpen="uploadProgressState.isOpen" :progress="uploadProgressState" />
 
   <!-- iFrameからの画像プレビュー -->
   <FullScreenMapModal

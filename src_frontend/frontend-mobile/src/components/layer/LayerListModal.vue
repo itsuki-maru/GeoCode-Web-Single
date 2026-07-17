@@ -3,6 +3,7 @@ import { ref, computed } from "vue";
 import BaseModal from "@/components/common/BaseModal.vue";
 import { useLayersStore } from "@/stores/layers";
 import { assetsUrl } from "@/settingMobile";
+import type { LayersData } from "@/interface";
 
 const props = defineProps<{
   isOpen: boolean;
@@ -30,7 +31,7 @@ const onLayerSearch = (reset: boolean = false): void => {
     );
     return;
   }
-  const result: { id: string; user_id: string; name: string; is_master: boolean }[] = [];
+  const result: LayersData[] = [];
   copiedLayersMap.value.forEach((value) => {
     if (value.name.includes(queryFormLayerData.value)) {
       result.push(value);
@@ -39,10 +40,7 @@ const onLayerSearch = (reset: boolean = false): void => {
 
   result.sort((a, b) => b.id.localeCompare(a.id));
 
-  const resultLayer: Map<
-    string,
-    { id: string; user_id: string; name: string; is_master: boolean }
-  > = new Map();
+  const resultLayer = new Map<string, LayersData>();
   for (const item of result) {
     resultLayer.set(item.id, item);
   }
@@ -54,10 +52,6 @@ const handleOpen = (): void => {
 };
 
 const handleRename = (id: string, name: string): void => {
-  if (props.masterLayerId === id) {
-    emit("message", "masterレイヤは名前を変更できません。");
-    return;
-  }
   emit("rename", id, name);
 };
 
@@ -75,7 +69,7 @@ defineExpose({ handleOpen });
 
 <template>
   <BaseModal :isOpen="isOpen" @close="emit('close')">
-    <h2 class="modal-h2">レイヤリスト</h2>
+    <h2 class="modal-h2">レイヤグループリスト</h2>
     <div class="search-form">
       <div class="form-text">
         <input
@@ -111,7 +105,7 @@ defineExpose({ handleOpen });
         <thead>
           <tr>
             <th id="copied-msg">LayerName</th>
-            <th>Rename</th>
+            <th>Edit</th>
             <th>Delete</th>
           </tr>
         </thead>

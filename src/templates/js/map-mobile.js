@@ -465,7 +465,9 @@ let localMarkerSearchQuery = "";
 for (const key in markersFromAxum) {
   let marker = L.marker(
     [markersFromAxum[key]["latitude"], markersFromAxum[key]["longitude"]],
-    { draggable: false },
+    markerOptionsForLayer(markersFromAxum[key]["layer_id"], layersFromAxum, {
+      draggable: false,
+    }),
   )
     .addTo(markersClusterGroup)
     .on("dragend", function (event) {
@@ -2301,26 +2303,34 @@ map.on("click", async function (e) {
     })
     .then((data) => {
       // サーバーからid, 緯度, 経度を受け取りマーカーとして描画
-      var marker = L.marker(e.latlng, { draggable: false })
+      var marker = L.marker(
+        e.latlng,
+        markerOptionsForLayer(layer, layersFromAxum, { draggable: false }),
+      )
         .addTo(markersClusterGroup)
         .on("dragend", function (event) {
           var movedMarker = event.target;
           var position = movedMarker.getLatLng();
           updateServer(movedMarker.id, position.lat, position.lng);
         });
-      marker
-        .bindPopup(
-          "ID: " +
-            data["id"] +
-            "<br>" +
-            "緯度: " +
-            e.latlng.lat +
-            "<br>" +
-            "経度: " +
-            e.latlng.lng,
-        )
-        .openPopup();
+      const markerKey = `marker-${data["id"]}`;
       marker.id = data["id"];
+      const markerElement = marker.getElement();
+      if (markerElement) {
+        markerElement.id = markerKey;
+      }
+      markers[markerKey] = marker;
+      markersFromAxum[data["id"]] = {
+        id: data["id"],
+        layer_id: layer,
+        marker_name: "",
+        latitude: e.latlng.lat,
+        longitude: e.latlng.lng,
+        detail: "",
+      };
+
+      // 再描画用の管理データへ登録してから、親画面の一覧を更新する
+      callParentReload();
     })
     .catch((error) => {
       console.log(

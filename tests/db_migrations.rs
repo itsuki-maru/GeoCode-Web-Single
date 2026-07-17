@@ -43,7 +43,7 @@ async fn migrations_create_schema_and_record_versions() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 3);
+    assert_eq!(migration_count, 4);
 
     let external_site_urls_table_count: i64 = sqlx::query_scalar(
         r#"
@@ -73,7 +73,7 @@ async fn migrations_are_idempotent() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 3);
+    assert_eq!(migration_count, 4);
 }
 
 #[tokio::test]
@@ -156,7 +156,7 @@ async fn migrations_record_versions_for_existing_schema() {
     .await
     .expect("migration rows should be returned");
 
-    assert_eq!(rows.len(), 3);
+    assert_eq!(rows.len(), 4);
     assert_eq!(rows[0].get::<i64, _>("version"), 1);
     assert_eq!(rows[0].get::<String, _>("name"), "create_initial_schema");
     assert_eq!(rows[1].get::<i64, _>("version"), 2);
@@ -165,6 +165,11 @@ async fn migrations_record_versions_for_existing_schema() {
     assert_eq!(
         rows[2].get::<String, _>("name"),
         "create_external_site_urls"
+    );
+    assert_eq!(rows[3].get::<i64, _>("version"), 4);
+    assert_eq!(
+        rows[3].get::<String, _>("name"),
+        "add_marker_icon_id_to_layer_model"
     );
 
     let legacy_user_count: i64 =

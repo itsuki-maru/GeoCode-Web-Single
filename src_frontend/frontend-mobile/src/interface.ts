@@ -17,6 +17,8 @@ interface LayersData {
   user_id: string;
   name: string;
   is_master: boolean;
+  marker_icon_id: string | null;
+  marker_icon_filename: string | null;
 }
 
 interface UpdateMapObjectData {
@@ -31,6 +33,11 @@ interface InitGeoCode {
 }
 
 interface ImageData {
+  id: string;
+  filename: string;
+  uuid_filename: string;
+}
+interface MarkerIconData {
   id: string;
   filename: string;
   uuid_filename: string;
@@ -73,6 +80,7 @@ export type {
   InitGeoCode,
   ImageData,
   QueryForm,
+  MarkerIconData,
   ShareLayerCheckList,
   ApplicationInit,
   UploadProgressState,
