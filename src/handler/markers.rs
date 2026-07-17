@@ -4,7 +4,7 @@ use crate::model::{
     MarkerInfoUpdateJsonData, MarkerMoveRequestParams, MarkerObject, MarkerQuerySearchParams,
     MarkerReadQueryPrams, MessageApi, ReturningId,
 };
-use crate::utils::{check_ismaster_handler, vec_to_hashmap};
+use crate::utils::{check_ismaster_handler, ensure_owned_layer, vec_to_hashmap};
 use axum::{
     Json,
     extract::{Extension, Path, Query},
@@ -88,6 +88,7 @@ pub async fn create_marker_handler(
 
     match (params.layer_id, params.latitude, params.longitude) {
         (Some(layer_id), Some(latitude), Some(longitude)) => {
+            ensure_owned_layer(&pool, &user_id, &layer_id).await?;
             let blank_text = "".to_string();
             let new_id = query_as!(
                 ReturningId,
@@ -189,6 +190,8 @@ pub async fn update_marker_info_handler(
 ) -> Result<Json<MessageApi>, AppError> {
     // 現在時刻を取得
     let now = Utc::now().naive_utc();
+
+    ensure_owned_layer(&pool, &user_id, &payload.layer_id).await?;
 
     let query_result = query!(
         r#"

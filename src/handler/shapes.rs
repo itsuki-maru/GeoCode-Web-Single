@@ -3,6 +3,7 @@ use crate::model::{
     MessageApi, ShapeCreateJsonData, ShapeCreatedResponse, ShapeObject, ShapeReadQueryParams,
     ShapeUpdateJsonData,
 };
+use crate::utils::ensure_owned_layer;
 use axum::{
     Json,
     extract::{Extension, Path, Query},
@@ -104,6 +105,8 @@ pub async fn create_shape_handler(
 
     // 図形名を正規化
     let normalized_name = normalize_shape_name(payload.name.as_deref())?;
+
+    ensure_owned_layer(&pool, &user_id, &payload.layer_id).await?;
 
     let new_shape_id = Uuid::now_v7().to_string();
     let now = Utc::now().naive_utc();

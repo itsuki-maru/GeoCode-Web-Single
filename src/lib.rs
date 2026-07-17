@@ -5,6 +5,7 @@ use axum::{
     response::{Html, IntoResponse, Redirect},
 };
 use rust_embed::RustEmbed;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tera::Tera;
 use tokio::sync::Mutex as TokioMutex;
@@ -110,6 +111,7 @@ pub async fn serve_favicon() -> Result<Response<Body>, AppError> {
 // Teraに対してテンプレートファイルを rust_embed から登録
 pub fn build_tera_from_embed() -> anyhow::Result<Tera> {
     let mut tera = Tera::default();
+    tera.register_filter("json_encode_for_html", json_encode_for_html_filter);
     for path in Templates::iter() {
         let path_str = path.as_ref();
         if let Some(file) = Templates::get(path_str) {
@@ -120,6 +122,35 @@ pub fn build_tera_from_embed() -> anyhow::Result<Tera> {
     Ok(tera)
 }
 
+fn json_encode_for_html_filter(
+    value: &serde_json::Value,
+    _args: &HashMap<String, serde_json::Value>,
+) -> tera::Result<serde_json::Value> {
+    let json = serde_json::to_string(value).map_err(|error| tera::Error::msg(error.to_string()))?;
+    let escaped = json
+        .replace('&', "\\u0026")
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029");
+    Ok(serde_json::Value::String(escaped))
+}
 pub fn build_tera_extension() -> anyhow::Result<Arc<TokioMutex<Tera>>> {
     Ok(Arc::new(TokioMutex::new(build_tera_from_embed()?)))
+}
+
+#[cfg(test)]
+mod template_filter_tests {
+    use super::*;
+
+    #[test]
+    fn escapes_script_breakout_characters() {
+        let value = serde_json::json!({"value": "</script>&\u{2028}"});
+        let filtered = json_encode_for_html_filter(&value, &HashMap::new()).unwrap();
+        let output = filtered.as_str().unwrap();
+        assert!(!output.contains("</script>"));
+        assert!(output.contains("\\u003c/script\\u003e"));
+        assert!(output.contains("\\u0026"));
+        assert!(output.contains("\\u2028"));
+    }
 }

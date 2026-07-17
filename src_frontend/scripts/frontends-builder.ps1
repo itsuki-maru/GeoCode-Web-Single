@@ -86,10 +86,10 @@ if ($dependsDeleteFlag)
     CheckExistsPath $nodeModules
 }
 
-# node_modulesが存在しなければnpm installを実行
+# node_modulesが存在しなければnpm ciを実行
 if (-Not (Test-Path $nodeModules))
 {
-    Invoke-ExternalCommand "npm" @("install")
+    Invoke-ExternalCommand "npm" @("ci")
 }
 
 # ビルド
@@ -131,10 +131,10 @@ if ($dependsDeleteFlag)
     CheckExistsPath $nodeModules
 }
 
-# node_modulesが存在しなければnpm installを実行
+# node_modulesが存在しなければnpm ciを実行
 if (-Not (Test-Path $nodeModules))
 {
-    Invoke-ExternalCommand "npm" @("install")
+    Invoke-ExternalCommand "npm" @("ci")
 }
 
 # ビルド
@@ -178,10 +178,10 @@ if ($dependsDeleteFlag)
     CheckExistsPath $nodeModules
 }
 
-# node_modulesが存在しなければnpm installを実行
+# node_modulesが存在しなければnpm ciを実行
 if (-Not (Test-Path $nodeModules))
 {
-    Invoke-ExternalCommand "npm" @("install")
+    Invoke-ExternalCommand "npm" @("ci")
 }
 
 # ビルド

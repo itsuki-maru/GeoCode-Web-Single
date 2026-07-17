@@ -3,11 +3,11 @@ use crate::config::CONFIG;
 use crate::error::AppError;
 use crate::model::{
     GetUserNameFromDb, MessageApi, TotpLoginPayload, TotpSetupResponse, TotpTempSecret,
-    TotpVerifyRequest, UserAccountModel,
+    TotpVerifyRequest,
 };
 use axum::{Json, extract::Extension, http::StatusCode, response::IntoResponse};
 use base32::Alphabet;
-use chrono::{Duration, NaiveDateTime, Utc};
+use chrono::Utc;
 use rand::Rng;
 use serde_json::json;
 use sqlx::sqlite::SqlitePool;
@@ -124,11 +124,15 @@ pub async fn totp_verify_handler(
     };
 
     // 検証成功時は本番用に昇格
-    let blank_text = "".to_string();
+    let blank_text = String::new();
     query!(
         r#"
         UPDATE user_model
-        SET totp_secret = $1, totp_temp_secret = $2
+        SET totp_secret = $1, totp_temp_secret = $2,
+            auth_version = auth_version + 1,
+            totp_challenge_id = NULL,
+            totp_challenge_expires_at = NULL,
+            totp_challenge_attempts = 0
         WHERE id = $3
         "#,
         result.totp_temp_secret,
@@ -152,154 +156,159 @@ pub async fn token_totp_handler(
     Extension(pool): Extension<SqlitePool>,
     Json(payload): Json<TotpLoginPayload>,
 ) -> Result<impl IntoResponse, AppError> {
-    // ユーザーIDからユーザーを取得
+    struct TotpLoginUser {
+        id: String,
+        username: String,
+        totp_secret: String,
+        auth_version: i64,
+    }
+
+    let challenge_now = Utc::now().naive_utc();
     let user = query_as!(
-        UserAccountModel,
+        TotpLoginUser,
         r#"
-        SELECT
-            id,
-            username,
-            password,
-            create_at,
-            is_superuser,
-            failed_count,
-            next_challenge_time,
-            is_locked,
-            is_private,
-            is_basic_authed,
-            is_basic_authed_at,
-            totp_secret,
-            totp_temp_secret
+        SELECT id, username, totp_secret, auth_version
         FROM user_model
-        WHERE id = $1
+        WHERE totp_challenge_id = $1
+          AND totp_challenge_expires_at > $2
+          AND totp_challenge_attempts < 5
+          AND is_locked = false
         "#,
-        payload.user_id
+        payload.challenge_id,
+        challenge_now,
     )
-    .fetch_one(&pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
-
-    // パスワードベーシック認証を成功していなければエラーレスポンス
-    if !user.is_basic_authed {
-        return Err(AppError::Unauthorized("NoBasicAuth".into()));
-    }
-
-    // 3分以内か検証
-    if let Some(expiry) = Duration::try_minutes(3) {
-        // SQLiteでの文字列から日付型に戻す
-        match parse_naive_datetime(&user.is_basic_authed_at) {
-            Some(next) if Utc::now().naive_utc() - next > expiry => {
-                return Err(AppError::Unauthorized("Time Over.".into()));
-            },
-            Some(_) => {},
-            None => {
-                return Err(AppError::Validation("Parse Error.".into()));
-            },
-        }
-    }
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::Unauthorized("Time Over.".into()))?;
 
     let totp = TOTP::new(
         Algorithm::SHA1,
         6,
         1,
         30,
-        user.totp_secret.into(),
+        user.totp_secret.clone().into(),
         CONFIG.service_name.clone().into(),
-        payload.user_id.clone().to_string(),
+        user.id.to_string(),
     )
-    .map_err(|_e| AppError::InternalServerError)?;
+    .map_err(|_| AppError::InternalServerError)?;
 
     if !totp.check_current(&payload.totp_token).unwrap_or(false) {
+        query!(
+            r#"
+            UPDATE user_model
+            SET totp_challenge_attempts = totp_challenge_attempts + 1,
+                totp_challenge_id = CASE
+                    WHEN totp_challenge_attempts + 1 >= 5 THEN NULL
+                    ELSE totp_challenge_id
+                END,
+                totp_challenge_expires_at = CASE
+                    WHEN totp_challenge_attempts + 1 >= 5 THEN NULL
+                    ELSE totp_challenge_expires_at
+                END
+            WHERE id = $1 AND totp_challenge_id = $2
+            "#,
+            user.id,
+            payload.challenge_id,
+        )
+        .execute(&pool)
+        .await?;
         return Err(AppError::Unauthorized("NoAuth".into()));
     }
 
-    // ログインに成功したらfailed_countをリセット
-    query!(
+    let consumed = sqlx::query_scalar::<_, String>(
         r#"
         UPDATE user_model
-        SET failed_count = $1
-        WHERE id = $2
+        SET failed_count = 0,
+            totp_challenge_id = NULL,
+            totp_challenge_expires_at = NULL,
+            totp_challenge_attempts = 0,
+            is_basic_authed = false
+        WHERE id = $1 AND totp_challenge_id = $2
+        RETURNING id
         "#,
-        0,
-        user.id
     )
-    .execute(&pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
+    .bind(&user.id)
+    .bind(payload.challenge_id)
+    .fetch_optional(&pool)
+    .await?;
+    if consumed.is_none() {
+        return Err(AppError::Unauthorized("NoAuth".into()));
+    }
 
-    // アクセストークン生成
     let access_token = create_token(
         &user.id,
         CONFIG.access_token_exp_minutes,
-        "access_token".to_string(),
+        "access_token",
+        user.auth_version,
     )
-    .map_err(|_e| AppError::InternalServerError)?;
-
-    // リフレッシュトークン生成
+    .map_err(|_| AppError::InternalServerError)?;
     let refresh_token = create_token(
         &user.id,
         CONFIG.refresh_token_exp_minutes,
-        "refresh_token".to_string(),
+        "refresh_token",
+        user.auth_version,
     )
-    .map_err(|_e| AppError::InternalServerError)?;
+    .map_err(|_| AppError::InternalServerError)?;
 
-    // レスポンスボディの情報
     let body = json!({
         "success": true,
         "user": user.username,
-        "id": user.id,
         "totp_required": false,
     })
     .to_string();
 
-    // ベーシック認証確認済みのフラグのフラグをfalseへ初期化
-    query!(
-        r#"
-        UPDATE user_model
-        SET is_basic_authed = $1
-        WHERE id = $2
-        "#,
-        false,
-        user.id
-    )
-    .execute(&pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
-
-    let response = build_auth_cookie_response(
+    build_auth_cookie_response(
         &access_token,
         &refresh_token,
         StatusCode::OK,
         axum::body::Body::from(body),
-    )?;
-    Ok(response)
+    )
 }
-
 // TOTP無効化ハンドラー
 pub async fn totp_disable_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
+    Json(payload): Json<TotpVerifyRequest>,
 ) -> Result<Json<MessageApi>, AppError> {
-    // 無効化
-    let blank_text = "".to_string();
+    let (username, current_secret) = sqlx::query_as::<_, (String, String)>(
+        "SELECT username, totp_secret FROM user_model WHERE id = $1 AND is_locked = false",
+    )
+    .bind(&user_id)
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::Unauthorized("Failed TOTP 2FA disable.".into()))?;
+    if current_secret.is_empty() {
+        return Err(AppError::BadRequest);
+    }
+    let totp = TOTP::new(
+        Algorithm::SHA1,
+        6,
+        1,
+        30,
+        current_secret.clone().into(),
+        CONFIG.service_name.clone().into(),
+        username,
+    )
+    .map_err(|_| AppError::InternalServerError)?;
+    if !totp.check_current(&payload.token).unwrap_or(false) {
+        return Err(AppError::Unauthorized("Invalid TOTP token.".into()));
+    }
+    let blank_secret = String::new();
+    let blank_temp_secret = String::new();
     let query_result = query!(
         r#"
         UPDATE user_model
-        SET totp_secret = $1, totp_temp_secret = $2
-        WHERE id = $3
+        SET totp_secret = $1, totp_temp_secret = $2,
+            auth_version = auth_version + 1,
+            totp_challenge_id = NULL,
+            totp_challenge_expires_at = NULL,
+            totp_challenge_attempts = 0
+        WHERE id = $3 AND totp_secret = $4
         "#,
-        blank_text,
-        blank_text,
+        blank_secret,
+        blank_temp_secret,
         user_id,
+        current_secret,
     )
     .execute(&pool)
     .await
@@ -316,20 +325,4 @@ pub async fn totp_disable_handler(
     } else {
         Err(AppError::Unauthorized("Failed TOTP 2FA disable.".into()))
     }
-}
-
-fn parse_naive_datetime(s: &str) -> Option<NaiveDateTime> {
-    // 小数秒あり/なし、スペース/T 区切りの両方を許容
-    let fmts: [&str; 4] = [
-        "%Y-%m-%d %H:%M:%S%.f",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S%.f",
-        "%Y-%m-%dT%H:%M:%S",
-    ];
-    for f in fmts {
-        if let Ok(dt) = NaiveDateTime::parse_from_str(s, f) {
-            return Some(dt);
-        }
-    }
-    None
 }

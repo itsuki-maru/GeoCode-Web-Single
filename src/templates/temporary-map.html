@@ -347,12 +347,12 @@
         <div class="folium-map" id="map"></div>
     </body>
     <script>
-        var layers = {{ layers | json_encode | safe }}
-        var markersObj = {{ markersObj | json_encode | safe }}
-        var shapesObj = {{ shapesObj | json_encode | safe }}
-        var tileServers = {{ tileServers | json_encode | safe }};
+        var layers = {{ layers | json_encode_for_html | safe }}
+        var markersObj = {{ markersObj | json_encode_for_html | safe }}
+        var shapesObj = {{ shapesObj | json_encode_for_html | safe }}
+        var tileServers = {{ tileServers | json_encode_for_html | safe }};
         var isMaster = false;
-        var isChecked = {{ isChecked | json_encode | safe }};
+        var isChecked = {{ isChecked | json_encode_for_html | safe }};
         var latitude = {{ latitude }};
         var longitude = {{ longitude }};
         var zoom = {{ zoom }};

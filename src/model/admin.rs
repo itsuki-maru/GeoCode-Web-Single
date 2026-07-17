@@ -10,7 +10,6 @@ pub struct IsSuperuser {
 pub struct ResponseUserData {
     pub id: String,
     pub username: String,
-    pub password: String,
     pub create_at: String,
     pub is_superuser: bool,
     pub is_locked: bool,

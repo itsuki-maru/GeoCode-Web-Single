@@ -61,6 +61,7 @@ use tera::Tera;
 use tokio::sync::Mutex;
 use totp_rs::{Algorithm, TOTP};
 use tower::ServiceExt;
+use uuid::Uuid;
 
 // マーカー作成ヘルパー関数
 async fn insert_marker(pool: &SqlitePool, user_id: &str, layer_id: &str) -> String {
@@ -401,19 +402,21 @@ async fn account_handlers_cover_signup_login_profile_and_tokens() {
         Extension(user_id.clone()),
         Extension(pool.clone()),
         Json(UpdateAccountPasswordPayload {
+            current_password: "password123".to_string(),
             new_password: "newpassword123".to_string(),
         }),
     )
     .await
     .expect("password should update");
 
-    let refresh_response = refresh_token_handler(Extension(user_id.clone()))
-        .await
-        .expect("refresh token response should be built")
-        .into_response();
+    let refresh_response =
+        refresh_token_handler(Extension(user_id.clone()), Extension(pool.clone()))
+            .await
+            .expect("refresh token response should be built")
+            .into_response();
     assert_eq!(refresh_response.status(), StatusCode::OK);
 
-    let disabled_response = disable_token(Extension(user_id))
+    let disabled_response = disable_token(Extension(user_id), Extension(pool))
         .await
         .expect("disable token response should be built")
         .into_response();
@@ -855,14 +858,16 @@ async fn totp_handlers_cover_setup_verify_login_and_disable() {
     .await
     .expect("totp verification should enable totp");
 
+    let challenge_id = Uuid::now_v7().to_string();
     sqlx::query(
-        "UPDATE user_model SET is_basic_authed = true, is_basic_authed_at = $1 WHERE id = $2",
+        "UPDATE user_model SET totp_challenge_id = $1, totp_challenge_expires_at = $2, totp_challenge_attempts = 0 WHERE id = $3",
     )
-    .bind(Utc::now().naive_utc())
+    .bind(&challenge_id)
+    .bind(Utc::now().naive_utc() + chrono::Duration::minutes(3))
     .bind(&user_id)
     .execute(&pool)
     .await
-    .expect("basic auth flag should be set");
+    .expect("totp challenge should be stored");
     let login_token = totp
         .generate_current()
         .expect("login token should generate");
@@ -870,16 +875,23 @@ async fn totp_handlers_cover_setup_verify_login_and_disable() {
         Extension(pool.clone()),
         Json(TotpLoginPayload {
             totp_token: login_token,
-            user_id: user_id.clone(),
+            challenge_id,
         }),
     )
     .await
     .expect("totp login should succeed")
     .into_response();
     assert_eq!(login_response.status(), StatusCode::OK);
-
-    let Json(disabled) = totp_disable_handler(Extension(user_id), Extension(pool))
-        .await
-        .expect("totp should disable");
+    let Json(disabled) = totp_disable_handler(
+        Extension(user_id),
+        Extension(pool),
+        Json(TotpVerifyRequest {
+            token: totp
+                .generate_current()
+                .expect("disable token should generate"),
+        }),
+    )
+    .await
+    .expect("totp should disable");
     assert!(disabled.message.contains("disabled"));
 }

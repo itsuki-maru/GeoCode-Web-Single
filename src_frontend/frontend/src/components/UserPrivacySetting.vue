@@ -59,19 +59,21 @@ const openCloseUserSettingModal = (): void => {
 const isOpenTotpSetupModal = ref(false);
 const changeTotpQRModal = async (): Promise<void> => {
   if (isTotpAuth.value) {
+    const disableToken = window.prompt("2段階認証を無効化するには現在の6桁コードを入力してください。");
+    if (!disableToken) return;
     try {
-      const response = await apiClient.get(userTotpDisableUrl);
+      await apiClient.post(userTotpDisableUrl, { token: disableToken });
       messageModalOpenClose("2段階認証を無効化しました。");
       isTotpAuth.value = false;
     } catch (error) {
-      messageModalOpenClose("2段階認証の無効化に失敗しました。");
+      messageModalOpenClose("コードが正しくないため、2段階認証を無効化できませんでした。");
     }
     return;
   } else {
     // 仮の有効化リクエスト
     isOpenTotpSetupModal.value = true;
     try {
-      const response = await apiClient.get(userTotpSettingUrl);
+      const response = await apiClient.post(userTotpSettingUrl);
       const otpAuthUrl = response.data["otpauth_url"];
       const secretBase32 = response.data["secret_base32"];
       qrCodeText.value = otpAuthUrl;
@@ -87,11 +89,13 @@ const closeTotpQRModal = (): void => {
 };
 
 const isOpenPasswordUpdateModal = ref(false);
+const currentPassword = ref("");
 const newPassword = ref("");
 const checkPassword = ref("");
 const openClosePasswordUpdateModal = (): void => {
   isOpenPasswordUpdateModal.value = !isOpenPasswordUpdateModal.value;
   if (!isOpenPasswordUpdateModal.value) {
+    currentPassword.value = "";
     newPassword.value = "";
     checkPassword.value = "";
   }
@@ -165,6 +169,10 @@ const verifyTotp = async (): Promise<void> => {
 };
 
 const updatePassword = async (): Promise<void> => {
+  if (currentPassword.value === "") {
+    messageModalOpenClose("現在のパスワードを入力してください。");
+    return;
+  }
   if (newPassword.value === "") {
     messageModalOpenClose("パスワードが入力されていません。");
     return;
@@ -180,6 +188,7 @@ const updatePassword = async (): Promise<void> => {
 
   try {
     await apiClient.post(userPasswordUpdateUrl, {
+      current_password: currentPassword.value,
       new_password: newPassword.value,
     });
     openClosePasswordUpdateModal();
@@ -273,7 +282,13 @@ const updatePassword = async (): Promise<void> => {
   <!-- パスワード更新モーダル -->
   <div id="overlay-update-password" v-show="isOpenPasswordUpdateModal">
     <div id="content-update-password">
-      <h2 class="modal-h2">パスワード変更</h2>
+      <h2 class="modal-h2">パスワード変更</h2>      <input
+        class="password-input"
+        type="password"
+        placeholder="Current Password"
+        autocomplete="current-password"
+        v-model="currentPassword"
+      />
       <input
         class="password-input"
         type="password"

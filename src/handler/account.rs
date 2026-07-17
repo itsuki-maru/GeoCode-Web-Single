@@ -10,7 +10,10 @@ use serde_json::json;
 use sqlx::sqlite::SqlitePool;
 use sqlx::{query, query_as};
 
-use crate::auth::{build_auth_cookie_response, create_token, refresh_access_token};
+use crate::auth::{
+    build_auth_cookie_response, build_clear_auth_cookie_response, create_token,
+    refresh_access_token,
+};
 use crate::db::create_user_with_master_layer;
 use crate::error::AppError;
 use crate::model::{
@@ -117,7 +120,8 @@ pub async fn token_handler(
             is_basic_authed,
             is_basic_authed_at,
             totp_secret,
-            totp_temp_secret
+            totp_temp_secret,
+            auth_version
         FROM user_model
         WHERE username = $1
         "#,
@@ -158,7 +162,7 @@ pub async fn token_handler(
         query!(
             r#"
             UPDATE user_model
-            SET is_locked = $1, failed_count = $2
+            SET is_locked = $1, failed_count = $2, auth_version = auth_version + 1
             WHERE id = $3
             "#,
             true,
@@ -236,35 +240,34 @@ pub async fn token_handler(
         return Err(AppError::Unauthorized("Unauthorized".into()));
     }
 
-    // TOTPが有効であれば要求
+    // TOTPが有効であれば、一回限りの短時間チャレンジを要求
     if user.totp_secret != "" {
-        let now = Utc::now().naive_utc().to_string();
-        // ベーシック認証確認済みのフラグ
+        let challenge_id = uuid::Uuid::now_v7().to_string();
+        let challenge_expires_at = Utc::now().naive_utc()
+            + TimeDelta::try_minutes(3).ok_or(AppError::InternalServerError)?;
         query!(
             r#"
             UPDATE user_model
-            SET is_basic_authed = $1, is_basic_authed_at = $2
+            SET totp_challenge_id = $1,
+                totp_challenge_expires_at = $2,
+                totp_challenge_attempts = 0,
+                is_basic_authed = false
             WHERE id = $3
             "#,
-            true,
-            now,
+            challenge_id,
+            challenge_expires_at,
             user.id
         )
         .execute(&pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "database error.");
-            AppError::Sqlx(e)
-        })?;
+        .await?;
 
         let body = json!({
             "success": false,
             "user": payload.username,
-            "id": user.id,
+            "challenge_id": challenge_id,
             "totp_required": true,
         })
         .to_string();
-        // レスポンスの生成
         let response = Response::builder()
             .status(StatusCode::OK)
             .body(axum::body::Body::from(body))
@@ -293,7 +296,8 @@ pub async fn token_handler(
         let access_token = create_token(
             &user.id,
             CONFIG.access_token_exp_minutes,
-            "access_token".to_string(),
+            "access_token",
+            user.auth_version,
         )
         .map_err(|_e| AppError::InternalServerError)?;
 
@@ -301,7 +305,8 @@ pub async fn token_handler(
         let refresh_token = create_token(
             &user.id,
             CONFIG.refresh_token_exp_minutes,
-            "refresh_token".to_string(),
+            "refresh_token",
+            user.auth_version,
         )
         .map_err(|_e| AppError::InternalServerError)?;
 
@@ -353,8 +358,17 @@ fn parsed_i64_to_string(string_int: String) -> Result<i64, std::num::ParseIntErr
 // リフレッシュトークンの再取得ハンドラ
 pub async fn refresh_token_handler(
     Extension(user_id): Extension<String>,
+    Extension(pool): Extension<SqlitePool>,
 ) -> Result<impl IntoResponse, AppError> {
-    match refresh_access_token(user_id) {
+    let auth_version = sqlx::query_scalar::<_, i64>(
+        "SELECT auth_version FROM user_model WHERE id = $1 AND is_locked = false",
+    )
+    .bind(&user_id)
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::Unauthorized("Unauthorized".into()))?;
+
+    match refresh_access_token(user_id, auth_version) {
         Ok(new_tokens) => {
             let response = build_auth_cookie_response(
                 &new_tokens.access_token,
@@ -410,17 +424,31 @@ pub async fn account_password_update_handler(
 ) -> Result<Json<MessageApi>, AppError> {
     validate_password(&payload.new_password)?;
 
+    let current_hash = sqlx::query_scalar::<_, String>(
+        "SELECT password FROM user_model WHERE id = $1 AND is_locked = false",
+    )
+    .bind(&user_id)
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::Unauthorized("Invalid credentials".into()))?;
+    if !verify(&payload.current_password, &current_hash)
+        .map_err(|_| AppError::InternalServerError)?
+    {
+        return Err(AppError::Unauthorized("Invalid credentials".into()));
+    }
+
     let hashed_password =
         hash(payload.new_password, DEFAULT_COST).map_err(|_| AppError::InternalServerError)?;
 
     let result = query!(
         r#"
         UPDATE user_model
-        SET password = $1
-        WHERE id = $2
+        SET password = $1, auth_version = auth_version + 1
+        WHERE id = $2 AND password = $3
         "#,
         hashed_password,
         user_id,
+        current_hash,
     )
     .execute(&pool)
     .await
@@ -497,22 +525,19 @@ fn parse_naive_datetime(s: &str) -> Option<NaiveDateTime> {
     None
 }
 
-// 期限0の無効トークンを発行し、既存のトークンを上書き
+// サーバー側で全セッションを失効させ、認証Cookieを削除
 pub async fn disable_token(
     Extension(user_id): Extension<String>,
+    Extension(pool): Extension<SqlitePool>,
 ) -> Result<impl IntoResponse, AppError> {
-    // アクセストークン生成
-    let access_token = create_token(&user_id, 0, "access_token".to_string())
-        .map_err(|_e| AppError::InternalServerError)?;
-
-    // リフレッシュトークン生成
-    let refresh_token = create_token(&user_id, 0, "refresh_token".to_string())
-        .map_err(|_e| AppError::InternalServerError)?;
-
-    build_auth_cookie_response(
-        &access_token,
-        &refresh_token,
-        StatusCode::OK,
-        axum::body::Body::empty(),
+    let updated = sqlx::query_scalar::<_, i64>(
+        "UPDATE user_model SET auth_version = auth_version + 1 WHERE id = $1 RETURNING auth_version",
     )
+    .bind(user_id)
+    .fetch_optional(&pool)
+    .await?;
+    if updated.is_none() {
+        return Err(AppError::Unauthorized("Unauthorized".into()));
+    }
+    build_clear_auth_cookie_response()
 }

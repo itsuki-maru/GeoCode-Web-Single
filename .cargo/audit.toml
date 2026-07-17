@@ -1,0 +1,4 @@
+[advisories]
+# `rsa` is present only in SQLx's unselected optional MySQL driver. This project
+# disables SQLx default features and links only sqlx-sqlite (`cargo tree -i rsa` is empty).
+ignore = ["RUSTSEC-2023-0071"]

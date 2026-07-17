@@ -38,7 +38,7 @@ const messageModalOpenClose = (message: string): void => {
 };
 
 const isTotpPostModal = ref(false);
-const userId = ref("");
+const challengeId = ref("");
 const loginPost = async (): Promise<void> => {
   const username = loginInfo.value.username;
   const password = loginInfo.value.password;
@@ -59,7 +59,7 @@ const loginPost = async (): Promise<void> => {
     const isTotp = response.data["totp_required"];
     if (isTotp) {
       isTotpPostModal.value = true;
-      userId.value = response.data["id"];
+      challengeId.value = response.data["challenge_id"];
       return;
     }
 
@@ -107,7 +107,7 @@ const tokenPost = async (): Promise<void> => {
 
   const data = {
     totp_token: token.value,
-    user_id: userId.value,
+    challenge_id: challengeId.value,
   };
 
   try {

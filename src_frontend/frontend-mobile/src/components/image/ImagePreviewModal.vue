@@ -15,20 +15,16 @@ const emit = defineEmits<{
   deleteRequest: [id: string];
 }>();
 
-const htmlContent = computed(() => {
-  if (!props.imageSrc) return "";
-  if (isMP4(props.imageSrc)) {
-    return `<video controls="" src="${baseUrl}/static/images/${props.imageSrc}" width="90%" height="90%"></video><br>`;
-  } else {
-    return `<img src="${baseUrl}/static/images/${props.imageSrc}" width="90%" height="90%"><br>`;
-  }
-});
+const imageUrl = computed(() =>
+  props.imageSrc ? `${baseUrl}/static/images/${props.imageSrc}` : "",
+);
 </script>
 
 <template>
   <BaseModal :isOpen="isOpen" :zIndex="13" @close="emit('close')">
     <div class="content-image-view">
-      <section v-html="htmlContent"></section>
+      <video v-if="imageUrl && isMP4(imageSrc)" controls :src="imageUrl" width="90%" height="90%"></video>
+      <img v-else-if="imageUrl" :src="imageUrl" width="90%" height="90%" alt="プレビュー" />
       <div class="btn-zone">
         <button @click.prevent="emit('close')">閉じる</button>
         <button @click.prevent="emit('deleteRequest', imageId)" class="btn-delete">削除</button>

@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref } from "vue";
 import BaseModal from "@/components/common/BaseModal.vue";
 import ConfirmModal from "@/components/common/ConfirmModal.vue";
-import { isMP4, isPDF } from "@/composables/useFileTypeCheck";
+import { isMP4 } from "@/composables/useFileTypeCheck";
 import { useImageStore } from "@/stores/images";
 import { imageDeleteUrl } from "@/router/urls";
 import { baseUrl } from "@/setting";
@@ -24,21 +24,11 @@ const emit = defineEmits<{
 
 const imageStore = useImageStore();
 const showDeleteConfirm = ref(false);
-
-const imageSrcHtml = ref("");
-
-watch(
-  () => props.imageFilename,
-  (filename) => {
-    if (!filename) return;
-    const prefix = props.readOnly ? baseUrl : `${baseUrl}/static/images/`;
-    if (isMP4(filename)) {
-      imageSrcHtml.value = `<video controls="" src="${prefix}${filename}" id="img-preview"></video><br>`;
-    } else {
-      imageSrcHtml.value = `<img src="${prefix}${filename}" id="img-preview"><br>`;
-    }
-  },
-);
+const imageUrl = computed(() => {
+  if (!props.imageFilename) return "";
+  const prefix = props.readOnly ? baseUrl : `${baseUrl}/static/images/`;
+  return `${prefix}${props.imageFilename}`;
+});
 
 const onDelete = async (): Promise<void> => {
   if (!props.imageId) {
@@ -75,7 +65,10 @@ const onDelete = async (): Promise<void> => {
 <template>
   <BaseModal :isOpen="isOpen" :zIndex="readOnly ? 15 : 2" @close="emit('close')">
     <div class="preview-content">
-      <div v-html="imageSrcHtml" class="image-preview"></div>
+      <div class="image-preview">
+        <video v-if="imageUrl && isMP4(imageFilename)" controls :src="imageUrl" id="img-preview"></video>
+        <img v-else-if="imageUrl" :src="imageUrl" id="img-preview" alt="プレビュー" />
+      </div>
       <div class="btn-zone" v-if="!readOnly">
         <button @click.prevent="showDeleteConfirm = true">削除</button>
         <button @click.prevent="emit('close')">閉じる</button>

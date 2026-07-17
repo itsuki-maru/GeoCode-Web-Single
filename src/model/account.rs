@@ -17,6 +17,7 @@ pub struct UserAccountModel {
     pub is_basic_authed_at: String,
     pub totp_secret: String,
     pub totp_temp_secret: String,
+    pub auth_version: i64,
 }
 
 // サインアップ情報構造体
@@ -39,6 +40,7 @@ pub struct Token {
     pub token_type: String,
     pub exp: usize,
     pub sub: String,
+    pub auth_version: i64,
 }
 
 // アクセストークンとリフレッシュトークンの両者
@@ -75,13 +77,14 @@ pub struct UpdateAccountPrivacyPayload {
 // ユーザーパスワード更新構造体
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateAccountPasswordPayload {
+    pub current_password: String,
     pub new_password: String,
 }
 // TOTPによるログイン情報構造体
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TotpLoginPayload {
     pub totp_token: String,
-    pub user_id: String,
+    pub challenge_id: String,
 }
 
 // TOTPセットアップ構造体

@@ -177,7 +177,7 @@ const handleMarkerSearch = async (query: QueryForm, reset: boolean = false): Pro
 // --- Login redirect ---
 async function loginRedirect(): Promise<void> {
   try {
-    await apiClient.get(disableTokenUrl);
+    await apiClient.post(disableTokenUrl);
   } catch (error) {
     console.error(error);
   }

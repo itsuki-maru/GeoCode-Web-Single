@@ -21,6 +21,8 @@ use crate::model::{
 };
 use crate::utils::check_ismaster_handler;
 
+const MAX_IMPORT_FILE_SIZE_BYTES: usize = 5 * 1024 * 1024;
+
 // インポートデータの正規化
 fn normalize_import_package(content: &str) -> Result<ImportPackage, AppError> {
     if let Ok(package) = serde_json::from_str::<ImportPackage>(content) {
@@ -315,11 +317,17 @@ pub async fn import_json_handler(
         // JSONファイルかを拡張子により検証
         let file_name = field.file_name().unwrap_or("file").to_string();
         if file_name.ends_with(".json") {
-            let content = match field.text().await {
-                Ok(text) => text,
-                Err(_) => return Err(AppError::BadRequest),
-            };
-
+            let mut field = field;
+            let mut bytes = Vec::new();
+            while let Some(chunk) = field.chunk().await.map_err(|_| AppError::BadRequest)? {
+                if bytes.len().saturating_add(chunk.len()) > MAX_IMPORT_FILE_SIZE_BYTES {
+                    return Err(AppError::PayloadTooLarge(
+                        "import JSON must be 5MB or smaller".to_string(),
+                    ));
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            let content = String::from_utf8(bytes).map_err(|_| AppError::BadRequest)?;
             let import_package = normalize_import_package(&content)?;
 
             let mut imported_layer_names = HashSet::new();

@@ -43,7 +43,7 @@ async fn migrations_create_schema_and_record_versions() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 4);
+    assert_eq!(migration_count, 5);
 
     let external_site_urls_table_count: i64 = sqlx::query_scalar(
         r#"
@@ -73,7 +73,7 @@ async fn migrations_are_idempotent() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 4);
+    assert_eq!(migration_count, 5);
 }
 
 #[tokio::test]
@@ -156,7 +156,7 @@ async fn migrations_record_versions_for_existing_schema() {
     .await
     .expect("migration rows should be returned");
 
-    assert_eq!(rows.len(), 4);
+    assert_eq!(rows.len(), 5);
     assert_eq!(rows[0].get::<i64, _>("version"), 1);
     assert_eq!(rows[0].get::<String, _>("name"), "create_initial_schema");
     assert_eq!(rows[1].get::<i64, _>("version"), 2);
@@ -172,6 +172,18 @@ async fn migrations_record_versions_for_existing_schema() {
         "add_marker_icon_id_to_layer_model"
     );
 
+    assert_eq!(rows[4].get::<i64, _>("version"), 5);
+    assert_eq!(
+        rows[4].get::<String, _>("name"),
+        "add_auth_session_security"
+    );
+
+    let auth_version: i64 =
+        sqlx::query_scalar("SELECT auth_version FROM user_model WHERE id = 'legacy-user'")
+            .fetch_one(&pool)
+            .await
+            .expect("legacy user auth version should be returned");
+    assert_eq!(auth_version, 0);
     let legacy_user_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM user_model WHERE id = 'legacy-user'")
             .fetch_one(&pool)

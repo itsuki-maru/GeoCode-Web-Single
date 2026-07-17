@@ -171,6 +171,17 @@ pub fn build_env_from_form(
     setup_dir: PathBuf,
     form: SetupForm,
 ) -> Result<ApplicationInitSetup, String> {
+    crate::utils::validate_username(&form.admin_username).map_err(|error| error.to_string())?;
+    if form.admin_password.chars().count() < 12
+        || matches!(
+            form.admin_password.as_str(),
+            "geocodeweb" | "password123" | "P@ssw0rd"
+        )
+    {
+        return Err(
+            "管理者パスワードは既定値ではない12文字以上の値を指定してください。".to_string(),
+        );
+    }
     let defaults = env_defaults(&setup_dir);
     let secret_key = Uuid::new_v4().to_string();
 
