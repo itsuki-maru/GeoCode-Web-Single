@@ -531,10 +531,38 @@ async fn image_and_asset_handlers_cover_listing_serving_preview_and_delete() {
         Extension(pool.clone()),
         Path(uuid_filename.clone()),
         Query(ThumbnailQueryParams { thumb: None }),
+        HeaderMap::new(),
     )
     .await
     .expect("image file should be served");
     assert_eq!(served.status(), StatusCode::OK);
+    assert_eq!(
+        served.headers().get(header::ACCEPT_RANGES).unwrap(),
+        "bytes"
+    );
+    assert_eq!(served.headers().get(header::CONTENT_LENGTH).unwrap(), "9");
+
+    let mut range_headers = HeaderMap::new();
+    range_headers.insert(header::RANGE, "bytes=0-2".parse().unwrap());
+    let partial = serve_image_file(
+        Extension(user_id.clone()),
+        Extension(pool.clone()),
+        Path(uuid_filename.clone()),
+        Query(ThumbnailQueryParams { thumb: None }),
+        range_headers,
+    )
+    .await
+    .expect("image byte range should be served");
+    assert_eq!(partial.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(
+        partial.headers().get(header::CONTENT_RANGE).unwrap(),
+        "bytes 0-2/9"
+    );
+    assert_eq!(partial.headers().get(header::CONTENT_LENGTH).unwrap(), "3");
+    let partial_body = to_bytes(partial.into_body(), usize::MAX)
+        .await
+        .expect("partial response body should be readable");
+    assert_eq!(&partial_body[..], b"png");
 
     let static_response = serve_static_file(Path("service-worker.js".to_string()))
         .await

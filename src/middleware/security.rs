@@ -6,7 +6,7 @@ use axum::{
     middleware::Next,
 };
 
-const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self'; frame-src 'self' https://www.youtube-nocookie.com; font-src 'self' data: https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'";
+const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://cloudflareinsights.com; manifest-src 'self' https://geocode-web-mobile-app.pages.dev; frame-src 'self' https://www.youtube-nocookie.com; font-src 'self' data: https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'";
 
 pub async fn security_headers_and_origin(req: Request, next: Next) -> Response<Body> {
     if is_state_changing(req.method()) {
@@ -86,5 +86,21 @@ mod tests {
     #[test]
     fn csp_allows_same_origin_map_frames() {
         assert!(CONTENT_SECURITY_POLICY.contains("frame-src 'self'"));
+    }
+
+    #[test]
+    fn csp_allows_configured_pwa_manifest_and_cloudflare_insights() {
+        assert!(
+            CONTENT_SECURITY_POLICY
+                .contains("manifest-src 'self' https://geocode-web-mobile-app.pages.dev")
+        );
+        assert!(
+            CONTENT_SECURITY_POLICY.contains(
+                "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com"
+            )
+        );
+        assert!(
+            CONTENT_SECURITY_POLICY.contains("connect-src 'self' https://cloudflareinsights.com")
+        );
     }
 }

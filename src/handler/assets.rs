@@ -1,7 +1,10 @@
 use axum::{
     body::Body,
     extract::{Extension, Path, Query},
-    http::{HeaderValue, Response, StatusCode, header::CONTENT_TYPE},
+    http::{
+        HeaderMap, HeaderValue, Method, Request, Response, StatusCode,
+        header::{CACHE_CONTROL, CONTENT_TYPE},
+    },
     response::{Html, IntoResponse, Response as HttpResponse},
 };
 use sqlx::query_as;
@@ -12,6 +15,8 @@ use tera::{Context, Tera};
 use tokio::fs::File;
 use tokio::sync::Mutex;
 use tokio_util::codec::{BytesCodec, FramedRead};
+use tower::ServiceExt;
+use tower_http::services::ServeFile;
 
 use crate::config::CONFIG;
 use crate::error::AppError;
@@ -60,6 +65,7 @@ pub async fn serve_image_file(
     Extension(pool): Extension<SqlitePool>,
     Path(image_name): Path<String>,
     Query(params): Query<ThumbnailQueryParams>,
+    request_headers: HeaderMap,
 ) -> Result<Response<Body>, AppError> {
     // 指定されたファイル名を検証する（ディレクトリトラバーサル攻撃対策）
     if let Some(safe_file_name) = sanitize_filename(&image_name) {
@@ -183,30 +189,27 @@ pub async fn serve_image_file(
             .parse()
             .map_err(|_e| AppError::InternalServerError)?;
 
-        let mut builder = HttpResponse::builder();
-        if let Some(headers) = builder.headers_mut() {
-            headers.append(
-                "Cache-Control",
-                HeaderValue::from_static(&CONFIG.cache_control),
-            );
-            headers.append(CONTENT_TYPE, parsed_content_type);
-        }
+        let mut file_request = Request::builder()
+            .method(Method::GET)
+            .uri("/")
+            .body(Body::empty())
+            .map_err(|_| AppError::InternalServerError)?;
+        *file_request.headers_mut() = request_headers;
 
-        let file = match File::open(read_file).await {
-            Ok(file) => file,
-            Err(_) => return Err(AppError::NotFound),
-        };
+        // ServeFile handles byte ranges required by mobile media players and also
+        // supplies Content-Length and Accept-Ranges for full responses.
+        let response = ServeFile::new(read_file)
+            .oneshot(file_request)
+            .await
+            .map_err(|_| AppError::InternalServerError)?;
+        let (mut parts, body) = response.into_parts();
+        parts.headers.insert(
+            CACHE_CONTROL,
+            HeaderValue::from_static(&CONFIG.cache_control),
+        );
+        parts.headers.insert(CONTENT_TYPE, parsed_content_type);
 
-        let stream = FramedRead::new(file, BytesCodec::new());
-        let body = Body::from_stream(stream);
-
-        let response = builder
-            .status(StatusCode::OK)
-            .body(body)
-            .expect("Failed to construct response");
-
-        Ok(response)
-
+        Ok(Response::from_parts(parts, Body::new(body)))
     // 存在しないファイル
     } else {
         Err(AppError::NotFound)
