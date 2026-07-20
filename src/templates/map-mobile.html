@@ -581,10 +581,10 @@
         var longitude = {{ longitude }}
         var markerId = "{{ markerId }}" // マーカーフォーカスしない場合は0が入る
         var zoom = {{ zoom }}
-        var tileServers = {{ tileServers | json_encode | safe }}
-        var layersFromAxum = {{ layersFromAxum | json_encode | safe }}
-        var markersFromAxum = {{ markersFromAxum | json_encode | safe }}
-        var shapesFromAxum = {{ shapesFromAxum | json_encode | safe }}
+        var tileServers = {{ tileServers | json_encode_for_html | safe }}
+        var layersFromAxum = {{ layersFromAxum | json_encode_for_html | safe }}
+        var markersFromAxum = {{ markersFromAxum | json_encode_for_html | safe }}
+        var shapesFromAxum = {{ shapesFromAxum | json_encode_for_html | safe }}
     </script>
     <script src="/assets/map-common.js"></script>
     <script src="/assets/map-mobile.js"></script>

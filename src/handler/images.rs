@@ -13,7 +13,7 @@ use axum::{
 };
 use chrono::Utc;
 use futures_util::TryStreamExt as _;
-use image::{ImageFormat, io::Reader as ImageReader};
+use image::{ImageFormat, ImageReader};
 use sqlx::query_as;
 use sqlx::sqlite::SqlitePool;
 use std::collections::HashMap;
@@ -28,6 +28,8 @@ use tokio_util::io::StreamReader;
 use uuid::Uuid;
 
 const MAX_UPLOAD_FILE_SIZE_BYTES: usize = 100 * 1024 * 1024;
+const MAX_POSTER_FILE_SIZE_BYTES: usize = 5 * 1024 * 1024;
+const MAX_IMAGE_DIMENSION: u32 = 12_000;
 const DEFAULT_IMAGE_LIST_LIMIT: i64 = 50;
 
 fn normalize_image_list_limit(limit: Option<i64>) -> i64 {
@@ -86,6 +88,55 @@ async fn write_field_to_file_with_limit(
     Ok(())
 }
 
+async fn read_field_with_limit(
+    mut field: axum::extract::multipart::Field<'_>,
+    max_size_bytes: usize,
+    error_message: &'static str,
+) -> Result<Vec<u8>, AppError> {
+    let mut bytes = Vec::new();
+    while let Some(chunk) = field.chunk().await.map_err(|_| AppError::BadRequest)? {
+        if bytes.len().saturating_add(chunk.len()) > max_size_bytes {
+            return Err(AppError::PayloadTooLarge(error_message.to_string()));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
+fn decode_uploaded_image(bytes: &[u8]) -> Result<image::DynamicImage, AppError> {
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_IMAGE_DIMENSION);
+    limits.max_image_height = Some(MAX_IMAGE_DIMENSION);
+    limits.max_alloc = Some(256 * 1024 * 1024);
+
+    let mut reader = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|_| AppError::BadRequest)?;
+    reader.limits(limits);
+    reader.decode().map_err(|_| AppError::BadRequest)
+}
+
+async fn validate_saved_document(path: &StdPath, extension: &str) -> Result<(), AppError> {
+    let mut file = File::open(path)
+        .await
+        .map_err(|_| AppError::InternalServerError)?;
+    let mut header = [0u8; 16];
+    let read = file
+        .read(&mut header)
+        .await
+        .map_err(|_| AppError::BadRequest)?;
+    let header = &header[..read];
+    let valid = match extension {
+        "pdf" => header.starts_with(b"%PDF-"),
+        "mp4" => header.len() >= 12 && &header[4..8] == b"ftyp",
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(AppError::BadRequest)
+    }
+}
 // GET IMAGES LIMIT
 pub async fn get_enable_images_limit_handler(
     Extension(user_id): Extension<String>,
@@ -229,27 +280,22 @@ pub async fn upload_image_handler(
     // 保存先とするディレクトリパスを作成
     let dir_path = PathBuf::from(CONFIG.upload_file_path.clone()).join(sub_dir);
 
-    // ディレクトリを作成（既に存在する場合は何もしない）
     ensure_dir(&dir_path)
         .await
         .map_err(|_| AppError::InternalServerError)?;
 
-    // サムネイル用のディレクトリを作成（既に存在する場合は何もしない）
     let thumb_dir = PathBuf::from(&dir_path).join("thumb");
     ensure_dir(&thumb_dir)
         .await
         .map_err(|_| AppError::InternalServerError)?;
 
-    // ファイルを保存する
     while let Some(field) = payload
         .next_field()
         .await
         .map_err(|_e| AppError::BadRequest)?
     {
-        // フィールド名を取得
         let field_name = field.name().unwrap_or_default().to_string();
 
-        // フィールド名がasset_kindの場合、アセットの種類(image, video, pdf)を取得
         if field_name == "asset_kind" {
             asset_kind = field
                 .text()
@@ -259,22 +305,24 @@ pub async fn upload_image_handler(
             continue;
         }
 
-        // フィールド名がposter_fileの場合、ポスター画像を取得
         if field_name == "poster_file" {
-            let bytes = field.bytes().await.map_err(|_| AppError::BadRequest)?;
-            poster_bytes = Some(bytes.to_vec());
+            poster_bytes = Some(
+                read_field_with_limit(
+                    field,
+                    MAX_POSTER_FILE_SIZE_BYTES,
+                    "video poster must be 5MB or smaller",
+                )
+                .await?,
+            );
             continue;
         }
 
-        // フィールド名がupload_file以外の場合、スキップ
         if field_name != "upload_file" {
             continue;
         }
 
         // アップロードされたファイル名を取得
         let original_name = field.file_name().unwrap_or("file").to_string();
-        // Content-Typeを取得
-        let content_type = field.content_type().unwrap_or("image/").to_string();
 
         let file_name_path = StdPath::new(&original_name);
         let ext = match file_name_path.extension() {
@@ -288,79 +336,60 @@ pub async fn upload_image_handler(
             Err(_) => return Err(AppError::BadRequest),
         };
 
-        // 画像ファイルの場合の処理（EXIF情報などを除去して保存）
-        if content_type.starts_with("image/") {
-            // 一時ファイルのパスを作成
+        let normalized_ext = valid_ext.to_string().to_ascii_lowercase();
+        let is_image = matches!(
+            normalized_ext.as_str(),
+            "png" | "jpg" | "jpeg" | "gif" | "webp"
+        );
+
+        // 画像ファイルの場合EXIF情報などを除去して保存
+        if is_image {
             let temp_file_path = format!(
                 "{}/temp_{}.{}",
                 CONFIG.upload_file_path, upload_uuid, valid_ext
             );
-
-            // サムネイルファイルのパスを作成
             let thumbnail_filename = format!("{}.{}", upload_uuid, valid_ext);
-
-            // 一時ファイルを作成
             let mut temp_file = File::create(&temp_file_path)
                 .await
                 .map_err(|_| AppError::BadRequest)?;
 
-            // ファイルを一時ファイルに書き込む
             if let Err(error) =
                 write_field_to_file_with_limit(field, &mut temp_file, MAX_UPLOAD_FILE_SIZE_BYTES)
                     .await
             {
-                // 失敗したら一時ファイルを削除
                 let _ = tokio::fs::remove_file(&temp_file_path).await;
                 return Err(error);
             }
 
-            // 一時ファイルを読み込む
             let temp_file_data = tokio::fs::read(&temp_file_path)
                 .await
                 .map_err(|_| AppError::InternalServerError)?;
 
-            // 画像リーダーを作成
-            let img_reader = ImageReader::new(Cursor::new(&temp_file_data))
-                .with_guessed_format()
-                .map_err(|_| AppError::InternalServerError)?;
+            let img = decode_uploaded_image(&temp_file_data)?;
 
-            // 画像をデコード
-            let img = &img_reader
-                .decode()
-                .map_err(|_| AppError::InternalServerError)?;
-
-            // 画像のフォーマットを取得
             let format = ImageFormat::from_path(&temp_file_path)
                 .map_err(|_| AppError::InternalServerError)?;
 
-            // 最終ファイルパスを生成
             let final_file_path = format!(
                 "{}/{}.{}",
                 dir_path.to_string_lossy(),
                 upload_uuid,
                 valid_ext
             );
-
-            // 最終ファイルを作成
             let mut final_file = File::create(&final_file_path)
                 .await
                 .map_err(|_| AppError::InternalServerError)?;
 
-            // 画像を最終ファイルに書き込む
             let mut output_data = Vec::new();
             img.write_to(&mut Cursor::new(&mut output_data), format)
                 .map_err(|_| AppError::InternalServerError)?;
 
-            // 最終ファイルに書き込む
             final_file
                 .write_all(&output_data)
                 .await
                 .map_err(|_| AppError::InternalServerError)?;
 
-            // サムネイルを作成
             let thumb_target = PathBuf::from(&temp_file_path);
-
-            // サムネイルファイルを作成
             if let Err(_) = resizer(&thumb_target, thumb_dir.clone(), 450, &thumbnail_filename) {
                 tokio::fs::remove_file(&temp_file_path)
                     .await
@@ -371,12 +400,9 @@ pub async fn upload_image_handler(
                 return Err(AppError::InternalServerError);
             }
 
-            // 一時ファイルを削除
             tokio::fs::remove_file(&temp_file_path)
                 .await
                 .map_err(|_| AppError::InternalServerError)?;
-
-        // 動画、PDFファイルの処理
         } else {
             let file_path = format!(
                 "{}/{}.{}",
@@ -384,16 +410,23 @@ pub async fn upload_image_handler(
                 upload_uuid,
                 valid_ext
             );
-            // ファイルを作成
             let mut file = File::create(&file_path)
                 .await
                 .map_err(|_| AppError::BadRequest)?;
 
-            // ファイルに書き込む
             if let Err(error) =
                 write_field_to_file_with_limit(field, &mut file, MAX_UPLOAD_FILE_SIZE_BYTES).await
             {
-                // 書き込みに失敗した場合はファイルを削除
+                let _ = tokio::fs::remove_file(&file_path).await;
+                return Err(error);
+            }
+            file.flush()
+                .await
+                .map_err(|_| AppError::InternalServerError)?;
+            if let Err(error) =
+                validate_saved_document(StdPath::new(&file_path), &normalized_ext).await
+            {
+                drop(file);
                 let _ = tokio::fs::remove_file(&file_path).await;
                 return Err(error);
             }
@@ -401,26 +434,26 @@ pub async fn upload_image_handler(
 
         unique_filename = format!("{}.{}", upload_uuid, ext);
         original_filename = original_name;
-        // ファイルが正常に保存されたことを示すフラグを立てる
         upload_saved = true;
     }
 
-    // ファイルが正常に保存されていない場合はエラーを返す
     if !upload_saved {
         return Err(AppError::BadRequest);
     }
 
-    // アセットが動画の場合はポスター画像を保存する
-    // ポスター画像がない場合はこの処理はスキップされ、動画のみが保存される
     if asset_kind == "video" {
-        // ポスター画像がある場合は保存する（None でない場合）
         if let Some(bytes) = poster_bytes {
+            let poster = decode_uploaded_image(&bytes)?.thumbnail(450, 450);
+            let mut encoded = Vec::new();
+            poster
+                .write_to(&mut Cursor::new(&mut encoded), ImageFormat::Jpeg)
+                .map_err(|_| AppError::BadRequest)?;
             let poster_path = thumb_dir.join(format!("{}.jpg", upload_uuid));
             let mut poster_file = File::create(&poster_path)
                 .await
                 .map_err(|_| AppError::InternalServerError)?;
             poster_file
-                .write_all(&bytes)
+                .write_all(&encoded)
                 .await
                 .map_err(|_| AppError::InternalServerError)?;
         }
@@ -428,7 +461,6 @@ pub async fn upload_image_handler(
 
     let new_id = new_image_id.clone();
     let uuid_filename = unique_filename.clone();
-
     query_as!(
         ReturningId,
         r#"

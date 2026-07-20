@@ -104,7 +104,7 @@ renderer.image = function (href, title, text) {
   const match = href.match(/\/static\/images\/([^\/]+)$/); // 画像ファイル名抜き出し
   if (match) {
     const filename = match[1];
-    return `<img src="${newHref}" style="cursor:pointer;" onclick="callParentImagePreview('/images/html/${filename}')">`;
+    return `<img src="${newHref}" class="marker-preview-image" data-preview-src="/images/html/${filename}">`;
   } else {
     // 例外処理相当として画像へのリンクをそのまま提供（プレビューなし）
     return `<img src="${href}">`;
@@ -157,7 +157,7 @@ renderer.link = (href, title, text) => {
       if (isRunningAsPWA()) {
         return html.replace(
           /^<a /,
-          `<a href="#" title="PDFダウンロードリンク" onclick="downloadFile('${href}')"`,
+          `<a class="markdown-download-link" data-download-href="${href}" title="PDFダウンロードリンク" `,
         );
       }
       return html.replace(
@@ -177,7 +177,7 @@ renderer.link = (href, title, text) => {
       if (isRunningAsPWA()) {
         return html.replace(
           /^<a /,
-          `<a href="#" title="PDFダウンロードリンク" onclick="downloadFile('${href}')"`,
+          `<a class="markdown-download-link" data-download-href="${href}" title="PDFダウンロードリンク" `,
         );
       }
       return html.replace(
@@ -203,8 +203,8 @@ let xssOptions = {
     h5: ["id"], // h5タグのid属性を許可
     h6: ["id"], // h6タグのid属性を許可
     pre: ["class"],
-    a: ["target", "rel", "href", "title", "onclick"],
-    img: ["src", "alt", "onclick"],
+    a: ["target", "rel", "href", "title", "class", "data-download-href"],
+    img: ["src", "alt", "class", "data-preview-src"],
     video: ["src", "controls", "preload", "poster"],
     p: [],
     div: ["class"],
@@ -422,8 +422,8 @@ var TileControl = L.Control.extend({
         checkedAttribute = "checked";
       }
       radioHTML += `
-                <input class="tile-radio" type="radio" id="${tileServers[key]["layer_name"]}" name="tile" value="${key}" ${checkedAttribute}>
-                <label for="${tileServers[key]["layer_name"]}" class="tile-radio-label">${tileServers[key]["label"]}</label><br>
+                <input class="tile-radio" type="radio" id="${escapeHtml(tileServers[key]["layer_name"])}" name="tile" value="${key}" ${checkedAttribute}>
+                <label for="${escapeHtml(tileServers[key]["layer_name"])}" class="tile-radio-label">${escapeHtml(tileServers[key]["label"])}</label><br>
                 `;
     }
     radioHTML += "</form></div>";
@@ -486,7 +486,7 @@ for (const key in markersFromAxum) {
     marker.bindTooltip(`<div class="custom-tooltip">No Name</div>`);
   } else {
     marker.bindTooltip(
-      `<div class="custom-tooltip">${markersFromAxum[key]["marker_name"]}</div>`,
+      `<div class="custom-tooltip">${escapeHtml(markersFromAxum[key]["marker_name"])}</div>`,
     );
   }
   if (markersFromAxum[key]["detail"]) {

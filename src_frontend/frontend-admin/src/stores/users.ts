@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import type { UserData, UpdateUserData } from "@/interface";
+import type { UserData } from "@/interface";
 import { getUsersUrl } from "@/router/urls";
 import apiClient from "@/axiosClient";
 
@@ -31,7 +31,6 @@ export const useUsersStore = defineStore("user", {
           this.usersList.set(usersData[key]["id"], {
             id: usersData[key]["id"],
             username: usersData[key]["username"],
-            password: usersData[key]["password"],
             create_at: usersData[key]["create_at"],
             is_superuser: usersData[key]["is_superuser"],
             is_locked: usersData[key]["is_locked"],

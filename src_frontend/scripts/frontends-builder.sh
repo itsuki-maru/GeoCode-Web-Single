@@ -111,9 +111,9 @@ else
     echo "Directory '$TARGET_DIR' exists, but -d option was not provided. No action taken."
 fi
 
-# node_modulesが存在しなければnpm installを実行
+# node_modulesが存在しなければnpm ciを実行
 if [ ! -d "$nodeModules" ]; then
-    npm install
+    npm ci
 else
     echo "Directory '$nodeModules' exist."
 fi
@@ -149,9 +149,9 @@ else
     echo "Directory '$TARGET_DIR' exists, but -d option was not provided. No action taken."
 fi
 
-# node_modulesが存在しなければnpm installを実行
+# node_modulesが存在しなければnpm ciを実行
 if [ ! -d "$nodeModules" ]; then
-    npm install
+    npm ci
 else
     echo "Directory '$nodeModules' exist."
 fi
@@ -191,9 +191,9 @@ else
     echo "Directory '$TARGET_DIR' exists, but -d option was not provided. No action taken."
 fi
 
-# node_modulesが存在しなければnpm installを実行
+# node_modulesが存在しなければnpm ciを実行
 if [ ! -d "$nodeModules" ]; then
-    npm install
+    npm ci
 else
     echo "Directory '$nodeModules' exist."
 fi

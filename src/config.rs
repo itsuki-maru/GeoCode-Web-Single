@@ -42,9 +42,10 @@ pub static CONFIG: Lazy<Config> = Lazy::new(|| Config {
         .expect("REFRESH_TOKEN_EXP_MINUTUES must be set.")
         .parse::<i64>()
         .expect("Failed Count Parse Error."),
-    secret_key: env::var("SECRET_KEY").expect("SECRET_KEY must be set."),
+    secret_key: get_required_secret("SECRET_KEY", 32),
     admin_user_name: env::var("ADMIN_USERNAME").expect("ADMIN_USERNAME must be set."),
-    admin_user_password: env::var("ADMIN_PASSWORD").expect("ADMIN_PASSWORD must be set."),
+    // デスクトップ版は導入容易性を優先し、初期値 `geocodeweb`（10文字）を許可する。
+    admin_user_password: get_required_secret("ADMIN_PASSWORD", 8),
     failed_count: env::var("FAILED_ACCOUNT_LOCK").expect("FAILED_ACCOUNT_LOCK must be set."),
     next_challenge_minutes: env::var("NEXT_CHALLENGE_MINUTES")
         .expect("NEXT_CHALLENGE_MINUTES must be set."),
@@ -82,6 +83,17 @@ pub static CONFIG: Lazy<Config> = Lazy::new(|| Config {
         .unwrap_or_else(|_| "default".to_string()),
 });
 
+fn get_required_secret(name: &str, minimum_length: usize) -> String {
+    let value = env::var(name).unwrap_or_else(|_| panic!("{name} must be set."));
+    if !cfg!(debug_assertions)
+        && (value.chars().count() < minimum_length
+            || value.starts_with("CHANGE_ME_")
+            || matches!(value.as_str(), "TESTPASS" | "SEACRET-KEY" | "P@ssw0rd"))
+    {
+        panic!("{name} must be a non-default secret with at least {minimum_length} characters.");
+    }
+    value
+}
 #[derive(Debug)]
 pub enum CacheControl {
     Public,

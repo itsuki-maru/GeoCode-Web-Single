@@ -49,11 +49,13 @@ const openCloseUserSettingModal = (): void => {
 };
 
 const isOpenPasswordUpdateModal = ref(false);
+const currentPassword = ref("");
 const newPassword = ref("");
 const checkPassword = ref("");
 const openClosePasswordUpdateModal = (): void => {
   isOpenPasswordUpdateModal.value = !isOpenPasswordUpdateModal.value;
   if (!isOpenPasswordUpdateModal.value) {
+    currentPassword.value = "";
     newPassword.value = "";
     checkPassword.value = "";
   }
@@ -72,6 +74,10 @@ const messageModalOpenClose = (message: string): void => {
 };
 
 const updatePassword = async (): Promise<void> => {
+  if (currentPassword.value === "") {
+    messageModalOpenClose("現在のパスワードを入力してください。");
+    return;
+  }
   if (newPassword.value === "") {
     messageModalOpenClose("パスワードが入力されていません。");
     return;
@@ -87,6 +93,7 @@ const updatePassword = async (): Promise<void> => {
 
   try {
     await apiClient.post(userPasswordUpdateUrl, {
+      current_password: currentPassword.value,
       new_password: newPassword.value,
     });
     openClosePasswordUpdateModal();
@@ -163,7 +170,13 @@ defineExpose({
   <!-- パスワード更新モーダル -->
   <div id="overlay-update-password" v-show="isOpenPasswordUpdateModal">
     <div id="content-update-password">
-      <h2 class="modal-h2">パスワード変更</h2>
+      <h2 class="modal-h2">パスワード変更</h2>      <input
+        class="password-input"
+        type="password"
+        placeholder="Current Password"
+        autocomplete="current-password"
+        v-model="currentPassword"
+      />
       <input
         class="password-input"
         type="password"

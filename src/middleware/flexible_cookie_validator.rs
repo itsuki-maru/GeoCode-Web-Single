@@ -1,9 +1,10 @@
 use crate::auth::verify_access_token;
-use crate::middleware::extract_cookie_value;
+use crate::middleware::{extract_cookie_value, token_is_active};
 use axum::{
     body::Body,
     http::{Request, Response},
 };
+use sqlx::SqlitePool;
 use std::{
     future::Future,
     pin::Pin,
@@ -41,32 +42,23 @@ where
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
-    // リクエストを受け取り、処理を行い、結果を返すメソッド。ここでミドルウェアの主な処理が行う
-    fn call(&mut self, req: Request<B>) -> Self::Future {
+
+    fn call(&mut self, mut req: Request<B>) -> Self::Future {
         let mut inner = self.inner.clone();
-
-        let future = async move {
-            let access_token_value = extract_cookie_value(req.headers(), "access_token");
-
-            // アクセストークンを検証し結果に応じてレスポンス
-            match verify_access_token(access_token_value.unwrap_or("")) {
-                // 成功時はハンドラーからユーザーIDを取り出せるよう設定
-                Ok(claims) => {
-                    // ユーザーIDをリクエストのExtensionとしてセット
-                    let mut req = req;
-                    req.extensions_mut().insert(claims.sub);
-                    // 内部サービスへのリクエストを続ける
-                    return inner.call(req).await;
-                },
-                // 検証失敗時（トークンなし）もダミーのUUID作成してExtensionとしてセット
-                Err(_) => {
-                    let mut req = req;
-                    let dummy_user_id = Uuid::now_v7().to_string();
-                    req.extensions_mut().insert(dummy_user_id);
-                    return inner.call(req).await;
-                },
+        Box::pin(async move {
+            let token = extract_cookie_value(req.headers(), "access_token").unwrap_or("");
+            let mut authenticated_user_id = None;
+            if let Ok(claims) = verify_access_token(token) {
+                if let Some(pool) = req.extensions().get::<SqlitePool>().cloned() {
+                    if token_is_active(&pool, &claims.sub, claims.auth_version).await {
+                        authenticated_user_id = Some(claims.sub);
+                    }
+                }
             }
-        };
-        Box::pin(future)
+
+            req.extensions_mut()
+                .insert(authenticated_user_id.unwrap_or_else(|| Uuid::now_v7().to_string()));
+            inner.call(req).await
+        })
     }
 }

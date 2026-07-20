@@ -82,6 +82,24 @@ pub async fn check_ismaster_handler(
     }
 }
 
+pub async fn ensure_owned_layer(
+    pool: &Pool<Sqlite>,
+    user_id: &String,
+    layer_id: &String,
+) -> Result<(), AppError> {
+    let owned = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM layer_model WHERE id = $1 AND user_id = $2)",
+    )
+    .bind(layer_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    if owned {
+        Ok(())
+    } else {
+        Err(AppError::BadRequest)
+    }
+}
 pub async fn ensure_dir(path: &Path) -> io::Result<()> {
     match fs::create_dir_all(path).await {
         Ok(_) => Ok(()),

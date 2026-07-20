@@ -81,7 +81,7 @@ renderer.image = function (href, title, text) {
   const match = href.match(/\/static\/images\/([^\/]+)$/); // 画像ファイル名抜き出し
   if (match) {
     const filename = match[1];
-    return `<img src="${newHref}" style="cursor:pointer;" onclick="callParentImagePreview('/images/html/${filename}')">`;
+    return `<img src="${newHref}" class="marker-preview-image" data-preview-src="/images/html/${filename}">`;
   } else {
     // 例外処理相当として画像へのリンクをそのまま提供（プレビューなし）
     return `<img src="${href}">`;
@@ -141,8 +141,8 @@ let xssOptions = {
     h5: ["id"], // h5タグのid属性を許可
     h6: ["id"], // h6タグのid属性を許可
     pre: ["class"],
-    a: ["target", "rel", "href", "title", "onclick"],
-    img: ["src", "alt", "onclick"],
+    a: ["target", "rel", "href", "title", "class", "data-download-href"],
+    img: ["src", "alt", "class", "data-preview-src"],
     video: ["src", "controls", "preload", "poster"],
     p: [],
     div: ["class"],
@@ -315,8 +315,8 @@ var TileControl = L.Control.extend({
         checkedAttribute = "checked";
       }
       radioHTML += `
-                <input class="tile-radio" type="radio" id="${tileServers[key]["layer_name"]}" name="tile" value="${key}" ${checkedAttribute}>
-                <label for="${tileServers[key]["layer_name"]}" class="tile-radio-label">${tileServers[key]["label"]}</label><br>
+                <input class="tile-radio" type="radio" id="${escapeHtml(tileServers[key]["layer_name"])}" name="tile" value="${key}" ${checkedAttribute}>
+                <label for="${escapeHtml(tileServers[key]["layer_name"])}" class="tile-radio-label">${escapeHtml(tileServers[key]["label"])}</label><br>
                 `;
     }
     radioHTML += "</form></div>";
@@ -774,7 +774,7 @@ for (const key in markersObj) {
   const marker = L.marker([
     markerData["latitude"],
     markerData["longitude"],
-  ], markerOptionsForLayer(markerData["layer_id"], layers)).bindPopup(markerData["marker_name"]);
+  ], markerOptionsForLayer(markerData["layer_id"], layers)).bindPopup(escapeHtml(markerData["marker_name"]));
   enableMarkerIconFallback(marker, markerData["layer_id"], layers);
 
   // ポップアップオープン時に遅延読み込みの処理を追加
@@ -790,7 +790,7 @@ for (const key in markersObj) {
     });
   } else {
     marker.bindTooltip(
-      `<div class="custom-tooltip">${markerData["marker_name"]}</div>`,
+      `<div class="custom-tooltip">${escapeHtml(markerData["marker_name"])}</div>`,
       { permanent: false },
     );
   }
@@ -924,7 +924,7 @@ const layersControl = L.control.layers(null, null, { collapsed: false });
 // 表示切替用の空レイヤをレイヤーコントロールに追加する
 const layerControlOverlayLayers = [];
 for (const layer_id in clusterGroups) {
-  const layerName = layerNames[layer_id];
+  const layerName = escapeHtml(layerNames[layer_id]);
   if (!layerName) {
     continue;
   }

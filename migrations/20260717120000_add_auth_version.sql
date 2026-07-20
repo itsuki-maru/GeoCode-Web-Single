@@ -1,0 +1,1 @@
+ALTER TABLE user_model ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 0;

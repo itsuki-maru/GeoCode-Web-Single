@@ -79,7 +79,6 @@ pub async fn get_users_handler(
         SELECT
             id,
             username,
-            password,
             create_at,
             is_superuser,
             is_locked
@@ -114,7 +113,7 @@ pub async fn update_users_handler(
         ReturningId,
         r#"
         UPDATE user_model
-        SET password = $1
+        SET password = $1, auth_version = auth_version + 1
         WHERE id = $2
         RETURNING id
         "#,
@@ -143,7 +142,7 @@ pub async fn unlock_account_handler(
         ReturningId,
         r#"
         UPDATE user_model
-        SET is_locked = $1
+        SET is_locked = $1, auth_version = auth_version + 1
         WHERE id = $2
         RETURNING id
         "#,

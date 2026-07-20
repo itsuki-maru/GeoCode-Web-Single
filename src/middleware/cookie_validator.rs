@@ -1,11 +1,11 @@
 use crate::auth::verify_access_token;
-use crate::middleware::extract_cookie_value;
-use axum::response::IntoResponse;
+use crate::middleware::{extract_cookie_value, token_is_active};
 use axum::{
     body::Body,
     http::{Request, Response, StatusCode},
 };
 use serde_json::json;
+use sqlx::SqlitePool;
 use std::{
     future::Future,
     pin::Pin,
@@ -42,45 +42,25 @@ where
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
-    // リクエストを受け取り、処理を行い、結果を返すメソッド。ここでミドルウェアの主な処理が行う
-    fn call(&mut self, req: Request<B>) -> Self::Future {
+
+    fn call(&mut self, mut req: Request<B>) -> Self::Future {
         let mut inner = self.inner.clone();
-
-        let future = async move {
-            let access_token_value = extract_cookie_value(req.headers(), "access_token");
-
-            // アクセストークンを検証し結果に応じてレスポンス
-            match verify_access_token(access_token_value.unwrap_or("")) {
-                // 成功時はハンドラーからユーザーIDを取り出せるよう設定
-                Ok(claims) => {
-                    // ユーザーIDをリクエストのExtensionとしてセット
-                    let mut req = req;
-                    req.extensions_mut().insert(claims.sub);
-                    // 内部サービスへのリクエストを続ける
-                    return inner.call(req).await;
-                },
-                // 検証失敗時のレスポンス
-                Err(_) => {
-                    let response_body = json!({
-                        "error": "token_expired"
-                    });
-                    let response = axum::response::Response::builder()
-                        .status(StatusCode::UNAUTHORIZED)
-                        .header("Content-Type", "application/json")
-                        .body(axum::body::Body::from(response_body.to_string()));
-                    match response {
-                        Ok(response) => return Ok(response),
-                        Err(err) => {
-                            tracing::error!("{}", err);
-                            let response =
-                                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error.")
-                                    .into_response();
-                            return Ok(response);
-                        },
+        Box::pin(async move {
+            let token = extract_cookie_value(req.headers(), "access_token").unwrap_or("");
+            if let Ok(claims) = verify_access_token(token) {
+                if let Some(pool) = req.extensions().get::<SqlitePool>().cloned() {
+                    if token_is_active(&pool, &claims.sub, claims.auth_version).await {
+                        req.extensions_mut().insert(claims.sub);
+                        return inner.call(req).await;
                     }
-                },
+                }
             }
-        };
-        Box::pin(future)
+
+            Ok(Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .header("Content-Type", "application/json")
+                .body(Body::from(json!({ "error": "token_expired" }).to_string()))
+                .expect("valid unauthorized response"))
+        })
     }
 }

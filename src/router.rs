@@ -63,6 +63,7 @@ use crate::handler::totp::{
 use crate::middleware::{
     cookie_validator::CookieValidator, flexible_cookie_validator::FlexibleCookieValidator,
     print_req_res::print_request_response, refresh_cookie_validator::RefreshCookieValidator,
+    security::security_headers_and_origin,
 };
 
 pub fn build_router(
@@ -89,9 +90,16 @@ pub fn build_router(
         .allow_credentials(true)
         .expose_headers(vec![header::CONTENT_TYPE]);
 
-    // 開発時のみ Vue3 のサーバを許可オリジンに追加
+    let mut allowed_origins: Vec<HeaderValue> = CONFIG
+        .allow_origins
+        .split(',')
+        .filter_map(|origin| origin.trim().parse::<HeaderValue>().ok())
+        .collect();
     if cfg!(debug_assertions) {
-        cors = cors.allow_origin("http://localhost:5173".parse::<HeaderValue>().unwrap());
+        allowed_origins.push(HeaderValue::from_static("http://localhost:5173"));
+    }
+    if !allowed_origins.is_empty() {
+        cors = cors.allow_origin(allowed_origins);
     }
 
     // アクセストークンによる認可を要する
@@ -105,13 +113,11 @@ pub fn build_router(
             "/images/eneble-images/{limit}",
             get(get_enable_images_limit_handler),
         )
-        .route("/images/upload", post(upload_image_handler))
         .route("/images/delete/{image_id}", delete(delete_image_handler))
         .route("/layer", post(create_layer_handler))
         .route("/layer/masterid", get(master_layer_get_handler))
         .route("/marker-icons", get(get_marker_icons_handler))
         .route("/marker-icons/search", get(search_marker_icons_handler))
-        .route("/marker-icons/upload", post(upload_marker_icon_handler))
         .route(
             "/marker-icons/{icon_id}",
             delete(delete_marker_icon_handler),
@@ -136,7 +142,6 @@ pub fn build_router(
         .route("/shape/{shape_id}", put(update_shape_handler))
         .route("/shape/{shape_id}", delete(delete_shape_handler))
         .route("/file/export/{layer_id}", get(export_json_handler))
-        .route("/file/import", post(import_json_handler))
         .route("/admin", get(admin_index_get_handler))
         .route("/admin/users", get(get_users_handler))
         .route(
@@ -156,14 +161,14 @@ pub fn build_router(
         )
         .route("/account/info", get(get_account_info_handler))
         .route("/account/privacy", put(account_privacy_update_handler))
-        .route("/account/totp/setup", get(totp_setup_handler))
+        .route("/account/totp/setup", post(totp_setup_handler))
         .route("/account/totp/verify", post(totp_verify_handler))
-        .route("/account/totp/disable", get(totp_disable_handler))
+        .route("/account/totp/disable", post(totp_disable_handler))
         .route(
             "/external-site-url",
             get(get_external_site_url_handler).put(update_external_site_url_handler),
         )
-        .route("/account/token/disable", get(disable_token));
+        .route("/account/token/disable", post(disable_token));
 
     if CONFIG.allow_user_update_password {
         secured_routes = secured_routes.route(
@@ -172,7 +177,22 @@ pub fn build_router(
         );
     }
 
-    let secured_routes = secured_routes.layer(CookieValidator);
+    let secured_routes = secured_routes
+        .layer(DefaultBodyLimit::max(1024 * 1024))
+        .layer(CookieValidator);
+
+    let image_upload_route = Router::new()
+        .route("/images/upload", post(upload_image_handler))
+        .layer(DefaultBodyLimit::max(105 * 1024 * 1024))
+        .layer(CookieValidator);
+    let marker_icon_upload_route = Router::new()
+        .route("/marker-icons/upload", post(upload_marker_icon_handler))
+        .layer(DefaultBodyLimit::max(6 * 1024 * 1024))
+        .layer(CookieValidator);
+    let import_route = Router::new()
+        .route("/file/import", post(import_json_handler))
+        .layer(DefaultBodyLimit::max(6 * 1024 * 1024))
+        .layer(CookieValidator);
 
     // アクセストークン不要
     let mut not_secured_routes = Router::new()
@@ -198,6 +218,7 @@ pub fn build_router(
     if CONFIG.allow_user_create_account {
         not_secured_routes = not_secured_routes.route("/account/signup", post(signup_handler));
     }
+    let not_secured_routes = not_secured_routes.layer(DefaultBodyLimit::max(1024 * 1024));
 
     // リフレッシュトークンを要する
     let token_refresh_routes = Router::new()
@@ -218,6 +239,9 @@ pub fn build_router(
     Router::new()
         .merge(secured_routes)
         .merge(not_secured_routes)
+        .merge(image_upload_route)
+        .merge(marker_icon_upload_route)
+        .merge(import_route)
         .merge(token_refresh_routes)
         .merge(flex_secured_routes)
         .layer(cors)
@@ -226,6 +250,7 @@ pub fn build_router(
         .layer(Extension(tile_cache))
         .layer(Extension(tera))
         .layer(middleware::from_fn(print_request_response))
-        .layer(DefaultBodyLimit::max(100 * 1024 * 1024))
+        .layer(middleware::from_fn(security_headers_and_origin))
+        .layer(DefaultBodyLimit::max(105 * 1024 * 1024))
         .fallback(crate::custom_not_found_handler)
 }
