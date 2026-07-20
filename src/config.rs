@@ -44,7 +44,8 @@ pub static CONFIG: Lazy<Config> = Lazy::new(|| Config {
         .expect("Failed Count Parse Error."),
     secret_key: get_required_secret("SECRET_KEY", 32),
     admin_user_name: env::var("ADMIN_USERNAME").expect("ADMIN_USERNAME must be set."),
-    admin_user_password: get_required_secret("ADMIN_PASSWORD", 12),
+    // デスクトップ版は導入容易性を優先し、初期値 `geocodeweb`（10文字）を許可する。
+    admin_user_password: get_required_secret("ADMIN_PASSWORD", 8),
     failed_count: env::var("FAILED_ACCOUNT_LOCK").expect("FAILED_ACCOUNT_LOCK must be set."),
     next_challenge_minutes: env::var("NEXT_CHALLENGE_MINUTES")
         .expect("NEXT_CHALLENGE_MINUTES must be set."),

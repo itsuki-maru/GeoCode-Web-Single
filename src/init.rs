@@ -172,15 +172,10 @@ pub fn build_env_from_form(
     form: SetupForm,
 ) -> Result<ApplicationInitSetup, String> {
     crate::utils::validate_username(&form.admin_username).map_err(|error| error.to_string())?;
-    if form.admin_password.chars().count() < 12
-        || matches!(
-            form.admin_password.as_str(),
-            "geocodeweb" | "password123" | "P@ssw0rd"
-        )
+    if form.admin_password.chars().count() < 8
+        || matches!(form.admin_password.as_str(), "password123" | "P@ssw0rd")
     {
-        return Err(
-            "管理者パスワードは既定値ではない12文字以上の値を指定してください。".to_string(),
-        );
+        return Err("管理者パスワードは8文字以上の値を指定してください。".to_string());
     }
     let defaults = env_defaults(&setup_dir);
     let secret_key = Uuid::new_v4().to_string();
@@ -370,6 +365,33 @@ mod tests {
             "next_challenge_minutes": "10",
             "challenge_limit_time_failed_count": "3"
         })
+    }
+
+    #[test]
+    fn build_env_from_form_accepts_desktop_default_credentials() {
+        let setup_dir = test_setup_dir("default-credentials");
+        let form = SetupForm {
+            app_title: "GeoCode-Web".to_string(),
+            admin_username: "geocodeweb".to_string(),
+            admin_password: "geocodeweb".to_string(),
+            failed_account_lock: "15".to_string(),
+            next_challenge_minutes: "5".to_string(),
+            challenge_limit_time_failed_count: "5".to_string(),
+            access_token_exp_minutes: "60".to_string(),
+            refresh_token_exp_minutes: "1440".to_string(),
+        };
+
+        let env = build_env_from_form(setup_dir.clone(), form).unwrap();
+
+        assert_eq!(env.admin_username, "geocodeweb");
+        assert_eq!(env.admin_passwotd, "geocodeweb");
+
+        let saved_text = fs::read_to_string(setup_dir.join("geocode-web-single.env.json")).unwrap();
+        let saved: ApplicationInitSetup = serde_json::from_str(&saved_text).unwrap();
+        assert_eq!(saved.admin_username, "geocodeweb");
+        assert_eq!(saved.admin_passwotd, "geocodeweb");
+
+        fs::remove_dir_all(setup_dir).unwrap();
     }
 
     #[test]
