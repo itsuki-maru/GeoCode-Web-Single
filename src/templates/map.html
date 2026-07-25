@@ -287,6 +287,40 @@
                 user-select: none;
             }
 
+            .leaflet-interactive.is-shape-geometry-selected {
+                filter: drop-shadow(0 0 3px rgba(37, 99, 235, 0.9));
+            }
+
+            .shape-edit-vertex-icon {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: transparent;
+                border: 0;
+            }
+
+            .leaflet-container.is-shape-edit-mode .leaflet-interactive {
+                cursor: pointer;
+            }
+
+            .shape-edit-vertex-handle {
+                display: block;
+                width: 14px;
+                height: 14px;
+                box-sizing: border-box;
+                background: #ffffff;
+                border: 3px solid #2563eb;
+                border-radius: 50%;
+                box-shadow: 0 1px 4px rgba(15, 23, 42, 0.45);
+                cursor: move;
+                touch-action: none;
+            }
+
+            .leaflet-container.is-shape-geometry-dragging,
+            .leaflet-container.is-shape-geometry-dragging .leaflet-interactive {
+                cursor: move !important;
+                user-select: none;
+            }
             .shape-name-tooltip {
                 background: rgba(255, 255, 255, 0.92);
                 border: 1px solid #d94841;
