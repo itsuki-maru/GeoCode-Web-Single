@@ -570,6 +570,11 @@ const DELETE_SHAPE_STYLE = {
 };
 const DELETE_HIT_TOLERANCE_PX = 18;
 const MEASUREMENT_SEGMENT_LABEL_GROUP_SIZE = 2;
+const shapeGeometryEditHandles = L.featureGroup();
+let currentMapMode = "view";
+let geometryEditingShapeLayer = null;
+let isShapeGeometrySaving = false;
+let circleShapeDragState = null;
 
 let activeDrawMode = null;
 let isCompletingActiveDrawing = false;
@@ -974,6 +979,7 @@ function resetDrawingState(message = "図形描画: オフ", isError = false) {
 // 指定モードで図形描画を開始する
 function beginDrawing(mode) {
   closeShapeNameEditor();
+  clearShapeGeometryEditing();
   toggleDrawPanel(true);
   activeDrawMode = mode;
   drawPoints = [];
@@ -1308,6 +1314,10 @@ function attachShapeNameTooltipClick(layer) {
     if (activeDrawMode) {
       return;
     }
+    if (currentMapMode === "edit") {
+      selectShapeForGeometryEdit(layer);
+      return;
+    }
     openShapeNameEditor(layer);
   };
   L.DomEvent.on(tooltipElement, "click", openEditorFromLabel);
@@ -1476,7 +1486,7 @@ async function persistShapeMetadata(layer, nextName, nextLayerId, nextGeoJson) {
 
 // 指定図形のラベル位置に名前編集ポップアップを開く
 function openShapeNameEditor(layer) {
-  if (!layer || activeDrawMode) {
+  if (!layer || activeDrawMode || currentMapMode === "edit") {
     return;
   }
 
@@ -1928,6 +1938,410 @@ async function deleteShapeAtLatLng(latlng) {
   }
 }
 
+// 図形座標の編集中に復元できるよう、Leaflet の座標配列を複製する
+function cloneShapeLatLngs(latLngs) {
+  if (Array.isArray(latLngs)) {
+    return latLngs.map((value) => cloneShapeLatLngs(value));
+  }
+  if (latLngs && Number.isFinite(latLngs.lat) && Number.isFinite(latLngs.lng)) {
+    return L.latLng(latLngs.lat, latLngs.lng, latLngs.alt);
+  }
+  return latLngs;
+}
+
+// 図形編集開始時の形状を保存用スナップショットとして取得する
+function captureShapeGeometry(layer) {
+  if (layer?.shapeType === "circle" && typeof layer.getLatLng === "function") {
+    return {
+      center: cloneShapeLatLngs(layer.getLatLng()),
+      radius: layer.getRadius(),
+    };
+  }
+  return {
+    latLngs: cloneShapeLatLngs(layer?.getLatLngs?.() || []),
+  };
+}
+
+// 保存失敗や編集キャンセル時に図形を元の位置へ戻す
+function restoreShapeGeometry(layer, snapshot) {
+  if (!layer || !snapshot) {
+    return;
+  }
+  if (layer.shapeType === "circle" && snapshot.center) {
+    layer.setLatLng(snapshot.center);
+    if (Number.isFinite(snapshot.radius) && snapshot.radius > 0) {
+      layer.setRadius(snapshot.radius);
+    }
+    return;
+  }
+  if (snapshot.latLngs && typeof layer.setLatLngs === "function") {
+    layer.setLatLngs(cloneShapeLatLngs(snapshot.latLngs));
+  }
+}
+
+// 図形の移動に合わせて名前ラベルと計測ラベルを更新する
+function refreshShapeGeometryPresentation(layer) {
+  const tooltip = layer?.getTooltip?.();
+  const labelLatLng = getShapeLabelLatLng(layer);
+  if (tooltip && labelLatLng && typeof tooltip.setLatLng === "function") {
+    tooltip.setLatLng(labelLatLng);
+  }
+  refreshShapeMeasurementMarkers(layer);
+}
+
+// 選択図形の強調クラスを SVG パスへ付け外しする
+function setShapeGeometrySelectedStyle(layer, isSelected) {
+  const element = layer?.getElement?.();
+  if (element) {
+    element.classList.toggle("is-shape-geometry-selected", isSelected);
+  }
+}
+
+// 編集ハンドルを保存中だけ操作不可にする
+function setShapeGeometryHandlesEnabled(isEnabled) {
+  shapeGeometryEditHandles.eachLayer((handle) => {
+    if (!handle?.dragging) {
+      return;
+    }
+    if (isEnabled) {
+      handle.dragging.enable();
+    } else {
+      handle.dragging.disable();
+    }
+  });
+}
+
+// 円ドラッグ用の document イベントを解除し、地図操作を復元する
+function releaseCircleShapeDragInteractions() {
+  document.removeEventListener("mousemove", handleCircleShapeDragMove, true);
+  document.removeEventListener("mouseup", handleCircleShapeDragEnd, true);
+  document.removeEventListener("touchmove", handleCircleShapeDragMove, true);
+  document.removeEventListener("touchend", handleCircleShapeDragEnd, true);
+  document.removeEventListener("touchcancel", handleCircleShapeDragEnd, true);
+  map.getContainer()?.classList.remove("is-shape-geometry-dragging");
+  if (circleShapeDragState?.mapDraggingWasEnabled) {
+    map.dragging.enable();
+  }
+}
+
+// モード変更などで円ドラッグが中断された場合は開始位置へ戻す
+function cancelActiveCircleShapeDrag() {
+  if (!circleShapeDragState) {
+    return;
+  }
+  const { layer, snapshot } = circleShapeDragState;
+  restoreShapeGeometry(layer, snapshot);
+  refreshShapeGeometryPresentation(layer);
+  releaseCircleShapeDragInteractions();
+  circleShapeDragState = null;
+}
+
+// 図形編集の選択状態と頂点ハンドルをすべて解除する
+function clearShapeGeometryEditing() {
+  cancelActiveCircleShapeDrag();
+  setShapeGeometrySelectedStyle(geometryEditingShapeLayer, false);
+  geometryEditingShapeLayer = null;
+  shapeGeometryEditHandles.clearLayers();
+  if (map.hasLayer(shapeGeometryEditHandles)) {
+    map.removeLayer(shapeGeometryEditHandles);
+  }
+}
+
+// 編集後の GeoJSON を既存の図形更新 API へ保存する
+async function persistShapeGeometryEdit(layer, snapshot) {
+  if (!layer?.shapeId || isShapeGeometrySaving) {
+    return;
+  }
+  const targetLayerId =
+    layer.layerId ||
+    layer.options?.shapeRecord?.layer_id ||
+    getCurrentShapeLayerId();
+  if (!targetLayerId) {
+    restoreShapeGeometry(layer, snapshot);
+    refreshShapeGeometryPresentation(layer);
+    setDrawStatus("図形編集: 所属レイヤを取得できませんでした。", true);
+    return;
+  }
+
+  isShapeGeometrySaving = true;
+  setShapeGeometryHandlesEnabled(false);
+  try {
+    const nextGeoJson = buildShapeGeoJson(
+      layer,
+      layer.shapeType,
+      layer.shapeStyle || getDefaultShapeStyle(layer.shapeType),
+    );
+    await persistShapeMetadata(
+      layer,
+      normalizeShapeName(layer.shapeName || ""),
+      targetLayerId,
+      nextGeoJson,
+    );
+    applyShapeRecord(layer, {
+      id: layer.shapeId,
+      layer_id: targetLayerId,
+      shape_type: layer.shapeType,
+      name: layer.shapeName || "",
+      geojson: nextGeoJson,
+    });
+    updateShapeNameLabel(layer, layer.shapeName || "");
+    refreshShapeMeasurementMarkers(layer);
+    setDrawStatus("図形編集: 位置を保存しました。");
+  } catch (_error) {
+    restoreShapeGeometry(layer, snapshot);
+    updateShapeNameLabel(layer, layer.shapeName || "");
+    refreshShapeMeasurementMarkers(layer);
+    setDrawStatus("図形編集: 保存に失敗したため元の位置へ戻しました。", true);
+  } finally {
+    isShapeGeometrySaving = false;
+    if (
+      geometryEditingShapeLayer === layer &&
+      currentMapMode === "edit" &&
+      !activeDrawMode
+    ) {
+      rebuildShapeGeometryHandles(layer);
+    }
+  }
+}
+
+// 頂点ハンドルの現在位置を図形の頂点へ同期する
+function syncShapeGeometryHandlePositions(layer, activeHandle = null) {
+  const vertices = flattenShapeLatLngs(layer?.getLatLngs?.());
+  shapeGeometryEditHandles.eachLayer((handle) => {
+    if (handle === activeHandle) {
+      return;
+    }
+    const vertex = vertices[handle.shapeVertexIndex];
+    if (vertex) {
+      handle.setLatLng(vertex);
+    }
+  });
+}
+
+// 頂点ハンドルのドラッグ位置を対象図形へ反映する
+function applyShapeVertexDrag(layer, vertexIndex, nextLatLng, activeHandle) {
+  const vertices = flattenShapeLatLngs(layer?.getLatLngs?.()).map((latLng) =>
+    cloneShapeLatLngs(latLng),
+  );
+  if (!vertices[vertexIndex]) {
+    return;
+  }
+
+  if (layer.shapeType === "rectangle" && vertices.length === 4) {
+    const oppositeVertex =
+      activeHandle?.shapeRectangleOppositeLatLng ||
+      vertices[(vertexIndex + 2) % 4];
+    const nextBounds = L.latLngBounds(oppositeVertex, nextLatLng);
+    layer.setLatLngs([
+      nextBounds.getSouthWest(),
+      nextBounds.getNorthWest(),
+      nextBounds.getNorthEast(),
+      nextBounds.getSouthEast(),
+    ]);
+    syncShapeGeometryHandlePositions(layer, activeHandle);
+  } else {
+    vertices[vertexIndex] = nextLatLng;
+    layer.setLatLngs(vertices);
+  }
+  refreshShapeGeometryPresentation(layer);
+}
+
+// 選択図形の頂点へドラッグ可能な編集ハンドルを配置する
+function rebuildShapeGeometryHandles(layer) {
+  shapeGeometryEditHandles.clearLayers();
+  if (
+    !layer ||
+    layer.shapeType === "circle" ||
+    currentMapMode !== "edit" ||
+    activeDrawMode ||
+    !map.hasLayer(drawnShapesGroup)
+  ) {
+    return;
+  }
+
+  const vertices = flattenShapeLatLngs(layer.getLatLngs?.());
+  vertices.forEach((latLng, vertexIndex) => {
+    const handle = L.marker(latLng, {
+      draggable: !isShapeGeometrySaving,
+      keyboard: false,
+      autoPan: true,
+      icon: L.divIcon({
+        className: "shape-edit-vertex-icon",
+        html: '<span class="shape-edit-vertex-handle" aria-hidden="true"></span>',
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      }),
+    });
+    handle.shapeVertexIndex = vertexIndex;
+    handle.on("dragstart", () => {
+      handle.shapeGeometrySnapshot = captureShapeGeometry(layer);
+      if (layer.shapeType === "rectangle" && vertices.length === 4) {
+        handle.shapeRectangleOppositeLatLng = cloneShapeLatLngs(
+          vertices[(vertexIndex + 2) % 4],
+        );
+      }
+      closeShapeNameEditor();
+    });
+    handle.on("drag", () => {
+      applyShapeVertexDrag(layer, vertexIndex, handle.getLatLng(), handle);
+    });
+    handle.on("dragend", async () => {
+      await persistShapeGeometryEdit(layer, handle.shapeGeometrySnapshot);
+      handle.shapeGeometrySnapshot = null;
+      handle.shapeRectangleOppositeLatLng = null;
+    });
+    shapeGeometryEditHandles.addLayer(handle);
+  });
+
+  if (!map.hasLayer(shapeGeometryEditHandles)) {
+    shapeGeometryEditHandles.addTo(map);
+  }
+}
+
+// 移動モードでクリックされた図形を編集対象として選択する
+function selectShapeForGeometryEdit(layer) {
+  if (
+    currentMapMode !== "edit" ||
+    activeDrawMode ||
+    isShapeGeometrySaving ||
+    !layer?.shapeId ||
+    layer.isMeasurementLabel === true ||
+    !map.hasLayer(drawnShapesGroup)
+  ) {
+    return false;
+  }
+
+  closeShapeNameEditor();
+  if (geometryEditingShapeLayer !== layer) {
+    setShapeGeometrySelectedStyle(geometryEditingShapeLayer, false);
+    geometryEditingShapeLayer = layer;
+  }
+  setShapeGeometrySelectedStyle(layer, true);
+  if (typeof layer.bringToFront === "function") {
+    layer.bringToFront();
+  }
+  rebuildShapeGeometryHandles(layer);
+  setDrawStatus(
+    layer.shapeType === "circle"
+      ? "図形編集: 円をドラッグして移動できます。"
+      : "図形編集: 頂点をドラッグして移動できます。",
+  );
+  return true;
+}
+
+// DOM のマウス・タッチイベントから地図上の緯度経度を取得する
+function getShapeDragEventLatLng(event) {
+  const sourceEvent =
+    event?.touches?.[0] || event?.changedTouches?.[0] || event;
+  if (
+    !Number.isFinite(sourceEvent?.clientX) ||
+    !Number.isFinite(sourceEvent?.clientY)
+  ) {
+    return null;
+  }
+  const mapRect = map.getContainer().getBoundingClientRect();
+  return map.containerPointToLatLng(
+    L.point(
+      sourceEvent.clientX - mapRect.left,
+      sourceEvent.clientY - mapRect.top,
+    ),
+  );
+}
+
+// 円本体のドラッグを開始する
+function startCircleShapeDrag(layer, leafletEvent) {
+  if (
+    layer?.shapeType !== "circle" ||
+    currentMapMode !== "edit" ||
+    activeDrawMode ||
+    isShapeGeometrySaving ||
+    circleShapeDragState
+  ) {
+    return;
+  }
+  if (!selectShapeForGeometryEdit(layer)) {
+    return;
+  }
+
+  const originalEvent = leafletEvent?.originalEvent;
+  const startPointerLatLng = getShapeDragEventLatLng(originalEvent);
+  if (!startPointerLatLng) {
+    return;
+  }
+  if (originalEvent) {
+    L.DomEvent.stop(originalEvent);
+    originalEvent.preventDefault?.();
+  }
+
+  const zoom = map.getZoom();
+  circleShapeDragState = {
+    layer,
+    snapshot: captureShapeGeometry(layer),
+    zoom,
+    startCenterPoint: map.project(layer.getLatLng(), zoom),
+    startPointerPoint: map.project(startPointerLatLng, zoom),
+    mapDraggingWasEnabled: Boolean(map.dragging?.enabled?.()),
+  };
+  if (circleShapeDragState.mapDraggingWasEnabled) {
+    map.dragging.disable();
+  }
+  map.getContainer()?.classList.add("is-shape-geometry-dragging");
+  document.addEventListener("mousemove", handleCircleShapeDragMove, true);
+  document.addEventListener("mouseup", handleCircleShapeDragEnd, true);
+  document.addEventListener("touchmove", handleCircleShapeDragMove, {
+    capture: true,
+    passive: false,
+  });
+  document.addEventListener("touchend", handleCircleShapeDragEnd, true);
+  document.addEventListener("touchcancel", handleCircleShapeDragEnd, true);
+}
+
+// 円ドラッグ中のポインター移動量を中心座標へ反映する
+function handleCircleShapeDragMove(event) {
+  if (!circleShapeDragState) {
+    return;
+  }
+  const pointerLatLng = getShapeDragEventLatLng(event);
+  if (!pointerLatLng) {
+    return;
+  }
+  event.preventDefault?.();
+  const currentPointerPoint = map.project(
+    pointerLatLng,
+    circleShapeDragState.zoom,
+  );
+  const pointerOffset = currentPointerPoint.subtract(
+    circleShapeDragState.startPointerPoint,
+  );
+  const nextCenter = map.unproject(
+    circleShapeDragState.startCenterPoint.add(pointerOffset),
+    circleShapeDragState.zoom,
+  );
+  circleShapeDragState.layer.setLatLng(nextCenter);
+  refreshShapeGeometryPresentation(circleShapeDragState.layer);
+}
+
+// 円ドラッグ終了時に操作を解除して変更後の位置を保存する
+async function handleCircleShapeDragEnd(event) {
+  if (!circleShapeDragState) {
+    return;
+  }
+  event?.preventDefault?.();
+  const completedDrag = circleShapeDragState;
+  releaseCircleShapeDragInteractions();
+  circleShapeDragState = null;
+  await persistShapeGeometryEdit(completedDrag.layer, completedDrag.snapshot);
+}
+
+// 閲覧・入力・移動モードに合わせて図形編集状態を切り替える
+function setShapeGeometryEditingMode(mode) {
+  currentMapMode = mode;
+  map.getContainer()?.classList.toggle("is-shape-edit-mode", mode === "edit");
+  if (mode !== "edit") {
+    clearShapeGeometryEditing();
+  }
+}
+
 // 図形クリック時の削除や編集開始に必要なイベントを付与する
 function attachShapeEvents(layer) {
   const handleDeleteEvent = async function (
@@ -1961,7 +2375,15 @@ function attachShapeEvents(layer) {
       return;
     }
 
-    return;
+    if (currentMapMode === "edit") {
+      if (event.originalEvent) {
+        L.DomEvent.stop(event.originalEvent);
+      }
+      if (shouldSuppressClick) {
+        suppressNextMapClick();
+      }
+      selectShapeForGeometryEdit(layer);
+    }
   };
 
   layer.on("click", async function (event) {
@@ -1971,6 +2393,15 @@ function attachShapeEvents(layer) {
   layer.on("touchend", async function (event) {
     await handleDeleteEvent(event, true);
   });
+
+  if (layer.shapeType === "circle") {
+    layer.on("mousedown", function (event) {
+      startCircleShapeDrag(layer, event);
+    });
+    layer.on("touchstart", function (event) {
+      startCircleShapeDrag(layer, event);
+    });
+  }
 }
 
 // 図形を現在レイヤへ保存し、保存後の情報をレイヤへ反映する
@@ -2506,6 +2937,7 @@ installPenPointerDrawingHandlers();
 // 閲覧・入力・移動モードに応じて UI とドラッグ可否を切り替える
 function handleRadioChange(event) {
   const mode = event.target.value;
+  setShapeGeometryEditingMode(mode);
   // 左下のコンテナを取得または作成
   let modeDescriptionContainer = document.getElementById("mode-description");
   if (!modeDescriptionContainer) {
@@ -2521,6 +2953,8 @@ function handleRadioChange(event) {
   // モードに応じた説明の設定とマーカードラッグの有効化・無効化切り替え
   if (mode === "view") {
     console.log("View Mode Changed.");
+    modeDescriptionContainer.innerHTML =
+      "閲覧モード: 現在のモードは閲覧のみ可能です。";
     // クラスタ内の全てのマーカーに対してドラッグを無効にする
     markersClusterGroup.eachLayer(function (marker) {
       if (marker.dragging) {
@@ -2530,6 +2964,8 @@ function handleRadioChange(event) {
     });
   } else if (mode === "input") {
     console.log("Input Mode Changed.");
+    modeDescriptionContainer.innerHTML =
+      "入力モード: 現在のモードはマーカーの追加が可能です。";
     markersClusterGroup.eachLayer(function (marker) {
       if (marker.dragging) {
         // marker.dragging が存在するか確認
@@ -2538,6 +2974,8 @@ function handleRadioChange(event) {
     });
   } else if (mode === "edit") {
     console.log("Edit Mode Changed.");
+    modeDescriptionContainer.innerHTML =
+      "移動モード: マーカーの移動と図形の頂点・円の移動が可能です。";
     // クラスタ内の全てのマーカーに対してドラッグを有効にする
     markersClusterGroup.eachLayer(function (marker) {
       if (marker.dragging) {
@@ -2736,6 +3174,7 @@ map.on("overlayremove", function (event) {
   }
 
   if (event.layer === drawnShapesGroup) {
+    clearShapeGeometryEditing();
     saveShapeLayerVisibility(false);
   }
 });
