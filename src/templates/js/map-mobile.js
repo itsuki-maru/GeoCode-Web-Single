@@ -570,11 +570,14 @@ const DELETE_SHAPE_STYLE = {
 };
 const DELETE_HIT_TOLERANCE_PX = 18;
 const MEASUREMENT_SEGMENT_LABEL_GROUP_SIZE = 2;
+const SHAPE_VERTEX_ADD_TOLERANCE_PX = 24;
+const SHAPE_VERTEX_MIN_DISTANCE_PX = 16;
 const shapeGeometryEditHandles = L.featureGroup();
 let currentMapMode = "view";
 let geometryEditingShapeLayer = null;
 let isShapeGeometrySaving = false;
 let circleShapeDragState = null;
+let drawStatusAutoHideTimer = null;
 
 let activeDrawMode = null;
 let isCompletingActiveDrawing = false;
@@ -585,7 +588,10 @@ let circleStartLatLng = null;
 let deletedShapesStack = [];
 let editingShapeLayer = null;
 let editingShapePopup = null;
+let shapeVertexDeletePopup = null;
+let shapeVertexDeleteTarget = null;
 let suppressMapClickUntil = 0;
+let suppressedPropagatedMapClickEvent = null;
 let suppressTouchEndUntil = 0;
 let activePenPointerId = null;
 let isMeasurementVisible = false;
@@ -595,13 +601,34 @@ const deletingShapeIds = new Set();
 const deletedShapeIds = new Set();
 
 // 図形描画用のステータスメッセージを更新する
-function setDrawStatus(message, isError = false) {
+function setDrawStatus(message, isError = false, forceVisible = false) {
   const status = document.getElementById("draw-status");
   if (!status) {
     return;
   }
+  if (drawStatusAutoHideTimer) {
+    clearTimeout(drawStatusAutoHideTimer);
+    drawStatusAutoHideTimer = null;
+  }
   status.textContent = message;
   status.classList.toggle("is-error", isError);
+  if (!forceVisible) {
+    const panel = document.getElementById("draw-control-panel");
+    status.classList.toggle(
+      "is-hidden",
+      !panel || panel.classList.contains("is-collapsed"),
+    );
+    return;
+  }
+
+  status.classList.remove("is-hidden");
+  drawStatusAutoHideTimer = setTimeout(() => {
+    const panel = document.getElementById("draw-control-panel");
+    if (!panel || panel.classList.contains("is-collapsed")) {
+      status.classList.add("is-hidden");
+    }
+    drawStatusAutoHideTimer = null;
+  }, 4000);
 }
 
 // ラベルやポップアップ表示用に HTML をエスケープする
@@ -706,6 +733,16 @@ function closeShapeNameEditor() {
   editingShapeLayer = null;
 }
 
+// 開いている頂点削除確認ポップアップを閉じる
+function closeShapeVertexDeletePopup() {
+  const popup = shapeVertexDeletePopup;
+  shapeVertexDeletePopup = null;
+  shapeVertexDeleteTarget = null;
+  if (popup && map.hasLayer(popup)) {
+    map.closePopup(popup);
+  }
+}
+
 // 描画途中のプレビュー図形を地図上から取り除く
 function clearDrawPreview() {
   if (drawPreviewLayer) {
@@ -764,7 +801,38 @@ function suppressNextMapClick(durationMs = 700) {
 }
 
 function isMapClickSuppressed() {
-  return Date.now() < suppressMapClickUntil;
+  if (Date.now() >= suppressMapClickUntil) {
+    return false;
+  }
+  suppressMapClickUntil = 0;
+  return true;
+}
+
+// Leaflet 内部で地図へ伝播する操作済みクリックのうち、その同一イベントだけを無視する
+function suppressPropagatedMapClick(event) {
+  if (event?.type !== "click" || !event.originalEvent) {
+    return;
+  }
+
+  const originalEvent = event.originalEvent;
+  suppressedPropagatedMapClickEvent = originalEvent;
+  setTimeout(() => {
+    if (suppressedPropagatedMapClickEvent === originalEvent) {
+      suppressedPropagatedMapClickEvent = null;
+    }
+  }, 0);
+}
+
+function isPropagatedMapClickSuppressed(event) {
+  if (
+    !suppressedPropagatedMapClickEvent ||
+    event?.originalEvent !== suppressedPropagatedMapClickEvent
+  ) {
+    return false;
+  }
+
+  suppressedPropagatedMapClickEvent = null;
+  return true;
 }
 
 function suppressNextTouchEnd(durationMs = 700) {
@@ -1462,7 +1530,13 @@ function applyShapeRecord(layer, shapeRecord) {
 }
 
 // 図形名と所属レイヤの変更をバックエンドへ保存する
-async function persistShapeMetadata(layer, nextName, nextLayerId, nextGeoJson) {
+async function persistShapeMetadata(
+  layer,
+  nextName,
+  nextLayerId,
+  nextGeoJson,
+  nextShapeType = null,
+) {
   if (!layer?.shapeId) {
     throw new Error("shape update target missing");
   }
@@ -1475,6 +1549,7 @@ async function persistShapeMetadata(layer, nextName, nextLayerId, nextGeoJson) {
     body: JSON.stringify({
       name: nextName,
       layer_id: nextLayerId,
+      shape_type: nextShapeType,
       geojson: nextGeoJson,
     }),
   });
@@ -2039,6 +2114,7 @@ function cancelActiveCircleShapeDrag() {
 // 図形編集の選択状態と頂点ハンドルをすべて解除する
 function clearShapeGeometryEditing() {
   cancelActiveCircleShapeDrag();
+  closeShapeVertexDeletePopup();
   setShapeGeometrySelectedStyle(geometryEditingShapeLayer, false);
   geometryEditingShapeLayer = null;
   shapeGeometryEditHandles.clearLayers();
@@ -2048,10 +2124,11 @@ function clearShapeGeometryEditing() {
 }
 
 // 編集後の GeoJSON を既存の図形更新 API へ保存する
-async function persistShapeGeometryEdit(layer, snapshot) {
+async function persistShapeGeometryEdit(layer, snapshot, options = {}) {
   if (!layer?.shapeId || isShapeGeometrySaving) {
     return;
   }
+  const nextShapeType = options.shapeType || layer.shapeType;
   const targetLayerId =
     layer.layerId ||
     layer.options?.shapeRecord?.layer_id ||
@@ -2064,39 +2141,41 @@ async function persistShapeGeometryEdit(layer, snapshot) {
   }
 
   isShapeGeometrySaving = true;
+  closeShapeVertexDeletePopup();
   setShapeGeometryHandlesEnabled(false);
   try {
     const nextGeoJson = buildShapeGeoJson(
       layer,
-      layer.shapeType,
-      layer.shapeStyle || getDefaultShapeStyle(layer.shapeType),
+      nextShapeType,
+      layer.shapeStyle || getDefaultShapeStyle(nextShapeType),
     );
     await persistShapeMetadata(
       layer,
       normalizeShapeName(layer.shapeName || ""),
       targetLayerId,
       nextGeoJson,
+      options.shapeType || null,
     );
     applyShapeRecord(layer, {
       id: layer.shapeId,
       layer_id: targetLayerId,
-      shape_type: layer.shapeType,
+      shape_type: nextShapeType,
       name: layer.shapeName || "",
       geojson: nextGeoJson,
     });
     updateShapeNameLabel(layer, layer.shapeName || "");
     refreshShapeMeasurementMarkers(layer);
-    setDrawStatus("図形編集: 位置を保存しました。");
+    setDrawStatus(options.successMessage || "図形編集: 位置を保存しました。");
   } catch (_error) {
     restoreShapeGeometry(layer, snapshot);
     updateShapeNameLabel(layer, layer.shapeName || "");
     refreshShapeMeasurementMarkers(layer);
-    setDrawStatus("図形編集: 保存に失敗したため元の位置へ戻しました。", true);
+    setDrawStatus("図形編集: 保存に失敗したため元の形状へ戻しました。", true);
   } finally {
     isShapeGeometrySaving = false;
     if (
       geometryEditingShapeLayer === layer &&
-      currentMapMode === "edit" &&
+      (currentMapMode === "edit" || currentMapMode === "input") &&
       !activeDrawMode
     ) {
       rebuildShapeGeometryHandles(layer);
@@ -2146,50 +2225,203 @@ function applyShapeVertexDrag(layer, vertexIndex, nextLatLng, activeHandle) {
   refreshShapeGeometryPresentation(layer);
 }
 
-// 選択図形の頂点へドラッグ可能な編集ハンドルを配置する
+// 入力モードで指定された頂点を削除し、既存の図形更新 API へ保存する
+async function deleteShapeVertex(layer, vertexIndex) {
+  if (
+    currentMapMode !== "input" ||
+    geometryEditingShapeLayer !== layer ||
+    activeDrawMode ||
+    isShapeGeometrySaving
+  ) {
+    return false;
+  }
+
+  const rawVertices = flattenShapeLatLngs(layer?.getLatLngs?.());
+  const vertices = (
+    layer.shapeType === "polygon" || layer.shapeType === "rectangle"
+      ? trimClosedLatLngs(rawVertices)
+      : rawVertices
+  ).map((latLng) => cloneShapeLatLngs(latLng));
+  const minimumVertexCount = layer.shapeType === "polyline" ? 2 : 3;
+  if (vertices.length <= minimumVertexCount) {
+    setDrawStatus(
+      layer.shapeType === "polyline"
+        ? "図形編集: 折れ線は2頂点未満にできません。"
+        : "図形編集: ポリゴンは3頂点未満にできません。",
+      true,
+      true,
+    );
+    return false;
+  }
+
+  if (!vertices[vertexIndex]) {
+    return false;
+  }
+
+  const snapshot = captureShapeGeometry(layer);
+  const shouldConvertRectangle = layer.shapeType === "rectangle";
+  vertices.splice(vertexIndex, 1);
+  layer.setLatLngs(vertices);
+  rebuildShapeGeometryHandles(layer);
+  refreshShapeGeometryPresentation(layer);
+  setDrawStatus("図形編集: 頂点を保存しています。");
+
+  await persistShapeGeometryEdit(layer, snapshot, {
+    shapeType: shouldConvertRectangle ? "polygon" : layer.shapeType,
+    successMessage: shouldConvertRectangle
+      ? "図形編集: 頂点を削除し、矩形をポリゴンへ変換しました。"
+      : "図形編集: 頂点を削除しました。",
+  });
+  return true;
+}
+
+// 入力モードの頂点位置に削除確認ポップアップを開く
+function openShapeVertexDeletePopup(layer, handle, event) {
+  if (
+    currentMapMode !== "input" ||
+    geometryEditingShapeLayer !== layer ||
+    activeDrawMode ||
+    isShapeGeometrySaving
+  ) {
+    return;
+  }
+
+  if (event?.originalEvent) {
+    L.DomEvent.stop(event.originalEvent);
+  }
+  closeShapeNameEditor();
+  closeShapeVertexDeletePopup();
+
+  const vertexIndex = handle.shapeVertexIndex;
+  const content = document.createElement("div");
+  content.className = "shape-vertex-delete-confirm";
+
+  const message = document.createElement("div");
+  message.className = "shape-vertex-delete-confirm-message";
+  message.textContent = "頂点を削除しますか？";
+
+  const actions = document.createElement("div");
+  actions.className = "shape-vertex-delete-confirm-actions";
+
+  const closeButton = document.createElement("button");
+  closeButton.type = "button";
+  closeButton.className = "shape-vertex-delete-confirm-button";
+  closeButton.textContent = "閉じる";
+
+  const deleteButton = document.createElement("button");
+  deleteButton.type = "button";
+  deleteButton.className =
+    "shape-vertex-delete-confirm-button shape-vertex-delete-confirm-button--delete";
+  deleteButton.textContent = "削除";
+
+  actions.append(closeButton, deleteButton);
+  content.append(message, actions);
+
+  const popup = L.popup({
+    className: "shape-vertex-delete-popup",
+    closeButton: false,
+    maxWidth: 220,
+  })
+    .setLatLng(handle.getLatLng())
+    .setContent(content)
+    .addTo(map);
+
+  shapeVertexDeletePopup = popup;
+  shapeVertexDeleteTarget = { layer, vertexIndex };
+  popup.on("remove", () => {
+    if (shapeVertexDeletePopup === popup) {
+      shapeVertexDeletePopup = null;
+      shapeVertexDeleteTarget = null;
+    }
+  });
+
+  L.DomEvent.on(closeButton, "click", (buttonEvent) => {
+    L.DomEvent.stop(buttonEvent);
+    closeShapeVertexDeletePopup();
+  });
+  L.DomEvent.on(deleteButton, "click", (buttonEvent) => {
+    suppressPropagatedMapClick({
+      type: "click",
+      originalEvent: buttonEvent,
+    });
+    L.DomEvent.stop(buttonEvent);
+    if (
+      shapeVertexDeleteTarget?.layer !== layer ||
+      shapeVertexDeleteTarget?.vertexIndex !== vertexIndex
+    ) {
+      return;
+    }
+    closeShapeVertexDeletePopup();
+    void deleteShapeVertex(layer, vertexIndex);
+  });
+}
+
+// 選択図形の頂点へ表示用またはドラッグ可能なハンドルを配置する
 function rebuildShapeGeometryHandles(layer) {
+  closeShapeVertexDeletePopup();
   shapeGeometryEditHandles.clearLayers();
+  const isVertexMoveMode = currentMapMode === "edit";
+  const isVertexDisplayMode = currentMapMode === "input";
   if (
     !layer ||
     layer.shapeType === "circle" ||
-    currentMapMode !== "edit" ||
+    (!isVertexMoveMode && !isVertexDisplayMode) ||
     activeDrawMode ||
     !map.hasLayer(drawnShapesGroup)
   ) {
     return;
   }
 
-  const vertices = flattenShapeLatLngs(layer.getLatLngs?.());
+  const rawVertices = flattenShapeLatLngs(layer.getLatLngs?.());
+  const vertices =
+    layer.shapeType === "polygon" || layer.shapeType === "rectangle"
+      ? trimClosedLatLngs(rawVertices)
+      : rawVertices;
   vertices.forEach((latLng, vertexIndex) => {
     const handle = L.marker(latLng, {
-      draggable: !isShapeGeometrySaving,
+      draggable: isVertexMoveMode && !isShapeGeometrySaving,
+      interactive: isVertexMoveMode || isVertexDisplayMode,
       keyboard: false,
-      autoPan: true,
+      autoPan: isVertexMoveMode,
       icon: L.divIcon({
-        className: "shape-edit-vertex-icon",
+        className: isVertexMoveMode
+          ? "shape-edit-vertex-icon"
+          : "shape-edit-vertex-icon shape-vertex-display-icon",
         html: '<span class="shape-edit-vertex-handle" aria-hidden="true"></span>',
         iconSize: [24, 24],
         iconAnchor: [12, 12],
       }),
     });
     handle.shapeVertexIndex = vertexIndex;
-    handle.on("dragstart", () => {
-      handle.shapeGeometrySnapshot = captureShapeGeometry(layer);
-      if (layer.shapeType === "rectangle" && vertices.length === 4) {
-        handle.shapeRectangleOppositeLatLng = cloneShapeLatLngs(
-          vertices[(vertexIndex + 2) % 4],
-        );
-      }
-      closeShapeNameEditor();
-    });
-    handle.on("drag", () => {
-      applyShapeVertexDrag(layer, vertexIndex, handle.getLatLng(), handle);
-    });
-    handle.on("dragend", async () => {
-      await persistShapeGeometryEdit(layer, handle.shapeGeometrySnapshot);
-      handle.shapeGeometrySnapshot = null;
-      handle.shapeRectangleOppositeLatLng = null;
-    });
+    if (isVertexDisplayMode) {
+      handle.on("click", (event) => {
+        if (event?.originalEvent) {
+          L.DomEvent.stop(event.originalEvent);
+        }
+      });
+      handle.on("contextmenu", (event) => {
+        openShapeVertexDeletePopup(layer, handle, event);
+      });
+    }
+    if (isVertexMoveMode) {
+      handle.on("dragstart", () => {
+        handle.shapeGeometrySnapshot = captureShapeGeometry(layer);
+        if (layer.shapeType === "rectangle" && vertices.length === 4) {
+          handle.shapeRectangleOppositeLatLng = cloneShapeLatLngs(
+            vertices[(vertexIndex + 2) % 4],
+          );
+        }
+        closeShapeNameEditor();
+      });
+      handle.on("drag", () => {
+        applyShapeVertexDrag(layer, vertexIndex, handle.getLatLng(), handle);
+      });
+      handle.on("dragend", async () => {
+        await persistShapeGeometryEdit(layer, handle.shapeGeometrySnapshot);
+        handle.shapeGeometrySnapshot = null;
+        handle.shapeRectangleOppositeLatLng = null;
+      });
+    }
     shapeGeometryEditHandles.addLayer(handle);
   });
 
@@ -2226,6 +2458,30 @@ function selectShapeForGeometryEdit(layer) {
       ? "図形編集: 円をドラッグして移動できます。"
       : "図形編集: 頂点をドラッグして移動できます。",
   );
+  return true;
+}
+
+// 入力モードで頂点追加対象の図形を選択し、現在の頂点を表示する
+function activateShapeForVertexAdd(layer) {
+  if (
+    currentMapMode !== "input" ||
+    activeDrawMode ||
+    !canAddVertexToShape(layer) ||
+    !map.hasLayer(drawnShapesGroup)
+  ) {
+    return false;
+  }
+
+  closeShapeNameEditor();
+  if (geometryEditingShapeLayer !== layer) {
+    setShapeGeometrySelectedStyle(geometryEditingShapeLayer, false);
+    geometryEditingShapeLayer = layer;
+  }
+  setShapeGeometrySelectedStyle(layer, true);
+  if (typeof layer.bringToFront === "function") {
+    layer.bringToFront();
+  }
+  rebuildShapeGeometryHandles(layer);
   return true;
 }
 
@@ -2333,13 +2589,236 @@ async function handleCircleShapeDragEnd(event) {
   await persistShapeGeometryEdit(completedDrag.layer, completedDrag.snapshot);
 }
 
+// 入力モードで頂点追加できる図形種別か判定する
+function canAddVertexToShape(layer) {
+  return Boolean(
+    layer?.shapeId &&
+      layer.isMeasurementLabel !== true &&
+      ["polygon", "polyline", "rectangle"].includes(layer.shapeType),
+  );
+}
+
+// クリック位置から線分上の最近傍点を画面座標で求める
+function getClosestPointOnShapeSegment(targetPoint, startPoint, endPoint) {
+  const segmentX = endPoint.x - startPoint.x;
+  const segmentY = endPoint.y - startPoint.y;
+  const segmentLengthSquared = segmentX * segmentX + segmentY * segmentY;
+  if (segmentLengthSquared === 0) {
+    return startPoint;
+  }
+
+  const targetX = targetPoint.x - startPoint.x;
+  const targetY = targetPoint.y - startPoint.y;
+  const ratio = Math.max(
+    0,
+    Math.min(
+      1,
+      (targetX * segmentX + targetY * segmentY) / segmentLengthSquared,
+    ),
+  );
+  return L.point(
+    startPoint.x + segmentX * ratio,
+    startPoint.y + segmentY * ratio,
+  );
+}
+
+// 図形の全辺からクリック位置に最も近い辺と挿入座標を取得する
+function findShapeVertexInsertion(layer, targetLatLng) {
+  if (!canAddVertexToShape(layer) || !targetLatLng) {
+    return null;
+  }
+
+  const vertices = flattenShapeLatLngs(layer.getLatLngs?.());
+  if (vertices.length < 2) {
+    return null;
+  }
+
+  const isClosedShape =
+    layer.shapeType === "polygon" || layer.shapeType === "rectangle";
+  const segmentCount = isClosedShape ? vertices.length : vertices.length - 1;
+  const targetPoint = map.latLngToLayerPoint(targetLatLng);
+  let closestMatch = null;
+
+  for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex += 1) {
+    const nextVertexIndex = (segmentIndex + 1) % vertices.length;
+    const startPoint = map.latLngToLayerPoint(vertices[segmentIndex]);
+    const endPoint = map.latLngToLayerPoint(vertices[nextVertexIndex]);
+    const closestPoint = getClosestPointOnShapeSegment(
+      targetPoint,
+      startPoint,
+      endPoint,
+    );
+    const distancePx = targetPoint.distanceTo(closestPoint);
+    if (!closestMatch || distancePx < closestMatch.distancePx) {
+      closestMatch = {
+        distancePx,
+        insertionIndex: segmentIndex + 1,
+        latLng: map.layerPointToLatLng(closestPoint),
+      };
+    }
+  }
+
+  if (
+    !closestMatch ||
+    closestMatch.distancePx > SHAPE_VERTEX_ADD_TOLERANCE_PX
+  ) {
+    return null;
+  }
+
+  const closestPoint = map.latLngToLayerPoint(closestMatch.latLng);
+  closestMatch.existingVertexDistancePx = vertices.reduce(
+    (minimumDistance, vertex) =>
+      Math.min(
+        minimumDistance,
+        closestPoint.distanceTo(map.latLngToLayerPoint(vertex)),
+      ),
+    Number.POSITIVE_INFINITY,
+  );
+  return closestMatch;
+}
+
+// 頂点追加・図形選択に使用したイベントをマーカー追加へ伝播させない
+function consumeShapeVertexAddEvent(event) {
+  if (event?.originalEvent) {
+    L.DomEvent.stop(event.originalEvent);
+  }
+  if (event?.type === "touchend") {
+    suppressNextMapClick();
+  } else {
+    suppressMapClickUntil = 0;
+  }
+  closeShapeNameEditor();
+}
+
+// 入力モードの最初の操作では図形の選択と頂点表示だけを行う
+function activateShapeForVertexAddFromEvent(
+  layer,
+  event,
+  shouldSuppressPropagatedMapClick = false,
+) {
+  if (shouldSuppressPropagatedMapClick) {
+    suppressPropagatedMapClick(event);
+  }
+  consumeShapeVertexAddEvent(event);
+  if (isShapeGeometrySaving) {
+    setDrawStatus(
+      "図形編集: 保存中です。少し待ってから図形を選択してください。",
+      true,
+    );
+    return true;
+  }
+  if (!activateShapeForVertexAdd(layer)) {
+    return false;
+  }
+  setDrawStatus(
+    "図形編集: 図形を選択しました。頂点を追加する辺をクリックしてください。",
+  );
+  return true;
+}
+
+// 入力モードで図形の辺をクリックした位置へ新しい頂点を追加する
+function tryAddShapeVertex(layer, event, knownInsertion = null) {
+  if (
+    currentMapMode !== "input" ||
+    activeDrawMode ||
+    !canAddVertexToShape(layer)
+  ) {
+    return false;
+  }
+
+  const insertion =
+    knownInsertion || findShapeVertexInsertion(layer, event?.latlng);
+  if (!insertion) {
+    return false;
+  }
+
+  consumeShapeVertexAddEvent(event);
+
+  if (isShapeGeometrySaving) {
+    setDrawStatus(
+      "図形編集: 保存中です。少し待ってから追加してください。",
+      true,
+    );
+    return true;
+  }
+
+  activateShapeForVertexAdd(layer);
+  if (insertion.existingVertexDistancePx < SHAPE_VERTEX_MIN_DISTANCE_PX) {
+    setDrawStatus("図形編集: 既存の頂点に近すぎるため追加できません。", true);
+    return true;
+  }
+
+  const snapshot = captureShapeGeometry(layer);
+  const vertices = flattenShapeLatLngs(layer.getLatLngs?.()).map((latLng) =>
+    cloneShapeLatLngs(latLng),
+  );
+  vertices.splice(insertion.insertionIndex, 0, insertion.latLng);
+  layer.setLatLngs(vertices);
+  rebuildShapeGeometryHandles(layer);
+  refreshShapeGeometryPresentation(layer);
+  setDrawStatus("図形編集: 頂点を保存しています。");
+
+  void persistShapeGeometryEdit(layer, snapshot, {
+    shapeType: layer.shapeType === "rectangle" ? "polygon" : layer.shapeType,
+    successMessage:
+      layer.shapeType === "rectangle"
+        ? "図形編集: 頂点を追加し、矩形をポリゴンへ変換しました。"
+        : "図形編集: 頂点を追加しました。",
+  });
+  return true;
+}
+
+// 入力モードのクリック位置に最も近い図形の辺へ頂点を追加する
+function tryAddShapeVertexAtLatLng(event) {
+  if (
+    currentMapMode !== "input" ||
+    activeDrawMode ||
+    !map.hasLayer(drawnShapesGroup)
+  ) {
+    return false;
+  }
+
+  let closestTarget = null;
+  drawnShapesGroup.eachLayer((layer) => {
+    const insertion = findShapeVertexInsertion(layer, event?.latlng);
+    if (
+      insertion &&
+      (!closestTarget ||
+        insertion.distancePx < closestTarget.insertion.distancePx)
+    ) {
+      closestTarget = { layer, insertion };
+    }
+  });
+
+  if (!closestTarget) {
+    return false;
+  }
+  if (geometryEditingShapeLayer !== closestTarget.layer) {
+    return activateShapeForVertexAddFromEvent(closestTarget.layer, event);
+  }
+  return tryAddShapeVertex(closestTarget.layer, event, closestTarget.insertion);
+}
+
+// 入力モードで頂点追加できる図形へカーソル用クラスを反映する
+function updateShapeVertexAddTargetStyles() {
+  drawnShapesGroup.eachLayer((layer) => {
+    const element = layer?.getElement?.();
+    if (!element) {
+      return;
+    }
+    element.classList.toggle(
+      "is-shape-vertex-add-target",
+      currentMapMode === "input" && canAddVertexToShape(layer),
+    );
+  });
+}
+
 // 閲覧・入力・移動モードに合わせて図形編集状態を切り替える
 function setShapeGeometryEditingMode(mode) {
   currentMapMode = mode;
   map.getContainer()?.classList.toggle("is-shape-edit-mode", mode === "edit");
-  if (mode !== "edit") {
-    clearShapeGeometryEditing();
-  }
+  clearShapeGeometryEditing();
+  updateShapeVertexAddTargetStyles();
 }
 
 // 図形クリック時の削除や編集開始に必要なイベントを付与する
@@ -2375,6 +2854,24 @@ function attachShapeEvents(layer) {
       return;
     }
 
+    if (currentMapMode === "input" && canAddVertexToShape(layer)) {
+      if (geometryEditingShapeLayer !== layer) {
+        activateShapeForVertexAddFromEvent(layer, event, true);
+        return;
+      }
+      if (
+        event.type === "click" &&
+        !findShapeVertexInsertion(layer, event?.latlng)
+      ) {
+        consumeShapeVertexAddEvent(event);
+        setDrawStatus(
+          "図形編集: 頂点を追加する場合は選択中の図形の辺をクリックしてください。",
+          true,
+        );
+        return;
+      }
+    }
+
     if (currentMapMode === "edit") {
       if (event.originalEvent) {
         L.DomEvent.stop(event.originalEvent);
@@ -2393,6 +2890,7 @@ function attachShapeEvents(layer) {
   layer.on("touchend", async function (event) {
     await handleDeleteEvent(event, true);
   });
+  layer.on("add", updateShapeVertexAddTargetStyles);
 
   if (layer.shapeType === "circle") {
     layer.on("mousedown", function (event) {
@@ -2697,6 +3195,10 @@ function handleShapeDrawLatLng(latlng) {
 
 // 地図クリック時にサーバーに情報を送信しマーカー描画
 map.on("click", async function (e) {
+  if (isPropagatedMapClickSuppressed(e)) {
+    return;
+  }
+
   if (isMapClickSuppressed()) {
     return;
   }
@@ -2707,6 +3209,10 @@ map.on("click", async function (e) {
   }
 
   if (handleShapeDrawLatLng(e.latlng)) {
+    return;
+  }
+
+  if (tryAddShapeVertexAtLatLng(e)) {
     return;
   }
 
@@ -2965,7 +3471,7 @@ function handleRadioChange(event) {
   } else if (mode === "input") {
     console.log("Input Mode Changed.");
     modeDescriptionContainer.innerHTML =
-      "入力モード: 現在のモードはマーカーの追加が可能です。";
+      "入力モード: マーカーの追加と図形への頂点追加が可能です。";
     markersClusterGroup.eachLayer(function (marker) {
       if (marker.dragging) {
         // marker.dragging が存在するか確認
@@ -3165,6 +3671,7 @@ map.on("overlayadd", function (event) {
   setTimeout(() => {
     bindVisibleShapeLabelEvents();
     applyMeasurementVisibilityToDrawnShapesGroup();
+    updateShapeVertexAddTargetStyles();
   }, 0);
 });
 map.on("overlayremove", function (event) {

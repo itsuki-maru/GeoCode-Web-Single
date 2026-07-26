@@ -54,7 +54,7 @@ use geocode_web_single::{
         UpdateAccountPrivacyPayload, UpdateUserData,
     },
 };
-use serde_json::json;
+use serde_json::{Value, json};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use tera::Tera;
@@ -62,6 +62,47 @@ use tokio::sync::Mutex;
 use totp_rs::{Algorithm, TOTP};
 use tower::ServiceExt;
 use uuid::Uuid;
+
+fn valid_polygon_geojson() -> Value {
+    json!({
+        "type": "Feature",
+        "properties": {},
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[
+                [139.0, 35.0],
+                [140.0, 35.0],
+                [140.0, 36.0],
+                [139.0, 35.0]
+            ]]
+        }
+    })
+}
+
+fn valid_rectangle_geojson() -> Value {
+    json!({
+        "type": "Feature",
+        "properties": {},
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[
+                [139.0, 35.0],
+                [140.0, 35.0],
+                [140.0, 36.0],
+                [139.0, 36.0],
+                [139.0, 35.0]
+            ]]
+        }
+    })
+}
+
+fn valid_circle_geojson() -> Value {
+    json!({
+        "type": "Feature",
+        "properties": {"radius": 100.0},
+        "geometry": {"type": "Point", "coordinates": [139.0, 35.0]}
+    })
+}
 
 // マーカー作成ヘルパー関数
 async fn insert_marker(pool: &SqlitePool, user_id: &str, layer_id: &str) -> String {
@@ -107,7 +148,7 @@ async fn insert_shape(pool: &SqlitePool, user_id: &str, layer_id: &str) -> Strin
     .bind(layer_id)
     .bind("polygon")
     .bind("shape")
-    .bind(json!({"type": "Polygon", "coordinates": []}).to_string())
+    .bind(valid_polygon_geojson().to_string())
     .bind(now)
     .bind(now)
     .execute(pool)
@@ -277,9 +318,9 @@ async fn shape_handlers_cover_create_read_delete_and_validation() {
         Extension(pool.clone()),
         Json(ShapeCreateJsonData {
             layer_id: layer_id.clone(),
-            shape_type: "polygon".to_string(),
+            shape_type: "rectangle".to_string(),
             name: Some("Area".to_string()),
-            geojson: json!({"type": "Polygon", "coordinates": []}),
+            geojson: valid_rectangle_geojson(),
         }),
     )
     .await
@@ -301,6 +342,30 @@ async fn shape_handlers_cover_create_read_delete_and_validation() {
         "unsupported shape type should be rejected"
     );
 
+    let invalid_polygon = json!({
+        "type": "Feature",
+        "properties": {},
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[[139.0, 35.0], [140.0, 36.0], [139.0, 35.0]]]
+        }
+    });
+    assert!(
+        create_shape_handler(
+            Extension(user_id.clone()),
+            Extension(pool.clone()),
+            Json(ShapeCreateJsonData {
+                layer_id: layer_id.clone(),
+                shape_type: "polygon".to_string(),
+                name: Some("Invalid polygon".to_string()),
+                geojson: invalid_polygon.clone(),
+            }),
+        )
+        .await
+        .is_err(),
+        "polygon below the minimum vertex count should be rejected"
+    );
+
     let Json(shapes) = shapes_get_handler(
         Extension(user_id.clone()),
         Extension(pool.clone()),
@@ -314,6 +379,7 @@ async fn shape_handlers_cover_create_read_delete_and_validation() {
     assert_eq!(shapes.len(), 1);
     assert_eq!(shapes[0].id, created.id);
 
+    let valid_polygon = valid_polygon_geojson();
     let _ = update_shape_handler(
         Extension(user_id.clone()),
         Extension(pool.clone()),
@@ -321,11 +387,65 @@ async fn shape_handlers_cover_create_read_delete_and_validation() {
         Json(ShapeUpdateJsonData {
             name: Some("Updated Area".to_string()),
             layer_id: None,
-            geojson: Some(json!({"type": "Polygon", "coordinates": [[[0, 0]]]})),
+            shape_type: Some("polygon".to_string()),
+            geojson: Some(valid_polygon.clone()),
         }),
     )
     .await
     .expect("shape should update");
+
+    let Json(updated_shapes) = shapes_get_handler(
+        Extension(user_id.clone()),
+        Extension(pool.clone()),
+        Query(ShapeReadQueryParams {
+            layer_id: None,
+            is_master: Some(true),
+        }),
+    )
+    .await
+    .expect("updated shapes should be returned");
+    assert_eq!(updated_shapes[0].shape_type, "polygon");
+    assert_eq!(updated_shapes[0].geojson, valid_polygon);
+
+    assert!(
+        update_shape_handler(
+            Extension(user_id.clone()),
+            Extension(pool.clone()),
+            Path(created.id.clone()),
+            Json(ShapeUpdateJsonData {
+                name: Some("Invalid update".to_string()),
+                layer_id: None,
+                shape_type: None,
+                geojson: Some(invalid_polygon),
+            }),
+        )
+        .await
+        .is_err(),
+        "invalid geometry update should be rejected"
+    );
+    let stored_geojson: Value = sqlx::query_scalar("SELECT geojson FROM shape_model WHERE id = $1")
+        .bind(&created.id)
+        .fetch_one(&pool)
+        .await
+        .expect("stored shape should be returned");
+    assert_eq!(stored_geojson, valid_polygon);
+
+    assert!(
+        update_shape_handler(
+            Extension(user_id.clone()),
+            Extension(pool.clone()),
+            Path(created.id.clone()),
+            Json(ShapeUpdateJsonData {
+                name: Some("Updated Area".to_string()),
+                layer_id: None,
+                shape_type: Some("triangle".to_string()),
+                geojson: None,
+            }),
+        )
+        .await
+        .is_err(),
+        "unsupported shape type update should be rejected"
+    );
 
     let _ = delete_shape_handler(Extension(user_id), Extension(pool), Path(created.id))
         .await
@@ -666,7 +786,7 @@ async fn file_handlers_cover_export_and_import() {
         "shapes": [{
             "shape_type": "circle",
             "name": "circle",
-            "geojson": {"type": "Feature"},
+            "geojson": valid_circle_geojson(),
             "layer": {"layer_name": "imported layer", "is_master": false}
         }]
     })
@@ -702,6 +822,78 @@ async fn file_handlers_cover_export_and_import() {
     .await
     .expect("imported marker count should be returned");
     assert_eq!(imported_count, 1);
+}
+
+// 不正な図形を含むインポートが全体を保存せず拒否されることを確認する。
+#[tokio::test]
+async fn file_import_rejects_invalid_shape_without_partial_writes() {
+    let pool = common::test_pool().await;
+    let user_id = common::create_test_user(&pool, "invalid-file-user").await;
+    let boundary = "INVALID_IMPORT";
+    let import_json = json!({
+        "version": 2,
+        "markers": [{
+            "marker_name": "must not be imported",
+            "latitude": 35.0,
+            "longitude": 139.0,
+            "detail": "detail",
+            "layer": {"layer_name": "invalid imported layer", "is_master": false}
+        }],
+        "shapes": [{
+            "shape_type": "polyline",
+            "name": "invalid line",
+            "geojson": {
+                "type": "Feature",
+                "properties": {},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[139.0, 35.0]]
+                }
+            },
+            "layer": {"layer_name": "invalid imported layer", "is_master": false}
+        }]
+    })
+    .to_string();
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"invalid.json\"\r\nContent-Type: application/json\r\n\r\n{import_json}\r\n--{boundary}--\r\n"
+    );
+    let app = Router::new()
+        .route("/import", post(import_json_handler))
+        .layer(Extension(user_id.clone()))
+        .layer(Extension(pool.clone()));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/import")
+                .header(
+                    header::CONTENT_TYPE,
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .expect("request should build"),
+        )
+        .await
+        .expect("import request should execute");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let marker_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM marker_info_model WHERE user_id = $1 AND marker_name = 'must not be imported'",
+    )
+    .bind(&user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("marker count should be returned");
+    let layer_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM layer_model WHERE user_id = $1 AND layer_name = 'invalid imported layer'",
+    )
+    .bind(&user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("layer count should be returned");
+    assert_eq!(marker_count, 0);
+    assert_eq!(layer_count, 0);
 }
 
 // 地図画面と別ウィンドウ地図画面がSQLite上のレイヤ/マーカー/図形/タイル情報で描画できることを確認する。

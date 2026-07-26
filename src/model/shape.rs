@@ -33,6 +33,7 @@ pub struct ShapeReadQueryParams {
 pub struct ShapeUpdateJsonData {
     pub name: Option<String>,
     pub layer_id: Option<String>,
+    pub shape_type: Option<String>,
     pub geojson: Option<Value>,
 }
 

@@ -3,6 +3,7 @@ use crate::model::{
     MessageApi, ShapeCreateJsonData, ShapeCreatedResponse, ShapeObject, ShapeReadQueryParams,
     ShapeUpdateJsonData,
 };
+use crate::shape_validation::validate_shape_geojson;
 use crate::utils::ensure_owned_layer;
 use axum::{
     Json,
@@ -95,13 +96,8 @@ pub async fn create_shape_handler(
     Extension(pool): Extension<SqlitePool>,
     Json(payload): Json<ShapeCreateJsonData>,
 ) -> Result<Json<ShapeCreatedResponse>, AppError> {
-    // シェープの種類をチェック
-    if !matches!(
-        payload.shape_type.as_str(),
-        "polygon" | "polyline" | "rectangle" | "circle"
-    ) {
-        return Err(AppError::Validation("Unsupported shape type.".into()));
-    }
+    // シェープの種類とGeoJSONをチェック
+    validate_shape_geojson(&payload.shape_type, &payload.geojson)?;
 
     // 図形名を正規化
     let normalized_name = normalize_shape_name(payload.name.as_deref())?;
@@ -188,7 +184,33 @@ pub async fn update_shape_handler(
     let normalized_name = normalize_shape_name(payload.name.as_deref())?;
 
     let next_layer_id = payload.layer_id;
+    let next_shape_type = payload.shape_type;
     let next_geojson = payload.geojson;
+
+    // 図形種別またはGeoJSONを変更する場合、既存値と合成した更新後の状態を検証する
+    if next_shape_type.is_some() || next_geojson.is_some() {
+        let current_shape = sqlx::query_as::<_, (String, serde_json::Value)>(
+            r#"
+            SELECT shape_type, geojson
+            FROM shape_model
+            WHERE id = $1 AND user_id = $2
+            "#,
+        )
+        .bind(&shape_id)
+        .bind(&user_id)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "database error.");
+            AppError::Sqlx(e)
+        })?;
+        let Some((current_shape_type, current_geojson)) = current_shape else {
+            return Err(AppError::Validation("Failed to update shape.".into()));
+        };
+        let effective_shape_type = next_shape_type.as_deref().unwrap_or(&current_shape_type);
+        let effective_geojson = next_geojson.as_ref().unwrap_or(&current_geojson);
+        validate_shape_geojson(effective_shape_type, effective_geojson)?;
+    }
 
     if let Some(ref layer_id) = next_layer_id {
         let layer_exists = sqlx::query_scalar::<_, bool>(
@@ -222,13 +244,15 @@ pub async fn update_shape_handler(
         SET
             name = $1,
             layer_id = COALESCE($2, layer_id),
-            geojson = COALESCE($3, geojson),
-            updated_at = $4
-        WHERE id = $5 AND user_id = $6
+            shape_type = COALESCE($3, shape_type),
+            geojson = COALESCE($4, geojson),
+            updated_at = $5
+        WHERE id = $6 AND user_id = $7
         "#,
     )
     .bind(normalized_name)
     .bind(next_layer_id)
+    .bind(next_shape_type)
     .bind(next_geojson)
     .bind(Utc::now().naive_utc())
     .bind(shape_id)
