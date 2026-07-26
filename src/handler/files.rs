@@ -19,6 +19,7 @@ use crate::model::{
     ExportJsonScheme, ExportLayers, ExportMarkers, ExportPackage, ExportShapeJsonScheme,
     ExportShapes, ImportMarkers, ImportPackage, ReturningId,
 };
+use crate::shape_validation::validate_shape_geojson;
 use crate::utils::check_ismaster_handler;
 
 const MAX_IMPORT_FILE_SIZE_BYTES: usize = 5 * 1024 * 1024;
@@ -36,15 +37,6 @@ fn normalize_import_package(content: &str) -> Result<ImportPackage, AppError> {
         markers,
         shapes: Vec::new(),
     })
-}
-
-// 図形タイプの検証
-fn validate_shape_type(shape_type: &str) -> Result<(), AppError> {
-    if matches!(shape_type, "polygon" | "polyline" | "rectangle" | "circle") {
-        return Ok(());
-    }
-
-    Err(AppError::BadRequest)
 }
 
 // エクスポートJSONのクエリパラメータの検証
@@ -341,7 +333,7 @@ pub async fn import_json_handler(
                 if shape.layer.layer_name.trim().is_empty() {
                     return Err(AppError::BadRequest);
                 }
-                validate_shape_type(&shape.shape_type)?;
+                validate_shape_geojson(&shape.shape_type, &shape.geojson)?;
                 imported_layer_names.insert(shape.layer.layer_name.trim().to_string());
             }
 

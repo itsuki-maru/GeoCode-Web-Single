@@ -287,6 +287,10 @@
                 user-select: none;
             }
 
+            .leaflet-interactive.is-shape-vertex-add-target {
+                cursor: copy !important;
+            }
+
             .leaflet-interactive.is-shape-geometry-selected {
                 filter: drop-shadow(0 0 3px rgba(37, 99, 235, 0.9));
             }
@@ -314,6 +318,64 @@
                 box-shadow: 0 1px 4px rgba(15, 23, 42, 0.45);
                 cursor: move;
                 touch-action: none;
+            }
+
+            .shape-vertex-delete-popup.leaflet-popup {
+                margin-bottom: 14px;
+                min-width: 0 !important;
+                max-width: 220px !important;
+            }
+
+            .shape-vertex-delete-popup .leaflet-popup-content-wrapper {
+                border-radius: 8px;
+                min-width: 0;
+                padding: 0;
+            }
+
+            .shape-vertex-delete-popup .leaflet-popup-content {
+                margin: 0;
+                width: auto !important;
+            }
+
+            .shape-vertex-delete-confirm {
+                box-sizing: border-box;
+                padding: 10px;
+                width: 190px;
+            }
+
+            .shape-vertex-delete-confirm-message {
+                font-size: 12px;
+                font-weight: bold;
+            }
+
+            .shape-vertex-delete-confirm-actions {
+                display: flex;
+                gap: 6px;
+                justify-content: flex-end;
+                margin-top: 10px;
+            }
+
+            .shape-vertex-delete-confirm-button {
+                background: white;
+                border: 1px solid #9aa7b6;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 12px;
+                padding: 4px 10px;
+            }
+
+            .shape-vertex-delete-confirm-button:hover {
+                background: #f4f6f8;
+            }
+
+            .shape-vertex-delete-confirm-button--delete {
+                background: #dc2626;
+                border-color: #dc2626;
+                color: white;
+            }
+
+            .shape-vertex-delete-confirm-button--delete:hover {
+                background: #b91c1c;
             }
 
             .leaflet-container.is-shape-geometry-dragging,

@@ -20,6 +20,7 @@ pub mod init;
 pub mod middleware;
 pub mod model;
 pub mod router;
+pub mod shape_validation;
 pub mod utils;
 
 use config::CONFIG;
