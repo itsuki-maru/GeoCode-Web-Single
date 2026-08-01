@@ -28,6 +28,7 @@ pub struct Config {
     pub redis_connect_timeout_seconds: u64,
     pub tile_cache_ttl_seconds: u64,
     pub tile_cache_namespace: String,
+    pub marker_form_storage_quota_bytes: i64,
 }
 
 pub static CONFIG: Lazy<Config> = Lazy::new(|| Config {
@@ -81,6 +82,11 @@ pub static CONFIG: Lazy<Config> = Lazy::new(|| Config {
         .unwrap_or(604800),
     tile_cache_namespace: env::var("TILE_CACHE_NAMESPACE")
         .unwrap_or_else(|_| "default".to_string()),
+    marker_form_storage_quota_bytes: env::var("MARKER_FORM_STORAGE_QUOTA_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(1024 * 1024 * 1024),
 });
 
 fn get_required_secret(name: &str, minimum_length: usize) -> String {

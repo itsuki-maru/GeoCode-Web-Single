@@ -31,6 +31,7 @@ pub struct ApplicationInitSetup {
     pub redis_connect_timeout_seconds: String,
     pub tile_cache_ttl_seconds: String,
     pub tile_cache_namespace: String,
+    pub marker_form_storage_quota_bytes: String,
 }
 
 #[derive(Serialize, Deserialize, FromRow)]

@@ -222,6 +222,68 @@ const MIGRATIONS: &[Migration] = &[
             "#,
         ],
     },
+    Migration {
+        version: 6,
+        name: "create_marker_form_models",
+        statements: &[
+            r#"
+            CREATE TABLE IF NOT EXISTS marker_form_config_model (
+                marker_id TEXT PRIMARY KEY NOT NULL,
+                public_id TEXT NOT NULL UNIQUE,
+                enabled BOOLEAN DEFAULT FALSE NOT NULL,
+                form_title CHARACTER VARYING(100) NOT NULL,
+                form_description CHARACTER VARYING(1000) NOT NULL,
+                form_schema TEXT NOT NULL,
+                password_hash CHARACTER VARYING(256),
+                create_at TEXT NOT NULL,
+                update_at TEXT NOT NULL,
+                FOREIGN KEY (marker_id) REFERENCES marker_info_model(id) ON DELETE CASCADE
+            );
+            "#,
+            r#"
+            CREATE TABLE IF NOT EXISTS marker_form_submission_model (
+                id TEXT PRIMARY KEY NOT NULL,
+                marker_id TEXT NOT NULL,
+                submitted_values TEXT NOT NULL,
+                rendered_markdown TEXT NOT NULL,
+                create_at TEXT NOT NULL,
+                FOREIGN KEY (marker_id) REFERENCES marker_info_model(id) ON DELETE CASCADE
+            );
+            "#,
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_marker_form_submission_marker_create
+            ON marker_form_submission_model(marker_id, create_at DESC);
+            "#,
+        ],
+    },
+    Migration {
+        version: 7,
+        name: "harden_marker_forms",
+        statements: &[
+            r#"
+            CREATE TABLE IF NOT EXISTS marker_form_rate_limit_model (
+                marker_id TEXT PRIMARY KEY NOT NULL,
+                window_started_at INTEGER NOT NULL,
+                attempt_count INTEGER NOT NULL CHECK (attempt_count >= 0),
+                FOREIGN KEY (marker_id) REFERENCES marker_form_config_model(marker_id) ON DELETE CASCADE
+            );
+            "#,
+            r#"
+            CREATE TABLE IF NOT EXISTS marker_form_image_model (
+                image_id TEXT PRIMARY KEY NOT NULL,
+                owner_id TEXT NOT NULL,
+                stored_bytes INTEGER NOT NULL CHECK (stored_bytes >= 0),
+                create_at TEXT NOT NULL,
+                FOREIGN KEY (image_id) REFERENCES image_model(id) ON DELETE CASCADE,
+                FOREIGN KEY (owner_id) REFERENCES user_model(id) ON DELETE CASCADE
+            );
+            "#,
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_marker_form_image_owner
+            ON marker_form_image_model(owner_id);
+            "#,
+        ],
+    },
 ];
 
 // データベース接続の確立

@@ -43,7 +43,7 @@ async fn migrations_create_schema_and_record_versions() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 5);
+    assert_eq!(migration_count, 7);
 
     let external_site_urls_table_count: i64 = sqlx::query_scalar(
         r#"
@@ -56,6 +56,43 @@ async fn migrations_create_schema_and_record_versions() {
     .await
     .expect("external_site_urls table count should be returned");
     assert_eq!(external_site_urls_table_count, 1);
+
+    let marker_form_table_count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'marker_form_config_model'
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("marker form table count should be returned");
+    assert_eq!(marker_form_table_count, 1);
+
+    let marker_form_security_table_count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name IN ('marker_form_rate_limit_model', 'marker_form_image_model')
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("marker form security table count should be returned");
+    assert_eq!(marker_form_security_table_count, 2);
+
+    let marker_form_image_index_count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM sqlite_master
+        WHERE type = 'index' AND name = 'idx_marker_form_image_owner'
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("marker form image index count should be returned");
+    assert_eq!(marker_form_image_index_count, 1);
 }
 
 #[tokio::test]
@@ -73,7 +110,7 @@ async fn migrations_are_idempotent() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 5);
+    assert_eq!(migration_count, 7);
 }
 
 #[tokio::test]
@@ -156,7 +193,7 @@ async fn migrations_record_versions_for_existing_schema() {
     .await
     .expect("migration rows should be returned");
 
-    assert_eq!(rows.len(), 5);
+    assert_eq!(rows.len(), 7);
     assert_eq!(rows[0].get::<i64, _>("version"), 1);
     assert_eq!(rows[0].get::<String, _>("name"), "create_initial_schema");
     assert_eq!(rows[1].get::<i64, _>("version"), 2);
@@ -177,6 +214,13 @@ async fn migrations_record_versions_for_existing_schema() {
         rows[4].get::<String, _>("name"),
         "add_auth_session_security"
     );
+    assert_eq!(rows[5].get::<i64, _>("version"), 6);
+    assert_eq!(
+        rows[5].get::<String, _>("name"),
+        "create_marker_form_models"
+    );
+    assert_eq!(rows[6].get::<i64, _>("version"), 7);
+    assert_eq!(rows[6].get::<String, _>("name"), "harden_marker_forms");
 
     let auth_version: i64 =
         sqlx::query_scalar("SELECT auth_version FROM user_model WHERE id = 'legacy-user'")

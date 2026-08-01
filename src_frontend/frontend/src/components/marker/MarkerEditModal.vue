@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from "vue";
 import ConfirmModal from "@/components/common/ConfirmModal.vue";
+import MarkerFormSettingsModal from "@/components/marker/MarkerFormSettingsModal.vue";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import type { LayersData } from "@/interface";
 import { baseUrl, assetsUrl } from "@/setting";
@@ -31,6 +32,7 @@ const activeMarkerName = ref("");
 const activeMarkerDetail = ref("");
 const activaMarkerLayer = ref("");
 const isDeleteCheckModal = ref(false);
+const isFormSettingsOpen = ref(false);
 
 watch(
   () => props.markerId,
@@ -231,6 +233,7 @@ defineExpose({ insertUploadedMarkdown, updateMakerNameDetail });
         </button>
       </div>
       <div class="btn-commit-row">
+        <button @click="isFormSettingsOpen = true" class="btn-form-settings">入力フォーム</button>
         <button @click="updateMakerNameDetail()" class="btn-update">+更新</button>
       </div>
       <div class="close-btn-img">
@@ -250,6 +253,12 @@ defineExpose({ insertUploadedMarkdown, updateMakerNameDetail });
     message="本当にこのマーカーを削除しますか？"
     @confirm="deleteMaker"
     @cancel="isDeleteCheckModal = false"
+  />
+  <MarkerFormSettingsModal
+    :isOpen="isFormSettingsOpen"
+    :markerId="markerId"
+    @close="isFormSettingsOpen = false"
+    @message="(text: string) => emit('message', text)"
   />
 </template>
 
@@ -425,8 +434,9 @@ defineExpose({ insertUploadedMarkdown, updateMakerNameDetail });
 }
 
 .btn-update {
-  width: 90px;
-  height: 50px;
+  min-width: 112px;
+  height: 44px;
+  padding: 0 14px;
   background: rgb(23, 155, 126);
   box-shadow: 3px 3px 5px 0 rgba(75, 75, 75, 0.5);
   color: #fff;
@@ -436,5 +446,16 @@ defineExpose({ insertUploadedMarkdown, updateMakerNameDetail });
   border-radius: 20px;
   transition: background-color 0.3s;
   margin: 5px;
+}
+.btn-form-settings {
+  min-width: 112px;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid #7890b6;
+  border-radius: 16px;
+  background: #edf4ff;
+  color: #183a70;
+  font-weight: 700;
+  cursor: pointer;
 }
 </style>

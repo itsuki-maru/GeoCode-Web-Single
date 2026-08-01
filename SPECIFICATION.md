@@ -121,6 +121,7 @@ PostgreSQL から SQLite を使用することによる差分吸収は **全て�
 - `REDIS_CONNECT_TIMEOUT_SECONDS`
 - `TILE_CACHE_TTL_SECONDS`
 - `TILE_CACHE_NAMESPACE`
+- `MARKER_FORM_STORAGE_QUOTA_BYTES`（未設定時は1 GiB）
 
 設定 JSON は `src/model/common.rs` の `ApplicationInitSetup` に対応する。起動時の読み込みは `src/init.rs` の `read_env_json` が行い、環境変数への注入は `src/main.rs` の `apply_env_vars` が行う。
 
@@ -458,6 +459,20 @@ JSON として不正な場合、または必須項目が欠落している場合
 - 一般ユーザー作成
 - ユーザーパスワード再設定
 - アカウントロック解除
+
+### 9.8 マーカー入力フォーム
+
+- 所有者はマーカー単位で公開フォームを作成でき、未設定時および初期値は無効とする
+- 未設定フォームの既定名にはマーカー名だけを使用する
+- フォーム定義は任意HTMLではなく、許可された入力型からなるJSONとして保持する
+- 公開URLにはマーカーIDとは別のランダムUUIDを使用し、所有者はURLを再発行できる
+- パスワードは任意設定とし、bcryptハッシュのみを保存する
+- 匿名投稿はサーバー側でフォーム定義、必須、文字数、選択肢、日付、画像を再検証する
+- 回答由来の文字列はMarkdownとしてエスケープし、サーバー生成Markdownのみを原子的に`detail`末尾へ連結する
+- 日付は`YYYY-MM-DD`として検証し、Markdownにも同形式で保存する
+- 投稿値と生成Markdownは`marker_form_submission_model`にも記録する
+- 画像はブラウザで縮小したBlobをmultipart/form-dataで受け付ける。JPEGへ再エンコードして既存画像領域へ保存し、DB本文へ画像バイナリを保存しない
+- 設定テーブルと投稿履歴テーブルは対象マーカー削除時にCASCADE削除される
 
 ## 10. 画面仕様
 

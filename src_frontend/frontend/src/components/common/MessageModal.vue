@@ -12,7 +12,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <BaseModal :isOpen="isOpen" :zIndex="19" @close="emit('close')">
+  <BaseModal :isOpen="isOpen" :zIndex="30" @close="emit('close')">
     <div class="message-modal-content">
       <h2 class="modal-h2">メッセージ</h2>
       <div class="input-text-zone">

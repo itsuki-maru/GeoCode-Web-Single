@@ -41,6 +41,10 @@ use crate::handler::layers::{
     update_layername_handler,
 };
 use crate::handler::map::{map_another_get_handler, map_get_handler};
+use crate::handler::marker_forms::{
+    get_marker_form_config_handler, public_marker_form_get_handler, rotate_marker_form_url_handler,
+    submit_marker_form_handler, update_marker_form_config_handler,
+};
 use crate::handler::marker_icons::{
     delete_marker_icon_handler, get_marker_icons_handler, search_marker_icons_handler,
     upload_marker_icon_handler,
@@ -136,6 +140,14 @@ pub fn build_router(
             "/marker/update/{marker_id}",
             put(update_marker_info_handler),
         )
+        .route(
+            "/marker/{marker_id}/form",
+            get(get_marker_form_config_handler).put(update_marker_form_config_handler),
+        )
+        .route(
+            "/marker/{marker_id}/form/rotate-url",
+            post(rotate_marker_form_url_handler),
+        )
         .route("/marker/read/query", get(query_marker_handler))
         .route("/shapes", get(shapes_get_handler))
         .route("/shape", post(create_shape_handler))
@@ -220,6 +232,13 @@ pub fn build_router(
     }
     let not_secured_routes = not_secured_routes.layer(DefaultBodyLimit::max(1024 * 1024));
 
+    let public_form_routes = Router::new()
+        .route(
+            "/forms/{public_id}",
+            get(public_marker_form_get_handler).post(submit_marker_form_handler),
+        )
+        .layer(DefaultBodyLimit::max(6 * 1024 * 1024));
+
     // リフレッシュトークンを要する
     let token_refresh_routes = Router::new()
         .route("/account/refresh", post(refresh_token_handler))
@@ -239,6 +258,7 @@ pub fn build_router(
     Router::new()
         .merge(secured_routes)
         .merge(not_secured_routes)
+        .merge(public_form_routes)
         .merge(image_upload_route)
         .merge(marker_icon_upload_route)
         .merge(import_route)
