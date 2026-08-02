@@ -279,7 +279,7 @@ defineExpose({ insertUploadedMarkdown, updateMakerNameDetail });
 .content-marker-edit {
   position: relative;
   z-index: 2;
-  width: 70%;
+  width: 65%;
   padding: 1em;
   background: whitesmoke;
   border-radius: 10px;
@@ -434,7 +434,7 @@ defineExpose({ insertUploadedMarkdown, updateMakerNameDetail });
 }
 
 .btn-update {
-  min-width: 112px;
+  min-width: 90px;
   height: 44px;
   padding: 0 14px;
   background: rgb(23, 155, 126);
@@ -443,7 +443,7 @@ defineExpose({ insertUploadedMarkdown, updateMakerNameDetail });
   font-size: 16px;
   text-decoration: none;
   border: 1px;
-  border-radius: 20px;
+  border-radius: 16px;
   transition: background-color 0.3s;
   margin: 5px;
 }
