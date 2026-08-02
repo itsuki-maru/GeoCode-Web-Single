@@ -357,28 +357,27 @@ defineExpose({ insertUploadedMarkdown });
 }
 
 .btn-standard {
-  min-width: 90px;
+  width: auto;
+  height: 50px;
+  margin: 5px;
+  border-radius: 20px;
+  box-shadow: 3px 3px 5px 0 rgba(75, 75, 75, 0.5);
+  font-size: 18px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background-color 0.3s;
 }
 
 .btn-update {
-  width: 95px;
-  height: 50px;
-  font-size: 18px;
+  border: 1px solid rgb(23, 155, 126);
   background: rgb(23, 155, 126);
-  box-shadow: 3px 3px 5px 0 rgba(75, 75, 75, 0.5);
   color: #fff;
-  text-decoration: none;
-  border: 1px;
-  border-radius: 20px;
-  transition: background-color 0.3s;
-  margin: 5px 5px 5px 5px;
 }
+
 .btn-form-settings {
-  height: 46px;
   border: 1px solid #7890b6;
-  border-radius: 16px;
   background: #edf4ff;
   color: #183a70;
-  font-weight: 700;
 }
 </style>

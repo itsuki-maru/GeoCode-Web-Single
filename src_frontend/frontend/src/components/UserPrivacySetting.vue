@@ -59,15 +59,7 @@ const openCloseUserSettingModal = (): void => {
 const isOpenTotpSetupModal = ref(false);
 const changeTotpQRModal = async (): Promise<void> => {
   if (isTotpAuth.value) {
-    const disableToken = window.prompt("2段階認証を無効化するには現在の6桁コードを入力してください。");
-    if (!disableToken) return;
-    try {
-      await apiClient.post(userTotpDisableUrl, { token: disableToken });
-      messageModalOpenClose("2段階認証を無効化しました。");
-      isTotpAuth.value = false;
-    } catch (error) {
-      messageModalOpenClose("コードが正しくないため、2段階認証を無効化できませんでした。");
-    }
+    openTotpDisableModal();
     return;
   } else {
     // 仮の有効化リクエスト
@@ -86,6 +78,41 @@ const changeTotpQRModal = async (): Promise<void> => {
 
 const closeTotpQRModal = (): void => {
   isOpenTotpSetupModal.value = false;
+};
+
+const isOpenTotpDisableModal = ref(false);
+const totpDisableToken = ref("");
+const isTotpDisableSubmitting = ref(false);
+const isTotpDisableTokenValid = computed(() => /^\d{6}$/.test(totpDisableToken.value));
+
+const openTotpDisableModal = (): void => {
+  totpDisableToken.value = "";
+  isOpenTotpDisableModal.value = true;
+};
+
+const closeTotpDisableModal = (): void => {
+  if (isTotpDisableSubmitting.value) return;
+  isOpenTotpDisableModal.value = false;
+  totpDisableToken.value = "";
+};
+
+const disableTotp = async (): Promise<void> => {
+  if (!isTotpDisableTokenValid.value || isTotpDisableSubmitting.value) {
+    return;
+  }
+
+  isTotpDisableSubmitting.value = true;
+  try {
+    await apiClient.post(userTotpDisableUrl, { token: totpDisableToken.value });
+    isTotpAuth.value = false;
+    isOpenTotpDisableModal.value = false;
+    totpDisableToken.value = "";
+    messageModalOpenClose("2段階認証を無効化しました。");
+  } catch (error) {
+    messageModalOpenClose("コードが正しくないため、2段階認証を無効化できませんでした。");
+  } finally {
+    isTotpDisableSubmitting.value = false;
+  }
 };
 
 const isOpenPasswordUpdateModal = ref(false);
@@ -282,7 +309,8 @@ const updatePassword = async (): Promise<void> => {
   <!-- パスワード更新モーダル -->
   <div id="overlay-update-password" v-show="isOpenPasswordUpdateModal">
     <div id="content-update-password">
-      <h2 class="modal-h2">パスワード変更</h2>      <input
+      <h2 class="modal-h2">パスワード変更</h2>
+      <input
         class="password-input"
         type="password"
         placeholder="Current Password"
@@ -309,6 +337,43 @@ const updatePassword = async (): Promise<void> => {
         <button v-on:click="openClosePasswordUpdateModal()">閉じる</button>
         <button v-on:click="updatePassword()">更新</button>
       </div>
+    </div>
+  </div>
+
+  <!-- 2段階認証無効化モーダル -->
+  <div id="overlay-disable-totp" v-show="isOpenTotpDisableModal">
+    <div
+      id="content-disable-totp"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="disable-totp-title"
+    >
+      <h2 id="disable-totp-title" class="modal-h2">2段階認証の無効化</h2>
+      <p>認証アプリに表示されている現在の6桁コードを入力してください。</p>
+      <form v-on:submit.prevent="disableTotp">
+        <input
+          class="totp-disable-input"
+          type="text"
+          inputmode="numeric"
+          autocomplete="one-time-code"
+          pattern="[0-9]{6}"
+          maxlength="6"
+          placeholder="XXXXXX"
+          aria-label="6桁の確認コード"
+          required
+          v-model.trim="totpDisableToken"
+        />
+        <div class="btn-zone">
+          <button type="button" v-on:click="closeTotpDisableModal()">キャンセル</button>
+          <button
+            type="submit"
+            class="danger-btn"
+            :disabled="!isTotpDisableTokenValid || isTotpDisableSubmitting"
+          >
+            {{ isTotpDisableSubmitting ? "確認中..." : "無効化" }}
+          </button>
+        </div>
+      </form>
     </div>
   </div>
 
@@ -382,7 +447,8 @@ const updatePassword = async (): Promise<void> => {
   padding: 0.4em 0.8em;
 }
 
-#overlay-update-password {
+#overlay-update-password,
+#overlay-disable-totp {
   z-index: 15;
   position: fixed;
   top: 0;
@@ -396,7 +462,8 @@ const updatePassword = async (): Promise<void> => {
   text-align: center;
 }
 
-#content-update-password {
+#content-update-password,
+#content-disable-totp {
   z-index: 16;
   width: 32%;
   padding: 1em;
@@ -411,6 +478,31 @@ const updatePassword = async (): Promise<void> => {
   border-radius: 5px;
   box-sizing: border-box;
   text-align: center;
+}
+
+.totp-disable-input {
+  width: 100%;
+  margin: 12px 0 20px;
+  padding: 0.6em 1.2em;
+  border-radius: 5px;
+  box-sizing: border-box;
+  font-size: 24px;
+  letter-spacing: 0.25em;
+  text-align: center;
+}
+
+.danger-btn {
+  background-color: #b42318;
+  color: white;
+}
+
+.danger-btn:hover:not(:disabled) {
+  background-color: #8f1c13;
+}
+
+.danger-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .switch-label {
@@ -567,5 +659,12 @@ th:nth-child(2) {
 
 .message-btn-close {
   text-align: center;
+}
+
+@media (max-width: 768px) {
+  #content-update-password,
+  #content-disable-totp {
+    width: 90%;
+  }
 }
 </style>
