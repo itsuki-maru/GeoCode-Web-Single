@@ -99,6 +99,10 @@ unsafe fn apply_env_vars(env: &ApplicationInitSetup, server_addr: &str) {
         );
         env::set_var("TILE_CACHE_TTL_SECONDS", &env.tile_cache_ttl_seconds);
         env::set_var("TILE_CACHE_NAMESPACE", &env.tile_cache_namespace);
+        env::set_var(
+            "MARKER_FORM_STORAGE_QUOTA_BYTES",
+            &env.marker_form_storage_quota_bytes,
+        );
     }
 }
 

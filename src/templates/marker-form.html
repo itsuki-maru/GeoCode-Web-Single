@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="ja">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>{{ form_title }}</title>
+        <style>
+            :root {
+                color-scheme: light;
+                font-family: "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif;
+                color: #172033;
+                background: #f1f5f9;
+            }
+            * { box-sizing: border-box; }
+            body {
+                margin: 0;
+                min-height: 100vh;
+                padding: 32px 16px;
+                background:
+                    radial-gradient(circle at top left, #dbeafe 0, transparent 38%),
+                    #f1f5f9;
+            }
+            main {
+                width: min(680px, 100%);
+                margin: 0 auto;
+                padding: 30px;
+                border: 1px solid #dbe3ee;
+                border-radius: 20px;
+                background: rgba(255, 255, 255, 0.97);
+                box-shadow: 0 18px 50px rgba(30, 64, 175, 0.1);
+            }
+            h1 { margin: 0; font-size: clamp(24px, 5vw, 34px); }
+            .description {
+                margin: 12px 0 26px;
+                color: #536176;
+                line-height: 1.7;
+                white-space: pre-wrap;
+            }
+            form { display: grid; gap: 22px; }
+            .field { display: grid; gap: 8px; }
+            .field-label { font-weight: 700; line-height: 1.5; }
+            .required { margin-left: 6px; color: #b42318; font-size: 12px; }
+            input, textarea, select {
+                width: 100%;
+                min-height: 46px;
+                padding: 11px 13px;
+                border: 1px solid #b8c5d6;
+                border-radius: 10px;
+                background: #fff;
+                color: inherit;
+                font: inherit;
+            }
+            textarea { min-height: 130px; resize: vertical; }
+            input:focus, textarea:focus, select:focus {
+                outline: 3px solid rgba(37, 99, 235, 0.18);
+                border-color: #2563eb;
+            }
+            .choice-list { display: grid; gap: 9px; }
+            .choice {
+                display: flex;
+                align-items: center;
+                gap: 9px;
+                min-height: 38px;
+            }
+            .choice input { width: 20px; min-height: 20px; margin: 0; }
+            .image-status { color: #536176; font-size: 13px; }
+            .hint { color: #64748b; font-size: 12px; }
+            button {
+                min-height: 50px;
+                border: 0;
+                border-radius: 12px;
+                background: #1d4ed8;
+                color: #fff;
+                font: inherit;
+                font-weight: 700;
+                cursor: pointer;
+            }
+            button:hover { background: #1e40af; }
+            button:disabled { cursor: wait; opacity: 0.65; }
+            .message {
+                display: none;
+                padding: 13px 15px;
+                border-radius: 10px;
+                line-height: 1.55;
+            }
+            .message.error { display: block; color: #8a1c13; background: #fee4e2; }
+            .message.success { display: block; color: #075e45; background: #d1fadf; }
+            .privacy {
+                margin: 20px 0 0;
+                color: #64748b;
+                font-size: 12px;
+                line-height: 1.6;
+            }
+            @media (max-width: 560px) {
+                body { padding: 0; background: #fff; }
+                main { min-height: 100vh; padding: 24px 18px; border: 0; border-radius: 0; box-shadow: none; }
+            }
+        </style>
+    </head>
+    <body>
+        <main>
+            <h1>{{ form_title }}</h1>
+            {% if form_description != "" %}
+            <p class="description">{{ form_description }}</p>
+            {% endif %}
+            <form id="marker-form" autocomplete="off">
+                <div id="fields"></div>
+                {% if is_password_protected %}
+                <div class="field">
+                    <label class="field-label" for="form-password">フォームパスワード<span class="required">必須</span></label>
+                    <input id="form-password" type="password" maxlength="64" required autocomplete="current-password" />
+                </div>
+                {% endif %}
+                <div id="message" class="message" role="status" aria-live="polite"></div>
+                <button id="submit-button" type="submit">送信してマーカーへ追記</button>
+            </form>
+            <p class="privacy">送信内容は対象マーカーへ追記されます。画像はブラウザ上で縮小し、ファイルとして送信されます。</p>
+        </main>
+        <script>
+            const schema = {{ form_schema | json_encode_for_html | safe }};
+            const publicId = {{ public_id | json_encode_for_html | safe }};
+            const isPasswordProtected = {{ is_password_protected | json_encode_for_html | safe }};
+            const imageFiles = new Map();
+            const fieldsRoot = document.getElementById("fields");
+            const form = document.getElementById("marker-form");
+            const message = document.getElementById("message");
+            const submitButton = document.getElementById("submit-button");
+
+            function createLabel(field, inputId) {
+                const label = document.createElement("label");
+                label.className = "field-label";
+                label.htmlFor = inputId;
+                label.textContent = field.label;
+                if (field.required) {
+                    const required = document.createElement("span");
+                    required.className = "required";
+                    required.textContent = "必須";
+                    label.appendChild(required);
+                }
+                return label;
+            }
+
+            function commonInput(field, type) {
+                const input = document.createElement("input");
+                input.id = `field-${field.id}`;
+                input.name = field.id;
+                input.type = type;
+                input.required = field.required;
+                if (field.max_length) input.maxLength = field.max_length;
+                return input;
+            }
+
+            function buildField(field) {
+                const wrapper = document.createElement("div");
+                wrapper.className = "field";
+                const inputId = `field-${field.id}`;
+                wrapper.appendChild(createLabel(field, inputId));
+
+                if (field.type === "textarea") {
+                    const input = document.createElement("textarea");
+                    input.id = inputId;
+                    input.name = field.id;
+                    input.required = field.required;
+                    input.maxLength = field.max_length || 2000;
+                    wrapper.appendChild(input);
+                } else if (field.type === "select") {
+                    const select = document.createElement("select");
+                    select.id = inputId;
+                    select.name = field.id;
+                    select.required = field.required;
+                    const empty = document.createElement("option");
+                    empty.value = "";
+                    empty.textContent = "選択してください";
+                    select.appendChild(empty);
+                    field.choices.forEach((choice) => {
+                        const option = document.createElement("option");
+                        option.value = choice;
+                        option.textContent = choice;
+                        select.appendChild(option);
+                    });
+                    wrapper.appendChild(select);
+                } else if (field.type === "radio") {
+                    const list = document.createElement("div");
+                    list.className = "choice-list";
+                    list.id = inputId;
+                    field.choices.forEach((choice, index) => {
+                        const optionLabel = document.createElement("label");
+                        optionLabel.className = "choice";
+                        const input = document.createElement("input");
+                        input.type = "radio";
+                        input.name = field.id;
+                        input.value = choice;
+                        input.required = field.required;
+                        input.id = `${inputId}-${index}`;
+                        optionLabel.append(input, document.createTextNode(choice));
+                        list.appendChild(optionLabel);
+                    });
+                    wrapper.appendChild(list);
+                } else if (field.type === "checkbox") {
+                    const choice = document.createElement("label");
+                    choice.className = "choice";
+                    const input = commonInput(field, "checkbox");
+                    choice.append(input, document.createTextNode("はい"));
+                    wrapper.appendChild(choice);
+                } else if (field.type === "image") {
+                    const input = commonInput(field, "file");
+                    input.accept = "image/jpeg,image/png,image/webp";
+                    const status = document.createElement("span");
+                    status.className = "image-status";
+                    status.textContent = "JPEG・PNG・WebP（選択後に最大1600pxへ縮小）";
+                    input.addEventListener("change", async () => {
+                        const file = input.files && input.files[0];
+                        imageFiles.delete(field.id);
+                        if (!file) return;
+                        status.textContent = "画像を縮小しています…";
+                        try {
+                            const blob = await resizeImage(file);
+                            imageFiles.set(field.id, { blob, filename: file.name });
+                            status.textContent = `準備完了: ${file.name}`;
+                        } catch (error) {
+                            input.value = "";
+                            status.textContent = error instanceof Error ? error.message : "画像を処理できませんでした。";
+                        }
+                    });
+                    wrapper.append(input, status);
+                } else {
+                    const input = commonInput(field, field.type === "number" ? "number" : field.type === "date" ? "date" : "text");
+                    if (field.type === "number") input.step = "any";
+                    wrapper.appendChild(input);
+                }
+                return wrapper;
+            }
+
+            schema.fields.forEach((field) => fieldsRoot.appendChild(buildField(field)));
+
+            function resizeImage(file) {
+                if (file.size > 15 * 1024 * 1024) return Promise.reject(new Error("元画像は15MB以内にしてください。"));
+                return new Promise((resolve, reject) => {
+                    const image = new Image();
+                    const objectUrl = URL.createObjectURL(file);
+                    image.onload = () => {
+                        URL.revokeObjectURL(objectUrl);
+                        const ratio = Math.min(1, 1600 / image.naturalWidth, 1600 / image.naturalHeight);
+                        const canvas = document.createElement("canvas");
+                        canvas.width = Math.max(1, Math.round(image.naturalWidth * ratio));
+                        canvas.height = Math.max(1, Math.round(image.naturalHeight * ratio));
+                        const context = canvas.getContext("2d");
+                        if (!context) return reject(new Error("画像を処理できませんでした。"));
+                        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+                        canvas.toBlob(
+                            (blob) => {
+                                if (!blob) return reject(new Error("画像を変換できませんでした。"));
+                                if (blob.size > 1_500_000) {
+                                    return reject(new Error("縮小後の画像が1.5MBを超えています。別の画像を選択してください。"));
+                                }
+                                resolve(blob);
+                            },
+                            "image/jpeg",
+                            0.78,
+                        );
+                    };
+                    image.onerror = () => {
+                        URL.revokeObjectURL(objectUrl);
+                        reject(new Error("画像を読み込めませんでした。"));
+                    };
+                    image.src = objectUrl;
+                });
+            }
+
+            function collectValues() {
+                const values = {};
+                schema.fields.forEach((field) => {
+                    if (field.type === "image") {
+                        return;
+                    } else if (field.type === "checkbox") {
+                        values[field.id] = document.getElementById(`field-${field.id}`).checked;
+                    } else if (field.type === "radio") {
+                        const selected = document.querySelector(`input[name="${CSS.escape(field.id)}"]:checked`);
+                        values[field.id] = selected ? selected.value : "";
+                    } else {
+                        values[field.id] = document.getElementById(`field-${field.id}`).value;
+                    }
+                });
+                return values;
+            }
+
+            form.addEventListener("submit", async (event) => {
+                event.preventDefault();
+                if (!form.reportValidity()) return;
+                submitButton.disabled = true;
+                submitButton.textContent = "送信中…";
+                message.className = "message";
+                try {
+                    const formData = new FormData();
+                    formData.append(
+                        "submission",
+                        JSON.stringify({
+                            password: isPasswordProtected ? document.getElementById("form-password").value : null,
+                            values: collectValues(),
+                        }),
+                    );
+                    imageFiles.forEach((image, fieldId) => {
+                        formData.append(`image__${fieldId}`, image.blob, image.filename);
+                    });
+                    const response = await fetch(`/forms/${publicId}`, {
+                        method: "POST",
+                        body: formData,
+                    });
+                    const body = await response.json().catch(() => ({}));
+                    if (!response.ok) throw new Error(body.error || "送信に失敗しました。");
+                    const completion = document.createElement("p");
+                    completion.className = "message success";
+                    completion.setAttribute("role", "status");
+                    completion.setAttribute("aria-live", "polite");
+                    completion.tabIndex = -1;
+                    completion.textContent = body.message || "送信が完了しました。";
+                    document.querySelector("main").replaceChildren(completion);
+                    imageFiles.clear();
+                    completion.focus({ preventScroll: true });
+                    completion.scrollIntoView({ behavior: "smooth", block: "center" });
+                    return;
+                } catch (error) {
+                    message.textContent = error instanceof Error ? error.message : "送信に失敗しました。";
+                    message.className = "message error";
+                }
+                submitButton.disabled = false;
+                submitButton.textContent = "送信してマーカーへ追記";
+                message.scrollIntoView({ behavior: "smooth", block: "center" });
+            });
+        </script>
+    </body>
+</html>

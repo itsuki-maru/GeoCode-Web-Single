@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
-import BaseModal from '@/components/common/BaseModal.vue';
-import { useMapObjectStore } from '@/stores/mapobjects';
-import { useLayersStore } from '@/stores/layers';
-import { assetsUrl } from '@/settingMobile';
+import { ref, watch, computed } from "vue";
+import BaseModal from "@/components/common/BaseModal.vue";
+import MarkerFormSettingsModal from "@/components/marker/MarkerFormSettingsModal.vue";
+import { useMapObjectStore } from "@/stores/mapobjects";
+import { useLayersStore } from "@/stores/layers";
+import { assetsUrl } from "@/settingMobile";
 
 const props = defineProps<{
   isOpen: boolean;
@@ -23,18 +24,19 @@ const mapobjStore = useMapObjectStore();
 const layersStore = useLayersStore();
 const layerList = computed(() => layersStore.layersList);
 
-const activeMarkerName = ref('');
-const activeMarkerDetail = ref('');
-const activaMarkerLayer = ref('');
+const activeMarkerName = ref("");
+const activeMarkerDetail = ref("");
+const activaMarkerLayer = ref("");
+const isFormSettingsOpen = ref(false);
 
 watch(
   () => props.markerId,
   (newId) => {
     if (newId && props.isOpen) {
       const marker = mapobjStore.getById(newId);
-      activeMarkerName.value = marker?.marker_name || '';
-      activeMarkerDetail.value = marker?.detail || '';
-      activaMarkerLayer.value = marker?.layer_id || '';
+      activeMarkerName.value = marker?.marker_name || "";
+      activeMarkerDetail.value = marker?.detail || "";
+      activaMarkerLayer.value = marker?.layer_id || "";
     }
   },
 );
@@ -44,25 +46,25 @@ watch(
   (open) => {
     if (open && props.markerId) {
       const marker = mapobjStore.getById(props.markerId);
-      activeMarkerName.value = marker?.marker_name || '';
-      activeMarkerDetail.value = marker?.detail || '';
-      activaMarkerLayer.value = marker?.layer_id || '';
+      activeMarkerName.value = marker?.marker_name || "";
+      activeMarkerDetail.value = marker?.detail || "";
+      activaMarkerLayer.value = marker?.layer_id || "";
     }
   },
 );
 
 const updateMarker = (): void => {
   if (
-    props.markerId === '' ||
-    activeMarkerName.value === '' ||
-    activeMarkerDetail.value === '' ||
-    activaMarkerLayer.value === ''
+    props.markerId === "" ||
+    activeMarkerName.value === "" ||
+    activeMarkerDetail.value === "" ||
+    activaMarkerLayer.value === ""
   ) {
-    emit('message', 'マーカー名と内容の両方に入力が必要です。');
+    emit("message", "マーカー名と内容の両方に入力が必要です。");
     return;
   }
   emit(
-    'updated',
+    "updated",
     props.markerId,
     activeMarkerName.value,
     activeMarkerDetail.value,
@@ -71,7 +73,7 @@ const updateMarker = (): void => {
 };
 
 function insertMarkdown(text: string) {
-  const textareaElm = document.getElementById('detail')! as HTMLTextAreaElement;
+  const textareaElm = document.getElementById("detail")! as HTMLTextAreaElement;
   textareaElm.focus();
 
   const startPos = textareaElm.selectionStart;
@@ -208,6 +210,9 @@ defineExpose({ insertUploadedMarkdown });
         </button>
       </div>
       <div class="btn-commit-row">
+        <button @click="isFormSettingsOpen = true" class="btn-standard btn-form-settings">
+          フォーム
+        </button>
         <button @click="updateMarker()" class="btn-standard btn-update">+更新</button>
       </div>
       <div class="close-btn-img">
@@ -220,6 +225,12 @@ defineExpose({ insertUploadedMarkdown });
       </div>
     </div>
   </BaseModal>
+  <MarkerFormSettingsModal
+    :isOpen="isFormSettingsOpen"
+    :markerId="markerId"
+    @close="isFormSettingsOpen = false"
+    @message="(text: string) => emit('message', text)"
+  />
 </template>
 
 <style scoped>
@@ -361,5 +372,13 @@ defineExpose({ insertUploadedMarkdown });
   border-radius: 20px;
   transition: background-color 0.3s;
   margin: 5px 5px 5px 5px;
+}
+.btn-form-settings {
+  height: 46px;
+  border: 1px solid #7890b6;
+  border-radius: 16px;
+  background: #edf4ff;
+  color: #183a70;
+  font-weight: 700;
 }
 </style>

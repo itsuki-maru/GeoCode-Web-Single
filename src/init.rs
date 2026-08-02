@@ -79,6 +79,7 @@ struct ApplicationInitSetupPartial {
     redis_connect_timeout_seconds: Option<String>,
     tile_cache_ttl_seconds: Option<String>,
     tile_cache_namespace: Option<String>,
+    marker_form_storage_quota_bytes: Option<String>,
 }
 
 /// 初回セットアップ作成時と既存JSON移行時で共有する既定値。
@@ -96,6 +97,7 @@ struct EnvDefaults {
     redis_connect_timeout_seconds: String,
     tile_cache_ttl_seconds: String,
     tile_cache_namespace: String,
+    marker_form_storage_quota_bytes: String,
 }
 
 /// 設定ディレクトリに依存するパス系の値を含めて、現在の既定値を組み立てる。
@@ -119,6 +121,7 @@ fn env_defaults(setup_dir: &std::path::Path) -> EnvDefaults {
         redis_connect_timeout_seconds: "3".to_string(),
         tile_cache_ttl_seconds: "604800".to_string(),
         tile_cache_namespace: "default".to_string(),
+        marker_form_storage_quota_bytes: "1073741824".to_string(),
     }
 }
 
@@ -207,6 +210,7 @@ pub fn build_env_from_form(
         redis_connect_timeout_seconds: defaults.redis_connect_timeout_seconds,
         tile_cache_ttl_seconds: defaults.tile_cache_ttl_seconds,
         tile_cache_namespace: defaults.tile_cache_namespace,
+        marker_form_storage_quota_bytes: defaults.marker_form_storage_quota_bytes,
     };
     let env_json_path = setup_dir.join("geocode-web-single.env.json");
     write_to_json_file(env_json_path, &env).map_err(|e| e.to_string())?;
@@ -239,6 +243,7 @@ fn env_json_requires_migration(value: &serde_json::Value) -> bool {
         "redis_connect_timeout_seconds",
         "tile_cache_ttl_seconds",
         "tile_cache_namespace",
+        "marker_form_storage_quota_bytes",
     ]
     .iter()
     .any(|field| !object.contains_key(*field))
@@ -320,6 +325,9 @@ fn complete_env(
         tile_cache_namespace: partial
             .tile_cache_namespace
             .unwrap_or(defaults.tile_cache_namespace),
+        marker_form_storage_quota_bytes: partial
+            .marker_form_storage_quota_bytes
+            .unwrap_or(defaults.marker_form_storage_quota_bytes),
     })
 }
 
@@ -410,6 +418,7 @@ mod tests {
         assert_eq!(env.redis_connect_timeout_seconds, "3");
         assert_eq!(env.tile_cache_ttl_seconds, "604800");
         assert_eq!(env.tile_cache_namespace, "default");
+        assert_eq!(env.marker_form_storage_quota_bytes, "1073741824");
         assert_eq!(env.tile_server_base_url, None);
         assert_eq!(
             env.sqlite_database_path,
@@ -429,6 +438,11 @@ mod tests {
                 .is_some()
         );
         assert!(migrated_value.get("tile_cache_ttl_seconds").is_some());
+        assert!(
+            migrated_value
+                .get("marker_form_storage_quota_bytes")
+                .is_some()
+        );
         assert!(setup_dir.join("geocode-web-single.env.json.bak").exists());
 
         fs::remove_dir_all(setup_dir).unwrap();
@@ -444,6 +458,10 @@ mod tests {
         object.insert("service_name".to_string(), json!("Custom Service"));
         object.insert("redis_url".to_string(), json!("redis://localhost:6379"));
         object.insert("tile_cache_namespace".to_string(), json!("custom"));
+        object.insert(
+            "marker_form_storage_quota_bytes".to_string(),
+            json!("536870912"),
+        );
         write_env_json(&setup_dir, value);
 
         let env = read_env_json(&setup_dir).unwrap();
@@ -453,6 +471,7 @@ mod tests {
         assert_eq!(env.service_name, "Custom Service");
         assert_eq!(env.redis_url.as_deref(), Some("redis://localhost:6379"));
         assert_eq!(env.tile_cache_namespace, "custom");
+        assert_eq!(env.marker_form_storage_quota_bytes, "536870912");
 
         fs::remove_dir_all(setup_dir).unwrap();
     }

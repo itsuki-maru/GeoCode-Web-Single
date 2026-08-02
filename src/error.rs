@@ -22,6 +22,8 @@ pub enum AppError {
     Unauthorized(String),
     #[error("bad request")]
     BadRequest,
+    #[error("too many requests: {0}")]
+    TooManyRequests(String),
 }
 
 #[derive(Serialize)]
@@ -41,15 +43,17 @@ impl AppError {
             AppError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             AppError::Sqlx(_) => StatusCode::INTERNAL_SERVER_ERROR,
             AppError::BadRequest => StatusCode::BAD_REQUEST,
+            AppError::TooManyRequests(_) => StatusCode::TOO_MANY_REQUESTS,
         }
     }
 
     fn client_message(&self) -> String {
         match self {
             // バリデーションはそのまま返却
-            AppError::Validation(_) | AppError::PayloadTooLarge(_) | AppError::Unauthorized(_) => {
-                self.to_string()
-            },
+            AppError::Validation(_)
+            | AppError::PayloadTooLarge(_)
+            | AppError::Unauthorized(_)
+            | AppError::TooManyRequests(_) => self.to_string(),
 
             // 内部エラーは隠す
             AppError::Sqlx(_) => "database error".to_string(),
