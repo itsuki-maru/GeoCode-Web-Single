@@ -1631,7 +1631,7 @@ dependencies = [
 
 [[package]]
 name = "geocode_web_single"
-version = "1.0.19"
+version = "1.0.20"
 dependencies = [
  "anyhow",
  "axum",
