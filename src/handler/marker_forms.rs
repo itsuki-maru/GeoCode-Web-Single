@@ -288,7 +288,7 @@ pub async fn submit_marker_form_handler(
         stored_values.insert(field.id.clone(), stored);
         if let Some(rendered) = rendered {
             sections.push(format!(
-                "#### {}\n\n{}",
+                "### {}\n\n{}",
                 escape_markdown(&field.label),
                 rendered
             ));
@@ -296,7 +296,7 @@ pub async fn submit_marker_form_handler(
     }
 
     let rendered_markdown = format!(
-        "\n\n---\n\n### フォーム投稿: {}\n\n{}",
+        "\n\n---\n\n## フォーム投稿: {}\n\n{}",
         escape_markdown(&form.form_title),
         sections.join("\n\n")
     );

@@ -215,14 +215,7 @@ defineExpose({ insertUploadedMarkdown });
         </button>
         <button @click="updateMarker()" class="btn-standard btn-update">+更新</button>
       </div>
-      <div class="close-btn-img">
-        <img
-          @click="emit('close')"
-          :src="`${assetsUrl}close_24.png`"
-          class="function-img"
-          alt="close_24.png"
-        />
-      </div>
+      <button type="button" class="close-button" @click="emit('close')">閉じる</button>
     </div>
   </BaseModal>
   <MarkerFormSettingsModal
@@ -332,12 +325,30 @@ defineExpose({ insertUploadedMarkdown });
   width: 24px;
 }
 
-.close-btn-img {
+.close-button {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: 1px;
+  right: 0.5px;
+  border: 0.5px solid transparent;
+  border-radius: 8px;
+  padding: 0.4em 0.8em;
+  background-color: #5f5f5f;
   color: #fff;
+  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
+  font: inherit;
+  font-weight: 500;
   cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.25s;
+}
+
+.close-button:hover {
+  border-color: #396cd8;
+}
+
+.close-button:active {
+  border-color: #396cd8;
+  background-color: #e8e8e8;
 }
 
 .select-elm-editform {
