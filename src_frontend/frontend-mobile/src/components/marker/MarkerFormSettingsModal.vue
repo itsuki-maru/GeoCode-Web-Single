@@ -232,7 +232,7 @@ const rotateUrl = async (): Promise<void> => {
       <header>
         <div>
           <h2>マーカー入力フォーム</h2>
-          <p>第三者の回答を、このマーカーのMarkdown末尾へ追記します。</p>
+          <p>フォームの各種設定をします。</p>
         </div>
         <button type="button" class="close-button" @click="emit('close')">閉じる</button>
       </header>
@@ -389,7 +389,22 @@ button:disabled {
 .close-button {
   align-self: flex-start;
   flex-shrink: 0;
+  border: 1px solid transparent;
+  padding: 0.4em 0.8em;
+  background-color: #5f5f5f;
+  color: #fff;
+  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
+  font: inherit;
+  font-weight: 500;
   white-space: nowrap;
+  transition: border-color 0.25s;
+}
+.close-button:hover {
+  border-color: #396cd8;
+}
+.close-button:active {
+  border-color: #396cd8;
+  background-color: #e8e8e8;
 }
 .enabled-row {
   display: flex;
@@ -397,7 +412,7 @@ button:disabled {
   gap: 10px;
   padding: 14px;
   border-radius: 10px;
-  background: #eaf2ff;
+  background: #c1d2f0;
   font-weight: 700;
 }
 input[type="checkbox"],
@@ -464,7 +479,7 @@ textarea {
 .url-section {
   padding: 14px;
   border-radius: 12px;
-  background: #eef7ef;
+  background: #cee9d1;
 }
 .url-actions {
   justify-content: flex-start;

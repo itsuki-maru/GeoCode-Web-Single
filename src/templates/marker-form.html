@@ -146,6 +146,17 @@
                 color: #075e45;
                 background: #d1fadf;
             }
+            main.completion-view {
+                display: grid;
+                min-height: calc(100vh - 64px);
+                place-items: center;
+            }
+            .completion-view .message.success {
+                width: min(420px, 100%);
+                margin: 0;
+                text-align: center;
+                font-weight: 700;
+            }
             @media (max-width: 560px) {
                 body {
                     padding: 0;
@@ -395,7 +406,9 @@
                     completion.setAttribute("aria-live", "polite");
                     completion.tabIndex = -1;
                     completion.textContent = body.message || "送信が完了しました。";
-                    document.querySelector("main").replaceChildren(completion);
+                    const main = document.querySelector("main");
+                    main.classList.add("completion-view");
+                    main.replaceChildren(completion);
                     imageFiles.clear();
                     completion.focus({ preventScroll: true });
                     completion.scrollIntoView({ behavior: "smooth", block: "center" });

@@ -294,7 +294,8 @@ async fn owner_can_enable_form_and_public_user_can_only_append() {
         .await
         .expect("marker detail should be readable");
     assert!(detail.starts_with("既存本文"));
-    assert!(detail.contains("フォーム投稿: 現地報告"));
+    assert!(detail.contains("## フォーム投稿: 現地報告"));
+    assert!(detail.contains("### コメント\n\n\\# 見出し"));
     assert!(detail.contains("\\# 見出し"));
     assert!(detail.contains("2026-08-01"));
     assert!(!detail.contains("2026\\-08\\-01"));
