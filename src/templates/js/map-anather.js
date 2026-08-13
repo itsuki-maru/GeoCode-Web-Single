@@ -870,8 +870,10 @@ function createShapeLayer(shapeType, geojson, shapeName = "") {
 
   layer.shapeType = shapeType;
   layer.shapeStyle = shapeStyle;
+  layer.shapeMemo = getShapeMemoFromGeoJson(geojson);
   applyShapeStyle(layer);
   updateShapeNameLabel(layer, shapeName);
+  attachShapeMemoPopup(layer);
   return layer;
 }
 
@@ -900,8 +902,10 @@ function restoreSavedShapes() {
     layer.shapeType = shape.shape_type;
     layer.shapeName = shape.name || "";
     layer.shapeStyle = shapeStyle;
+    layer.shapeMemo = getShapeMemoFromGeoJson(shape.geojson);
     applyShapeStyle(layer);
     updateShapeNameLabel(layer, shape.name || "");
+    attachShapeMemoPopup(layer);
     addShapeLayerToManagedGroups(layer, shape.layer_id);
     attachShapeMeasurementMarkers(layer, shape.layer_id);
   });

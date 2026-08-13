@@ -729,11 +729,13 @@ for (const key in shapesObj) {
   layer.shapeStyle = shapeStyle;
   layer.shapeType = shapesObj[key]["shape_type"];
   layer.shapeName = normalizeShapeName(shapesObj[key]["name"] || "");
+  layer.shapeMemo = getShapeMemoFromGeoJson(shapesObj[key]["geojson"]);
   bindShapeNameLabel(
     layer,
     shapesObj[key]["shape_type"],
     shapesObj[key]["name"],
   );
+  attachShapeMemoPopup(layer);
   const targetShapeGroup = ensureShapeGroup(layerId);
   if (targetShapeGroup) {
     targetShapeGroup.addLayer(layer);

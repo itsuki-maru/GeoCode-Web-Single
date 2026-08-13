@@ -2,6 +2,7 @@ use crate::error::AppError;
 use serde_json::Value;
 
 type Coordinate = (f64, f64);
+const SHAPE_MEMO_MAX_LENGTH: usize = 10_000;
 
 fn validation_error(message: &str) -> AppError {
     AppError::Validation(message.to_string())
@@ -37,6 +38,8 @@ pub fn validate_shape_geojson(shape_type: &str, geojson: &Value) -> Result<(), A
         .get("coordinates")
         .ok_or_else(|| validation_error("GeoJSON coordinatesがありません。"))?;
 
+    validate_shape_memo(feature.get("properties"))?;
+
     match shape_type {
         "polygon" => validate_polygon(coordinates, false),
         "rectangle" => validate_polygon(coordinates, true),
@@ -44,6 +47,28 @@ pub fn validate_shape_geojson(shape_type: &str, geojson: &Value) -> Result<(), A
         "circle" => validate_circle(coordinates, feature.get("properties")),
         _ => unreachable!(),
     }
+}
+
+fn validate_shape_memo(properties: Option<&Value>) -> Result<(), AppError> {
+    let Some(memo) = properties
+        .and_then(Value::as_object)
+        .and_then(|properties| properties.get("memo"))
+    else {
+        return Ok(());
+    };
+
+    if memo.is_null() {
+        return Ok(());
+    }
+    let memo = memo
+        .as_str()
+        .ok_or_else(|| validation_error("図形メモは文字列で指定してください。"))?;
+    if memo.chars().count() > SHAPE_MEMO_MAX_LENGTH {
+        return Err(validation_error(
+            "図形メモは10000文字以内で入力してください。",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_position(value: &Value) -> Result<Coordinate, AppError> {
@@ -257,5 +282,35 @@ mod tests {
 
         assert!(validate_shape_geojson("polygon", &mismatched).is_err());
         assert!(validate_shape_geojson("circle", &invalid_circle).is_err());
+    }
+
+    #[test]
+    fn accepts_markdown_shape_memo_and_null_memo() {
+        for memo in [json!("## メモ\n\n- 項目"), json!(null)] {
+            let geojson = json!({
+                "type": "Feature",
+                "properties": {"memo": memo},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[139.0, 35.0], [140.0, 36.0]]
+                }
+            });
+            assert!(validate_shape_geojson("polyline", &geojson).is_ok());
+        }
+    }
+
+    #[test]
+    fn rejects_non_string_and_overlong_shape_memo() {
+        for memo in [json!({"text": "memo"}), json!("a".repeat(10_001))] {
+            let geojson = json!({
+                "type": "Feature",
+                "properties": {"memo": memo},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[139.0, 35.0], [140.0, 36.0]]
+                }
+            });
+            assert!(validate_shape_geojson("polyline", &geojson).is_err());
+        }
     }
 }
