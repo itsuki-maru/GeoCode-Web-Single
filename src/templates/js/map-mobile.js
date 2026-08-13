@@ -637,13 +637,15 @@ function setDrawStatus(message, isError = false, forceVisible = false) {
 // 図形種別ごとの既定スタイルを返す
 // GeoJSON から図形スタイルを取り出す
 // 選択色から図形スタイルを作る
-function buildShapeStyleFromColor(shapeType, color) {
+function buildShapeStyleFromColor(shapeType, color, lineType = "solid") {
   const normalizedColor = normalizeShapeColor(color, SHAPE_STYLE.color);
   const defaultStyle = getDefaultShapeStyle(shapeType);
+  const dashArray = getShapeDashArray(lineType);
   if (shapeType === "polyline") {
     return {
       color: normalizedColor,
       weight: defaultStyle.weight,
+      dashArray,
       fill: false,
     };
   }
@@ -651,17 +653,24 @@ function buildShapeStyleFromColor(shapeType, color) {
   return {
     color: normalizedColor,
     weight: defaultStyle.weight,
+    dashArray,
     fillColor: normalizedColor,
     fillOpacity: defaultStyle.fillOpacity,
   };
 }
 
 // 図形レイヤから保存用 GeoJSON を組み立てる
-function buildShapeGeoJson(layer, shapeType, shapeStyle) {
+function buildShapeGeoJson(
+  layer,
+  shapeType,
+  shapeStyle,
+  shapeMemo = layer?.shapeMemo,
+) {
   const geojson = layer.toGeoJSON();
   const normalizedStyle = {
     color: normalizeShapeColor(shapeStyle?.color, SHAPE_STYLE.color),
     weight: Number(shapeStyle?.weight) || SHAPE_STYLE.weight,
+    dashArray: normalizeShapeDashArray(shapeStyle?.dashArray),
   };
 
   if (shapeType !== "polyline") {
@@ -681,6 +690,7 @@ function buildShapeGeoJson(layer, shapeType, shapeStyle) {
       ? geojson.properties
       : {}),
     style: normalizedStyle,
+    memo: normalizeShapeMemo(shapeMemo),
   };
   if (shapeType === "circle") {
     const radius = Number(layer?.getRadius?.());
@@ -1501,6 +1511,14 @@ function buildShapeLayerOptions(selectedLayerId) {
     .join("");
 }
 
+function buildShapeLineTypeOptions(selectedLineType) {
+  const normalizedLineType = normalizeShapeLineType(selectedLineType);
+  return SHAPE_LINE_TYPE_OPTIONS.map((option) => {
+    const selected = option.value === normalizedLineType ? "selected" : "";
+    return `<option value="${option.value}" ${selected}>${option.label}</option>`;
+  }).join("");
+}
+
 // 図形レイヤに保存用メタデータをまとめて関連付ける
 function applyShapeRecord(layer, shapeRecord) {
   if (!layer) {
@@ -1522,6 +1540,7 @@ function applyShapeRecord(layer, shapeRecord) {
   layer.layerId = shapeRecord.layer_id || null;
   layer.shapeType = shapeRecord.shape_type;
   layer.shapeName = normalizeShapeName(shapeRecord.name || "");
+  layer.shapeMemo = getShapeMemoFromGeoJson(shapeRecord.geojson);
   layer.shapeStyle = getShapeStyleFromGeoJson(
     shapeRecord.shape_type,
     shapeRecord.geojson,
@@ -1573,6 +1592,9 @@ function openShapeNameEditor(layer) {
   closeShapeNameEditor();
   editingShapeLayer = layer;
   const selectedLayerId = getShapeEditorLayerId(layer);
+  const selectedLineType = getShapeLineTypeFromDashArray(
+    layer.shapeStyle?.dashArray,
+  );
 
   // 図形の編集ポップアップ（カラーピッカーはブラウザ標準のカラーピッカーを呼び出して使用）
   const editorPopup = L.popup({
@@ -1586,7 +1608,7 @@ function openShapeNameEditor(layer) {
     .setContent(
       `
             <div class="shape-name-editor">
-                <div class="shape-name-editor-title">図形名を編集</div>
+                <div class="shape-name-editor-title">図形を編集</div>
                 <input
                     type="text"
                     class="shape-name-editor-input"
@@ -1608,7 +1630,20 @@ function openShapeNameEditor(layer) {
                         aria-label="図形色"
                     />
                 </div>
-                <div class="shape-name-editor-help">所属レイヤを変更すると、現在表示中のレイヤ外へ移動した図形はこの画面から消えます。</div>
+                <div class="shape-name-editor-line-type-row">
+                    <label class="shape-name-editor-line-type-label" for="shape-line-type-editor-select">線種</label>
+                    <select class="shape-name-editor-select" id="shape-line-type-editor-select" aria-label="図形の線種">
+                        ${buildShapeLineTypeOptions(selectedLineType)}
+                    </select>
+                </div>
+                <label class="shape-name-editor-memo-label" for="shape-memo-editor-input">メモ（Markdown）</label>
+                <textarea
+                    class="shape-name-editor-memo-input"
+                    id="shape-memo-editor-input"
+                    maxlength="${SHAPE_MEMO_MAX_LENGTH}"
+                    placeholder="Markdownでメモを入力"
+                    aria-label="図形のメモ"
+                >${escapeHtml(layer.shapeMemo || "")}</textarea>
                 <div class="shape-name-editor-actions">
                     <button type="button" class="shape-name-editor-button" id="shape-name-editor-cancel">キャンセル</button>
                     <button type="button" class="shape-name-editor-button" id="shape-name-editor-save">保存</button>
@@ -1624,6 +1659,10 @@ function openShapeNameEditor(layer) {
     const input = document.getElementById("shape-name-editor-input");
     const layerSelect = document.getElementById("shape-layer-editor-select");
     const colorInput = document.getElementById("shape-color-editor-input");
+    const lineTypeSelect = document.getElementById(
+      "shape-line-type-editor-select",
+    );
+    const memoInput = document.getElementById("shape-memo-editor-input");
     const saveButton = document.getElementById("shape-name-editor-save");
     const cancelButton = document.getElementById("shape-name-editor-cancel");
     const popupElement =
@@ -1634,6 +1673,8 @@ function openShapeNameEditor(layer) {
       !input ||
       !layerSelect ||
       !colorInput ||
+      !lineTypeSelect ||
+      !memoInput ||
       !saveButton ||
       !cancelButton ||
       editingShapeLayer !== layer
@@ -1656,11 +1697,13 @@ function openShapeNameEditor(layer) {
       const nextShapeStyle = buildShapeStyleFromColor(
         layer.shapeType,
         colorInput.value,
+        lineTypeSelect.value,
       );
       const nextGeoJson = buildShapeGeoJson(
         layer,
         layer.shapeType,
         nextShapeStyle,
+        memoInput.value,
       );
       try {
         await persistShapeMetadata(layer, nextName, nextLayerId, nextGeoJson);
@@ -1686,7 +1729,7 @@ function openShapeNameEditor(layer) {
           return;
         }
 
-        setDrawStatus("図形描画: 図形名と所属レイヤを更新しました。");
+        setDrawStatus("図形描画: 図形情報を更新しました。");
       } catch (_error) {
         setDrawStatus("図形描画: 図形情報の更新に失敗しました。", true);
       }
@@ -2880,6 +2923,11 @@ function attachShapeEvents(layer) {
         suppressNextMapClick();
       }
       selectShapeForGeometryEdit(layer);
+      return;
+    }
+
+    if (currentMapMode === "view") {
+      openShapeMemoPopup(layer, event?.latlng);
     }
   };
 

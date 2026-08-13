@@ -119,6 +119,63 @@ function normalizeShapeName(name) {
   return name.trim();
 }
 
+const SHAPE_MEMO_MAX_LENGTH = 10000;
+
+function normalizeShapeMemo(memo) {
+  return typeof memo === "string" ? memo : "";
+}
+
+function getShapeMemoFromGeoJson(geojson) {
+  return normalizeShapeMemo(geojson?.properties?.memo);
+}
+
+function renderShapeMemoPopupContent(shapeName, memo) {
+  const normalizedMemo = normalizeShapeMemo(memo);
+  if (!normalizedMemo.trim()) {
+    return "";
+  }
+
+  const title = normalizeShapeName(shapeName);
+  const titleHtml = title ? `<h1>${escapeHtml(title)}</h1>` : "";
+  const markdownHtml = marked.parse(normalizedMemo);
+  const cleanHtml = filterXSS(markdownHtml, xssOptions);
+  return `<div class="md-detail-contents">${titleHtml}${renderIframe(cleanHtml)}</div>`;
+}
+
+function openShapeMemoPopup(layer, latLng) {
+  if (!layer || !latLng) {
+    return false;
+  }
+
+  const popupContent = renderShapeMemoPopupContent(
+    layer.shapeName,
+    layer.shapeMemo,
+  );
+  if (!popupContent) {
+    return false;
+  }
+
+  const popup = L.popup().setLatLng(latLng).setContent(popupContent).openOn(map);
+  setTimeout(() => {
+    const popupElement =
+      popup && typeof popup.getElement === "function"
+        ? popup.getElement()
+        : null;
+    setupDetailsLazyImages(popupElement || document);
+  }, 0);
+  return true;
+}
+
+function attachShapeMemoPopup(layer) {
+  if (!layer || layer.shapeMemoClickBound === true) {
+    return;
+  }
+  layer.shapeMemoClickBound = true;
+  layer.on("click", (event) => {
+    openShapeMemoPopup(layer, event?.latlng);
+  });
+}
+
 function normalizeShapeColor(color, fallback = SHAPE_STYLE.color) {
   if (typeof color !== "string") {
     return fallback;
@@ -141,11 +198,70 @@ function normalizeShapeColor(color, fallback = SHAPE_STYLE.color) {
   return fallback;
 }
 
+const SHAPE_LINE_TYPE_OPTIONS = [
+  { value: "solid", label: "実線", dashArray: null },
+  { value: "dashed", label: "破線", dashArray: "12,8" },
+  { value: "dotted", label: "点線", dashArray: "1,6" },
+  { value: "dash-dot", label: "一点鎖線", dashArray: "12,6,1,6" },
+];
+
+function normalizeShapeLineType(lineType, fallback = "solid") {
+  const normalizedFallback = SHAPE_LINE_TYPE_OPTIONS.some(
+    (option) => option.value === fallback,
+  )
+    ? fallback
+    : "solid";
+  if (typeof lineType !== "string") {
+    return normalizedFallback;
+  }
+
+  const normalizedLineType = lineType.trim().toLowerCase();
+  return SHAPE_LINE_TYPE_OPTIONS.some(
+    (option) => option.value === normalizedLineType,
+  )
+    ? normalizedLineType
+    : normalizedFallback;
+}
+
+function normalizeDashArrayValue(dashArray) {
+  if (typeof dashArray !== "string") {
+    return "";
+  }
+  return dashArray
+    .trim()
+    .split(/[\s,]+/)
+    .filter(Boolean)
+    .join(",");
+}
+
+function getShapeLineTypeFromDashArray(dashArray) {
+  const normalizedDashArray = normalizeDashArrayValue(dashArray);
+  const matchingOption = SHAPE_LINE_TYPE_OPTIONS.find(
+    (option) =>
+      normalizeDashArrayValue(option.dashArray) === normalizedDashArray,
+  );
+  return matchingOption ? matchingOption.value : "solid";
+}
+
+function getShapeDashArray(lineType) {
+  const normalizedLineType = normalizeShapeLineType(lineType);
+  return (
+    SHAPE_LINE_TYPE_OPTIONS.find(
+      (option) => option.value === normalizedLineType,
+    )?.dashArray || null
+  );
+}
+
+function normalizeShapeDashArray(dashArray) {
+  return getShapeDashArray(getShapeLineTypeFromDashArray(dashArray));
+}
+
 function getDefaultShapeStyle(shapeType) {
   if (shapeType === "polyline") {
     return {
       color: SHAPE_STYLE.color,
       weight: SHAPE_STYLE.weight,
+      dashArray: null,
       fill: false,
     };
   }
@@ -153,6 +269,7 @@ function getDefaultShapeStyle(shapeType) {
   return {
     color: SHAPE_STYLE.color,
     weight: SHAPE_STYLE.weight,
+    dashArray: null,
     fillColor: SHAPE_STYLE.color,
     fillOpacity: SHAPE_STYLE.fillOpacity,
   };
@@ -167,10 +284,12 @@ function getShapeStyleFromGeoJson(shapeType, geojson) {
 
   const nextColor = normalizeShapeColor(styleRecord.color, defaultStyle.color);
   const nextWeight = Number(styleRecord.weight);
+  const nextDashArray = normalizeShapeDashArray(styleRecord.dashArray);
   if (shapeType === "polyline") {
     return {
       color: nextColor,
       weight: Number.isFinite(nextWeight) ? nextWeight : defaultStyle.weight,
+      dashArray: nextDashArray,
       fill: false,
     };
   }
@@ -179,6 +298,7 @@ function getShapeStyleFromGeoJson(shapeType, geojson) {
   return {
     color: nextColor,
     weight: Number.isFinite(nextWeight) ? nextWeight : defaultStyle.weight,
+    dashArray: nextDashArray,
     fillColor: nextColor,
     fillOpacity: Number.isFinite(nextFillOpacity)
       ? nextFillOpacity

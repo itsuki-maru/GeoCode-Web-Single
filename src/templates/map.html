@@ -413,7 +413,7 @@
             .shape-name-editor-popup.leaflet-popup {
                 margin-bottom: 20px;
                 min-width: 0 !important;
-                max-width: 240px !important;
+                max-width: min(340px, calc(100vw - 24px)) !important;
             }
 
             .shape-name-editor-popup .leaflet-popup-content-wrapper {
@@ -428,11 +428,13 @@
             }
 
             .shape-name-editor {
+                box-sizing: border-box;
                 display: flex;
                 flex-direction: column;
                 gap: 8px;
+                max-width: calc(100vw - 44px);
                 min-width: 0;
-                width: 210px;
+                width: 320px;
                 padding: 10px;
             }
 
@@ -476,6 +478,39 @@
                 width: 48px;
             }
 
+            .shape-name-editor-line-type-row {
+                align-items: center;
+                display: flex;
+                gap: 8px;
+            }
+
+            .shape-name-editor-line-type-label {
+                flex: 0 0 auto;
+                font-size: 12px;
+                font-weight: bold;
+            }
+
+            .shape-name-editor-line-type-row .shape-name-editor-select {
+                min-width: 0;
+            }
+
+            .shape-name-editor-memo-label {
+                font-size: 12px;
+                font-weight: bold;
+            }
+
+            .shape-name-editor-memo-input {
+                border: 1px solid #b7c3d0;
+                border-radius: 6px;
+                box-sizing: border-box;
+                font-family: inherit;
+                font-size: 13px;
+                min-height: 110px;
+                padding: 6px 8px;
+                resize: vertical;
+                width: 100%;
+            }
+
             .draw-control-color-row {
                 align-items: center;
                 display: flex;
@@ -494,12 +529,6 @@
                 height: 20px;
                 padding: 0;
                 width: 48px;
-            }
-
-            .shape-name-editor-help {
-                color: #5f6b76;
-                font-size: 11px;
-                line-height: 1.4;
             }
 
             .shape-name-editor-actions {
