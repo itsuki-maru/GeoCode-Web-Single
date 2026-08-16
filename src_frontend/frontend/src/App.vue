@@ -291,6 +291,19 @@ a {
   box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
 }
 
+@media (orientation: portrait) {
+  #overlay-memo {
+    justify-content: flex-end;
+  }
+
+  #content-memo {
+    box-sizing: border-box;
+    flex: 0 0 60vw;
+    width: 60vw;
+    margin-left: 0;
+  }
+}
+
 .btn-memo-open-close {
   box-sizing: border-box;
   display: inline-flex;

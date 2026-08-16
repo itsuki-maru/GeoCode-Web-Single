@@ -469,7 +469,10 @@ const handleKeyDown = (event: KeyboardEvent) => {
     document.getElementById("search-textbox1")?.focus();
   } else if (event.altKey && event.key == "2") {
     event.preventDefault();
-    document.getElementById("search-textbox2")?.focus();
+    const searchTextbox2 = document.getElementById("search-textbox2");
+    if (searchTextbox2 instanceof HTMLInputElement && searchTextbox2.offsetParent !== null) {
+      searchTextbox2.focus();
+    }
   } else if (event.altKey && event.key == "3") {
     event.preventDefault();
     mapToolbarRef.value?.onMarkerSearch(true);
@@ -736,6 +739,17 @@ iframe {
 
 .info-draw {
   width: 28%;
+}
+
+@media (orientation: portrait) {
+  .map-draw {
+    width: 70%;
+  }
+
+  .info-draw {
+    width: 30%;
+    min-width: 0;
+  }
 }
 
 table {
