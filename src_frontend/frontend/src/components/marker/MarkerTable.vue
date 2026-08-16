@@ -37,14 +37,14 @@ function fixFloat(number: number): string {
       <table>
         <thead>
           <tr>
-            <th>Layer</th>
-            <th>Name</th>
-            <th>Code</th>
+            <th class="layer-column">Layer</th>
+            <th class="marker-name-column">Name</th>
+            <th class="code-column">Code</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="[id, obj] in mapobjList" :key="id">
-            <td id="layer-name-td" :title="getLayerForId(obj.layer_id)">
+            <td id="layer-name-td" class="layer-column" :title="getLayerForId(obj.layer_id)">
               {{ getLayerForId(obj.layer_id) }}
             </td>
             <td
@@ -101,5 +101,30 @@ function fixFloat(number: number): string {
 .pointer:active {
   transform: scale(0.98);
   filter: brightness(1.15);
+}
+
+@media (orientation: portrait) {
+  .layer-column {
+    display: none;
+  }
+
+  .table_sticky table {
+    width: 100%;
+    table-layout: fixed;
+  }
+
+  .table_sticky th,
+  .table_sticky td {
+    padding-right: 4px;
+    padding-left: 4px;
+  }
+
+  .marker-name-column {
+    width: 65%;
+  }
+
+  .code-column {
+    width: 35%;
+  }
 }
 </style>

@@ -2,6 +2,7 @@
 import { ref, computed, watch } from "vue";
 import type { LayersData, QueryForm } from "@/interface";
 import { baseUrl, assetsUrl } from "@/setting";
+import { useWindowSize } from "@/composables/useWindowSize";
 
 const props = defineProps<{
   activeLayer: string;
@@ -30,6 +31,8 @@ const emit = defineEmits<{
 }>();
 
 const markerQueryFormData = ref<QueryForm>({ ...props.markerQueryFormData });
+const { width, height } = useWindowSize();
+const isPortrait = computed((): boolean => height.value >= width.value);
 let suppressNextWatchSearch = false;
 
 const isSameQuery = (a: QueryForm, b: QueryForm): boolean => {
@@ -64,6 +67,15 @@ watch(
     onMarkerSearch();
   },
   { deep: true },
+);
+
+watch(
+  isPortrait,
+  (portrait) => {
+    if (!portrait || markerQueryFormData.value.query2 === "") return;
+    markerQueryFormData.value.query2 = "";
+  },
+  { immediate: true },
 );
 
 const selectedLayer = computed({
@@ -163,13 +175,14 @@ defineExpose({ markerQueryFormData, onMarkerSearch });
         type="text"
         maxlength="15"
         title="15字以内で入力してください。"
-        placeholder="検索ワード1"
+        :placeholder="isPortrait ? '検索ワード' : '検索ワード1'"
         id="search-textbox1"
         class="search-box"
         required
         v-model="markerQueryFormData.query1"
       />
       <input
+        v-show="!isPortrait"
         type="text"
         maxlength="15"
         title="15字以内で入力してください。"
@@ -273,7 +286,15 @@ defineExpose({ markerQueryFormData, onMarkerSearch });
   width: 24px;
 }
 .left-btn-header-zone {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  min-width: 0;
   justify-content: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
 }
 
 .right-btn-header-zone {
@@ -321,5 +342,36 @@ defineExpose({ markerQueryFormData, onMarkerSearch });
 
 #search-textbox1 {
   margin-right: 2%;
+}
+
+@media (orientation: portrait) {
+  .header-btn-zone {
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    margin-bottom: 0;
+  }
+
+  .left-btn-header-zone {
+    margin-right: 12px;
+    padding-bottom: 7px;
+  }
+
+  .right-btn-header-zone {
+    flex: 0 0 auto;
+    justify-content: flex-start;
+    width: max-content;
+    margin-left: 0;
+  }
+
+  .btn-head-image,
+  .btn-head-image-search,
+  .right-btn-header-zone .select-elm {
+    flex: 0 0 auto;
+  }
+
+  .search-box {
+    flex: 0 0 150px;
+    width: 150px;
+  }
 }
 </style>
