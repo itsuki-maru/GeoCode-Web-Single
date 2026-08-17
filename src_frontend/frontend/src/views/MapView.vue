@@ -130,7 +130,7 @@ const reloadMap = async (mapUrl: string, absolute: boolean = false): Promise<voi
     markerQueryFormData.value = { query1: "", query2: "" };
     const isMaster = activeLayer.value === masterLayerId.value;
     await mapobjStore.queryMapObject(activeLayer.value, isMaster);
-    mapIframeRef.value?.filterMarkers(null);
+    mapIframeRef.value?.filterMapObjects(null, null);
     showProgressModal.value = false;
   }
 };
@@ -155,9 +155,9 @@ const focusMarker = (id: string, lat: number, lng: number): void => {
   }
 };
 
-const filterMapMarkers = (): void => {
+const filterMapObjects = (): void => {
   const markerIds = [...mapobjStore.mapObjectList.keys()];
-  mapIframeRef.value?.filterMarkers(markerIds);
+  mapIframeRef.value?.filterMapObjects(markerIds, mapobjStore.filteredShapeIds);
 };
 
 const handleMarkerSearch = async (query: QueryForm, reset: boolean = false): Promise<void> => {
@@ -168,7 +168,7 @@ const handleMarkerSearch = async (query: QueryForm, reset: boolean = false): Pro
     } else {
       await mapobjStore.queryWordMapObject(query.query1, query.query2, activeLayer.value);
     }
-    filterMapMarkers();
+    filterMapObjects();
   } catch (error) {
     console.error(error);
   }

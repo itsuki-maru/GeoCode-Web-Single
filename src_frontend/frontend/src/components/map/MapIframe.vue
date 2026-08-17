@@ -13,7 +13,10 @@ const emit = defineEmits<{
   previewImage: [filename: string];
 }>();
 
-const filteredMarkerIds = ref<string[] | null>(null);
+const filteredObjectIds = ref<{ markerIds: string[] | null; shapeIds: string[] | null }>({
+  markerIds: null,
+  shapeIds: null,
+});
 
 const postMessageToMap = (messageData: Record<string, unknown>): void => {
   const iframe = document.getElementById("map-iframe") as HTMLIFrameElement;
@@ -26,14 +29,23 @@ const focusMarker = (id: string, lat: number, lng: number): void => {
   postMessageToMap({ id: id, lat: lat, lng: lng, type: "focus" });
 };
 
-const filterMarkers = (ids: string[] | null): void => {
-  filteredMarkerIds.value = ids;
-  postMessageToMap({ ids: ids, type: "markerFilter" });
+const filterMapObjects = (markerIds: string[] | null, shapeIds: string[] | null): void => {
+  const cloneableMarkerIds = Array.isArray(markerIds) ? [...markerIds] : null;
+  const cloneableShapeIds = Array.isArray(shapeIds) ? [...shapeIds] : null;
+  filteredObjectIds.value = {
+    markerIds: cloneableMarkerIds,
+    shapeIds: cloneableShapeIds,
+  };
+  postMessageToMap({
+    markerIds: cloneableMarkerIds,
+    shapeIds: cloneableShapeIds,
+    type: "mapObjectFilter",
+  });
 };
 
 const handleIframeLoad = (): void => {
-  if (filteredMarkerIds.value !== null) {
-    filterMarkers(filteredMarkerIds.value);
+  if (filteredObjectIds.value.markerIds !== null || filteredObjectIds.value.shapeIds !== null) {
+    filterMapObjects(filteredObjectIds.value.markerIds, filteredObjectIds.value.shapeIds);
   }
 };
 
@@ -60,7 +72,7 @@ onUnmounted(() => {
   window.removeEventListener("message", handleMessage);
 });
 
-defineExpose({ focusMarker, filterMarkers });
+defineExpose({ focusMarker, filterMapObjects });
 </script>
 
 <template>

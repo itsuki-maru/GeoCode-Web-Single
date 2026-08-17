@@ -1,10 +1,11 @@
 use crate::error::AppError;
 use crate::model::{
-    LayerObject, MapAnotherWindowQueryParams, MapReadQueryPrams, MarkerObject, ShapeObject,
-    TileServers,
+    LayerObject, MapAnotherWindowQueryParams, MapObjectQueryResponse, MapObjectQuerySearchParams,
+    MapReadQueryPrams, MarkerObject, ShapeObject, TileServers,
 };
-use crate::utils::vec_to_hashmap;
+use crate::utils::{check_ismaster_handler, vec_to_hashmap};
 use axum::{
+    Json,
     extract::{Extension, Query},
     http::HeaderMap,
     response::{Html, IntoResponse},
@@ -14,6 +15,84 @@ use sqlx::sqlite::SqlitePool;
 use std::sync::Arc;
 use tera::{Context, Tera};
 use tokio::sync::Mutex;
+
+fn escape_like_term(term: &str) -> String {
+    term.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+pub async fn query_map_objects_handler(
+    Extension(user_id): Extension<String>,
+    Extension(pool): Extension<SqlitePool>,
+    Query(params): Query<MapObjectQuerySearchParams>,
+) -> Result<Json<MapObjectQueryResponse>, AppError> {
+    let layer_filter = if check_ismaster_handler(&user_id, &params.layer, &pool).await {
+        None
+    } else {
+        Some(params.layer)
+    };
+    let query1 =
+        (!params.query1.is_empty()).then(|| format!("%{}%", escape_like_term(&params.query1)));
+    let query2 =
+        (!params.query2.is_empty()).then(|| format!("%{}%", escape_like_term(&params.query2)));
+
+    let markers = sqlx::query_as::<_, MarkerObject>(
+        r#"
+        SELECT id, layer_id, marker_name, latitude, longitude, detail
+        FROM marker_info_model
+        WHERE user_id = $1
+          AND ($2 IS NULL OR layer_id = $2)
+          AND ($3 IS NULL OR marker_name LIKE $3 ESCAPE '\' OR detail LIKE $3 ESCAPE '\')
+          AND ($4 IS NULL OR marker_name LIKE $4 ESCAPE '\' OR detail LIKE $4 ESCAPE '\')
+        "#,
+    )
+    .bind(&user_id)
+    .bind(layer_filter.as_deref())
+    .bind(query1.as_deref())
+    .bind(query2.as_deref())
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "database error.");
+        AppError::Sqlx(e)
+    })?;
+
+    let shape_ids = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT id
+        FROM shape_model
+        WHERE user_id = $1
+          AND ($2 IS NULL OR layer_id = $2)
+          AND (
+            $3 IS NULL
+            OR COALESCE(name, '') LIKE $3 ESCAPE '\'
+            OR COALESCE(json_extract(geojson, '$.properties.memo'), '') LIKE $3 ESCAPE '\'
+          )
+          AND (
+            $4 IS NULL
+            OR COALESCE(name, '') LIKE $4 ESCAPE '\'
+            OR COALESCE(json_extract(geojson, '$.properties.memo'), '') LIKE $4 ESCAPE '\'
+          )
+        ORDER BY created_at ASC
+        "#,
+    )
+    .bind(&user_id)
+    .bind(layer_filter.as_deref())
+    .bind(query1.as_deref())
+    .bind(query2.as_deref())
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "database error.");
+        AppError::Sqlx(e)
+    })?;
+
+    Ok(Json(MapObjectQueryResponse {
+        markers: vec_to_hashmap(markers, |marker| marker.id.clone()),
+        shape_ids,
+    }))
+}
 
 // HTML地図の取得ハンドラー
 pub async fn map_get_handler(

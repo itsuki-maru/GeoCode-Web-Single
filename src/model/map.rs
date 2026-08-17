@@ -1,4 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+use super::MarkerObject;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TileServers {
@@ -22,6 +25,19 @@ pub struct MapReadQueryPrams {
     pub longitude: Option<f64>,
     pub layer: Option<String>,
     pub is_master: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MapObjectQuerySearchParams {
+    pub query1: String,
+    pub query2: String,
+    pub layer: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MapObjectQueryResponse {
+    pub markers: HashMap<String, MarkerObject>,
+    pub shape_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

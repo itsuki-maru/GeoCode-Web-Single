@@ -40,7 +40,7 @@ use crate::handler::layers::{
     create_layer_handler, delete_layer_handler, get_all_layers_handler, master_layer_get_handler,
     update_layername_handler,
 };
-use crate::handler::map::{map_another_get_handler, map_get_handler};
+use crate::handler::map::{map_another_get_handler, map_get_handler, query_map_objects_handler};
 use crate::handler::marker_forms::{
     get_marker_form_config_handler, public_marker_form_get_handler, rotate_marker_form_url_handler,
     submit_marker_form_handler, update_marker_form_config_handler,
@@ -149,6 +149,7 @@ pub fn build_router(
             post(rotate_marker_form_url_handler),
         )
         .route("/marker/read/query", get(query_marker_handler))
+        .route("/map-objects/read/query", get(query_map_objects_handler))
         .route("/shapes", get(shapes_get_handler))
         .route("/shape", post(create_shape_handler))
         .route("/shape/{shape_id}", put(update_shape_handler))

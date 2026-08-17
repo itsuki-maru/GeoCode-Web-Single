@@ -356,6 +356,7 @@ const layerVisibilityGroups = {};
 const visibleMarkerGroup = L.markerClusterGroup();
 visibleMarkerGroup.addTo(map);
 const shapeGroups = {};
+const shapeLayers = {};
 const shapeVisibilityLayer = L.layerGroup().addTo(map);
 let hasSharedShapes = false;
 let isMeasurementVisible = false;
@@ -839,6 +840,7 @@ for (const key in shapesObj) {
   layer.shapeType = shapesObj[key]["shape_type"];
   layer.shapeName = normalizeShapeName(shapesObj[key]["name"] || "");
   layer.shapeMemo = getShapeMemoFromGeoJson(shapesObj[key]["geojson"]);
+  shapeLayers[`shape-${shapesObj[key]["id"]}`] = layer;
   bindShapeNameLabel(
     layer,
     shapesObj[key]["shape_type"],
@@ -946,6 +948,25 @@ const layeredMarkerDisplay = createLayeredMarkerDisplayManager({
   layerVisibilityGroups,
 });
 layeredMarkerDisplay.rebuildVisibleMarkers();
+const layeredShapeDisplay = createLayeredShapeDisplayManager({
+  map,
+  shapeRecords: shapesObj,
+  shapeLayers,
+  shapeGroups,
+  isLayerVisible: layeredMarkerDisplay.isLayerVisible,
+});
+
+function setMapObjectSearchQuery(query) {
+  layeredMarkerDisplay.setSearchQuery(query);
+  layeredShapeDisplay.setSearchQuery(query);
+  syncAllShapeGroupsVisibility();
+}
+
+function clearMapObjectSearch(options = {}) {
+  layeredMarkerDisplay.clearSearch(options);
+  layeredShapeDisplay.clearSearch();
+  syncAllShapeGroupsVisibility();
+}
 const layerBulkToggleControl = createLayerBulkToggleControl({
   map,
   overlayLayers: layerControlOverlayLayers,
@@ -969,7 +990,7 @@ map.on("overlayadd", function (event) {
   }
 
   // レイヤ切替時は検索状態を解除し、表示用グループを作り直す
-  layeredMarkerDisplay.clearSearch();
+  clearMapObjectSearch();
 
   setTimeout(() => {
     syncShapeGroupVisibility(layerId);
@@ -987,6 +1008,7 @@ map.on("overlayremove", function (event) {
   }
 
   layeredMarkerDisplay.rebuildVisibleMarkers();
+  layeredShapeDisplay.rebuildVisibleShapes();
   syncShapeGroupVisibility(layerId);
 });
 
@@ -1094,8 +1116,8 @@ const markerSearchControl = createMarkerSearchControl({
   markers: markers,
   clusterGroups: clusterGroups,
   // 検索時も表示用グループの再構築へ委譲する
-  onSearch: layeredMarkerDisplay.setSearchQuery,
-  onClear: layeredMarkerDisplay.clearSearch,
+  onSearch: setMapObjectSearchQuery,
+  onClear: clearMapObjectSearch,
 });
 map.addControl(markerSearchControl);
 

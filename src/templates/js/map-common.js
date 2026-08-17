@@ -795,6 +795,29 @@ function matchesMarkerSearch(record, query) {
   return searchableText.includes(normalizedQuery);
 }
 
+function matchesShapeSearch(record, query) {
+  const normalizedQuery = normalizeMarkerSearchText(query);
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  const searchableText = [record?.name, record?.geojson?.properties?.memo]
+    .map(normalizeMarkerSearchText)
+    .join(" ");
+
+  return searchableText.includes(normalizedQuery);
+}
+
+function getShapeRecords(shapeRecords) {
+  if (Array.isArray(shapeRecords)) {
+    return shapeRecords;
+  }
+  if (shapeRecords && typeof shapeRecords === "object") {
+    return Object.values(shapeRecords);
+  }
+  return [];
+}
+
 // レイヤのチェック状態と検索条件から、表示用の単一マーカーグループを再構築する
 function createLayeredMarkerDisplayManager({
   map,
@@ -872,6 +895,66 @@ function createLayeredMarkerDisplayManager({
     findLayerIdByVisibilityGroup,
     isLayerVisible,
     rebuildVisibleMarkers,
+    setSearchQuery,
+  };
+}
+
+// 検索条件に一致する図形と、その図形に付随するラベルだけをレイヤ別グループへ戻す
+function createLayeredShapeDisplayManager({
+  map,
+  shapeRecords,
+  shapeLayers,
+  shapeGroups,
+  isLayerVisible,
+}) {
+  let searchQuery = "";
+
+  const rebuildVisibleShapes = () => {
+    if (!shapeLayers || !shapeGroups || typeof isLayerVisible !== "function") {
+      return;
+    }
+
+    Object.values(shapeGroups).forEach((group) => group.clearLayers());
+
+    getShapeRecords(shapeRecords).forEach((record) => {
+      const layerId = record?.layer_id;
+      const shapeLayer = shapeLayers[`shape-${record?.id}`];
+      const targetGroup = shapeGroups[layerId];
+      if (
+        !shapeLayer ||
+        !targetGroup ||
+        !isLayerVisible(layerId) ||
+        !matchesShapeSearch(record, searchQuery)
+      ) {
+        return;
+      }
+
+      targetGroup.addLayer(shapeLayer);
+      if (Array.isArray(shapeLayer.measurementMarkers)) {
+        shapeLayer.measurementMarkers.forEach((marker) => {
+          targetGroup.addLayer(marker);
+        });
+      }
+    });
+
+    if (map && typeof map.closePopup === "function") {
+      map.closePopup();
+    }
+  };
+
+  const setSearchQuery = (query) => {
+    searchQuery = normalizeMarkerSearchText(query) ? query : "";
+    rebuildVisibleShapes();
+  };
+
+  const clearSearch = () => {
+    searchQuery = "";
+    rebuildVisibleShapes();
+  };
+
+  return {
+    clearSearch,
+    rebuildVisibleShapes,
     setSearchQuery,
   };
 }
@@ -971,7 +1054,7 @@ function createMarkerSearchControl(options = {}) {
       const inputId = options.inputId ?? "marker-search-input";
       container.innerHTML = `
         <div class="search-zone">
-            <input type="text" class="search-input marker-search-input" id="${inputId}" placeholder="マーカー検索" title="マーカー名や詳細を検索します。">
+            <input type="text" class="search-input marker-search-input" id="${inputId}" placeholder="マーカー・図形検索" title="マーカー名・詳細・座標、図形名・メモを検索します。">
         </div>`;
 
       const input = container.querySelector(`#${inputId}`);
@@ -1114,7 +1197,7 @@ function createFlatMarkerSearchControl(options = {}) {
       const inputId = options.inputId ?? "marker-search-input";
       container.innerHTML = `
         <div class="search-zone">
-            <input type="text" class="search-input marker-search-input" id="${inputId}" placeholder="マーカー検索" title="マーカー名や詳細を検索します。">
+            <input type="text" class="search-input marker-search-input" id="${inputId}" placeholder="マーカー・図形検索" title="マーカー名・詳細・座標、図形名・メモを検索します。">
         </div>`;
 
       const input = container.querySelector(`#${inputId}`);
