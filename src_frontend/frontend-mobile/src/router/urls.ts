@@ -20,6 +20,7 @@ export const updateLayersUrl = baseUrl + "/layer/update/";
 export const deleteLayersUrl = baseUrl + "/layer/delete/";
 export const mapAnatherLayerUrl = baseUrl + "/map-another";
 export const mapQueryMarkerUrl = baseUrl + "/marker/read/query";
+export const mapQueryObjectsUrl = baseUrl + "/map-objects/read/query";
 export const licensesGetUrl = baseUrl + "/licanses";
 export const exportJsonUrl = baseUrl + "/file/export/";
 export const importJsonUrl = baseUrl + "/file/import";

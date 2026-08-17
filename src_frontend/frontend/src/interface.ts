@@ -12,6 +12,11 @@ interface MapObjectData {
   detail: string;
 }
 
+interface MapObjectQueryResponse {
+  markers: Record<string, MapObjectData>;
+  shape_ids: string[];
+}
+
 interface LayersData {
   id: string;
   user_id: string;
@@ -76,6 +81,7 @@ export type {
   LoginUser,
   LayersData,
   MapObjectData,
+  MapObjectQueryResponse,
   UpdateMapObjectData,
   InitGeoCode,
   ImageData,

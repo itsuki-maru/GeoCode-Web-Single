@@ -30,7 +30,7 @@ use geocode_web_single::{
             create_layer_handler, delete_layer_handler, get_all_layers_handler,
             master_layer_get_handler, update_layername_handler,
         },
-        map::{map_another_get_handler, map_get_handler},
+        map::{map_another_get_handler, map_get_handler, query_map_objects_handler},
         markers::{
             create_marker_handler, delete_marker_handler, marker_get_handler, query_marker_handler,
             update_marker_info_handler, update_marker_position_handler,
@@ -46,12 +46,12 @@ use geocode_web_single::{
     },
     model::{
         ExportPackage, GenarateUrlPayload, LayerCreateQueryParams, LayerNameUpdatePayload,
-        LoginPayload, MapAnotherWindowQueryParams, MapReadQueryPrams, MapStateParams,
-        MarkerCreateRequestParams, MarkerInfoUpdateJsonData, MarkerMoveRequestParams,
-        MarkerQuerySearchParams, MarkerReadQueryPrams, OnetimePasswordForm, ShapeCreateJsonData,
-        ShapeReadQueryParams, ShapeUpdateJsonData, SignupPayload, ThumbnailQueryParams,
-        TotpLoginPayload, TotpVerifyRequest, UpdateAccountPasswordPayload,
-        UpdateAccountPrivacyPayload, UpdateUserData,
+        LoginPayload, MapAnotherWindowQueryParams, MapObjectQuerySearchParams, MapReadQueryPrams,
+        MapStateParams, MarkerCreateRequestParams, MarkerInfoUpdateJsonData,
+        MarkerMoveRequestParams, MarkerQuerySearchParams, MarkerReadQueryPrams,
+        OnetimePasswordForm, ShapeCreateJsonData, ShapeReadQueryParams, ShapeUpdateJsonData,
+        SignupPayload, ThumbnailQueryParams, TotpLoginPayload, TotpVerifyRequest,
+        UpdateAccountPasswordPayload, UpdateAccountPrivacyPayload, UpdateUserData,
     },
 };
 use serde_json::{Value, json};
@@ -304,6 +304,71 @@ async fn marker_handlers_cover_create_read_update_delete() {
     delete_marker_handler(Extension(user_id), Extension(pool), Path(created.id))
         .await
         .expect("marker should be deleted");
+}
+
+// 統合検索がマーカー名・詳細と図形名・メモを対象にし、他ユーザーのデータを除外する。
+#[tokio::test]
+async fn map_object_query_returns_matching_markers_and_shapes() {
+    let pool = common::test_pool().await;
+    let user_id = common::create_test_user(&pool, "map-object-search-user").await;
+    let layer_id = common::master_layer_id(&pool, &user_id).await;
+    let marker_id = insert_marker(&pool, &user_id, &layer_id).await;
+    let shape_id = insert_shape(&pool, &user_id, &layer_id).await;
+
+    sqlx::query(
+        "UPDATE marker_info_model SET marker_name = '避難対象', detail = '駅前' WHERE id = $1",
+    )
+    .bind(&marker_id)
+    .execute(&pool)
+    .await
+    .expect("marker search data should update");
+
+    let mut shape_geojson = valid_polygon_geojson();
+    shape_geojson["properties"]["memo"] = json!("立入禁止");
+    sqlx::query("UPDATE shape_model SET name = '避難対象区域', geojson = $1 WHERE id = $2")
+        .bind(shape_geojson.to_string())
+        .bind(&shape_id)
+        .execute(&pool)
+        .await
+        .expect("shape search data should update");
+
+    let foreign_user_id = common::create_test_user(&pool, "foreign-map-object-search-user").await;
+    let foreign_layer_id = common::master_layer_id(&pool, &foreign_user_id).await;
+    let foreign_shape_id = insert_shape(&pool, &foreign_user_id, &foreign_layer_id).await;
+    sqlx::query("UPDATE shape_model SET name = '避難対象区域' WHERE id = $1")
+        .bind(&foreign_shape_id)
+        .execute(&pool)
+        .await
+        .expect("foreign shape search data should update");
+
+    let Json(name_results) = query_map_objects_handler(
+        Extension(user_id.clone()),
+        Extension(pool.clone()),
+        Query(MapObjectQuerySearchParams {
+            query1: "避難対象".to_string(),
+            query2: String::new(),
+            layer: layer_id.clone(),
+        }),
+    )
+    .await
+    .expect("name search should succeed");
+    assert!(name_results.markers.contains_key(&marker_id));
+    assert!(name_results.shape_ids.contains(&shape_id));
+    assert!(!name_results.shape_ids.contains(&foreign_shape_id));
+
+    let Json(memo_results) = query_map_objects_handler(
+        Extension(user_id),
+        Extension(pool),
+        Query(MapObjectQuerySearchParams {
+            query1: "避難対象".to_string(),
+            query2: "立入禁止".to_string(),
+            layer: layer_id,
+        }),
+    )
+    .await
+    .expect("two-term shape memo search should succeed");
+    assert!(memo_results.markers.is_empty());
+    assert_eq!(memo_results.shape_ids, vec![shape_id]);
 }
 
 // 図形の作成・一覧取得・更新・削除と、不正な shape_type の拒否を確認する。

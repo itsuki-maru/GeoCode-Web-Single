@@ -415,6 +415,54 @@ function applyMarkerFilter(markerIds) {
 }
 
 const drawnShapesGroup = L.featureGroup();
+const searchableShapeLayers = new Set();
+let externalShapeFilterIdSet = null;
+
+function isShapeVisibleForExternalFilter(layer) {
+  return Boolean(
+    layer &&
+      !layer.isDeletedShape &&
+      (!externalShapeFilterIdSet ||
+        externalShapeFilterIdSet.has(String(layer.shapeId))),
+  );
+}
+
+function renderVisibleShapes() {
+  searchableShapeLayers.forEach((layer) => {
+    const isVisible = isShapeVisibleForExternalFilter(layer);
+    if (isVisible) {
+      if (!drawnShapesGroup.hasLayer(layer)) {
+        drawnShapesGroup.addLayer(layer);
+      }
+      if (Array.isArray(layer.measurementMarkers)) {
+        layer.measurementMarkers.forEach((marker) => {
+          if (!drawnShapesGroup.hasLayer(marker)) {
+            drawnShapesGroup.addLayer(marker);
+          }
+          setMeasurementMarkerVisibility(marker, isMeasurementVisible);
+        });
+      }
+      return;
+    }
+
+    drawnShapesGroup.removeLayer(layer);
+    if (Array.isArray(layer.measurementMarkers)) {
+      layer.measurementMarkers.forEach((marker) => drawnShapesGroup.removeLayer(marker));
+    }
+  });
+
+  if (map && typeof map.closePopup === "function") {
+    map.closePopup();
+  }
+}
+
+function applyMapObjectFilter(markerIds, shapeIds) {
+  applyMarkerFilter(markerIds);
+  externalShapeFilterIdSet = Array.isArray(shapeIds)
+    ? new Set(shapeIds.map(String))
+    : null;
+  renderVisibleShapes();
+}
 const SHAPE_STYLE = {
   color: "#d94841",
   weight: 4,
@@ -1166,7 +1214,9 @@ function attachShapeMeasurementMarkers(layer) {
 
   layer.measurementMarkers = markers;
   markers.forEach((marker) => {
-    drawnShapesGroup.addLayer(marker);
+    if (isShapeVisibleForExternalFilter(layer)) {
+      drawnShapesGroup.addLayer(marker);
+    }
     setMeasurementMarkerVisibility(marker, isMeasurementVisible);
   });
 }
@@ -1195,14 +1245,7 @@ function refreshShapeMeasurementMarkers(layer) {
 
 // 表示中の図形計測ラベルをまとめて再生成する
 function refreshAllShapeMeasurementMarkers() {
-  const shapeLayers = [];
-  drawnShapesGroup.eachLayer((layer) => {
-    if (layer?.shapeType && layer.isMeasurementLabel !== true) {
-      shapeLayers.push(layer);
-    }
-  });
-
-  shapeLayers.forEach((layer) => {
+  searchableShapeLayers.forEach((layer) => {
     refreshShapeMeasurementMarkers(layer);
   });
 }
@@ -1415,6 +1458,10 @@ function applyShapeRecord(layer, shapeRecord) {
     shapeRecord.geojson,
   );
   layer.feature = shapeRecord.geojson;
+  if (shapeRecord.id) {
+    searchableShapeLayers.add(layer);
+    renderVisibleShapes();
+  }
 }
 
 // 図形名と所属レイヤの変更をバックエンドへ保存する
@@ -1752,6 +1799,7 @@ async function deleteShape(layer) {
   try {
     removeShapeMeasurementMarkers(layer);
     drawnShapesGroup.removeLayer(layer);
+    searchableShapeLayers.delete(layer);
     refreshAllShapeMeasurementMarkers();
     applyMeasurementVisibilityToDrawnShapesGroup();
     deletedShapesStack.push(deletedShape);
@@ -2861,6 +2909,7 @@ async function saveShape(
   attachShapeEvents(layer);
   drawnShapesGroup.addLayer(layer);
   attachShapeMeasurementMarkers(layer);
+  renderVisibleShapes();
   if (!map.hasLayer(drawnShapesGroup)) {
     drawnShapesGroup.addTo(map);
   }
@@ -3594,6 +3643,7 @@ map.on("overlayadd", function (event) {
 
   saveShapeLayerVisibility(true);
   setTimeout(() => {
+    renderVisibleShapes();
     bindVisibleShapeLabelEvents();
     applyMeasurementVisibilityToDrawnShapesGroup();
     updateShapeVertexAddTargetStyles();
@@ -3676,6 +3726,8 @@ window.addEventListener("message", function (event) {
     const messageData = event.data;
     if (messageData["type"] === "focus") {
       onFocusMarker(messageData["id"], messageData["lat"], messageData["lng"]);
+    } else if (messageData["type"] === "mapObjectFilter") {
+      applyMapObjectFilter(messageData["markerIds"], messageData["shapeIds"]);
     } else if (messageData["type"] === "markerFilter") {
       applyMarkerFilter(messageData["ids"]);
     }

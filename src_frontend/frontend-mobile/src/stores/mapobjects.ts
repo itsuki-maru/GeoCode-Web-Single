@@ -1,21 +1,23 @@
 import { defineStore } from "pinia";
-import type { MapObjectData } from "@/interface";
+import type { MapObjectData, MapObjectQueryResponse } from "@/interface";
 import {
   getMapObjectsUrl,
   updateMapObjectUrl,
   deleteMapObjectUrl,
-  mapQueryMarkerUrl,
+  mapQueryObjectsUrl,
 } from "@/router/urls";
 import apiClient from "@/axiosClient";
 
 interface State {
   mapObjectList: Map<string, MapObjectData>;
+  filteredShapeIds: string[] | null;
 }
 
 export const useMapObjectStore = defineStore("mapobjects", {
   state: (): State => {
     return {
       mapObjectList: new Map<string, MapObjectData>(),
+      filteredShapeIds: null,
     };
   },
   getters: {
@@ -31,6 +33,7 @@ export const useMapObjectStore = defineStore("mapobjects", {
       try {
         const response = await apiClient.get(getMapObjectsUrl);
         this.mapObjectList.clear();
+        this.filteredShapeIds = null;
         const mapObjData = response.data;
         for (let key in mapObjData) {
           this.mapObjectList.set(mapObjData[key]["id"], {
@@ -75,6 +78,7 @@ export const useMapObjectStore = defineStore("mapobjects", {
         const requestUrl = `${getMapObjectsUrl}?layer=${layer_id}&is_master=${is_master}`;
         const response = await apiClient.get(requestUrl);
         this.mapObjectList.clear();
+        this.filteredShapeIds = null;
         const mapObjData = response.data;
         for (let key in mapObjData) {
           this.mapObjectList.set(mapObjData[key]["id"], {
@@ -102,18 +106,21 @@ export const useMapObjectStore = defineStore("mapobjects", {
       activeLayer: string,
     ): Promise<void> {
       try {
-        const requestUrl = `${mapQueryMarkerUrl}?query1=${query1}&query2=${query2}&layer=${activeLayer}`;
-        const response = await apiClient.get(requestUrl);
+        const searchParams = new URLSearchParams({ query1, query2, layer: activeLayer });
+        const response = await apiClient.get<MapObjectQueryResponse>(
+          `${mapQueryObjectsUrl}?${searchParams.toString()}`,
+        );
         this.mapObjectList.clear();
-        const mapObjData = response.data;
-        for (let key in mapObjData) {
-          this.mapObjectList.set(mapObjData[key]["id"], {
-            id: mapObjData[key]["id"],
-            layer_id: mapObjData[key]["layer_id"],
-            marker_name: mapObjData[key]["marker_name"],
-            latitude: mapObjData[key]["latitude"],
-            longitude: mapObjData[key]["longitude"],
-            detail: mapObjData[key]["detail"],
+        const mapObjData = response.data.markers;
+        this.filteredShapeIds = response.data.shape_ids;
+        for (const mapObject of Object.values(mapObjData)) {
+          this.mapObjectList.set(mapObject.id, {
+            id: mapObject.id,
+            layer_id: mapObject.layer_id,
+            marker_name: mapObject.marker_name,
+            latitude: mapObject.latitude,
+            longitude: mapObject.longitude,
+            detail: mapObject.detail,
           });
         }
         let sortedDsc = new Map(
@@ -148,6 +155,7 @@ export const useMapObjectStore = defineStore("mapobjects", {
 
     clearMapObject(): void {
       this.mapObjectList.clear();
+      this.filteredShapeIds = null;
     },
   },
 });
