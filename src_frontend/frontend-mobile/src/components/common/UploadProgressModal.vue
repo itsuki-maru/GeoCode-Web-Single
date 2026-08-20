@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { UploadProgressState } from '@/interface';
-import BaseModal from './BaseModal.vue';
+import type { UploadProgressState } from "@/interface";
+import BaseModal from "./BaseModal.vue";
 
 defineProps<{
   isOpen: boolean;
@@ -27,8 +27,8 @@ defineProps<{
         </g>
       </svg>
 
-      <p class="progress-title">{{ progress.fileName || '処理を実行しています' }}</p>
-      <p class="progress-message">{{ progress.message || 'しばらくお待ちください。' }}</p>
+      <p class="progress-title">{{ progress.fileName || "処理を実行しています" }}</p>
+      <p class="progress-message">{{ progress.message || "しばらくお待ちください。" }}</p>
 
       <div class="progress-track">
         <div

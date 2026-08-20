@@ -2,8 +2,9 @@ use crate::config::CONFIG;
 use crate::error::AppError;
 use crate::model::{
     MarkerFormConfigResponse, MarkerFormConfigUpdate, MarkerFormField, MarkerFormSchema,
-    MarkerFormSubmissionRequest, MarkerFormSubmissionResponse,
+    MarkerFormSubmissionRequest, MarkerFormSubmissionResponse, ShapeFormConfigResponse,
 };
+use crate::shape_validation::validate_shape_geojson;
 use crate::utils::ensure_dir;
 use axum::{
     Json,
@@ -33,6 +34,7 @@ const MAX_STORED_IMAGE_DIMENSION: u32 = 1_600;
 const MAX_STORED_IMAGE_BYTES: usize = 1_500_000;
 const MAX_THUMBNAIL_BYTES: usize = 300_000;
 const MAX_SUBMISSIONS_PER_MINUTE: i64 = 30;
+const SHAPE_MEMO_MAX_LENGTH: usize = 10_000;
 const JPEG_QUALITIES: &[u8] = &[82, 76, 70, 64, 58, 52];
 const THUMBNAIL_QUALITIES: &[u8] = &[78, 70, 62, 54, 46];
 
@@ -51,6 +53,30 @@ struct OwnerFormRow {
 #[derive(Debug, FromRow)]
 struct PublicFormRow {
     marker_id: String,
+    owner_id: String,
+    public_id: String,
+    enabled: bool,
+    form_title: String,
+    form_description: String,
+    form_schema: SqlJson<MarkerFormSchema>,
+    password_hash: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct ShapeOwnerFormRow {
+    shape_id: String,
+    shape_name: Option<String>,
+    public_id: Option<String>,
+    enabled: Option<bool>,
+    form_title: Option<String>,
+    form_description: Option<String>,
+    form_schema: Option<SqlJson<MarkerFormSchema>>,
+    is_password_protected: Option<bool>,
+}
+
+#[derive(Debug, FromRow)]
+struct ShapePublicFormRow {
+    shape_id: String,
     owner_id: String,
     public_id: String,
     enabled: bool,
@@ -189,11 +215,129 @@ pub async fn public_marker_form_get_handler(
     context.insert("form_title", &row.form_title);
     context.insert("form_description", &row.form_description);
     context.insert("form_schema", &row.form_schema.0);
-    context.insert("public_id", &row.public_id);
+    context.insert("submission_path", &format!("/forms/{}", row.public_id));
     context.insert("is_password_protected", &row.password_hash.is_some());
     let tera = tera.lock().await;
     let rendered = tera.render("marker-form.html", &context).map_err(|error| {
         tracing::error!(%error, "marker form template render failed");
+        AppError::InternalServerError
+    })?;
+    Ok(Html(rendered).into_response())
+}
+
+/// 図形所有者向けに、現在の入力フォーム設定を取得する。
+pub async fn get_shape_form_config_handler(
+    Extension(user_id): Extension<String>,
+    Extension(pool): Extension<SqlitePool>,
+    Path(shape_id): Path<String>,
+) -> Result<Json<ShapeFormConfigResponse>, AppError> {
+    Ok(Json(shape_owner_response(
+        fetch_shape_owner_form(&pool, &user_id, &shape_id).await?,
+    )))
+}
+
+/// 図形所有者が送信した設定を検証し、入力フォーム設定とパスワードを保存する。
+pub async fn update_shape_form_config_handler(
+    Extension(user_id): Extension<String>,
+    Extension(pool): Extension<SqlitePool>,
+    Path(shape_id): Path<String>,
+    Json(payload): Json<MarkerFormConfigUpdate>,
+) -> Result<Json<ShapeFormConfigResponse>, AppError> {
+    validate_config(&payload)?;
+    let current = fetch_shape_owner_form(&pool, &user_id, &shape_id).await?;
+    let existing_hash = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT password_hash FROM shape_form_config_model WHERE shape_id = $1",
+    )
+    .bind(&shape_id)
+    .fetch_optional(&pool)
+    .await?
+    .flatten();
+    let password_hash = resolve_password_hash(&payload, existing_hash).await?;
+    let public_id = current
+        .public_id
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let now = Utc::now().naive_utc();
+    sqlx::query(
+        r#"
+        INSERT INTO shape_form_config_model (
+            shape_id, public_id, enabled, form_title, form_description,
+            form_schema, password_hash, create_at, update_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+        ON CONFLICT (shape_id) DO UPDATE SET
+            enabled = excluded.enabled,
+            form_title = excluded.form_title,
+            form_description = excluded.form_description,
+            form_schema = excluded.form_schema,
+            password_hash = excluded.password_hash,
+            update_at = excluded.update_at
+        "#,
+    )
+    .bind(&shape_id)
+    .bind(public_id)
+    .bind(payload.enabled)
+    .bind(payload.form_title.trim())
+    .bind(payload.form_description.trim())
+    .bind(SqlJson(&payload.form_schema))
+    .bind(password_hash)
+    .bind(now)
+    .execute(&pool)
+    .await?;
+    Ok(Json(shape_owner_response(
+        fetch_shape_owner_form(&pool, &user_id, &shape_id).await?,
+    )))
+}
+
+/// 図形の所有権を確認し、入力フォームの公開URLを新しいIDへ更新する。
+pub async fn rotate_shape_form_url_handler(
+    Extension(user_id): Extension<String>,
+    Extension(pool): Extension<SqlitePool>,
+    Path(shape_id): Path<String>,
+) -> Result<Json<ShapeFormConfigResponse>, AppError> {
+    fetch_shape_owner_form(&pool, &user_id, &shape_id).await?;
+    let result = sqlx::query(
+        "UPDATE shape_form_config_model SET public_id = $1, update_at = $2 WHERE shape_id = $3",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(Utc::now().naive_utc())
+    .bind(&shape_id)
+    .execute(&pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::Validation(
+            "フォーム設定を保存してからURLを再発行してください。".into(),
+        ));
+    }
+    Ok(Json(shape_owner_response(
+        fetch_shape_owner_form(&pool, &user_id, &shape_id).await?,
+    )))
+}
+
+/// 公開IDに対応する有効な図形入力フォームをHTMLで表示する。
+pub async fn public_shape_form_get_handler(
+    Extension(pool): Extension<SqlitePool>,
+    Extension(tera): Extension<Arc<Mutex<Tera>>>,
+    Path(public_id): Path<String>,
+) -> Result<Response, AppError> {
+    if Uuid::parse_str(&public_id).is_err() {
+        return render_marker_form_not_found(&tera).await;
+    }
+    let row = match fetch_shape_public_form(&pool, &public_id).await {
+        Ok(row) if row.enabled => row,
+        Ok(_) | Err(AppError::NotFound) => return render_marker_form_not_found(&tera).await,
+        Err(error) => return Err(error),
+    };
+    let mut context = Context::new();
+    context.insert("form_title", &row.form_title);
+    context.insert("form_description", &row.form_description);
+    context.insert("form_schema", &row.form_schema.0);
+    context.insert(
+        "submission_path",
+        &format!("/shape-forms/{}", row.public_id),
+    );
+    context.insert("is_password_protected", &row.password_hash.is_some());
+    let tera = tera.lock().await;
+    let rendered = tera.render("marker-form.html", &context).map_err(|error| {
+        tracing::error!(%error, "shape form template render failed");
         AppError::InternalServerError
     })?;
     Ok(Html(rendered).into_response())
@@ -229,13 +373,75 @@ pub async fn submit_marker_form_handler(
     }
     check_rate_limit(&pool, &form.marker_id).await?;
     let (payload, uploaded_images) = parse_marker_form_multipart(&mut multipart).await?;
-    verify_submission_password(&form, payload.password.as_deref()).await?;
+    verify_submission_password(form.password_hash.as_deref(), payload.password.as_deref()).await?;
 
     let schema = &form.form_schema.0;
     validate_submission_keys(schema, &payload.values)?;
     validate_uploaded_image_keys(schema, &uploaded_images)?;
 
-    // 画像をディスクへ保存する前に、すべての回答値と必須画像の有無を検証する。
+    let (submitted_values, rendered_markdown, prepared_images) =
+        build_submission(schema, &payload.values, &uploaded_images, &form.form_title).await?;
+
+    let result = persist_submission(
+        &pool,
+        &form,
+        &submitted_values,
+        &rendered_markdown,
+        &prepared_images,
+    )
+    .await;
+    if let Err(error) = result {
+        cleanup_images(&prepared_images).await;
+        return Err(error);
+    }
+
+    Ok(Json(MarkerFormSubmissionResponse {
+        message: "送信が完了しました。".to_string(),
+    }))
+}
+
+/// 公開図形フォームの投稿を検証し、図形メモへMarkdownを追記する。
+pub async fn submit_shape_form_handler(
+    Extension(pool): Extension<SqlitePool>,
+    Path(public_id): Path<String>,
+    mut multipart: Multipart,
+) -> Result<Json<MarkerFormSubmissionResponse>, AppError> {
+    let form = fetch_shape_public_form(&pool, &public_id).await?;
+    if !form.enabled {
+        return Err(AppError::NotFound);
+    }
+    check_shape_rate_limit(&pool, &form.shape_id).await?;
+    let (payload, uploaded_images) = parse_marker_form_multipart(&mut multipart).await?;
+    verify_submission_password(form.password_hash.as_deref(), payload.password.as_deref()).await?;
+    let schema = &form.form_schema.0;
+    validate_submission_keys(schema, &payload.values)?;
+    validate_uploaded_image_keys(schema, &uploaded_images)?;
+    let (submitted_values, rendered_markdown, prepared_images) =
+        build_submission(schema, &payload.values, &uploaded_images, &form.form_title).await?;
+    if let Err(error) = persist_shape_submission(
+        &pool,
+        &form,
+        &submitted_values,
+        &rendered_markdown,
+        &prepared_images,
+    )
+    .await
+    {
+        cleanup_images(&prepared_images).await;
+        return Err(error);
+    }
+    Ok(Json(MarkerFormSubmissionResponse {
+        message: "送信が完了しました。".to_string(),
+    }))
+}
+
+/// 検証済みの投稿値から、保存値・Markdown・保存前画像を生成する。
+async fn build_submission(
+    schema: &MarkerFormSchema,
+    values: &HashMap<String, JsonValue>,
+    uploaded_images: &HashMap<String, UploadedFormImage>,
+    form_title: &str,
+) -> Result<(JsonValue, String, Vec<PreparedImage>), AppError> {
     let mut processed_fields = HashMap::new();
     for field in &schema.fields {
         if field.field_type == "image" {
@@ -245,14 +451,12 @@ pub async fn submit_marker_form_handler(
             processed_fields.insert(field.id.clone(), (JsonValue::Null, None));
             continue;
         }
-        let value = payload.values.get(&field.id).unwrap_or(&JsonValue::Null);
+        let value = values.get(&field.id).unwrap_or(&JsonValue::Null);
         processed_fields.insert(
             field.id.clone(),
             process_non_image_field_value(field, value)?,
         );
     }
-
-    // 全項目の検証完了後に、画像をメモリ上で縮小・再エンコードする。
     let mut prepared_images = Vec::new();
     for field in schema
         .fields
@@ -278,7 +482,6 @@ pub async fn submit_marker_form_handler(
         );
         prepared_images.push(prepared);
     }
-
     let mut stored_values = serde_json::Map::new();
     let mut sections = Vec::new();
     for field in &schema.fields {
@@ -294,30 +497,15 @@ pub async fn submit_marker_form_handler(
             ));
         }
     }
-
-    let rendered_markdown = format!(
-        "\n\n---\n\n## フォーム投稿: {}\n\n{}",
-        escape_markdown(&form.form_title),
-        sections.join("\n\n")
-    );
-    let submitted_values = JsonValue::Object(stored_values);
-
-    let result = persist_submission(
-        &pool,
-        &form,
-        &submitted_values,
-        &rendered_markdown,
-        &prepared_images,
-    )
-    .await;
-    if let Err(error) = result {
-        cleanup_images(&prepared_images).await;
-        return Err(error);
-    }
-
-    Ok(Json(MarkerFormSubmissionResponse {
-        message: "送信が完了しました。".to_string(),
-    }))
+    Ok((
+        JsonValue::Object(stored_values),
+        format!(
+            "\n\n---\n\n## フォーム投稿: {}\n\n{}",
+            escape_markdown(form_title),
+            sections.join("\n\n")
+        ),
+        prepared_images,
+    ))
 }
 
 /// 容量確認、画像保存、回答履歴登録、マーカー追記を1つのDBトランザクションとして処理する。
@@ -440,6 +628,133 @@ async fn persist_submission(
     tx.commit().await?;
     Ok(())
 }
+
+/// 容量確認、画像保存、回答履歴登録、図形メモ追記を1つのDBトランザクションで処理する。
+async fn persist_shape_submission(
+    pool: &SqlitePool,
+    form: &ShapePublicFormRow,
+    submitted_values: &JsonValue,
+    rendered_markdown: &str,
+    prepared_images: &[PreparedImage],
+) -> Result<(), AppError> {
+    let now = Utc::now().naive_utc();
+    let mut tx = pool.begin().await?;
+    let owner_locked = sqlx::query("UPDATE user_model SET id = id WHERE id = $1")
+        .bind(&form.owner_id)
+        .execute(&mut *tx)
+        .await?;
+    if owner_locked.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+    let still_enabled = sqlx::query_scalar::<_, bool>(
+        "SELECT enabled FROM shape_form_config_model WHERE shape_id = $1",
+    )
+    .bind(&form.shape_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .unwrap_or(false);
+    if !still_enabled {
+        return Err(AppError::NotFound);
+    }
+    let (shape_type, mut geojson) = sqlx::query_as::<_, (String, SqlJson<JsonValue>)>(
+        "SELECT shape_type, geojson FROM shape_model WHERE id = $1 AND user_id = $2",
+    )
+    .bind(&form.shape_id)
+    .bind(&form.owner_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .map(|(shape_type, geojson)| (shape_type, geojson.0))
+    .ok_or(AppError::NotFound)?;
+    let feature = geojson
+        .as_object_mut()
+        .ok_or_else(|| AppError::Validation("保存されている図形情報が不正です。".into()))?;
+    let properties_value = feature.entry("properties").or_insert_with(|| json!({}));
+    if !properties_value.is_object() {
+        *properties_value = json!({});
+    }
+    let properties = properties_value
+        .as_object_mut()
+        .ok_or_else(|| AppError::Validation("保存されている図形情報が不正です。".into()))?;
+    let current_memo = properties
+        .get("memo")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("");
+    let next_memo = format!("{current_memo}{rendered_markdown}");
+    if next_memo.chars().count() > SHAPE_MEMO_MAX_LENGTH {
+        return Err(AppError::PayloadTooLarge(
+            "図形メモの上限10000文字を超えるため投稿できません。".into(),
+        ));
+    }
+    properties.insert("memo".into(), JsonValue::String(next_memo));
+    validate_shape_geojson(&shape_type, &geojson)?;
+
+    let current_bytes = sqlx::query_scalar::<_, i64>(
+        "SELECT COALESCE(SUM(stored_bytes), 0) FROM marker_form_image_model WHERE owner_id = $1",
+    )
+    .bind(&form.owner_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let incoming_bytes = prepared_images.iter().try_fold(0_i64, |total, image| {
+        let image_bytes = i64::try_from(image.bytes.len().saturating_add(image.thumb_bytes.len()))
+            .map_err(|_| AppError::InternalServerError)?;
+        total
+            .checked_add(image_bytes)
+            .ok_or(AppError::InternalServerError)
+    })?;
+    if current_bytes.saturating_add(incoming_bytes) > CONFIG.marker_form_storage_quota_bytes {
+        return Err(AppError::PayloadTooLarge(
+            "入力フォームから保存できる画像容量の上限を超えています。".into(),
+        ));
+    }
+    write_prepared_images(prepared_images).await?;
+    for image in prepared_images {
+        sqlx::query(
+            "INSERT INTO image_model (id, user_id, filename, uuid_filename, create_at) VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(&image.id)
+        .bind(&form.owner_id)
+        .bind(&image.filename)
+        .bind(&image.unique_filename)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+        let stored_bytes = i64::try_from(image.bytes.len().saturating_add(image.thumb_bytes.len()))
+            .map_err(|_| AppError::InternalServerError)?;
+        sqlx::query(
+            "INSERT INTO marker_form_image_model (image_id, owner_id, stored_bytes, create_at) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(&image.id)
+        .bind(&form.owner_id)
+        .bind(stored_bytes)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+    }
+    sqlx::query(
+        "INSERT INTO shape_form_submission_model (id, shape_id, submitted_values, rendered_markdown, create_at) VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(Uuid::now_v7().to_string())
+    .bind(&form.shape_id)
+    .bind(SqlJson(submitted_values))
+    .bind(rendered_markdown)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+    let updated = sqlx::query(
+        "UPDATE shape_model SET geojson = $1, updated_at = $2 WHERE id = $3 AND user_id = $4",
+    )
+    .bind(SqlJson(&geojson))
+    .bind(now)
+    .bind(&form.shape_id)
+    .bind(&form.owner_id)
+    .execute(&mut *tx)
+    .await?;
+    if updated.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+    tx.commit().await?;
+    Ok(())
+}
 /// 指定ユーザーが所有するマーカーと、その入力フォーム設定をデータベースから取得する。
 async fn fetch_owner_form(
     pool: &SqlitePool,
@@ -504,6 +819,64 @@ fn owner_response(row: OwnerFormRow) -> MarkerFormConfigResponse {
         form_schema: row.form_schema.map(|schema| schema.0).unwrap_or_default(),
         is_password_protected: row.is_password_protected.unwrap_or(false),
         public_path,
+    }
+}
+
+/// 指定ユーザーが所有する図形と、その入力フォーム設定を取得する。
+async fn fetch_shape_owner_form(
+    pool: &SqlitePool,
+    user_id: &str,
+    shape_id: &str,
+) -> Result<ShapeOwnerFormRow, AppError> {
+    sqlx::query_as::<_, ShapeOwnerFormRow>(
+        r#"
+        SELECT s.id AS shape_id, s.name AS shape_name, c.public_id, c.enabled,
+               c.form_title, c.form_description, c.form_schema,
+               (c.password_hash IS NOT NULL) AS is_password_protected
+        FROM shape_model s
+        LEFT JOIN shape_form_config_model c ON c.shape_id = s.id
+        WHERE s.id = $1 AND s.user_id = $2
+        "#,
+    )
+    .bind(shape_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or(AppError::NotFound)
+}
+
+/// 公開IDに対応する図形入力フォームと所有者を取得する。
+async fn fetch_shape_public_form(
+    pool: &SqlitePool,
+    public_id: &str,
+) -> Result<ShapePublicFormRow, AppError> {
+    sqlx::query_as::<_, ShapePublicFormRow>(
+        r#"
+        SELECT c.shape_id, s.user_id AS owner_id, c.public_id, c.enabled,
+               c.form_title, c.form_description, c.form_schema, c.password_hash
+        FROM shape_form_config_model c
+        JOIN shape_model s ON s.id = c.shape_id
+        WHERE c.public_id = $1
+        "#,
+    )
+    .bind(public_id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or(AppError::NotFound)
+}
+
+/// 未設定時の既定値を補い、図形フォーム設定APIのレスポンスへ変換する。
+fn shape_owner_response(row: ShapeOwnerFormRow) -> ShapeFormConfigResponse {
+    ShapeFormConfigResponse {
+        shape_id: row.shape_id,
+        enabled: row.enabled.unwrap_or(false),
+        form_title: row
+            .form_title
+            .unwrap_or_else(|| row.shape_name.unwrap_or_else(|| "図形入力フォーム".into())),
+        form_description: row.form_description.unwrap_or_default(),
+        form_schema: row.form_schema.map(|schema| schema.0).unwrap_or_default(),
+        is_password_protected: row.is_password_protected.unwrap_or(false),
+        public_path: row.public_id.map(|id| format!("/shape-forms/{id}")),
     }
 }
 
@@ -627,10 +1000,10 @@ async fn resolve_password_hash(
 
 /// パスワード保護されたフォームへの投稿パスワードを検証する。
 async fn verify_submission_password(
-    form: &PublicFormRow,
+    password_hash: Option<&str>,
     password: Option<&str>,
 ) -> Result<(), AppError> {
-    let Some(password_hash) = form.password_hash.clone() else {
+    let Some(password_hash) = password_hash.map(str::to_owned) else {
         return Ok(());
     };
     let password = password.unwrap_or("");
@@ -651,6 +1024,36 @@ async fn verify_submission_password(
             "フォームのパスワードが正しくありません。".into(),
         ))
     }
+}
+
+/// 図形フォーム用の固定時間枠カウンターを更新する。
+async fn check_shape_rate_limit(pool: &SqlitePool, shape_id: &str) -> Result<(), AppError> {
+    let attempt_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        INSERT INTO shape_form_rate_limit_model (shape_id, window_started_at, attempt_count)
+        VALUES ($1, $2, 1)
+        ON CONFLICT (shape_id) DO UPDATE SET
+            attempt_count = CASE
+                WHEN shape_form_rate_limit_model.window_started_at <= excluded.window_started_at - 60
+                THEN 1 ELSE shape_form_rate_limit_model.attempt_count + 1
+            END,
+            window_started_at = CASE
+                WHEN shape_form_rate_limit_model.window_started_at <= excluded.window_started_at - 60
+                THEN excluded.window_started_at ELSE shape_form_rate_limit_model.window_started_at
+            END
+        RETURNING attempt_count
+        "#,
+    )
+    .bind(shape_id)
+    .bind(Utc::now().timestamp())
+    .fetch_one(pool)
+    .await?;
+    if attempt_count > MAX_SUBMISSIONS_PER_MINUTE {
+        return Err(AppError::TooManyRequests(
+            "投稿が集中しています。しばらく待ってから再試行してください。".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// DB上の固定時間枠カウンターを更新し、全プロセスで投稿回数を共有制限する。

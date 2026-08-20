@@ -170,7 +170,8 @@ defineExpose({
   <!-- パスワード更新モーダル -->
   <div id="overlay-update-password" v-show="isOpenPasswordUpdateModal">
     <div id="content-update-password">
-      <h2 class="modal-h2">パスワード変更</h2>      <input
+      <h2 class="modal-h2">パスワード変更</h2>
+      <input
         class="password-input"
         type="password"
         placeholder="Current Password"

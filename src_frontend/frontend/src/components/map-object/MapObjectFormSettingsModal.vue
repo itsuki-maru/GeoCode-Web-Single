@@ -24,7 +24,8 @@ interface FormField {
 }
 
 interface FormConfig {
-  marker_id: string;
+  marker_id?: string;
+  shape_id?: string;
   enabled: boolean;
   form_title: string;
   form_description: string;
@@ -35,7 +36,8 @@ interface FormConfig {
 
 const props = defineProps<{
   isOpen: boolean;
-  markerId: string;
+  targetType: "marker" | "shape";
+  targetId: string;
 }>();
 
 const emit = defineEmits<{
@@ -58,6 +60,7 @@ let fieldSequence = 0;
 const publicUrl = computed(() =>
   publicPath.value ? `${window.location.origin}${publicPath.value}` : "",
 );
+const formBaseUrl = computed(() => `/${props.targetType}/${props.targetId}/form`);
 
 const fieldTypeLabels: Record<FieldType, string> = {
   text: "1行テキスト",
@@ -94,10 +97,10 @@ const applyConfig = (config: FormConfig): void => {
 };
 
 const loadConfig = async (): Promise<void> => {
-  if (!props.markerId) return;
+  if (!props.targetId) return;
   loading.value = true;
   try {
-    const response = await apiClient.get<FormConfig>(`/marker/${props.markerId}/form`);
+    const response = await apiClient.get<FormConfig>(formBaseUrl.value);
     applyConfig(response.data);
   } catch (error) {
     emit("message", errorMessage(error, "フォーム設定を読み込めませんでした。"));
@@ -184,7 +187,7 @@ const save = async (): Promise<void> => {
   }
   saving.value = true;
   try {
-    const response = await apiClient.put<FormConfig>(`/marker/${props.markerId}/form`, {
+    const response = await apiClient.put<FormConfig>(formBaseUrl.value, {
       enabled: enabled.value,
       form_title: formTitle.value,
       form_description: formDescription.value,
@@ -217,7 +220,7 @@ const copyUrl = async (): Promise<void> => {
 const rotateUrl = async (): Promise<void> => {
   if (!window.confirm("以前のフォームURLは利用できなくなります。再発行しますか？")) return;
   try {
-    const response = await apiClient.post<FormConfig>(`/marker/${props.markerId}/form/rotate-url`);
+    const response = await apiClient.post<FormConfig>(`${formBaseUrl.value}/rotate-url`);
     applyConfig(response.data);
     emit("message", "公開フォームURLを再発行しました。");
   } catch (error) {

@@ -10,11 +10,44 @@ interface MapObjectData {
   latitude: number;
   longitude: number;
   detail: string;
+  update_at: string;
 }
 
 interface MapObjectQueryResponse {
   markers: Record<string, MapObjectData>;
   shape_ids: string[];
+}
+
+interface ShapeStyle {
+  color?: string;
+  weight?: number;
+  dashArray?: string | null;
+  fillColor?: string;
+  fillOpacity?: number;
+}
+
+interface ShapeGeoJson {
+  type: "Feature";
+  properties: Record<string, unknown> & {
+    style?: ShapeStyle;
+    memo?: string | null;
+    radius?: number;
+  };
+  geometry: {
+    type: "Point" | "LineString" | "Polygon";
+    coordinates: unknown;
+  };
+}
+
+interface ShapeData {
+  id: string;
+  user_id: string;
+  layer_id: string;
+  shape_type: "circle" | "polyline" | "polygon" | "rectangle";
+  name: string | null;
+  geojson: ShapeGeoJson;
+  created_at: string;
+  updated_at: string;
 }
 
 interface LayersData {
@@ -90,4 +123,7 @@ export type {
   ShareLayerCheckList,
   ApplicationInit,
   UploadProgressState,
+  ShapeStyle,
+  ShapeGeoJson,
+  ShapeData,
 };

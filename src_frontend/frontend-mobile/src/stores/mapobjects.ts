@@ -43,6 +43,7 @@ export const useMapObjectStore = defineStore("mapobjects", {
             latitude: mapObjData[key]["latitude"],
             longitude: mapObjData[key]["longitude"],
             detail: mapObjData[key]["detail"],
+            update_at: mapObjData[key]["update_at"],
           });
         }
         let sortedDsc = new Map(
@@ -88,6 +89,7 @@ export const useMapObjectStore = defineStore("mapobjects", {
             latitude: mapObjData[key]["latitude"],
             longitude: mapObjData[key]["longitude"],
             detail: mapObjData[key]["detail"],
+            update_at: mapObjData[key]["update_at"],
           });
         }
         let sortedDsc = new Map(
@@ -121,6 +123,7 @@ export const useMapObjectStore = defineStore("mapobjects", {
             latitude: mapObject.latitude,
             longitude: mapObject.longitude,
             detail: mapObject.detail,
+            update_at: mapObject.update_at,
           });
         }
         let sortedDsc = new Map(
@@ -140,6 +143,7 @@ export const useMapObjectStore = defineStore("mapobjects", {
         latitude: mapobje.latitude,
         longitude: mapobje.longitude,
         detail: mapobje.detail,
+        update_at: mapobje.update_at,
       });
     },
     async deleteMapObject(id: string): Promise<void> {

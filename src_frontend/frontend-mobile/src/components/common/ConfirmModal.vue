@@ -17,7 +17,9 @@ const emit = defineEmits<{
   <BaseModal :isOpen="isOpen" :zIndex="15" @close="emit('cancel')">
     <h2 class="modal-h2">{{ title }}</h2>
     <div class="input-text-zone">
-      <p><strong>{{ message }}</strong></p>
+      <p>
+        <strong>{{ message }}</strong>
+      </p>
     </div>
     <div class="btn-zone">
       <button @click="emit('cancel')" class="btn-standard">戻る</button>

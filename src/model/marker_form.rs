@@ -45,6 +45,17 @@ pub struct MarkerFormConfigResponse {
     pub public_path: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct ShapeFormConfigResponse {
+    pub shape_id: String,
+    pub enabled: bool,
+    pub form_title: String,
+    pub form_description: String,
+    pub form_schema: MarkerFormSchema,
+    pub is_password_protected: bool,
+    pub public_path: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct MarkerFormSubmissionRequest {
     #[serde(default)]

@@ -1,19 +1,19 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import type { AxiosProgressEvent } from 'axios';
-import type { UploadProgressState } from '@/interface';
-import BaseModal from '@/components/common/BaseModal.vue';
-import { useImageResize } from '@/composables/useImageResize';
-import { useVideoPoster } from '@/composables/useVideoPoster';
-import { ALLOWED_MIME_TYPES, isMP4, isPDF } from '@/composables/useFileTypeCheck';
-import { useImageStore } from '@/stores/images';
-import { imageUploadUrl } from '@/router/urls';
-import { baseUrl } from '@/settingMobile';
-import apiClient from '@/axiosClient';
+import { computed, ref } from "vue";
+import type { AxiosProgressEvent } from "axios";
+import type { UploadProgressState } from "@/interface";
+import BaseModal from "@/components/common/BaseModal.vue";
+import { useImageResize } from "@/composables/useImageResize";
+import { useVideoPoster } from "@/composables/useVideoPoster";
+import { ALLOWED_MIME_TYPES, isMP4, isPDF } from "@/composables/useFileTypeCheck";
+import { useImageStore } from "@/stores/images";
+import { imageUploadUrl } from "@/router/urls";
+import { baseUrl } from "@/settingMobile";
+import apiClient from "@/axiosClient";
 
 const props = defineProps<{
   isOpen: boolean;
-  isEditingMarker: boolean;
+  isEditingMapObject: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -30,46 +30,46 @@ const MAX_UPLOAD_FILE_SIZE = 100 * 1024 * 1024;
 
 const selectedImageBlob = ref<Blob | null>(null);
 const selectedPosterBlob = ref<Blob | null>(null);
-const selectedFileName = ref<string>('');
+const selectedFileName = ref<string>("");
 const selectedFileSize = ref<number | null>(null);
-const selectedMimeType = ref<string>('');
-const selectedPosterFileName = ref<string>('');
-const selectedAssetKind = ref<'image' | 'video' | 'pdf' | ''>('');
+const selectedMimeType = ref<string>("");
+const selectedPosterFileName = ref<string>("");
+const selectedAssetKind = ref<"image" | "video" | "pdf" | "">("");
 const isImageSendNow = ref(false);
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const emptyProgressState = (): UploadProgressState => ({
   isOpen: false,
-  phase: 'preparing',
+  phase: "preparing",
   percent: null,
-  fileName: '',
-  message: '',
+  fileName: "",
+  message: "",
 });
 
-const acceptedFileTypes = 'JPEG, PNG, WebP, GIF, MP4, PDF';
+const acceptedFileTypes = "JPEG, PNG, WebP, GIF, MP4, PDF";
 
 const selectedFileTypeLabel = computed(() => {
   switch (selectedAssetKind.value) {
-    case 'image':
-      return '画像';
-    case 'video':
-      return '動画';
-    case 'pdf':
-      return 'PDF';
+    case "image":
+      return "画像";
+    case "video":
+      return "動画";
+    case "pdf":
+      return "PDF";
     default:
-      return '未選択';
+      return "未選択";
   }
 });
 
 const isUploadReady = computed(() => selectedImageBlob.value !== null && !isImageSendNow.value);
 
 const formatFileSize = (size: number | null): string => {
-  if (size === null) return '-';
+  if (size === null) return "-";
   if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
 
 const emitProgress = (progress: UploadProgressState): void => {
-  emit('uploadProgressChange', progress);
+  emit("uploadProgressChange", progress);
 };
 
 const handleUploadProgress = (progressEvent: AxiosProgressEvent): void => {
@@ -79,13 +79,13 @@ const handleUploadProgress = (progressEvent: AxiosProgressEvent): void => {
 
   emitProgress({
     isOpen: true,
-    phase: percent === 100 ? 'finalizing' : 'uploading',
+    phase: percent === 100 ? "finalizing" : "uploading",
     percent: percent === 100 ? null : percent,
     fileName: selectedFileName.value,
     message:
       percent === 100
-        ? 'アップロード完了。サーバーで保存処理中です。'
-        : 'ファイルをアップロードしています。',
+        ? "アップロード完了。サーバーで保存処理中です。"
+        : "ファイルをアップロードしています。",
     loadedBytes: loaded,
     totalBytes: total,
   });
@@ -93,8 +93,8 @@ const handleUploadProgress = (progressEvent: AxiosProgressEvent): void => {
 
 const onImageSelect = async (): Promise<void> => {
   const element = fileInputRef.value;
-  if (!element || element.value === '' || element.value === null) {
-    emit('message', '画像ファイルを選択してください。');
+  if (!element || element.value === "" || element.value === null) {
+    emit("message", "画像ファイルを選択してください。");
     return;
   }
 
@@ -107,65 +107,65 @@ const onImageSelect = async (): Promise<void> => {
   selectedMimeType.value = fileObj.type;
 
   if (!ALLOWED_MIME_TYPES.includes(fileObj.type)) {
-    emit('message', '許可されていない形式のファイルです。');
+    emit("message", "許可されていない形式のファイルです。");
     imageClear();
     return;
   }
 
   if (fileObj.size > MAX_UPLOAD_FILE_SIZE) {
-    emit('message', '100MBを超えるファイルはアップロードできません。');
+    emit("message", "100MBを超えるファイルはアップロードできません。");
     imageClear();
     return;
   }
 
-  if (fileObj.type.startsWith('image/')) {
+  if (fileObj.type.startsWith("image/")) {
     try {
       emitProgress({
         isOpen: true,
-        phase: 'preparing',
+        phase: "preparing",
         percent: null,
         fileName,
-        message: '画像をアップロード用に最適化しています。',
+        message: "画像をアップロード用に最適化しています。",
       });
       selectedImageBlob.value = await resizeImageWithCanvas(fileObj);
       selectedPosterBlob.value = null;
-      selectedPosterFileName.value = '';
-      selectedAssetKind.value = 'image';
+      selectedPosterFileName.value = "";
+      selectedAssetKind.value = "image";
     } catch (error) {
-      console.error('リサイズエラー: ', error);
+      console.error("リサイズエラー: ", error);
       selectedImageBlob.value = null;
     } finally {
       emitProgress(emptyProgressState());
     }
-  } else if (fileObj.type === 'video/mp4') {
+  } else if (fileObj.type === "video/mp4") {
     try {
       emitProgress({
         isOpen: true,
-        phase: 'preparing',
+        phase: "preparing",
         percent: null,
         fileName,
-        message: '動画のposter画像を生成しています。',
+        message: "動画のposter画像を生成しています。",
       });
       const poster = await generateVideoPoster(fileObj);
       selectedImageBlob.value = fileObj;
       selectedPosterBlob.value = poster.blob;
       selectedPosterFileName.value = poster.fileName;
-      selectedAssetKind.value = 'video';
+      selectedAssetKind.value = "video";
     } catch (error) {
-      console.error('動画poster生成エラー: ', error);
+      console.error("動画poster生成エラー: ", error);
       selectedImageBlob.value = fileObj;
       selectedPosterBlob.value = null;
-      selectedPosterFileName.value = '';
-      selectedAssetKind.value = 'video';
-      emit('message', '動画のposter画像生成に失敗したため、動画のみアップロードします。');
+      selectedPosterFileName.value = "";
+      selectedAssetKind.value = "video";
+      emit("message", "動画のposter画像生成に失敗したため、動画のみアップロードします。");
     } finally {
       emitProgress(emptyProgressState());
     }
   } else {
     selectedImageBlob.value = fileObj;
     selectedPosterBlob.value = null;
-    selectedPosterFileName.value = '';
-    selectedAssetKind.value = 'pdf';
+    selectedPosterFileName.value = "";
+    selectedAssetKind.value = "pdf";
   }
   selectedFileName.value = fileName;
 };
@@ -175,34 +175,34 @@ const uploadImage = async (): Promise<void> => {
   isImageSendNow.value = true;
 
   if (!selectedImageBlob.value) {
-    emit('message', 'ファイルを選択してください。');
+    emit("message", "ファイルを選択してください。");
     isImageSendNow.value = false;
     return;
   }
 
   const payload = new FormData();
-  payload.append('upload_file', selectedImageBlob.value, selectedFileName.value);
-  payload.append('asset_kind', selectedAssetKind.value);
+  payload.append("upload_file", selectedImageBlob.value, selectedFileName.value);
+  payload.append("asset_kind", selectedAssetKind.value);
 
-  if (selectedAssetKind.value === 'video' && selectedPosterBlob.value) {
-    payload.append('poster_file', selectedPosterBlob.value, selectedPosterFileName.value);
+  if (selectedAssetKind.value === "video" && selectedPosterBlob.value) {
+    payload.append("poster_file", selectedPosterBlob.value, selectedPosterFileName.value);
   }
 
   try {
     emitProgress({
       isOpen: true,
-      phase: 'uploading',
+      phase: "uploading",
       percent: 0,
       fileName: selectedFileName.value,
-      message: 'ファイルをアップロードしています。',
+      message: "ファイルをアップロードしています。",
       loadedBytes: 0,
     });
     const response = await apiClient.post(imageUploadUrl, payload, {
       onUploadProgress: handleUploadProgress,
     });
-    const uniqueFileName = response.data['uuid_filename'];
+    const uniqueFileName = response.data["uuid_filename"];
 
-    let imageUrlMarkdown = '';
+    let imageUrlMarkdown = "";
     if (isMP4(uniqueFileName)) {
       imageUrlMarkdown = `?[${selectedFileName.value}](${baseUrl}/static/images/${uniqueFileName})`;
     } else if (isPDF(uniqueFileName)) {
@@ -211,38 +211,38 @@ const uploadImage = async (): Promise<void> => {
       imageUrlMarkdown = `![${selectedFileName.value}](${baseUrl}/static/images/${uniqueFileName})`;
     }
 
-    emit('uploaded', imageUrlMarkdown, uniqueFileName);
+    emit("uploaded", imageUrlMarkdown, uniqueFileName);
     imageStore.initList();
     imageClear();
   } catch (error) {
     console.error(error);
     emit(
-      'message',
-      'アップロードエラー。ファイルのサイズが大きすぎる、又はサポート対象外のファイルです。',
+      "message",
+      "アップロードエラー。ファイルのサイズが大きすぎる、又はサポート対象外のファイルです。",
     );
   } finally {
     selectedImageBlob.value = null;
     selectedPosterBlob.value = null;
-    selectedFileName.value = '';
+    selectedFileName.value = "";
     selectedFileSize.value = null;
-    selectedMimeType.value = '';
-    selectedPosterFileName.value = '';
-    selectedAssetKind.value = '';
+    selectedMimeType.value = "";
+    selectedPosterFileName.value = "";
+    selectedAssetKind.value = "";
     isImageSendNow.value = false;
     emitProgress(emptyProgressState());
   }
 };
 
 const imageClear = (): void => {
-  selectedFileName.value = '';
+  selectedFileName.value = "";
   selectedFileSize.value = null;
-  selectedMimeType.value = '';
+  selectedMimeType.value = "";
   selectedImageBlob.value = null;
   selectedPosterBlob.value = null;
-  selectedPosterFileName.value = '';
-  selectedAssetKind.value = '';
+  selectedPosterFileName.value = "";
+  selectedAssetKind.value = "";
   if (!fileInputRef.value || fileInputRef.value.value === null) return;
-  fileInputRef.value.value = '';
+  fileInputRef.value.value = "";
 };
 </script>
 
@@ -252,8 +252,8 @@ const imageClear = (): void => {
     <p class="upload-lead">
       追加したいファイルを 1 件選択してアップロードします。対応形式: {{ acceptedFileTypes }}
     </p>
-    <p v-if="isEditingMarker" class="upload-context">
-      アップロード後、マーカー編集欄へそのまま挿入できます。
+    <p v-if="isEditingMapObject" class="upload-context">
+      アップロード後、編集中の内容欄へそのまま挿入できます。
     </p>
 
     <div class="upload-panel">
@@ -279,7 +279,9 @@ const imageClear = (): void => {
           <div class="summary-meta">
             <span class="meta-chip">{{ selectedFileTypeLabel }}</span>
             <span class="meta-chip">{{ formatFileSize(selectedFileSize) }}</span>
-            <span v-if="selectedMimeType" class="meta-chip meta-chip-muted">{{ selectedMimeType }}</span>
+            <span v-if="selectedMimeType" class="meta-chip meta-chip-muted">{{
+              selectedMimeType
+            }}</span>
           </div>
         </template>
         <p v-else class="empty-text">
@@ -288,10 +290,20 @@ const imageClear = (): void => {
       </div>
 
       <div class="action-row">
-        <button type="submit" class="btn-file-upload" :disabled="!isUploadReady" @click.prevent="uploadImage()">
-          {{ isImageSendNow ? 'アップロード中...' : 'アップロード' }}
+        <button
+          type="submit"
+          class="btn-file-upload"
+          :disabled="!isUploadReady"
+          @click.prevent="uploadImage()"
+        >
+          {{ isImageSendNow ? "アップロード中..." : "アップロード" }}
         </button>
-        <button type="button" class="btn-secondary" :disabled="!selectedFileName" @click.prevent="imageClear()">
+        <button
+          type="button"
+          class="btn-secondary"
+          :disabled="!selectedFileName"
+          @click.prevent="imageClear()"
+        >
           選択をクリア
         </button>
       </div>

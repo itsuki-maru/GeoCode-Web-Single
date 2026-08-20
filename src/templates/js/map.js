@@ -447,7 +447,9 @@ function renderVisibleShapes() {
 
     drawnShapesGroup.removeLayer(layer);
     if (Array.isArray(layer.measurementMarkers)) {
-      layer.measurementMarkers.forEach((marker) => drawnShapesGroup.removeLayer(marker));
+      layer.measurementMarkers.forEach((marker) =>
+        drawnShapesGroup.removeLayer(marker),
+      );
     }
   });
 
@@ -465,7 +467,7 @@ function applyMapObjectFilter(markerIds, shapeIds) {
 }
 const SHAPE_STYLE = {
   color: "#d94841",
-  weight: 4,
+  weight: 5,
   fillColor: "#d94841",
   fillOpacity: 0.16,
 };
@@ -544,14 +546,20 @@ function setDrawStatus(message, isError = false, forceVisible = false) {
 // 図形種別ごとの既定スタイルを返す
 // GeoJSON から図形スタイルを取り出す
 // 選択色から図形スタイルを作る
-function buildShapeStyleFromColor(shapeType, color, lineType = "solid") {
+function buildShapeStyleFromColor(
+  shapeType,
+  color,
+  lineType = "solid",
+  weight = SHAPE_STYLE.weight,
+) {
   const normalizedColor = normalizeShapeColor(color, SHAPE_STYLE.color);
   const defaultStyle = getDefaultShapeStyle(shapeType);
   const dashArray = getShapeDashArray(lineType);
+  const normalizedWeight = normalizeShapeWeight(weight, defaultStyle.weight);
   if (shapeType === "polyline") {
     return {
       color: normalizedColor,
-      weight: defaultStyle.weight,
+      weight: normalizedWeight,
       dashArray,
       fill: false,
     };
@@ -559,7 +567,7 @@ function buildShapeStyleFromColor(shapeType, color, lineType = "solid") {
 
   return {
     color: normalizedColor,
-    weight: defaultStyle.weight,
+    weight: normalizedWeight,
     dashArray,
     fillColor: normalizedColor,
     fillOpacity: defaultStyle.fillOpacity,
@@ -576,7 +584,7 @@ function buildShapeGeoJson(
   const geojson = layer.toGeoJSON();
   const normalizedStyle = {
     color: normalizeShapeColor(shapeStyle?.color, SHAPE_STYLE.color),
-    weight: Number(shapeStyle?.weight) || SHAPE_STYLE.weight,
+    weight: normalizeShapeWeight(shapeStyle?.weight, SHAPE_STYLE.weight),
     dashArray: normalizeShapeDashArray(shapeStyle?.dashArray),
   };
 
@@ -1511,6 +1519,7 @@ function openShapeNameEditor(layer) {
   const selectedLineType = getShapeLineTypeFromDashArray(
     layer.shapeStyle?.dashArray,
   );
+  const selectedWeight = normalizeShapeWeight(layer.shapeStyle?.weight);
 
   // 図形の編集ポップアップ（カラーピッカーはブラウザ標準のカラーピッカーを呼び出して使用）
   const editorPopup = L.popup({
@@ -1552,6 +1561,21 @@ function openShapeNameEditor(layer) {
                         ${buildShapeLineTypeOptions(selectedLineType)}
                     </select>
                 </div>
+                <div class="shape-name-editor-weight-row">
+                    <label class="shape-name-editor-weight-label" for="shape-weight-editor-input">太さ</label>
+                    <input
+                        type="range"
+                        class="shape-name-editor-weight-input"
+                        id="shape-weight-editor-input"
+                        min="${SHAPE_WEIGHT_MIN}"
+                        max="${SHAPE_WEIGHT_MAX}"
+                        step="1"
+                        value="${selectedWeight}"
+                        aria-label="図形の線の太さ"
+                        aria-valuetext="${selectedWeight}px"
+                    />
+                    <output class="shape-name-editor-weight-value" id="shape-weight-editor-value" for="shape-weight-editor-input">${selectedWeight}px</output>
+                </div>
                 <label class="shape-name-editor-memo-label" for="shape-memo-editor-input">メモ（Markdown）</label>
                 <textarea
                     class="shape-name-editor-memo-input"
@@ -1578,6 +1602,8 @@ function openShapeNameEditor(layer) {
     const lineTypeSelect = document.getElementById(
       "shape-line-type-editor-select",
     );
+    const weightInput = document.getElementById("shape-weight-editor-input");
+    const weightValue = document.getElementById("shape-weight-editor-value");
     const memoInput = document.getElementById("shape-memo-editor-input");
     const saveButton = document.getElementById("shape-name-editor-save");
     const cancelButton = document.getElementById("shape-name-editor-cancel");
@@ -1590,6 +1616,8 @@ function openShapeNameEditor(layer) {
       !layerSelect ||
       !colorInput ||
       !lineTypeSelect ||
+      !weightInput ||
+      !weightValue ||
       !memoInput ||
       !saveButton ||
       !cancelButton ||
@@ -1606,6 +1634,14 @@ function openShapeNameEditor(layer) {
     input.focus();
     input.select();
 
+    const updateWeightValue = () => {
+      const normalizedWeight = normalizeShapeWeight(weightInput.value);
+      weightValue.value = `${normalizedWeight}px`;
+      weightInput.setAttribute("aria-valuetext", `${normalizedWeight}px`);
+    };
+    weightInput.addEventListener("input", updateWeightValue);
+    updateWeightValue();
+
     const submitEdit = async () => {
       const nextName = normalizeShapeName(input.value);
       const previousLayerId =
@@ -1615,6 +1651,7 @@ function openShapeNameEditor(layer) {
         layer.shapeType,
         colorInput.value,
         lineTypeSelect.value,
+        weightInput.value,
       );
       const nextGeoJson = buildShapeGeoJson(
         layer,
@@ -1636,9 +1673,7 @@ function openShapeNameEditor(layer) {
         applyShapeStyle(layer);
         refreshShapeMeasurementMarkers(layer);
         closeShapeNameEditor();
-        if (previousLayerId !== nextLayerId) {
-          callParentReload(nextLayerId);
-        }
+        callParentReload(previousLayerId !== nextLayerId ? nextLayerId : null);
         if (!is_master && nextLayerId !== getCurrentShapeLayerId()) {
           removeShapeMeasurementMarkers(layer);
           drawnShapesGroup.removeLayer(layer);
@@ -2915,6 +2950,7 @@ async function saveShape(
   }
   applyMeasurementVisibilityToDrawnShapesGroup();
   setDrawStatus("図形描画: 保存しました。");
+  callParentReload();
 }
 
 // 直前に削除した図形を同じレイヤへ再作成する

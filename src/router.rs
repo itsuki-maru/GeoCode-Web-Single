@@ -42,8 +42,10 @@ use crate::handler::layers::{
 };
 use crate::handler::map::{map_another_get_handler, map_get_handler, query_map_objects_handler};
 use crate::handler::marker_forms::{
-    get_marker_form_config_handler, public_marker_form_get_handler, rotate_marker_form_url_handler,
-    submit_marker_form_handler, update_marker_form_config_handler,
+    get_marker_form_config_handler, get_shape_form_config_handler, public_marker_form_get_handler,
+    public_shape_form_get_handler, rotate_marker_form_url_handler, rotate_shape_form_url_handler,
+    submit_marker_form_handler, submit_shape_form_handler, update_marker_form_config_handler,
+    update_shape_form_config_handler,
 };
 use crate::handler::marker_icons::{
     delete_marker_icon_handler, get_marker_icons_handler, search_marker_icons_handler,
@@ -154,6 +156,14 @@ pub fn build_router(
         .route("/shape", post(create_shape_handler))
         .route("/shape/{shape_id}", put(update_shape_handler))
         .route("/shape/{shape_id}", delete(delete_shape_handler))
+        .route(
+            "/shape/{shape_id}/form",
+            get(get_shape_form_config_handler).put(update_shape_form_config_handler),
+        )
+        .route(
+            "/shape/{shape_id}/form/rotate-url",
+            post(rotate_shape_form_url_handler),
+        )
         .route("/file/export/{layer_id}", get(export_json_handler))
         .route("/admin", get(admin_index_get_handler))
         .route("/admin/users", get(get_users_handler))
@@ -237,6 +247,10 @@ pub fn build_router(
         .route(
             "/forms/{public_id}",
             get(public_marker_form_get_handler).post(submit_marker_form_handler),
+        )
+        .route(
+            "/shape-forms/{public_id}",
+            get(public_shape_form_get_handler).post(submit_shape_form_handler),
         )
         .layer(DefaultBodyLimit::max(6 * 1024 * 1024));
 

@@ -37,7 +37,8 @@ pub async fn marker_get_handler(
                 marker_name,
                 latitude,
                 longitude,
-                detail
+                detail,
+                update_at
             FROM marker_info_model
             WHERE user_id = $1 AND layer_id = $2
             "#,
@@ -56,7 +57,8 @@ pub async fn marker_get_handler(
                 marker_name,
                 latitude,
                 longitude,
-                detail
+                detail,
+                update_at
             FROM marker_info_model
             WHERE user_id = $1
             "#,
@@ -291,7 +293,8 @@ pub async fn query_marker_handler(
                         marker_name,
                         latitude,
                         longitude,
-                        detail
+                        detail,
+                        update_at
                     FROM marker_info_model
                     WHERE user_id = $1",
                     user_id
@@ -308,7 +311,8 @@ pub async fn query_marker_handler(
                         marker_name,
                         latitude,
                         longitude,
-                        detail
+                        detail,
+                        update_at
                     FROM marker_info_model
                     WHERE user_id = $1
                     AND (marker_name LIKE $2 ESCAPE '\\' OR detail LIKE $2 ESCAPE '\\')",
@@ -327,7 +331,8 @@ pub async fn query_marker_handler(
                         marker_name,
                         latitude,
                         longitude,
-                        detail
+                        detail,
+                        update_at
                     FROM marker_info_model
                     WHERE user_id = $1
                     AND (marker_name LIKE $2 ESCAPE '\\' OR detail LIKE $2 ESCAPE '\\')
@@ -352,7 +357,8 @@ pub async fn query_marker_handler(
                         marker_name,
                         latitude,
                         longitude,
-                        detail
+                        detail,
+                        update_at
                     FROM marker_info_model
                     WHERE user_id = $1 AND layer_id = $2",
                     user_id,
@@ -370,7 +376,8 @@ pub async fn query_marker_handler(
                         marker_name,
                         latitude,
                         longitude,
-                        detail
+                        detail,
+                        update_at
                     FROM marker_info_model
                     WHERE user_id = $1 AND layer_id = $2
                     AND (marker_name LIKE $3 ESCAPE '\\' OR detail LIKE $3 ESCAPE '\\')",
@@ -390,7 +397,8 @@ pub async fn query_marker_handler(
                         marker_name,
                         latitude,
                         longitude,
-                        detail
+                        detail,
+                        update_at
                     FROM marker_info_model
                     WHERE user_id = $1 AND layer_id = $2
                     AND (marker_name LIKE $3 ESCAPE '\\' OR detail LIKE $3 ESCAPE '\\')
