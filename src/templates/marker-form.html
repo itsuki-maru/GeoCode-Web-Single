@@ -210,7 +210,7 @@
         </main>
         <script>
             const schema = {{ form_schema | json_encode_for_html | safe }};
-            const publicId = {{ public_id | json_encode_for_html | safe }};
+            const submissionPath = {{ submission_path | json_encode_for_html | safe }};
             const isPasswordProtected = {{ is_password_protected | json_encode_for_html | safe }};
             const imageFiles = new Map();
             const fieldsRoot = document.getElementById("fields");
@@ -394,7 +394,7 @@
                     imageFiles.forEach((image, fieldId) => {
                         formData.append(`image__${fieldId}`, image.blob, image.filename);
                     });
-                    const response = await fetch(`/forms/${publicId}`, {
+                    const response = await fetch(submissionPath, {
                         method: "POST",
                         body: formData,
                     });

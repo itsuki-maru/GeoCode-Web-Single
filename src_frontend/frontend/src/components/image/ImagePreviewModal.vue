@@ -66,7 +66,12 @@ const onDelete = async (): Promise<void> => {
   <BaseModal :isOpen="isOpen" :zIndex="readOnly ? 15 : 2" @close="emit('close')">
     <div class="preview-content">
       <div class="image-preview">
-        <video v-if="imageUrl && isMP4(imageFilename)" controls :src="imageUrl" id="img-preview"></video>
+        <video
+          v-if="imageUrl && isMP4(imageFilename)"
+          controls
+          :src="imageUrl"
+          id="img-preview"
+        ></video>
         <img v-else-if="imageUrl" :src="imageUrl" id="img-preview" alt="プレビュー" />
       </div>
       <div class="btn-zone" v-if="!readOnly">

@@ -5,6 +5,7 @@ import { AxiosError } from "axios";
 import { useRouter } from "vue-router";
 import type { QueryForm, UploadProgressState } from "@/interface";
 import { useMapObjectStore } from "@/stores/mapobjects";
+import { useShapeStore } from "@/stores/shapes";
 import { useLayersStore } from "@/stores/layers";
 import { useImageStore } from "@/stores/images";
 import { authCheckUrl, getMasterLayerIdUrl, imageDeleteUrl, disableTokenUrl } from "@/router/urls";
@@ -22,8 +23,8 @@ import ConfirmModal from "@/components/common/ConfirmModal.vue";
 import MapToolbar from "@/components/map/MapToolbar.vue";
 import MapIframe from "@/components/map/MapIframe.vue";
 import FullScreenMapModal from "@/components/map/FullScreenMapModal.vue";
-import MarkerTable from "@/components/marker/MarkerTable.vue";
-import MarkerEditModal from "@/components/marker/MarkerEditModal.vue";
+import MapObjectTable from "@/components/map-object/MapObjectTable.vue";
+import MapObjectEditModal from "@/components/map-object/MapObjectEditModal.vue";
 import LayerCreateModal from "@/components/layer/LayerCreateModal.vue";
 import LayerListModal from "@/components/layer/LayerListModal.vue";
 import LayerRenameModal from "@/components/layer/LayerRenameModal.vue";
@@ -66,6 +67,8 @@ const layersStore = useLayersStore();
 layersStore.initList();
 const mapobjStore = useMapObjectStore();
 mapobjStore.initList();
+const shapeStore = useShapeStore();
+void shapeStore.queryShapes();
 
 const layerList = computed(() => layersStore.layersList);
 
@@ -73,7 +76,7 @@ const layerList = computed(() => layersStore.layersList);
 const activeLayer = ref("");
 const masterLayerId = ref("");
 const srcUrl = ref("");
-const markerQueryFormData = ref<QueryForm>({ query1: "", query2: "" });
+const mapObjectQueryFormData = ref<QueryForm>({ query1: "", query2: "" });
 
 const getMasterLayerId = async (): Promise<void> => {
   try {
@@ -118,9 +121,12 @@ const reloadMap = async (mapUrl: string, absolute: boolean = false): Promise<voi
   await apiClient.get(authCheckUrl);
   srcUrl.value = mapUrl;
   if (absolute) {
-    markerQueryFormData.value = { query1: "", query2: "" };
+    mapObjectQueryFormData.value = { query1: "", query2: "" };
     const isMaster = activeLayer.value === masterLayerId.value;
-    await mapobjStore.queryMapObject(activeLayer.value, isMaster);
+    await Promise.all([
+      mapobjStore.queryMapObject(activeLayer.value, isMaster),
+      shapeStore.queryShapes(activeLayer.value, isMaster),
+    ]);
     mapIframeRef.value?.filterMapObjects(null, null);
   }
 };
@@ -135,8 +141,8 @@ const getMarker = (id: string): void => {
   );
 };
 
-const focusMarker = (id: string, lat: number, lng: number): void => {
-  mapIframeRef.value?.focusMarker(id, lat, lng);
+const focusObject = (type: "marker" | "shape", id: string, lat: number, lng: number): void => {
+  mapIframeRef.value?.focusObject(type, id, lat, lng);
   if (isHttpsProtocol.value) {
     navigator.clipboard.writeText(`${lat},${lng}`);
   }
@@ -147,9 +153,9 @@ const filterMapObjects = (): void => {
   mapIframeRef.value?.filterMapObjects(markerIds, mapobjStore.filteredShapeIds);
 };
 
-const handleMarkerSearch = async (query: QueryForm, reset: boolean = false): Promise<void> => {
+const handleMapObjectSearch = async (query: QueryForm, reset: boolean = false): Promise<void> => {
   try {
-    markerQueryFormData.value = { ...query };
+    mapObjectQueryFormData.value = { ...query };
     if (reset) {
       await mapobjStore.queryWordMapObject("", "", activeLayer.value);
     } else {
@@ -186,7 +192,8 @@ const messageText = ref("");
 const showFunctionContent = ref(false);
 const isOpenToolbar = ref(false);
 const isOpenEditModal = ref(false);
-const selectedMarkerId = ref("");
+const selectedObjectId = ref("");
+const selectedObjectType = ref<"marker" | "shape">("marker");
 const showImageUploadModal = ref(false);
 const showImageListModal = ref(false);
 const imagePreviewModal = ref(false);
@@ -233,20 +240,24 @@ const onOpenCloseFunctionModal = async (): Promise<void> => {
   } else {
     showFunctionContent.value = true;
     const isMaster = activeLayer.value === masterLayerId.value;
-    await mapobjStore.queryMapObject(activeLayer.value, isMaster);
+    await Promise.all([
+      mapobjStore.queryMapObject(activeLayer.value, isMaster),
+      shapeStore.queryShapes(activeLayer.value, isMaster),
+    ]);
   }
 };
 
-// --- マーカー編集 ---
-const markerEditModalRef = ref<InstanceType<typeof MarkerEditModal> | null>(null);
+// --- 地図オブジェクト編集 ---
+const mapObjectEditModalRef = ref<InstanceType<typeof MapObjectEditModal> | null>(null);
 
-const openEditModal = (id: string): void => {
-  selectedMarkerId.value = id;
+const openEditModal = (type: "marker" | "shape", id: string): void => {
+  selectedObjectType.value = type;
+  selectedObjectId.value = id;
   isOpenEditModal.value = true;
 };
 
 const closeEditModal = (): void => {
-  selectedMarkerId.value = "";
+  selectedObjectId.value = "";
   isOpenEditModal.value = false;
 };
 
@@ -262,6 +273,20 @@ const handleMarkerUpdated = (id: string, name: string, detail: string, layerId: 
   showMessage("更新しました。");
 };
 
+const handleShapeUpdated = (
+  layerId: string,
+  latitude: number | null,
+  longitude: number | null,
+): void => {
+  const isMaster = layerId === masterLayerId.value;
+  const centerParams =
+    latitude !== null && longitude !== null ? `&latitude=${latitude}&longitude=${longitude}` : "";
+  reloadMap(`${baseUrl}/map?layer=${layerId}&is_master=${isMaster}${centerParams}`);
+  activeLayer.value = layerId;
+  isOpenEditModal.value = false;
+  showMessage("更新しました。");
+};
+
 const handleDeleteMarker = (id: string): void => {
   mapobjStore.deleteMapObject(id);
   showMessage("削除しました。");
@@ -272,7 +297,7 @@ const handleDeleteMarker = (id: string): void => {
 // --- 画像管理 ---
 const handleImageUploaded = (markdownLink: string, uniqueFileName: string): void => {
   if (isOpenEditModal.value) {
-    markerEditModalRef.value?.insertUploadedMarkdown(markdownLink);
+    mapObjectEditModalRef.value?.insertUploadedMarkdown(markdownLink);
     showMessage("アップロード完了。画像を挿入しました。");
   } else {
     uploadedUrl.value = markdownLink;
@@ -595,15 +620,15 @@ watch(
             </div>
           </div>
 
-          <MarkerTable
+          <MapObjectTable
             :activeLayer="activeLayer"
-            :markerQueryFormData="markerQueryFormData"
-            @editMarker="openEditModal"
-            @focusMarker="focusMarker"
+            :mapObjectQueryFormData="mapObjectQueryFormData"
+            @editObject="openEditModal"
+            @focusObject="focusObject"
             @deleteMarker="handleDeleteMarker"
             @message="showMessage"
-            @markerSearch="handleMarkerSearch"
-            @update:markerQueryFormData="markerQueryFormData = $event"
+            @mapObjectSearch="handleMapObjectSearch"
+            @update:mapObjectQueryFormData="mapObjectQueryFormData = $event"
           />
         </div>
         <button id="function-close-elm" @click="onOpenCloseFunctionModal">閉じる</button>
@@ -621,14 +646,16 @@ watch(
     @previewImage="handlePreviewImageFromIframe"
   />
 
-  <!-- マーカー編集モーダル -->
-  <MarkerEditModal
-    ref="markerEditModalRef"
+  <!-- 地図オブジェクト編集モーダル -->
+  <MapObjectEditModal
+    ref="mapObjectEditModalRef"
     :isOpen="isOpenEditModal"
-    :markerId="selectedMarkerId"
+    :targetType="selectedObjectType"
+    :targetId="selectedObjectId"
     :isHttpsProtocol="isHttpsProtocol"
     @close="closeEditModal"
     @updated="handleMarkerUpdated"
+    @shapeUpdated="handleShapeUpdated"
     @openImageUpload="showImageUploadModal = true"
     @openImageList="showImageListModal = true"
     @message="showMessage"
@@ -677,7 +704,7 @@ watch(
   <!-- 画像アップロードモーダル -->
   <ImageUploadModal
     :isOpen="showImageUploadModal"
-    :isEditingMarker="isOpenEditModal"
+    :isEditingMapObject="isOpenEditModal"
     @close="showImageUploadModal = false"
     @uploaded="handleImageUploaded"
     @message="showMessage"

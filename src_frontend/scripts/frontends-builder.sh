@@ -48,13 +48,17 @@ distributionDirOld="$projectRoot/dist"
 # mainディレクトリ
 mainDir="$projectDir/main"
 mainDistDir="$mainDir/dist"
-
 mainDistAssetsDir="$mainDir/dist/assets/"
 faviconDir="$mainDir/dist/favicon.ico"
+faviconMovedDir="$mainDir/dist/assets/favicon.ico"
 publicImageDir="$mainDir/dist/*.png"
+publicImageMovedDir="$mainDir/dist/assets/"
 qrcodeJsDir="$mainDir/dist/qrcode.min.js"
+qrcodeJsMovedDir="$mainDir/dist/assets/qrcode.min.js"
 xssJsDir="$mainDir/dist/xss.min.js"
+xssJsMovedDir="$mainDir/dist/assets/xss.min.js"
 githubCssDir="$mainDir/dist/github.css"
+githubCssMovedDir="$mainDir/dist/assets/github.css"
 manifestJsonDir="$mainDir/dist/manifest.json"
 manifestJsonMovedDir="$mainDir/dist/assets/manifest.json"
 manifestJsonIPadDir="$mainDir/dist/manifest-tab.json"
@@ -111,7 +115,7 @@ else
     echo "Directory '$TARGET_DIR' exists, but -d option was not provided. No action taken."
 fi
 
-# node_modulesが存在しなければnpm ciを実行
+# node_modulesが存在しなければnpm installを実行
 if [ ! -d "$nodeModules" ]; then
     npm ci
 else
@@ -149,7 +153,7 @@ else
     echo "Directory '$TARGET_DIR' exists, but -d option was not provided. No action taken."
 fi
 
-# node_modulesが存在しなければnpm ciを実行
+# node_modulesが存在しなければnpm installを実行
 if [ ! -d "$nodeModules" ]; then
     npm ci
 else
@@ -191,7 +195,7 @@ else
     echo "Directory '$TARGET_DIR' exists, but -d option was not provided. No action taken."
 fi
 
-# node_modulesが存在しなければnpm ciを実行
+# node_modulesが存在しなければnpm installを実行
 if [ ! -d "$nodeModules" ]; then
     npm ci
 else
@@ -220,11 +224,15 @@ cp -r $frontendMobileDistDir ./
 cp -r $frontendAdminDistDir ./
 
 # favicon.icoをassets配下に移動
-mv $faviconDir $mainDistAssetsDir
-mv $publicImageDir $mainDistAssetsDir
-mv $qrcodeJsDir $mainDistAssetsDir
-mv $xssJsDir $mainDistAssetsDir
-mv $githubCssDir $mainDistAssetsDir
+mv $faviconDir $faviconMovedDir
+# アイコンファイル（開発時にpublicに配置）をassets配下に移動
+mv $publicImageDir $publicImageMovedDir
+# qrcide.min.js（開発時にpublicに配置）をassets配下に移動
+mv $qrcodeJsDir $qrcodeJsMovedDir
+# xss.min.js（開発時にpublicに配置）をassets配下に移動
+mv $xssJsDir $xssJsMovedDir
+# github.css（開発時にpublicに配置）をassets配下に移動
+mv $githubCssDir $githubCssMovedDir
 
 cd $mainDistDir
 
@@ -240,6 +248,12 @@ mv $manifestJsonDir $manifestJsonMovedDir
 # manifest-tab.jsonをassets配下に移動
 mv $manifestJsonIPadDir $manifestJsonIPadMovedDir
 cp -f $rustTemplateJsDir $mainDistAssetsDir
+
+# 静的ファイルを配置移動
+mv $faviconDir $mainDistAssetsDir
+mv $pngFiles $mainDistAssetsDir
+mv $jsFiles $mainDistAssetsDir
+mv $jsonFiles $mainDistAssetsDir
 
 # フロントエンド成果物配布用ディレクトリ作成
 cd $mainDistDir

@@ -13,8 +13,10 @@ use geocode_web_single::{
     build_tera_extension,
     config::CONFIG,
     handler::marker_forms::{
-        get_marker_form_config_handler, public_marker_form_get_handler, submit_marker_form_handler,
-        update_marker_form_config_handler,
+        get_marker_form_config_handler, get_shape_form_config_handler,
+        public_marker_form_get_handler, public_shape_form_get_handler, submit_marker_form_handler,
+        submit_shape_form_handler, update_marker_form_config_handler,
+        update_shape_form_config_handler,
     },
     model::{MarkerFormConfigUpdate, MarkerFormField, MarkerFormSchema},
 };
@@ -129,6 +131,152 @@ async fn insert_marker(pool: &SqlitePool, user_id: &str, layer_id: &str) -> Stri
     .await
     .expect("marker should be inserted");
     marker_id
+}
+
+async fn insert_shape(pool: &SqlitePool, user_id: &str, layer_id: &str) -> String {
+    let shape_id = uuid::Uuid::now_v7().to_string();
+    let now = Utc::now().naive_utc();
+    sqlx::query(
+        r#"
+        INSERT INTO shape_model (id, user_id, layer_id, shape_type, name, geojson, created_at, updated_at)
+        VALUES ($1, $2, $3, 'polyline', '巡回経路', $4, $5, $5)
+        "#,
+    )
+    .bind(&shape_id)
+    .bind(user_id)
+    .bind(layer_id)
+    .bind(sqlx::types::Json(json!({
+        "type": "Feature",
+        "properties": { "memo": "既存メモ", "style": { "weight": 4 } },
+        "geometry": { "type": "LineString", "coordinates": [[139.0, 35.0], [139.1, 35.1]] }
+    })))
+    .bind(now)
+    .execute(pool)
+    .await
+    .expect("shape should be inserted");
+    shape_id
+}
+
+async fn post_shape_form(app: &Router, public_id: &str, submission: Value) -> StatusCode {
+    let (content_type, body) = multipart_body(&submission, None);
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/shape-forms/{public_id}"))
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
+                .expect("multipart request should build"),
+        )
+        .await
+        .expect("shape form request should complete")
+        .status()
+}
+
+async fn get_shape_form(app: &Router, public_id: &str) -> (StatusCode, String) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/shape-forms/{public_id}"))
+                .body(Body::empty())
+                .expect("shape form request should build"),
+        )
+        .await
+        .expect("shape form request should complete");
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("shape form response should be readable");
+    (status, String::from_utf8_lossy(&body).into_owned())
+}
+
+#[tokio::test]
+async fn shape_form_appends_markdown_without_changing_geometry() {
+    let pool = common::test_pool().await;
+    common::init_test_env();
+    let owner_id = common::create_test_user(&pool, "shape-form-owner").await;
+    let other_id = common::create_test_user(&pool, "shape-form-other").await;
+    let layer_id = common::master_layer_id(&pool, &owner_id).await;
+    let shape_id = insert_shape(&pool, &owner_id, &layer_id).await;
+    assert!(
+        get_shape_form_config_handler(
+            Extension(other_id),
+            Extension(pool.clone()),
+            Path(shape_id.clone()),
+        )
+        .await
+        .is_err()
+    );
+    let saved = update_shape_form_config_handler(
+        Extension(owner_id),
+        Extension(pool.clone()),
+        Path(shape_id.clone()),
+        Json(MarkerFormConfigUpdate {
+            enabled: true,
+            form_title: "経路報告".into(),
+            form_description: String::new(),
+            form_schema: MarkerFormSchema {
+                fields: vec![MarkerFormField {
+                    id: "comment".into(),
+                    label: "コメント".into(),
+                    field_type: "textarea".into(),
+                    required: true,
+                    max_length: Some(200),
+                    choices: vec![],
+                }],
+            },
+            password_mode: "keep".into(),
+            password: None,
+        }),
+    )
+    .await
+    .expect("shape form should be saved")
+    .0;
+    let public_id = saved
+        .public_path
+        .expect("public path should exist")
+        .trim_start_matches("/shape-forms/")
+        .to_string();
+    let app = Router::new()
+        .route(
+            "/shape-forms/{public_id}",
+            get(public_shape_form_get_handler).post(submit_shape_form_handler),
+        )
+        .layer(Extension(
+            build_tera_extension().expect("embedded templates should load"),
+        ))
+        .layer(Extension(pool.clone()));
+    let (get_status, form_html) = get_shape_form(&app, &public_id).await;
+    assert_eq!(get_status, StatusCode::OK);
+    assert!(form_html.contains(&format!("/shape-forms/{public_id}")));
+    let status = post_shape_form(
+        &app,
+        &public_id,
+        json!({ "values": { "comment": "異常なし" } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let geojson: sqlx::types::Json<Value> =
+        sqlx::query_scalar("SELECT geojson FROM shape_model WHERE id = $1")
+            .bind(&shape_id)
+            .fetch_one(&pool)
+            .await
+            .expect("shape geojson should load");
+    assert_eq!(geojson["geometry"]["type"], "LineString");
+    assert_eq!(geojson["properties"]["style"]["weight"], 4);
+    let memo = geojson["properties"]["memo"].as_str().unwrap_or_default();
+    assert!(memo.starts_with("既存メモ"));
+    assert!(memo.contains("## フォーム投稿: 経路報告"));
+    assert!(memo.contains("### コメント"));
+    assert!(memo.contains("異常なし"));
+    let submissions: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM shape_form_submission_model WHERE shape_id = $1")
+            .bind(&shape_id)
+            .fetch_one(&pool)
+            .await
+            .expect("submission count should load");
+    assert_eq!(submissions, 1);
 }
 
 #[tokio::test]

@@ -43,7 +43,7 @@ async fn migrations_create_schema_and_record_versions() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 7);
+    assert_eq!(migration_count, 8);
 
     let external_site_urls_table_count: i64 = sqlx::query_scalar(
         r#"
@@ -93,6 +93,21 @@ async fn migrations_create_schema_and_record_versions() {
     .await
     .expect("marker form image index count should be returned");
     assert_eq!(marker_form_image_index_count, 1);
+
+    let shape_form_table_count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*) FROM sqlite_master
+        WHERE type = 'table' AND name IN (
+            'shape_form_config_model',
+            'shape_form_submission_model',
+            'shape_form_rate_limit_model'
+        )
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("shape form tables should be returned");
+    assert_eq!(shape_form_table_count, 3);
 }
 
 #[tokio::test]
@@ -110,7 +125,7 @@ async fn migrations_are_idempotent() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 7);
+    assert_eq!(migration_count, 8);
 }
 
 #[tokio::test]
@@ -193,7 +208,7 @@ async fn migrations_record_versions_for_existing_schema() {
     .await
     .expect("migration rows should be returned");
 
-    assert_eq!(rows.len(), 7);
+    assert_eq!(rows.len(), 8);
     assert_eq!(rows[0].get::<i64, _>("version"), 1);
     assert_eq!(rows[0].get::<String, _>("name"), "create_initial_schema");
     assert_eq!(rows[1].get::<i64, _>("version"), 2);
@@ -221,6 +236,8 @@ async fn migrations_record_versions_for_existing_schema() {
     );
     assert_eq!(rows[6].get::<i64, _>("version"), 7);
     assert_eq!(rows[6].get::<String, _>("name"), "harden_marker_forms");
+    assert_eq!(rows[7].get::<i64, _>("version"), 8);
+    assert_eq!(rows[7].get::<String, _>("name"), "create_shape_form_models");
 
     let auth_version: i64 =
         sqlx::query_scalar("SELECT auth_version FROM user_model WHERE id = 'legacy-user'")

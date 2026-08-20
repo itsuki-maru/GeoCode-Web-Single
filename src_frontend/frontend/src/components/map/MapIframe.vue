@@ -25,8 +25,13 @@ const postMessageToMap = (messageData: Record<string, unknown>): void => {
   }
 };
 
-const focusMarker = (id: string, lat: number, lng: number): void => {
-  postMessageToMap({ id: id, lat: lat, lng: lng, type: "focus" });
+const focusObject = (
+  objectType: "marker" | "shape",
+  id: string,
+  lat: number,
+  lng: number,
+): void => {
+  postMessageToMap({ id: objectType === "marker" ? id : "", lat, lng, type: "focus" });
 };
 
 const filterMapObjects = (markerIds: string[] | null, shapeIds: string[] | null): void => {
@@ -46,6 +51,18 @@ const filterMapObjects = (markerIds: string[] | null, shapeIds: string[] | null)
 const handleIframeLoad = (): void => {
   if (filteredObjectIds.value.markerIds !== null || filteredObjectIds.value.shapeIds !== null) {
     filterMapObjects(filteredObjectIds.value.markerIds, filteredObjectIds.value.shapeIds);
+  }
+  const mapUrl = new URL(props.srcUrl, window.location.origin);
+  const latitude = Number(mapUrl.searchParams.get("latitude"));
+  const longitude = Number(mapUrl.searchParams.get("longitude"));
+  if (
+    !mapUrl.searchParams.has("marker_id") &&
+    mapUrl.searchParams.has("latitude") &&
+    mapUrl.searchParams.has("longitude") &&
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude)
+  ) {
+    focusObject("shape", "", latitude, longitude);
   }
 };
 
@@ -72,7 +89,7 @@ onUnmounted(() => {
   window.removeEventListener("message", handleMessage);
 });
 
-defineExpose({ focusMarker, filterMapObjects });
+defineExpose({ focusObject, filterMapObjects });
 </script>
 
 <template>

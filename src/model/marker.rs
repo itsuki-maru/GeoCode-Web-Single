@@ -10,6 +10,7 @@ pub struct MarkerObject {
     pub latitude: f64,
     pub longitude: f64,
     pub detail: String,
+    pub update_at: String,
 }
 
 // マーカー情報取得クエリパラメータ

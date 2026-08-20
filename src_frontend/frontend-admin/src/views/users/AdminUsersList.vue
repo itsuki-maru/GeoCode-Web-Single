@@ -16,7 +16,8 @@ import { AxiosError } from "axios";
 
 const MIN_PASSWORD_LENGTH = 8;
 const USERNAME_PATTERN = /^[A-Za-z0-9@_.\x2D]{3,}$/;
-const USERNAME_VALIDATION_MESSAGE = "ユーザー名は3文字以上で、半角英数字、@、_、-、.のみ使用できます。";
+const USERNAME_VALIDATION_MESSAGE =
+  "ユーザー名は3文字以上で、半角英数字、@、_、-、.のみ使用できます。";
 
 // 認証のコントロール
 const authStore = useAuthStore();

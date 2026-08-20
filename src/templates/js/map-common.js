@@ -205,6 +205,25 @@ const SHAPE_LINE_TYPE_OPTIONS = [
   { value: "dash-dot", label: "一点鎖線", dashArray: "12,6,1,6" },
 ];
 
+const SHAPE_WEIGHT_MIN = 1;
+const SHAPE_WEIGHT_MAX = 10;
+
+function normalizeShapeWeight(weight, fallback = SHAPE_STYLE.weight) {
+  const numericFallback = Number(fallback);
+  const normalizedFallback = Number.isFinite(numericFallback)
+    ? Math.min(SHAPE_WEIGHT_MAX, Math.max(SHAPE_WEIGHT_MIN, numericFallback))
+    : 5;
+  if (weight === null || weight === "") {
+    return normalizedFallback;
+  }
+
+  const numericWeight = Number(weight);
+  if (!Number.isFinite(numericWeight)) {
+    return normalizedFallback;
+  }
+  return Math.min(SHAPE_WEIGHT_MAX, Math.max(SHAPE_WEIGHT_MIN, numericWeight));
+}
+
 function normalizeShapeLineType(lineType, fallback = "solid") {
   const normalizedFallback = SHAPE_LINE_TYPE_OPTIONS.some(
     (option) => option.value === fallback,
@@ -283,12 +302,15 @@ function getShapeStyleFromGeoJson(shapeType, geojson) {
   }
 
   const nextColor = normalizeShapeColor(styleRecord.color, defaultStyle.color);
-  const nextWeight = Number(styleRecord.weight);
+  const nextWeight = normalizeShapeWeight(
+    styleRecord.weight,
+    defaultStyle.weight,
+  );
   const nextDashArray = normalizeShapeDashArray(styleRecord.dashArray);
   if (shapeType === "polyline") {
     return {
       color: nextColor,
-      weight: Number.isFinite(nextWeight) ? nextWeight : defaultStyle.weight,
+      weight: nextWeight,
       dashArray: nextDashArray,
       fill: false,
     };
@@ -297,7 +319,7 @@ function getShapeStyleFromGeoJson(shapeType, geojson) {
   const nextFillOpacity = Number(styleRecord.fillOpacity);
   return {
     color: nextColor,
-    weight: Number.isFinite(nextWeight) ? nextWeight : defaultStyle.weight,
+    weight: nextWeight,
     dashArray: nextDashArray,
     fillColor: nextColor,
     fillOpacity: Number.isFinite(nextFillOpacity)

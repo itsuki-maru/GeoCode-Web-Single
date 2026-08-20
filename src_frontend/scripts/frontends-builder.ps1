@@ -1,32 +1,17 @@
 # 依存関係を更新するかのフラグオプション`-d`を引数で受け取る
 Param(
-    [switch]$d,
-    [switch]$SkipCargoBuild
+    [switch]$d
 )
-
-$ErrorActionPreference = "Stop"
-
-Function Invoke-ExternalCommand($command, $arguments)
-{
-    & $command @arguments
-    if ($LASTEXITCODE -ne 0)
-    {
-        throw "$command $($arguments -join ' ') failed with exit code $LASTEXITCODE"
-    }
-}
 
 $dependsDeleteFlag = $false
 
-if ($d)
-{
+if ($d) {
     $dependsDeleteFlag = $true
 }
 
 # パスを確認して存在すれば削除する関数
-Function CheckExistsPath($checkPath)
-{
-    if (Test-Path $checkPath)
-    {
+Function CheckExistsPath($checkPath) {
+    if (Test-Path $checkPath) {
         Remove-Item -Recurse -Force $checkPath
     }
 }
@@ -70,8 +55,7 @@ $svgFiles = Join-Path -Path $mainDir -ChildPath "dist/*.svg"
 $movedDir = Join-Path -Path $mainDir -ChildPath "dist/assets/"
 
 # 前回のビルドファイルが存在する場合は削除
-foreach ($checkPath in $mainDistDir, $frontendDistDir, $frontendMobileDistDir, $frontendAdminDistDir, $distributionDir)
-{
+foreach ($checkPath in $mainDistDir, $frontendDistDir, $frontendMobileDistDir, $frontendAdminDistDir, $distributionDir) {
     CheckExistsPath $checkPath
 }
 
@@ -81,20 +65,17 @@ Set-Location $frontendDir
 $nodeModules = Join-Path -Path $frontendDir -ChildPath  "node_modules"
 
 # 依存関係を更新する場合の処理
-if ($dependsDeleteFlag)
-{
+if ($dependsDeleteFlag) {
     CheckExistsPath $nodeModules
 }
 
-# node_modulesが存在しなければnpm ciを実行
-if (-Not (Test-Path $nodeModules))
-{
-    Invoke-ExternalCommand "npm" @("ci")
+# node_modulesが存在しなければnpm installを実行
+if (-Not (Test-Path $nodeModules)) {
+    npm install
 }
 
 # ビルド
-Invoke-ExternalCommand "npm" @("run", "type-check")
-Invoke-ExternalCommand "npm" @("run", "build-only")
+npm run build
 
 # HTMLファイルパス
 $targetHtml = Join-Path -Path $frontendDir -ChildPath "dist/index.html"
@@ -126,20 +107,17 @@ Set-Location $frontendMobileDir
 $nodeModules = Join-Path -Path $frontendMobileDir -ChildPath  "node_modules"
 
 # 依存関係を更新する場合の処理
-if ($dependsDeleteFlag)
-{
+if ($dependsDeleteFlag) {
     CheckExistsPath $nodeModules
 }
 
-# node_modulesが存在しなければnpm ciを実行
-if (-Not (Test-Path $nodeModules))
-{
-    Invoke-ExternalCommand "npm" @("ci")
+# node_modulesが存在しなければnpm installを実行
+if (-Not (Test-Path $nodeModules)) {
+    npm install
 }
 
 # ビルド
-Invoke-ExternalCommand "npm" @("run", "type-check")
-Invoke-ExternalCommand "npm" @("run", "build-only")
+npm run build
 # HTMLファイルパス
 $targetHtml = Join-Path -Path $frontendMobileDir -ChildPath "dist/index.html"
 
@@ -173,20 +151,17 @@ Set-Location $frontendAdminDir
 $nodeModules = Join-Path -Path $frontendAdminDir -ChildPath  "node_modules"
 
 # 依存関係を更新する場合の処理
-if ($dependsDeleteFlag)
-{
+if ($dependsDeleteFlag) {
     CheckExistsPath $nodeModules
 }
 
-# node_modulesが存在しなければnpm ciを実行
-if (-Not (Test-Path $nodeModules))
-{
-    Invoke-ExternalCommand "npm" @("ci")
+# node_modulesが存在しなければnpm installを実行
+if (-Not (Test-Path $nodeModules)) {
+    npm install
 }
 
 # ビルド
-Invoke-ExternalCommand "npm" @("run", "type-check")
-Invoke-ExternalCommand "npm" @("run", "build-only")
+npm run build
 # HTMLファイルパス
 $targetHtml = Join-Path -Path $frontendAdminDir -ChildPath "dist/index.html"
 
@@ -223,7 +198,4 @@ Copy-Item -Path $rustTemplatesDir -Destination $distributionDir -Recurse -Force
 
 # プロジェクトディレクトリに移動し、Rustをコンパイル
 Set-Location $prepareDistributionDir
-if (-Not $SkipCargoBuild)
-{
-    Invoke-ExternalCommand "cargo" @("build", "--release")
-}
+cargo build --release

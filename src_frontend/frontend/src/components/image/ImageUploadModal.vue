@@ -13,7 +13,7 @@ import apiClient from "@/axiosClient";
 
 const props = defineProps<{
   isOpen: boolean;
-  isEditingMarker: boolean;
+  isEditingMapObject: boolean;
   isHttpsProtocol: boolean;
 }>();
 
@@ -226,7 +226,7 @@ const uploadImage = async (): Promise<void> => {
       }
     }
 
-    if (props.isEditingMarker) {
+    if (props.isEditingMapObject) {
       emit("uploaded", imageUrlMarkdown);
       emit("message", "画像を挿入しました。");
     } else {
@@ -279,8 +279,8 @@ const imageClear = (): void => {
       <p class="upload-lead">
         追加したいファイルを 1 件選択してアップロードします。対応形式: {{ acceptedFileTypes }}
       </p>
-      <p v-if="isEditingMarker" class="upload-context">
-        アップロード後、マーカー編集欄へそのまま挿入できます。
+      <p v-if="isEditingMapObject" class="upload-context">
+        アップロード後、編集中の内容欄へそのまま挿入できます。
       </p>
 
       <div class="upload-panel">

@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { ref, watch, computed } from "vue";
 import ConfirmModal from "@/components/common/ConfirmModal.vue";
-import MarkerFormSettingsModal from "@/components/marker/MarkerFormSettingsModal.vue";
+import MapObjectFormSettingsModal from "@/components/map-object/MapObjectFormSettingsModal.vue";
 import { useMapObjectStore } from "@/stores/mapobjects";
-import type { LayersData } from "@/interface";
+import { useShapeStore } from "@/stores/shapes";
+import { getShapeCenter } from "@/composables/useShapeCenter";
+import type { LayersData, ShapeGeoJson } from "@/interface";
 import { baseUrl, assetsUrl } from "@/setting";
 
 const props = defineProps<{
   isOpen: boolean;
-  markerId: string;
+  targetType: "marker" | "shape";
+  targetId: string;
   layerList: Map<string, LayersData>;
   isHttpsProtocol: boolean;
   activeLayer: string;
@@ -27,61 +30,131 @@ const emit = defineEmits<{
 }>();
 
 const mapobjStore = useMapObjectStore();
+const shapeStore = useShapeStore();
 
-const activeMarkerName = ref("");
-const activeMarkerDetail = ref("");
-const activaMarkerLayer = ref("");
+const activeObjectName = ref("");
+const activeObjectDetail = ref("");
+const activeObjectLayer = ref("");
+const activeShapeColor = ref("#d94841");
+const activeShapeLineType = ref("solid");
+const activeShapeWeight = ref(5);
 const isDeleteCheckModal = ref(false);
 const isFormSettingsOpen = ref(false);
+const detailTextarea = ref<HTMLTextAreaElement | null>(null);
+const isShape = computed(() => props.targetType === "shape");
+
+const lineTypeOptions = [
+  { value: "solid", label: "実線", dashArray: null },
+  { value: "dashed", label: "破線", dashArray: "12,8" },
+  { value: "dotted", label: "点線", dashArray: "1,6" },
+  { value: "dash-dot", label: "一点鎖線", dashArray: "12,6,1,6" },
+] as const;
+
+const lineTypeFromDashArray = (dashArray: string | null | undefined): string => {
+  const normalized = typeof dashArray === "string" ? dashArray.replace(/\s+/g, "") : null;
+  return lineTypeOptions.find((option) => option.dashArray === normalized)?.value || "solid";
+};
+
+const loadTarget = (): void => {
+  if (!props.targetId) return;
+  if (isShape.value) {
+    const shape = shapeStore.getById(props.targetId);
+    activeObjectName.value = shape?.name || "";
+    activeObjectDetail.value =
+      typeof shape?.geojson.properties.memo === "string" ? shape.geojson.properties.memo : "";
+    activeObjectLayer.value = shape?.layer_id || "";
+    activeShapeColor.value = shape?.geojson.properties.style?.color || "#d94841";
+    activeShapeLineType.value = lineTypeFromDashArray(shape?.geojson.properties.style?.dashArray);
+    activeShapeWeight.value = shape?.geojson.properties.style?.weight || 5;
+    return;
+  }
+  const marker = mapobjStore.getById(props.targetId);
+  activeObjectName.value = marker?.marker_name || "";
+  activeObjectDetail.value = marker?.detail || "";
+  activeObjectLayer.value = marker?.layer_id || "";
+};
 
 watch(
-  () => props.markerId,
-  (id) => {
-    if (!id) return;
-    const marker = mapobjStore.getById(id);
-    activeMarkerName.value = marker?.marker_name || "";
-    activeMarkerDetail.value = marker?.detail || "";
-    activaMarkerLayer.value = marker?.layer_id || "";
+  () => [props.targetId, props.targetType, props.isOpen] as const,
+  () => {
+    if (props.isOpen) loadTarget();
   },
 );
 
-const updateMakerNameDetail = (): void => {
-  if (
-    props.markerId === "" ||
-    activeMarkerName.value === "" ||
-    activeMarkerDetail.value === "" ||
-    activaMarkerLayer.value === ""
-  ) {
+const updateMapObject = async (): Promise<void> => {
+  if (props.targetId === "" || activeObjectLayer.value === "") {
+    emit("message", "所属レイヤを選択してください。");
+    return;
+  }
+  if (!isShape.value && (activeObjectName.value === "" || activeObjectDetail.value === "")) {
     emit("message", "マーカー名と内容の両方に入力が必要です。");
     return;
   }
-  mapobjStore.updateMapObject(
-    props.markerId,
-    activeMarkerName.value,
-    activeMarkerDetail.value,
-    activaMarkerLayer.value,
-  );
 
-  const marker = mapobjStore.getById(props.markerId);
-  const isMaster = activaMarkerLayer.value === props.masterLayerId;
-  emit(
-    "reloadMap",
-    `${baseUrl}/map?marker_id=${marker.id}&latitude=${marker.latitude}&longitude=${marker.longitude}&layer=${activaMarkerLayer.value}&is_master=${isMaster}`,
-  );
+  if (isShape.value) {
+    const shape = shapeStore.getById(props.targetId);
+    if (!shape) return;
+    const nextGeoJson = JSON.parse(JSON.stringify(shape.geojson)) as ShapeGeoJson;
+    const dashArray =
+      lineTypeOptions.find((option) => option.value === activeShapeLineType.value)?.dashArray ||
+      null;
+    nextGeoJson.properties = {
+      ...nextGeoJson.properties,
+      memo: activeObjectDetail.value,
+      style: {
+        ...nextGeoJson.properties.style,
+        color: activeShapeColor.value,
+        weight: activeShapeWeight.value,
+        dashArray,
+        ...(shape.shape_type === "polyline" ? {} : { fillColor: activeShapeColor.value }),
+      },
+    };
+    const updated = await shapeStore.updateShape(
+      props.targetId,
+      activeObjectName.value,
+      activeObjectLayer.value,
+      nextGeoJson,
+    );
+    if (!updated) {
+      emit("message", "図形情報を更新できませんでした。");
+      return;
+    }
+    const center = getShapeCenter(shape);
+    const isMaster = activeObjectLayer.value === props.masterLayerId;
+    const centerParams = center ? `&latitude=${center.latitude}&longitude=${center.longitude}` : "";
+    emit(
+      "reloadMap",
+      `${baseUrl}/map?layer=${activeObjectLayer.value}&is_master=${isMaster}${centerParams}`,
+    );
+  } else {
+    await mapobjStore.updateMapObject(
+      props.targetId,
+      activeObjectName.value,
+      activeObjectDetail.value,
+      activeObjectLayer.value,
+    );
 
-  emit("changeActiveLayer", activaMarkerLayer.value);
+    const marker = mapobjStore.getById(props.targetId);
+    const isMaster = activeObjectLayer.value === props.masterLayerId;
+    emit(
+      "reloadMap",
+      `${baseUrl}/map?marker_id=${marker.id}&latitude=${marker.latitude}&longitude=${marker.longitude}&layer=${activeObjectLayer.value}&is_master=${isMaster}`,
+    );
+  }
+
+  emit("changeActiveLayer", activeObjectLayer.value);
   emit("close");
   emit("message", "更新しました。");
-  activeMarkerName.value = "";
-  activeMarkerDetail.value = "";
-  activaMarkerLayer.value = "";
+  activeObjectName.value = "";
+  activeObjectDetail.value = "";
+  activeObjectLayer.value = "";
 };
 
-const deleteMaker = (): void => {
-  if (props.markerId === "") {
+const deleteMarker = (): void => {
+  if (props.targetId === "" || isShape.value) {
     return;
   }
-  mapobjStore.deleteMapObject(props.markerId);
+  mapobjStore.deleteMapObject(props.targetId);
   isDeleteCheckModal.value = false;
   emit("close");
   emit("message", "削除しました。");
@@ -95,7 +168,8 @@ const deleteMaker = (): void => {
 };
 
 function insertMarkdown(text: string) {
-  const textareaElm = document.getElementById("detail")! as HTMLTextAreaElement;
+  const textareaElm = detailTextarea.value;
+  if (!textareaElm) return;
   textareaElm.focus();
 
   const startPos = textareaElm.selectionStart;
@@ -104,7 +178,7 @@ function insertMarkdown(text: string) {
   const beforeText = textareaElm.value.substring(0, startPos);
   const afterText = textareaElm.value.substring(endPos);
 
-  activeMarkerDetail.value = beforeText + text + afterText;
+  activeObjectDetail.value = beforeText + text + afterText;
   textareaElm.value = beforeText + text + afterText;
 
   const newCursorPos = startPos + text.length;
@@ -116,45 +190,68 @@ const insertUploadedMarkdown = (markdownLink: string) => {
   insertMarkdown(markdownLink);
 };
 
-defineExpose({ insertUploadedMarkdown, updateMakerNameDetail });
+defineExpose({ insertUploadedMarkdown, updateMapObject });
 </script>
 
 <template>
-  <div class="overlay-marker-edit" v-show="isOpen">
-    <div class="content-marker-edit">
-      <h2 class="modal-h2">マーカー情報の編集</h2>
+  <div class="overlay-map-object-edit" v-show="isOpen">
+    <div class="content-map-object-edit">
+      <h2 class="modal-h2">{{ isShape ? "図形情報の編集" : "マーカー情報の編集" }}</h2>
       <div class="title-select-row">
         <div class="input-select-row-group title-input">
-          <label class="row">マーカー名</label>
+          <label class="row">{{ isShape ? "図形名" : "マーカー名" }}</label>
           <input
             class="input-text input-text-title"
             type="text"
-            placeholder="マーカー名"
-            v-model="activeMarkerName"
+            :placeholder="isShape ? '図形名' : 'マーカー名'"
+            :maxlength="isShape ? 80 : undefined"
+            v-model="activeObjectName"
           />
         </div>
         <div class="input-select-row-group group-select">
           <label class="row">レイヤ選択</label>
-          <select class="select-elm-editform" v-model="activaMarkerLayer">
+          <select class="select-elm-editform" v-model="activeObjectLayer">
             <option v-for="[id, obj] in layerList" :key="id" :value="obj.id">
               {{ obj.name }}
             </option>
           </select>
         </div>
       </div>
+      <div v-if="isShape" class="shape-style-row">
+        <label>
+          色
+          <input v-model="activeShapeColor" type="color" aria-label="図形色" />
+        </label>
+        <label>
+          線種
+          <select v-model="activeShapeLineType" class="select-elm-editform shape-line-select">
+            <option v-for="option in lineTypeOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <label class="shape-weight-label">
+          太さ
+          <input v-model.number="activeShapeWeight" type="range" min="1" max="10" step="1" />
+          <output>{{ activeShapeWeight }}px</output>
+        </label>
+      </div>
       <div class="textarea-row">
         <div class="input-select-row-group">
-          <label class="row">マーカーの内容</label>
+          <label class="row">{{ isShape ? "メモ（Markdown）" : "マーカーの内容" }}</label>
           <textarea
+            ref="detailTextarea"
             class="input-detail-markdown"
+            :class="{ 'shape-detail-markdown': isShape }"
             id="detail"
             name="detail"
             placeholder="## マークダウンで記述"
-            v-model="activeMarkerDetail"
+            :maxlength="isShape ? 10000 : undefined"
+            v-model="activeObjectDetail"
           ></textarea>
         </div>
       </div>
-      <div class="marker-edit-row">
+      <div class="map-object-edit-row">
         <button @click="emit('openImageUpload')" class="btn-function-image" title="ファイルの追加">
           <img
             :src="`${assetsUrl}smartphone_line24.png`"
@@ -225,6 +322,7 @@ defineExpose({ insertUploadedMarkdown, updateMakerNameDetail });
           <img :src="`${assetsUrl}warning_24.png`" class="function-img" alt="warning_24.png" />
         </button>
         <button
+          v-if="!isShape"
           @click="isDeleteCheckModal = true"
           class="btn-function-image"
           title="マーカーを削除"
@@ -234,7 +332,7 @@ defineExpose({ insertUploadedMarkdown, updateMakerNameDetail });
       </div>
       <div class="btn-commit-row">
         <button @click="isFormSettingsOpen = true" class="btn-form-settings">入力フォーム</button>
-        <button @click="updateMakerNameDetail()" class="btn-update">+更新</button>
+        <button @click="updateMapObject()" class="btn-update">+更新</button>
       </div>
       <button type="button" class="close-button" @click="emit('close')">閉じる</button>
     </div>
@@ -244,19 +342,20 @@ defineExpose({ insertUploadedMarkdown, updateMakerNameDetail });
     :isOpen="isDeleteCheckModal"
     title="削除の確認"
     message="本当にこのマーカーを削除しますか？"
-    @confirm="deleteMaker"
+    @confirm="deleteMarker"
     @cancel="isDeleteCheckModal = false"
   />
-  <MarkerFormSettingsModal
+  <MapObjectFormSettingsModal
     :isOpen="isFormSettingsOpen"
-    :markerId="markerId"
+    :targetType="targetType"
+    :targetId="targetId"
     @close="isFormSettingsOpen = false"
     @message="(text: string) => emit('message', text)"
   />
 </template>
 
 <style scoped>
-.overlay-marker-edit {
+.overlay-map-object-edit {
   z-index: 1;
   position: fixed;
   top: 0;
@@ -269,7 +368,7 @@ defineExpose({ insertUploadedMarkdown, updateMakerNameDetail });
   justify-content: center;
 }
 
-.content-marker-edit {
+.content-map-object-edit {
   position: relative;
   z-index: 2;
   width: 65%;
@@ -364,6 +463,33 @@ defineExpose({ insertUploadedMarkdown, updateMakerNameDetail });
   margin-bottom: 10px;
 }
 
+.shape-style-row {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin: 12px 0;
+  text-align: left;
+}
+
+.shape-style-row label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.shape-line-select {
+  width: 180px;
+  margin: 0;
+}
+
+.shape-weight-label {
+  flex: 1;
+}
+
+.shape-weight-label input {
+  flex: 1;
+}
+
 .input-detail-markdown {
   font-size: 20px;
   width: 100%;
@@ -376,13 +502,17 @@ defineExpose({ insertUploadedMarkdown, updateMakerNameDetail });
   height: 50vh;
 }
 
+.shape-detail-markdown {
+  height: 42vh;
+}
+
 .input-detail-markdown:focus {
   outline: none;
   border-color: #007bff;
   box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
 }
 
-.marker-edit-row {
+.map-object-edit-row {
   display: flex;
   width: 100%;
   gap: 20px;

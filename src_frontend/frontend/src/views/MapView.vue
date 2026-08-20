@@ -8,8 +8,10 @@ import type {
   ImageData,
   QueryForm,
   UploadProgressState,
+  ShapeData,
 } from "@/interface";
 import { useMapObjectStore } from "@/stores/mapobjects";
+import { useShapeStore } from "@/stores/shapes";
 import { useLayersStore } from "@/stores/layers";
 import { useImageStore } from "@/stores/images";
 import { authCheckUrl, getMasterLayerIdUrl, exportJsonUrl, disableTokenUrl } from "@/router/urls";
@@ -28,8 +30,8 @@ import ConfirmModal from "@/components/common/ConfirmModal.vue";
 import MapToolbar from "@/components/map/MapToolbar.vue";
 import MapIframe from "@/components/map/MapIframe.vue";
 import FullScreenMapModal from "@/components/map/FullScreenMapModal.vue";
-import MarkerTable from "@/components/marker/MarkerTable.vue";
-import MarkerEditModal from "@/components/marker/MarkerEditModal.vue";
+import MapObjectTable from "@/components/map-object/MapObjectTable.vue";
+import MapObjectEditModal from "@/components/map-object/MapObjectEditModal.vue";
 import LayerCreateModal from "@/components/layer/LayerCreateModal.vue";
 import LayerListModal from "@/components/layer/LayerListModal.vue";
 import LayerRenameModal from "@/components/layer/LayerRenameModal.vue";
@@ -65,7 +67,10 @@ const layerList = computed((): Map<string, LayersData> => layersStore.layersList
 
 const mapobjStore = useMapObjectStore();
 mapobjStore.initList();
-const mapobjList = computed((): Map<string, MapObjectData> => mapobjStore.mapObjectList);
+const markerList = computed((): Map<string, MapObjectData> => mapobjStore.mapObjectList);
+const shapeStore = useShapeStore();
+void shapeStore.queryShapes();
+const shapeList = computed((): Map<string, ShapeData> => shapeStore.shapeList);
 
 // --- Window size ---
 const { divHeight } = useWindowSize();
@@ -127,9 +132,12 @@ const reloadMap = async (mapUrl: string, absolute: boolean = false): Promise<voi
   srcUrl.value = mapUrl;
   if (absolute) {
     isReload.value = true;
-    markerQueryFormData.value = { query1: "", query2: "" };
+    mapObjectQueryFormData.value = { query1: "", query2: "" };
     const isMaster = activeLayer.value === masterLayerId.value;
-    await mapobjStore.queryMapObject(activeLayer.value, isMaster);
+    await Promise.all([
+      mapobjStore.queryMapObject(activeLayer.value, isMaster),
+      shapeStore.queryShapes(activeLayer.value, isMaster),
+    ]);
     mapIframeRef.value?.filterMapObjects(null, null);
     showProgressModal.value = false;
   }
@@ -148,8 +156,8 @@ const getMarker = (id: string): void => {
 };
 
 const mapIframeRef = ref<InstanceType<typeof MapIframe> | null>(null);
-const focusMarker = (id: string, lat: number, lng: number): void => {
-  mapIframeRef.value?.focusMarker(id, lat, lng);
+const focusObject = (type: "marker" | "shape", id: string, lat: number, lng: number): void => {
+  mapIframeRef.value?.focusObject(type, id, lat, lng);
   if (isHttpsProtocol.value) {
     navigator.clipboard.writeText(`${lat},${lng}`);
   }
@@ -160,9 +168,9 @@ const filterMapObjects = (): void => {
   mapIframeRef.value?.filterMapObjects(markerIds, mapobjStore.filteredShapeIds);
 };
 
-const handleMarkerSearch = async (query: QueryForm, reset: boolean = false): Promise<void> => {
+const handleMapObjectSearch = async (query: QueryForm, reset: boolean = false): Promise<void> => {
   try {
-    markerQueryFormData.value = { ...query };
+    mapObjectQueryFormData.value = { ...query };
     if (reset) {
       await mapobjStore.queryWordMapObject("", "", activeLayer.value);
     } else {
@@ -198,7 +206,8 @@ const closeMessage = (): void => {
 
 // --- Modal states ---
 const isOpenEditModal = ref(false);
-const selectedMarkerId = ref("");
+const selectedObjectId = ref("");
+const selectedObjectType = ref<"marker" | "shape">("marker");
 const isNewLayerModal = ref(false);
 const showImageUploadModal = ref(false);
 const showImageListModal = ref(false);
@@ -228,16 +237,17 @@ const oneTimeUrl = ref("");
 const oneTimeUuid = ref("");
 const oneTimeExpiration = ref("");
 
-// --- Marker edit ---
-const markerEditRef = ref<InstanceType<typeof MarkerEditModal> | null>(null);
+// --- Map object edit ---
+const mapObjectEditRef = ref<InstanceType<typeof MapObjectEditModal> | null>(null);
 
-const openEditModal = (id: string): void => {
-  selectedMarkerId.value = id;
+const openEditModal = (type: "marker" | "shape", id: string): void => {
+  selectedObjectType.value = type;
+  selectedObjectId.value = id;
   isOpenEditModal.value = true;
 };
 
 const closeEditModal = (): void => {
-  selectedMarkerId.value = "";
+  selectedObjectId.value = "";
   isOpenEditModal.value = false;
 };
 
@@ -306,7 +316,7 @@ const openReadOnlyPreview = (filename: string): void => {
 
 const onImageUploaded = (markdownLink: string): void => {
   if (isOpenEditModal.value) {
-    markerEditRef.value?.insertUploadedMarkdown(markdownLink);
+    mapObjectEditRef.value?.insertUploadedMarkdown(markdownLink);
   }
 };
 
@@ -435,9 +445,9 @@ watch(
   },
 );
 
-// --- Marker search (MapToolbarからエクスポート) ---
+// --- Map object search (MapToolbarからエクスポート) ---
 const mapToolbarRef = ref<InstanceType<typeof MapToolbar> | null>(null);
-const markerQueryFormData = ref<QueryForm>({ query1: "", query2: "" });
+const mapObjectQueryFormData = ref<QueryForm>({ query1: "", query2: "" });
 
 // --- Keyboard shortcuts ---
 const handleKeyDown = (event: KeyboardEvent) => {
@@ -462,7 +472,7 @@ const handleKeyDown = (event: KeyboardEvent) => {
   } else if (event.ctrlKey && event.key == "m") {
     event.preventDefault();
     if (isOpenEditModal.value) {
-      markerEditRef.value?.updateMakerNameDetail();
+      mapObjectEditRef.value?.updateMapObject();
     }
   } else if (event.altKey && event.key == "1") {
     event.preventDefault();
@@ -475,7 +485,7 @@ const handleKeyDown = (event: KeyboardEvent) => {
     }
   } else if (event.altKey && event.key == "3") {
     event.preventDefault();
-    mapToolbarRef.value?.onMarkerSearch(true);
+    mapToolbarRef.value?.onMapObjectSearch(true);
   } else if (event.altKey && event.key == "4") {
     event.preventDefault();
     openLayerList();
@@ -522,7 +532,7 @@ const onImageDeleteRequest = (id: string): void => {
     :layerList="layerList"
     :isMasterLayer="isMasterLayer"
     :isHttpsProtocol="isHttpsProtocol"
-    :markerQueryFormData="markerQueryFormData"
+    :mapObjectQueryFormData="mapObjectQueryFormData"
     ref="mapToolbarRef"
     @newLayer="isNewLayerModal = true"
     @imageUpload="showImageUploadModal = true"
@@ -535,8 +545,8 @@ const onImageDeleteRequest = (id: string): void => {
     @userSetting="userPrivacySettingFunction()"
     @reloadMap="reloadMap"
     @layerList="openLayerList()"
-    @markerSearch="handleMarkerSearch"
-    @update:markerQueryFormData="markerQueryFormData = $event"
+    @mapObjectSearch="handleMapObjectSearch"
+    @update:mapObjectQueryFormData="mapObjectQueryFormData = $event"
     @update:activeLayer="activeLayer = $event"
   />
 
@@ -554,22 +564,25 @@ const onImageDeleteRequest = (id: string): void => {
         />
       </div>
       <div class="info-draw">
-        <MarkerTable
-          :mapobjList="mapobjList"
+        <MapObjectTable
+          :markerList="markerList"
+          :shapeList="shapeList"
+          :filteredShapeIds="mapobjStore.filteredShapeIds"
           :height="divHeight"
           :activeLayer="activeLayer"
-          @editMarker="openEditModal"
-          @focusMarker="focusMarker"
+          @editObject="openEditModal"
+          @focusObject="focusObject"
         />
       </div>
     </div>
   </div>
 
   <!-- Modals -->
-  <MarkerEditModal
-    ref="markerEditRef"
+  <MapObjectEditModal
+    ref="mapObjectEditRef"
     :isOpen="isOpenEditModal"
-    :markerId="selectedMarkerId"
+    :targetType="selectedObjectType"
+    :targetId="selectedObjectId"
     :layerList="layerList"
     :isHttpsProtocol="isHttpsProtocol"
     :activeLayer="activeLayer"
@@ -617,7 +630,7 @@ const onImageDeleteRequest = (id: string): void => {
 
   <ImageUploadModal
     :isOpen="showImageUploadModal"
-    :isEditingMarker="isOpenEditModal"
+    :isEditingMapObject="isOpenEditModal"
     :isHttpsProtocol="isHttpsProtocol"
     @close="showImageUploadModal = false"
     @uploaded="onImageUploaded"

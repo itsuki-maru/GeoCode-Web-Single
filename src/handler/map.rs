@@ -39,7 +39,7 @@ pub async fn query_map_objects_handler(
 
     let markers = sqlx::query_as::<_, MarkerObject>(
         r#"
-        SELECT id, layer_id, marker_name, latitude, longitude, detail
+        SELECT id, layer_id, marker_name, latitude, longitude, detail, update_at
         FROM marker_info_model
         WHERE user_id = $1
           AND ($2 IS NULL OR layer_id = $2)
@@ -169,7 +169,8 @@ pub async fn map_get_handler(
                 marker_name,
                 latitude,
                 longitude,
-                detail
+                detail,
+                update_at
             FROM marker_info_model
             WHERE user_id = $1
             "#,
@@ -187,7 +188,8 @@ pub async fn map_get_handler(
                 marker_name,
                 latitude,
                 longitude,
-                detail
+                detail,
+                update_at
             FROM marker_info_model
             WHERE user_id = $1 AND layer_id = $2
             "#,
@@ -342,7 +344,8 @@ pub async fn map_another_get_handler(
             marker_name,
             latitude,
             longitude,
-            detail
+            detail,
+            update_at
         FROM marker_info_model
         WHERE user_id = $1
         "#,

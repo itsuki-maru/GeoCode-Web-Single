@@ -23,7 +23,13 @@ const imageUrl = computed(() =>
 <template>
   <BaseModal :isOpen="isOpen" :zIndex="13" @close="emit('close')">
     <div class="content-image-view">
-      <video v-if="imageUrl && isMP4(imageSrc)" controls :src="imageUrl" width="90%" height="90%"></video>
+      <video
+        v-if="imageUrl && isMP4(imageSrc)"
+        controls
+        :src="imageUrl"
+        width="90%"
+        height="90%"
+      ></video>
       <img v-else-if="imageUrl" :src="imageUrl" width="90%" height="90%" alt="プレビュー" />
       <div class="btn-zone">
         <button @click.prevent="emit('close')">閉じる</button>

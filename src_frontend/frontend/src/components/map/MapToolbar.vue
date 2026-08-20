@@ -10,7 +10,7 @@ const props = defineProps<{
   layerList: Map<string, LayersData>;
   isMasterLayer: boolean;
   isHttpsProtocol: boolean;
-  markerQueryFormData: QueryForm;
+  mapObjectQueryFormData: QueryForm;
 }>();
 
 const emit = defineEmits<{
@@ -25,12 +25,12 @@ const emit = defineEmits<{
   userSetting: [];
   reloadMap: [url: string, absolute: boolean];
   layerList: [];
-  markerSearch: [query: QueryForm, reset: boolean];
-  "update:markerQueryFormData": [query: QueryForm];
+  mapObjectSearch: [query: QueryForm, reset: boolean];
+  "update:mapObjectQueryFormData": [query: QueryForm];
   "update:activeLayer": [id: string];
 }>();
 
-const markerQueryFormData = ref<QueryForm>({ ...props.markerQueryFormData });
+const mapObjectQueryFormData = ref<QueryForm>({ ...props.mapObjectQueryFormData });
 const { width, height } = useWindowSize();
 const isPortrait = computed((): boolean => height.value >= width.value);
 let suppressNextWatchSearch = false;
@@ -39,32 +39,32 @@ const isSameQuery = (a: QueryForm, b: QueryForm): boolean => {
   return a.query1 === b.query1 && a.query2 === b.query2;
 };
 
-const onMarkerSearch = (reset: boolean = false): void => {
+const onMapObjectSearch = (reset: boolean = false): void => {
   if (reset) {
     suppressNextWatchSearch = true;
-    markerQueryFormData.value = { query1: "", query2: "" };
+    mapObjectQueryFormData.value = { query1: "", query2: "" };
   }
-  emit("markerSearch", { ...markerQueryFormData.value }, reset);
+  emit("mapObjectSearch", { ...mapObjectQueryFormData.value }, reset);
 };
 
 watch(
-  () => props.markerQueryFormData,
+  () => props.mapObjectQueryFormData,
   (query) => {
-    if (isSameQuery(query, markerQueryFormData.value)) return;
+    if (isSameQuery(query, mapObjectQueryFormData.value)) return;
     suppressNextWatchSearch = true;
-    markerQueryFormData.value = { ...query };
+    mapObjectQueryFormData.value = { ...query };
   },
 );
 
 watch(
-  markerQueryFormData,
+  mapObjectQueryFormData,
   () => {
-    emit("update:markerQueryFormData", { ...markerQueryFormData.value });
+    emit("update:mapObjectQueryFormData", { ...mapObjectQueryFormData.value });
     if (suppressNextWatchSearch) {
       suppressNextWatchSearch = false;
       return;
     }
-    onMarkerSearch();
+    onMapObjectSearch();
   },
   { deep: true },
 );
@@ -72,8 +72,8 @@ watch(
 watch(
   isPortrait,
   (portrait) => {
-    if (!portrait || markerQueryFormData.value.query2 === "") return;
-    markerQueryFormData.value.query2 = "";
+    if (!portrait || mapObjectQueryFormData.value.query2 === "") return;
+    mapObjectQueryFormData.value.query2 = "";
   },
   { immediate: true },
 );
@@ -83,7 +83,7 @@ const selectedLayer = computed({
   set: (val: string) => emit("update:activeLayer", val),
 });
 
-defineExpose({ markerQueryFormData, onMarkerSearch });
+defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
 </script>
 
 <template>
@@ -179,7 +179,7 @@ defineExpose({ markerQueryFormData, onMarkerSearch });
         id="search-textbox1"
         class="search-box"
         required
-        v-model="markerQueryFormData.query1"
+        v-model="mapObjectQueryFormData.query1"
       />
       <input
         v-show="!isPortrait"
@@ -190,7 +190,7 @@ defineExpose({ markerQueryFormData, onMarkerSearch });
         id="search-textbox2"
         class="search-box"
         required
-        v-model="markerQueryFormData.query2"
+        v-model="mapObjectQueryFormData.query2"
       />
       <button
         v-if="isMasterLayer"
