@@ -4,8 +4,7 @@ import ConfirmModal from "@/components/common/ConfirmModal.vue";
 import MapObjectFormSettingsModal from "@/components/map-object/MapObjectFormSettingsModal.vue";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useShapeStore } from "@/stores/shapes";
-import { getShapeCenter } from "@/composables/useShapeCenter";
-import type { LayersData, ShapeGeoJson } from "@/interface";
+import type { LayersData, MapObjectUpdatePayload, ShapeGeoJson } from "@/interface";
 import { baseUrl, assetsUrl } from "@/setting";
 
 const props = defineProps<{
@@ -20,7 +19,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: [];
-  updated: [];
+  updated: [payload: MapObjectUpdatePayload, previousLayerId: string];
   deleted: [];
   openImageUpload: [];
   openImageList: [];
@@ -91,9 +90,13 @@ const updateMapObject = async (): Promise<void> => {
     return;
   }
 
+  let updatePayload: MapObjectUpdatePayload;
+  let previousLayerId: string;
+
   if (isShape.value) {
     const shape = shapeStore.getById(props.targetId);
     if (!shape) return;
+    previousLayerId = shape.layer_id;
     const nextGeoJson = JSON.parse(JSON.stringify(shape.geojson)) as ShapeGeoJson;
     const dashArray =
       lineTypeOptions.find((option) => option.value === activeShapeLineType.value)?.dashArray ||
@@ -109,39 +112,50 @@ const updateMapObject = async (): Promise<void> => {
         ...(shape.shape_type === "polyline" ? {} : { fillColor: activeShapeColor.value }),
       },
     };
-    const updated = await shapeStore.updateShape(
+    const updatedShape = await shapeStore.updateShape(
       props.targetId,
       activeObjectName.value,
       activeObjectLayer.value,
       nextGeoJson,
     );
-    if (!updated) {
+    if (!updatedShape) {
       emit("message", "図形情報を更新できませんでした。");
       return;
     }
-    const center = getShapeCenter(shape);
-    const isMaster = activeObjectLayer.value === props.masterLayerId;
-    const centerParams = center ? `&latitude=${center.latitude}&longitude=${center.longitude}` : "";
-    emit(
-      "reloadMap",
-      `${baseUrl}/map?layer=${activeObjectLayer.value}&is_master=${isMaster}${centerParams}`,
-    );
+    updatePayload = {
+      objectType: "shape",
+      id: updatedShape.id,
+      layerId: updatedShape.layer_id,
+      shapeType: updatedShape.shape_type,
+      name: updatedShape.name || "",
+      geojson: updatedShape.geojson,
+    };
   } else {
-    await mapobjStore.updateMapObject(
+    const marker = mapobjStore.getById(props.targetId);
+    if (!marker) return;
+    previousLayerId = marker.layer_id;
+    const updatedMarker = await mapobjStore.updateMapObject(
       props.targetId,
       activeObjectName.value,
       activeObjectDetail.value,
       activeObjectLayer.value,
     );
-
-    const marker = mapobjStore.getById(props.targetId);
-    const isMaster = activeObjectLayer.value === props.masterLayerId;
-    emit(
-      "reloadMap",
-      `${baseUrl}/map?marker_id=${marker.id}&latitude=${marker.latitude}&longitude=${marker.longitude}&layer=${activeObjectLayer.value}&is_master=${isMaster}`,
-    );
+    if (!updatedMarker) {
+      emit("message", "マーカー情報を更新できませんでした。");
+      return;
+    }
+    updatePayload = {
+      objectType: "marker",
+      id: updatedMarker.id,
+      layerId: updatedMarker.layer_id,
+      name: updatedMarker.marker_name,
+      detail: updatedMarker.detail,
+      latitude: updatedMarker.latitude,
+      longitude: updatedMarker.longitude,
+    };
   }
 
+  emit("updated", updatePayload, previousLayerId);
   emit("changeActiveLayer", activeObjectLayer.value);
   emit("close");
   emit("message", "更新しました。");

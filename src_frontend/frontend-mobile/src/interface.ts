@@ -50,6 +50,25 @@ interface ShapeData {
   updated_at: string;
 }
 
+type MapObjectUpdatePayload =
+  | {
+      objectType: "marker";
+      id: string;
+      layerId: string;
+      name: string;
+      detail: string;
+      latitude: number;
+      longitude: number;
+    }
+  | {
+      objectType: "shape";
+      id: string;
+      layerId: string;
+      shapeType: ShapeData["shape_type"];
+      name: string;
+      geojson: ShapeGeoJson;
+    };
+
 interface LayersData {
   id: string;
   user_id: string;
@@ -126,4 +145,5 @@ export type {
   ShapeStyle,
   ShapeGeoJson,
   ShapeData,
+  MapObjectUpdatePayload,
 };

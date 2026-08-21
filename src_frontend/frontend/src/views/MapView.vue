@@ -9,6 +9,7 @@ import type {
   QueryForm,
   UploadProgressState,
   ShapeData,
+  MapObjectUpdatePayload,
 } from "@/interface";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useShapeStore } from "@/stores/shapes";
@@ -20,6 +21,7 @@ import apiClient from "@/axiosClient";
 import { useApplicationInitStore } from "@/stores/appInits";
 import { useWindowSize } from "@/composables/useWindowSize";
 import { isMP4 } from "@/composables/useFileTypeCheck";
+import { getShapeCenter } from "@/composables/useShapeCenter";
 
 // Components
 import UserPrivacySetting from "@/components/UserPrivacySetting.vue";
@@ -79,6 +81,7 @@ const { divHeight } = useWindowSize();
 const activeLayer = ref("");
 const masterLayerId = ref("");
 const srcUrl = ref("");
+const pendingLayerMapUrl = ref<string | null>(null);
 const showProgressModal = ref(false);
 const uploadProgressState = ref<UploadProgressState>({
   isOpen: false,
@@ -121,7 +124,10 @@ let loadedOnceFlag = false;
 watch(activeLayer, async (): Promise<void> => {
   if (loadedOnceFlag) showProgressModal.value = true;
   const isMaster = activeLayer.value === masterLayerId.value;
-  await reloadMap(`${baseUrl}/map?layer=${activeLayer.value}&is_master=${isMaster}`, true);
+  const mapUrl =
+    pendingLayerMapUrl.value ?? `${baseUrl}/map?layer=${activeLayer.value}&is_master=${isMaster}`;
+  pendingLayerMapUrl.value = null;
+  await reloadMap(mapUrl, true);
   showProgressModal.value = false;
   loadedOnceFlag = true;
 });
@@ -156,6 +162,48 @@ const getMarker = (id: string): void => {
 };
 
 const mapIframeRef = ref<InstanceType<typeof MapIframe> | null>(null);
+
+const reloadMapObjectFallback = async (payload: MapObjectUpdatePayload): Promise<void> => {
+  const isMaster = payload.layerId === masterLayerId.value;
+  if (payload.objectType === "marker") {
+    await reloadMap(
+      `${baseUrl}/map?marker_id=${payload.id}&latitude=${payload.latitude}&longitude=${payload.longitude}&layer=${payload.layerId}&is_master=${isMaster}`,
+    );
+    return;
+  }
+  const shape = shapeStore.getById(payload.id);
+  const center = shape ? getShapeCenter(shape) : null;
+  const centerParams = center ? `&latitude=${center.latitude}&longitude=${center.longitude}` : "";
+  await reloadMap(`${baseUrl}/map?layer=${payload.layerId}&is_master=${isMaster}${centerParams}`);
+};
+
+const handleMapObjectUpdated = async (
+  payload: MapObjectUpdatePayload,
+  previousLayerId: string,
+): Promise<void> => {
+  if (payload.layerId !== previousLayerId) {
+    if (payload.objectType === "marker") {
+      const isMaster = payload.layerId === masterLayerId.value;
+      pendingLayerMapUrl.value = `${baseUrl}/map?marker_id=${payload.id}&latitude=${payload.latitude}&longitude=${payload.longitude}&layer=${payload.layerId}&is_master=${isMaster}`;
+    }
+    return;
+  }
+
+  const updated = (await mapIframeRef.value?.updateMapObject(payload)) ?? false;
+  if (!updated) {
+    await reloadMapObjectFallback(payload);
+    return;
+  }
+
+  if (mapObjectQueryFormData.value.query1 || mapObjectQueryFormData.value.query2) {
+    await handleMapObjectSearch(mapObjectQueryFormData.value);
+  }
+
+  if (payload.objectType === "marker") {
+    mapIframeRef.value?.focusObject("marker", payload.id, payload.latitude, payload.longitude);
+  }
+};
+
 const focusObject = (type: "marker" | "shape", id: string, lat: number, lng: number): void => {
   mapIframeRef.value?.focusObject(type, id, lat, lng);
   if (isHttpsProtocol.value) {
@@ -588,6 +636,7 @@ const onImageDeleteRequest = (id: string): void => {
     :activeLayer="activeLayer"
     :masterLayerId="masterLayerId"
     @close="closeEditModal"
+    @updated="handleMapObjectUpdated"
     @message="showMessage"
     @reloadMap="reloadMap"
     @changeActiveLayer="activeLayer = $event"
