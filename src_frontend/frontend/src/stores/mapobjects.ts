@@ -59,7 +59,7 @@ export const useMapObjectStore = defineStore("mapobjects", {
       name: string,
       detail: string,
       layer_id: string,
-    ): Promise<void> {
+    ): Promise<MapObjectData | null> {
       const updateURL = `${updateMapObjectUrl}${id}`;
       const payload = {
         name: name,
@@ -68,10 +68,21 @@ export const useMapObjectStore = defineStore("mapobjects", {
       };
 
       try {
-        const response = await apiClient.put(updateURL, payload);
-        this.queryMapObject(layer_id, false);
+        await apiClient.put(updateURL, payload);
+        const current = this.mapObjectList.get(id);
+        if (!current) return null;
+        const updated: MapObjectData = {
+          ...current,
+          marker_name: name,
+          detail,
+          layer_id,
+          update_at: new Date().toISOString(),
+        };
+        this.mapObjectList.set(id, updated);
+        return updated;
       } catch (error) {
         console.log(error);
+        return null;
       }
     },
     async queryMapObject(layer_id: string, is_master: boolean): Promise<boolean> {

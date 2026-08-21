@@ -35,7 +35,7 @@ export const useShapeStore = defineStore("shapes", {
       name: string,
       layerId: string,
       geojson: ShapeGeoJson,
-    ): Promise<boolean> {
+    ): Promise<ShapeData | null> {
       try {
         await apiClient.put(`${shapeUrl}${id}`, {
           name,
@@ -44,17 +44,20 @@ export const useShapeStore = defineStore("shapes", {
         });
         const current = this.shapeList.get(id);
         if (current) {
-          this.shapeList.set(id, {
+          const updated: ShapeData = {
             ...current,
             name: name.trim() || null,
             layer_id: layerId,
             geojson,
-          });
+            updated_at: new Date().toISOString(),
+          };
+          this.shapeList.set(id, updated);
+          return updated;
         }
-        return true;
+        return null;
       } catch (error) {
         console.error("Shapes Store: Update Error.", error);
-        return false;
+        return null;
       }
     },
   },
