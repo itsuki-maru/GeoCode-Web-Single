@@ -439,4 +439,19 @@ button:active {
 .footer-zone a {
   color: white;
 }
+
+@media (orientation: portrait) {
+  #overlay-message {
+    box-sizing: border-box;
+    padding: 16px;
+  }
+
+  #content-message {
+    box-sizing: border-box;
+    width: min(calc(100vw - 32px), 520px);
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+  }
+}
 </style>

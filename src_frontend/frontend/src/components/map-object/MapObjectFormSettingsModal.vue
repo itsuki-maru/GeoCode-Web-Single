@@ -514,4 +514,31 @@ footer {
     align-items: flex-start;
   }
 }
+
+@media (orientation: portrait) {
+  .form-settings {
+    box-sizing: border-box;
+    width: min(calc(100vw - 64px), 860px);
+    max-height: calc(100dvh - 64px);
+  }
+
+  .field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  header,
+  footer {
+    flex-wrap: wrap;
+  }
+}
+
+@media (orientation: portrait) and (max-width: 900px) {
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  header {
+    align-items: flex-start;
+  }
+}
 </style>

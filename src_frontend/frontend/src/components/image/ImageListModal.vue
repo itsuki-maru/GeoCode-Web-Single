@@ -298,4 +298,23 @@ function selectTextOrClipboardCopy(elementId: string) {
   display: flex;
   justify-content: space-between;
 }
+
+@media (orientation: portrait) {
+  .image-list-content {
+    box-sizing: border-box;
+    width: min(calc(100vw - 64px), 900px);
+  }
+
+  .table-sticky-imagelist {
+    overflow-x: auto;
+  }
+
+  .table-sticky-imagelist table {
+    min-width: 620px;
+  }
+
+  .table-sticky-imagelist td:first-child {
+    overflow-wrap: anywhere;
+  }
+}
 </style>

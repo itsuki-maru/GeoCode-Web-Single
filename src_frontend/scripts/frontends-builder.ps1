@@ -35,7 +35,7 @@ $frontendMobileDistDir = Join-Path -Path $frontendMobileDir -ChildPath "dist"
 # templates ディレクトリ
 $rootDir = Split-Path -Path $projectDir -Parent
 $rustTemplatesDir = Join-Path -Path $rootDir -ChildPath "src/templates"
-$rustTemplateJsFiles = Join-Path -Path $rustTemplatesDir -ChildPath "js/*.js"
+$rustTemplateJsDir = Join-Path -Path $rustTemplatesDir -ChildPath "js"
 
 # 最終的なフロントエンド成果物の配布用ディレクトリ
 $prepareDistributionDir = Split-Path -Path $projectDir -Parent
@@ -85,11 +85,6 @@ $targetHtml = Join-Path -Path $frontendDir -ChildPath "dist/index.html"
     $_ -replace 'href="./favicon.ico"', 'href="/assets/favicon.ico"'
 } | Set-Content -Path $targetHtml
 
-# qrcode.min.jsのパス変更
-(Get-Content -Path $targetHtml) | ForEach-Object {
-    $_ -replace 'src="./qrcode.min.js"', 'src="/assets/qrcode.min.js"'
-} | Set-Content -Path $targetHtml
-
 # manifest-tab.jsonのパス変更
 (Get-Content -Path $targetHtml) | ForEach-Object {
     $_ -replace 'href="./manifest-tab.json"', 'href="/assets/manifest-tab.json"'
@@ -124,11 +119,6 @@ $targetHtml = Join-Path -Path $frontendMobileDir -ChildPath "dist/index.html"
 # favicon.icoのパス変更
 (Get-Content -Path $targetHtml) | ForEach-Object {
     $_ -replace 'href="./favicon.ico"', 'href="/assets/favicon.ico"'
-} | Set-Content -Path $targetHtml
-
-# qrcode.min.jsのパス変更
-(Get-Content -Path $targetHtml) | ForEach-Object {
-    $_ -replace 'src="./qrcode.min.js"', 'src="/assets/qrcode.min.js"'
 } | Set-Content -Path $targetHtml
 
 # manifest.jsonのパス変更
@@ -188,7 +178,15 @@ Move-Item -Path $mjsFiles -Destination $movedDir
 Move-Item -Path $cssFiles -Destination $movedDir
 Move-Item -Path $jsonFiles -Destination $movedDir
 Move-Item -Path $svgFiles -Destination $movedDir
-Copy-Item -Path $rustTemplateJsFiles -Destination $movedDir -Force
+$rustTemplateJsFiles = Get-ChildItem -LiteralPath $rustTemplateJsDir -Recurse -File -Filter "*.js"
+$duplicateTemplateJsFiles = $rustTemplateJsFiles | Group-Object -Property Name | Where-Object { $_.Count -gt 1 }
+if ($duplicateTemplateJsFiles) {
+    $duplicateNames = ($duplicateTemplateJsFiles | Select-Object -ExpandProperty Name) -join ", "
+    throw "Template JavaScript file names must be unique: $duplicateNames"
+}
+foreach ($templateJsFile in $rustTemplateJsFiles) {
+    Copy-Item -LiteralPath $templateJsFile.FullName -Destination $movedDir -Force
+}
 
 # 最終的なフロントエンド成果物の配置ディレクトリを作成
 New-Item -Type Directory $distributionDir

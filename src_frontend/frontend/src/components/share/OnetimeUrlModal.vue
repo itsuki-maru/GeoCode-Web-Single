@@ -175,4 +175,20 @@ pre tt {
   display: flex;
   justify-content: space-between;
 }
+
+@media (orientation: portrait) {
+  .onetime-url-content {
+    box-sizing: border-box;
+    width: min(calc(100vw - 64px), 680px);
+  }
+
+  #link-copy-btn {
+    max-width: calc(100% - 10px);
+  }
+
+  .btn-zone {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+}
 </style>

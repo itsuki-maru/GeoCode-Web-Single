@@ -493,7 +493,8 @@ a {
 
 #content-message {
   z-index: 20;
-  width: 20%;
+  width: clamp(300px, 40vw, 420px);
+  max-width: calc(100vw - 32px);
   padding: 1em;
   background: whitesmoke;
   border-radius: 10px;
@@ -542,7 +543,8 @@ a {
 
 #content-token-post {
   z-index: 16;
-  width: 20%;
+  width: clamp(300px, 40vw, 420px);
+  max-width: calc(100vw - 32px);
   padding: 1em;
   background: rgb(223, 223, 223);
   border-radius: 10px;

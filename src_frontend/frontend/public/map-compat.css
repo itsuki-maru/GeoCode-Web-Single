@@ -1,0 +1,50 @@
+/*
+ * Map templates historically relied on Bootstrap 3's global reset styles.
+ * Keep the required layout and form normalization without loading Bootstrap.
+ */
+html {
+  font-size: 62.5%;
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  color: #333;
+  background-color: #fff;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.428571429;
+}
+
+button,
+input,
+select,
+textarea {
+  margin: 0;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+button {
+  border-radius: 0;
+}
+
+label {
+  display: inline-block;
+  margin-bottom: 5px;
+  font-weight: bold;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  box-sizing: border-box;
+  margin: 4px 0 0;
+  line-height: normal;
+}
