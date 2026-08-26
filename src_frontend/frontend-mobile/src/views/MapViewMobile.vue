@@ -138,18 +138,33 @@ const reloadMap = async (mapUrl: string, absolute: boolean = false): Promise<voi
 
 const mapIframeRef = ref<InstanceType<typeof MapIframe> | null>(null);
 
-const reloadMapObjectFallback = async (payload: MapObjectUpdatePayload): Promise<void> => {
-  const isMaster = payload.layerId === masterLayerId.value;
+const getMapObjectFocusPosition = (
+  payload: MapObjectUpdatePayload,
+): { latitude: number; longitude: number } | null => {
   if (payload.objectType === "marker") {
-    await reloadMap(
-      `${baseUrl}/map?marker_id=${payload.id}&latitude=${payload.latitude}&longitude=${payload.longitude}&layer=${payload.layerId}&is_master=${isMaster}`,
-    );
-    return;
+    return { latitude: payload.latitude, longitude: payload.longitude };
   }
+
   const shape = shapeStore.getById(payload.id);
-  const center = shape ? getShapeCenter(shape) : null;
-  const centerParams = center ? `&latitude=${center.latitude}&longitude=${center.longitude}` : "";
-  await reloadMap(`${baseUrl}/map?layer=${payload.layerId}&is_master=${isMaster}${centerParams}`);
+  return shape ? getShapeCenter(shape) : null;
+};
+
+const getMapObjectMapUrl = (
+  payload: MapObjectUpdatePayload,
+  layerId: string,
+  isMaster: boolean,
+): string => {
+  const focusPosition = getMapObjectFocusPosition(payload);
+  const focusParams = focusPosition
+    ? `&latitude=${focusPosition.latitude}&longitude=${focusPosition.longitude}`
+    : "";
+  const markerParams = payload.objectType === "marker" ? `&marker_id=${payload.id}` : "";
+  return `${baseUrl}/map?layer=${layerId}&is_master=${isMaster}${markerParams}${focusParams}`;
+};
+
+const reloadMapObjectFallback = async (payload: MapObjectUpdatePayload): Promise<void> => {
+  const isMaster = activeLayer.value === masterLayerId.value;
+  await reloadMap(getMapObjectMapUrl(payload, activeLayer.value, isMaster));
 };
 
 const getMarker = (id: string): void => {
@@ -284,11 +299,9 @@ const handleMapObjectUpdated = async (
   payload: MapObjectUpdatePayload,
   previousLayerId: string,
 ): Promise<void> => {
-  if (payload.layerId !== previousLayerId) {
-    if (payload.objectType === "marker") {
-      const isMaster = payload.layerId === masterLayerId.value;
-      pendingLayerMapUrl.value = `${baseUrl}/map?marker_id=${payload.id}&latitude=${payload.latitude}&longitude=${payload.longitude}&layer=${payload.layerId}&is_master=${isMaster}`;
-    }
+  const isMaster = activeLayer.value === masterLayerId.value;
+  if (payload.layerId !== previousLayerId && !isMaster) {
+    pendingLayerMapUrl.value = getMapObjectMapUrl(payload, payload.layerId, false);
     activeLayer.value = payload.layerId;
     return;
   }
@@ -303,8 +316,14 @@ const handleMapObjectUpdated = async (
     await handleMapObjectSearch(mapObjectQueryFormData.value);
   }
 
-  if (payload.objectType === "marker") {
-    mapIframeRef.value?.focusObject("marker", payload.id, payload.latitude, payload.longitude);
+  const focusPosition = getMapObjectFocusPosition(payload);
+  if (focusPosition) {
+    mapIframeRef.value?.focusObject(
+      payload.objectType,
+      payload.id,
+      focusPosition.latitude,
+      focusPosition.longitude,
+    );
   }
 };
 

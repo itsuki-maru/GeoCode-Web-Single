@@ -33,16 +33,27 @@ const activeObjectDetail = ref("");
 const activeObjectLayer = ref("");
 const activeShapeColor = ref("#d94841");
 const activeShapeLineType = ref("solid");
+const activeShapeArrowType = ref<"none" | "start" | "end" | "both">("none");
 const activeShapeWeight = ref(5);
 const isFormSettingsOpen = ref(false);
 const detailTextarea = ref<HTMLTextAreaElement | null>(null);
 const isShape = computed(() => props.targetType === "shape");
+const isPolyline = computed(
+  () => isShape.value && shapeStore.getById(props.targetId)?.shape_type === "polyline",
+);
 
 const lineTypeOptions = [
   { value: "solid", label: "実線", dashArray: null },
   { value: "dashed", label: "破線", dashArray: "12,8" },
   { value: "dotted", label: "点線", dashArray: "1,6" },
   { value: "dash-dot", label: "一点鎖線", dashArray: "12,6,1,6" },
+] as const;
+
+const arrowTypeOptions = [
+  { value: "none", label: "なし" },
+  { value: "start", label: "始点" },
+  { value: "end", label: "終点" },
+  { value: "both", label: "両端" },
 ] as const;
 
 const lineTypeFromDashArray = (dashArray: string | null | undefined): string => {
@@ -60,6 +71,7 @@ const loadTarget = (): void => {
     activeObjectLayer.value = shape?.layer_id || "";
     activeShapeColor.value = shape?.geojson.properties.style?.color || "#d94841";
     activeShapeLineType.value = lineTypeFromDashArray(shape?.geojson.properties.style?.dashArray);
+    activeShapeArrowType.value = shape?.geojson.properties.style?.arrowType || "none";
     activeShapeWeight.value = shape?.geojson.properties.style?.weight || 5;
     return;
   }
@@ -96,16 +108,22 @@ const updateMapObject = async (): Promise<void> => {
     const dashArray =
       lineTypeOptions.find((option) => option.value === activeShapeLineType.value)?.dashArray ||
       null;
+    const nextStyle = {
+      ...nextGeoJson.properties.style,
+      color: activeShapeColor.value,
+      weight: activeShapeWeight.value,
+      dashArray,
+    };
+    if (shape.shape_type === "polyline") {
+      nextStyle.arrowType = activeShapeArrowType.value;
+    } else {
+      nextStyle.fillColor = activeShapeColor.value;
+      delete nextStyle.arrowType;
+    }
     nextGeoJson.properties = {
       ...nextGeoJson.properties,
       memo: activeObjectDetail.value,
-      style: {
-        ...nextGeoJson.properties.style,
-        color: activeShapeColor.value,
-        weight: activeShapeWeight.value,
-        dashArray,
-        ...(shape.shape_type === "polyline" ? {} : { fillColor: activeShapeColor.value }),
-      },
+      style: nextStyle,
     };
     const updatedShape = await shapeStore.updateShape(
       props.targetId,
@@ -212,6 +230,14 @@ defineExpose({ insertUploadedMarkdown });
             </option>
           </select>
         </label>
+        <label v-if="isPolyline">
+          矢印
+          <select v-model="activeShapeArrowType" class="shape-line-select">
+            <option v-for="option in arrowTypeOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
         <label class="shape-weight-label">
           太さ
           <input v-model.number="activeShapeWeight" type="range" min="1" max="10" step="1" />
@@ -220,107 +246,129 @@ defineExpose({ insertUploadedMarkdown });
       </div>
       <div class="textarea-row">
         <label class="detail-label">{{ isShape ? "メモ（Markdown）" : "マーカーの内容" }}</label>
-        <textarea
-          ref="detailTextarea"
-          class="input-detail-markdown"
-          :class="{ 'shape-detail-markdown': isShape }"
-          id="detail"
-          name="detail"
-          placeholder="## マークダウンで記述"
-          :maxlength="isShape ? 10000 : undefined"
-          v-model="activeObjectDetail"
-        ></textarea>
-      </div>
-      <div class="input-tools">
-        <button
-          @click="emit('openImageUpload')"
-          class="btn-function-image-editor"
-          title="ファイルの追加"
-        >
-          <img
-            :src="`${assetsUrl}smartphone_line24.png`"
-            class="input-tools-img"
-            alt="smartphone_line24.png"
-          />
-        </button>
-        <button
-          @click="emit('openImageList')"
-          class="btn-function-image-editor"
-          title="ファイル一覧"
-        >
-          <img
-            :src="`${assetsUrl}documents_line24.png`"
-            class="input-tools-img"
-            alt="documents_line24.png"
-          />
-        </button>
-        <button @click="insertMarkdown('## ')" class="btn-function-image-editor" title="## を挿入">
-          <img
-            :src="`${assetsUrl}format_h2_24.png`"
-            class="input-tools-img"
-            alt="format_h2_24.png"
-          />
-        </button>
-        <button
-          @click="insertMarkdown('### ')"
-          class="btn-function-image-editor"
-          title="### を挿入"
-        >
-          <img
-            :src="`${assetsUrl}format_h3_24.png`"
-            class="input-tools-img"
-            alt="format_h3_24.png"
-          />
-        </button>
-        <button @click="insertMarkdown('- ')" class="btn-function-image-editor" title="- を挿入">
-          <img
-            :src="`${assetsUrl}format_list_bulleted_24.png`"
-            class="input-tools-img"
-            alt="format_list_bulleted_24.png"
-          />
-        </button>
-        <button @click="insertMarkdown('1. ')" class="btn-function-image-editor" title="1. を挿入">
-          <img
-            :src="`${assetsUrl}format_list_numbered_24.png`"
-            class="input-tools-img"
-            alt="format_list_numbered_24.png"
-          />
-        </button>
-        <button @click="insertMarkdown('**')" class="btn-function-image-editor" title="** を挿入">
-          <img
-            :src="`${assetsUrl}format_bold_24.png`"
-            class="input-tools-img"
-            alt="format_bold_24.png"
-          />
-        </button>
-        <button
-          @click="insertMarkdown('[ Title ]( URL )')"
-          class="btn-function-image-editor"
-          title="[ Title ]( URL )を挿入"
-        >
-          <img :src="`${assetsUrl}link_24.png`" class="input-tools-img" alt="link_24.png" />
-        </button>
-        <button
-          @click="insertMarkdown(':::details タイトル\n非表示にする内容\n:::')"
-          class="btn-function-image-editor"
-          title=":::details を挿入"
-        >
-          <img :src="`${assetsUrl}more_24.png`" class="input-tools-img" alt="more_24.png" />
-        </button>
-        <button
-          @click="insertMarkdown(':::note タイトル\n内容\n:::')"
-          class="btn-function-image-editor"
-          title=":::note を挿入"
-        >
-          <img :src="`${assetsUrl}info_24.png`" class="input-tools-img" alt="info_24.png" />
-        </button>
-        <button
-          @click="insertMarkdown(':::warning タイトル\n内容\n:::')"
-          class="btn-function-image-editor"
-          title=":::warning を挿入"
-        >
-          <img :src="`${assetsUrl}warning_24.png`" class="input-tools-img" alt="warning_24.png" />
-        </button>
+        <div class="markdown-editor">
+          <textarea
+            ref="detailTextarea"
+            class="input-detail-markdown"
+            :class="{ 'shape-detail-markdown': isShape }"
+            id="detail"
+            name="detail"
+            placeholder="## マークダウンで記述"
+            :maxlength="isShape ? 10000 : undefined"
+            v-model="activeObjectDetail"
+          ></textarea>
+          <div class="input-tools">
+            <button
+              @click="emit('openImageUpload')"
+              class="btn-function-image-editor"
+              title="ファイルの追加"
+            >
+              <img
+                :src="`${assetsUrl}smartphone_line24.png`"
+                class="input-tools-img"
+                alt="smartphone_line24.png"
+              />
+            </button>
+            <button
+              @click="emit('openImageList')"
+              class="btn-function-image-editor"
+              title="ファイル一覧"
+            >
+              <img
+                :src="`${assetsUrl}documents_line24.png`"
+                class="input-tools-img"
+                alt="documents_line24.png"
+              />
+            </button>
+            <button
+              @click="insertMarkdown('## ')"
+              class="btn-function-image-editor"
+              title="## を挿入"
+            >
+              <img
+                :src="`${assetsUrl}format_h2_24.png`"
+                class="input-tools-img"
+                alt="format_h2_24.png"
+              />
+            </button>
+            <button
+              @click="insertMarkdown('### ')"
+              class="btn-function-image-editor"
+              title="### を挿入"
+            >
+              <img
+                :src="`${assetsUrl}format_h3_24.png`"
+                class="input-tools-img"
+                alt="format_h3_24.png"
+              />
+            </button>
+            <button
+              @click="insertMarkdown('- ')"
+              class="btn-function-image-editor"
+              title="- を挿入"
+            >
+              <img
+                :src="`${assetsUrl}format_list_bulleted_24.png`"
+                class="input-tools-img"
+                alt="format_list_bulleted_24.png"
+              />
+            </button>
+            <button
+              @click="insertMarkdown('1. ')"
+              class="btn-function-image-editor"
+              title="1. を挿入"
+            >
+              <img
+                :src="`${assetsUrl}format_list_numbered_24.png`"
+                class="input-tools-img"
+                alt="format_list_numbered_24.png"
+              />
+            </button>
+            <button
+              @click="insertMarkdown('**')"
+              class="btn-function-image-editor"
+              title="** を挿入"
+            >
+              <img
+                :src="`${assetsUrl}format_bold_24.png`"
+                class="input-tools-img"
+                alt="format_bold_24.png"
+              />
+            </button>
+            <button
+              @click="insertMarkdown('[ Title ]( URL )')"
+              class="btn-function-image-editor"
+              title="[ Title ]( URL )を挿入"
+            >
+              <img :src="`${assetsUrl}link_24.png`" class="input-tools-img" alt="link_24.png" />
+            </button>
+            <button
+              @click="insertMarkdown(':::details タイトル\n非表示にする内容\n:::')"
+              class="btn-function-image-editor"
+              title=":::details を挿入"
+            >
+              <img :src="`${assetsUrl}more_24.png`" class="input-tools-img" alt="more_24.png" />
+            </button>
+            <button
+              @click="insertMarkdown(':::note タイトル\n内容\n:::')"
+              class="btn-function-image-editor"
+              title=":::note を挿入"
+            >
+              <img :src="`${assetsUrl}info_24.png`" class="input-tools-img" alt="info_24.png" />
+            </button>
+            <button
+              @click="insertMarkdown(':::warning タイトル\n内容\n:::')"
+              class="btn-function-image-editor"
+              title=":::warning を挿入"
+            >
+              <img
+                :src="`${assetsUrl}warning_24.png`"
+                class="input-tools-img"
+                alt="warning_24.png"
+              />
+            </button>
+          </div>
+        </div>
       </div>
       <div class="btn-commit-row">
         <button @click="isFormSettingsOpen = true" class="btn-standard btn-form-settings">
@@ -379,6 +427,10 @@ defineExpose({ insertUploadedMarkdown });
   margin-bottom: 4px;
 }
 
+.markdown-editor {
+  position: relative;
+}
+
 .shape-style-row {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -406,9 +458,10 @@ defineExpose({ insertUploadedMarkdown });
 }
 
 .input-detail-markdown {
+  display: block;
   width: 100%;
   height: 60vh;
-  padding: 10px 12px;
+  padding: 10px 80px 10px 12px;
   margin: auto;
   box-sizing: border-box;
   font-size: 22px;
@@ -430,10 +483,15 @@ defineExpose({ insertUploadedMarkdown });
 .input-tools {
   position: absolute;
   display: grid;
-  height: 55%;
-  right: 4%;
-  bottom: 22%;
-  overflow: scroll;
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 12px;
+  top: 24px;
+  right: 8px;
+  bottom: 150px;
+  width: 55px;
+  overflow-x: hidden;
+  overflow-y: auto;
   scrollbar-width: none;
 }
 
@@ -457,9 +515,7 @@ defineExpose({ insertUploadedMarkdown });
   border: 1px;
   border-radius: 15px;
   transition: background-color 0.3s;
-  margin-right: 10px;
-  margin-left: 5px;
-  margin-bottom: 25px;
+  margin: 0;
   text-align: center;
 }
 

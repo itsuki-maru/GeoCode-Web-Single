@@ -50,4 +50,18 @@ const handleOverlayClick = () => {
   background: whitesmoke;
   border-radius: 10px;
 }
+
+@media (orientation: portrait) {
+  .base-modal-overlay {
+    box-sizing: border-box;
+    padding: 16px;
+  }
+
+  .base-modal-content {
+    box-sizing: border-box;
+    max-width: 100%;
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+  }
+}
 </style>

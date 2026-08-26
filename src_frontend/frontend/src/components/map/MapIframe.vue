@@ -152,7 +152,15 @@ defineExpose({ focusObject, filterMapObjects, updateMapObject });
 </template>
 
 <style scoped>
-iframe {
+.iframe-area {
   width: 100%;
+  overflow: hidden;
+  line-height: 0;
+}
+
+iframe {
+  display: block;
+  width: 100%;
+  border: 0;
 }
 </style>

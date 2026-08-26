@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from "vue";
+import { ref, watch } from "vue";
+import QRCode from "qrcode";
 import BaseModal from "@/components/common/BaseModal.vue";
 
 defineProps<{
@@ -11,50 +12,62 @@ const emit = defineEmits<{
   message: [text: string];
 }>();
 
-const QRCode: any = (window as any).QRCode;
 const qrCodeText = ref("");
 const isGenerateOk = ref(false);
-let qrcode: any;
+const qrCodeCanvas = ref<HTMLCanvasElement | null>(null);
+let generationId = 0;
 
-onMounted(() => {
-  qrcode = new QRCode(document.getElementById("qrcode"), {
-    text: qrCodeText.value,
-    width: 128,
-    height: 128,
-    colorDark: "#000000",
-    colorLight: "#ffffff",
-    correctLevel: QRCode.CorrectLevel.H,
-  });
-});
-
-watch(qrCodeText, () => {
-  if (qrCodeText.value === "") {
-    let qrElement = document.getElementById("qrcode") as HTMLElement | null;
-    if (qrElement !== null) {
-      const images = qrElement.querySelectorAll("img");
-      images.forEach((img) => (img.style.display = "none"));
-    }
-    isGenerateOk.value = false;
-  } else {
-    isGenerateOk.value = true;
-    generateQRCode();
-  }
-});
-
-function generateQRCode(): void {
-  const text = qrCodeText.value;
+watch(qrCodeText, async (text) => {
+  const currentGenerationId = ++generationId;
   if (text === "") {
-    emit("message", "文字列を入力してください。");
+    isGenerateOk.value = false;
+    clearQRCode();
     return;
   }
-  qrcode.clear();
-  qrcode.makeCode(text);
+
+  try {
+    await generateQRCode(text);
+    if (currentGenerationId === generationId) {
+      isGenerateOk.value = true;
+    }
+  } catch (error) {
+    console.error(error);
+    if (currentGenerationId === generationId) {
+      clearQRCode();
+      isGenerateOk.value = false;
+      emit("message", "QRコードを生成できませんでした。");
+    }
+  }
+});
+
+async function generateQRCode(text: string): Promise<void> {
+  const canvas = qrCodeCanvas.value;
+  if (canvas === null) {
+    throw new Error("QR code canvas is not mounted.");
+  }
+
+  await QRCode.toCanvas(canvas, text, {
+    width: 128,
+    margin: 0,
+    errorCorrectionLevel: "H",
+    color: {
+      dark: "#000000",
+      light: "#ffffff",
+    },
+  });
+}
+
+function clearQRCode(): void {
+  const canvas = qrCodeCanvas.value;
+  if (canvas !== null) {
+    canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+  }
 }
 
 function saveQRCode(): void {
-  const canvas: any = document.querySelector("#qrcode canvas");
-  if (canvas) {
-    const imageUrl = canvas.toDataURL("image/png").replace("image/png", "image/octet-stream");
+  const canvas = qrCodeCanvas.value;
+  if (canvas !== null && isGenerateOk.value) {
+    const imageUrl = canvas.toDataURL("image/png");
     const link = document.createElement("a");
     link.download = "qrcode.png";
     link.href = imageUrl;
@@ -68,7 +81,9 @@ function saveQRCode(): void {
     <div class="qrcode-content">
       <h2 class="modal-h2">QRコード生成</h2>
       <div class="setting-contents">
-        <div id="qrcode" class="qrcode"></div>
+        <div class="qrcode">
+          <canvas v-show="isGenerateOk" ref="qrCodeCanvas" width="128" height="128"></canvas>
+        </div>
         <div class="input-zone">
           <input
             type="text"
@@ -116,5 +131,12 @@ function saveQRCode(): void {
   height: 40px;
   text-align: center;
   border-radius: 5px;
+}
+
+@media (orientation: portrait) {
+  .qrcode-content {
+    box-sizing: border-box;
+    width: min(calc(100vw - 64px), 560px);
+  }
 }
 </style>

@@ -109,4 +109,14 @@ const onDelete = async (): Promise<void> => {
   display: flex;
   justify-content: space-between;
 }
+
+@media (orientation: portrait) {
+  .preview-content {
+    max-width: calc(100vw - 64px);
+  }
+
+  .preview-content :deep(#img-preview) {
+    max-height: calc(100dvh - 160px);
+  }
+}
 </style>

@@ -25,7 +25,6 @@ const emit = defineEmits<{
   openImageList: [];
   message: [text: string];
   reloadMap: [url: string];
-  changeActiveLayer: [id: string];
 }>();
 
 const mapobjStore = useMapObjectStore();
@@ -36,17 +35,28 @@ const activeObjectDetail = ref("");
 const activeObjectLayer = ref("");
 const activeShapeColor = ref("#d94841");
 const activeShapeLineType = ref("solid");
+const activeShapeArrowType = ref<"none" | "start" | "end" | "both">("none");
 const activeShapeWeight = ref(5);
 const isDeleteCheckModal = ref(false);
 const isFormSettingsOpen = ref(false);
 const detailTextarea = ref<HTMLTextAreaElement | null>(null);
 const isShape = computed(() => props.targetType === "shape");
+const isPolyline = computed(
+  () => isShape.value && shapeStore.getById(props.targetId)?.shape_type === "polyline",
+);
 
 const lineTypeOptions = [
   { value: "solid", label: "実線", dashArray: null },
   { value: "dashed", label: "破線", dashArray: "12,8" },
   { value: "dotted", label: "点線", dashArray: "1,6" },
   { value: "dash-dot", label: "一点鎖線", dashArray: "12,6,1,6" },
+] as const;
+
+const arrowTypeOptions = [
+  { value: "none", label: "なし" },
+  { value: "start", label: "始点" },
+  { value: "end", label: "終点" },
+  { value: "both", label: "両端" },
 ] as const;
 
 const lineTypeFromDashArray = (dashArray: string | null | undefined): string => {
@@ -64,6 +74,7 @@ const loadTarget = (): void => {
     activeObjectLayer.value = shape?.layer_id || "";
     activeShapeColor.value = shape?.geojson.properties.style?.color || "#d94841";
     activeShapeLineType.value = lineTypeFromDashArray(shape?.geojson.properties.style?.dashArray);
+    activeShapeArrowType.value = shape?.geojson.properties.style?.arrowType || "none";
     activeShapeWeight.value = shape?.geojson.properties.style?.weight || 5;
     return;
   }
@@ -101,16 +112,22 @@ const updateMapObject = async (): Promise<void> => {
     const dashArray =
       lineTypeOptions.find((option) => option.value === activeShapeLineType.value)?.dashArray ||
       null;
+    const nextStyle = {
+      ...nextGeoJson.properties.style,
+      color: activeShapeColor.value,
+      weight: activeShapeWeight.value,
+      dashArray,
+    };
+    if (shape.shape_type === "polyline") {
+      nextStyle.arrowType = activeShapeArrowType.value;
+    } else {
+      nextStyle.fillColor = activeShapeColor.value;
+      delete nextStyle.arrowType;
+    }
     nextGeoJson.properties = {
       ...nextGeoJson.properties,
       memo: activeObjectDetail.value,
-      style: {
-        ...nextGeoJson.properties.style,
-        color: activeShapeColor.value,
-        weight: activeShapeWeight.value,
-        dashArray,
-        ...(shape.shape_type === "polyline" ? {} : { fillColor: activeShapeColor.value }),
-      },
+      style: nextStyle,
     };
     const updatedShape = await shapeStore.updateShape(
       props.targetId,
@@ -156,7 +173,6 @@ const updateMapObject = async (): Promise<void> => {
   }
 
   emit("updated", updatePayload, previousLayerId);
-  emit("changeActiveLayer", activeObjectLayer.value);
   emit("close");
   emit("message", "更新しました。");
   activeObjectName.value = "";
@@ -240,6 +256,14 @@ defineExpose({ insertUploadedMarkdown, updateMapObject });
           線種
           <select v-model="activeShapeLineType" class="select-elm-editform shape-line-select">
             <option v-for="option in lineTypeOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <label v-if="isPolyline">
+          矢印
+          <select v-model="activeShapeArrowType" class="select-elm-editform shape-line-select">
+            <option v-for="option in arrowTypeOptions" :key="option.value" :value="option.value">
               {{ option.label }}
             </option>
           </select>
@@ -479,6 +503,7 @@ defineExpose({ insertUploadedMarkdown, updateMapObject });
 
 .shape-style-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 24px;
   margin: 12px 0;
@@ -611,5 +636,39 @@ defineExpose({ insertUploadedMarkdown, updateMapObject });
   color: #183a70;
   font-weight: 700;
   cursor: pointer;
+}
+
+@media (orientation: portrait) {
+  .content-map-object-edit {
+    width: calc(100vw - 32px);
+    max-width: 960px;
+    max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
+    margin: 16px auto;
+    overflow-y: auto;
+  }
+
+  .map-object-edit-row {
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .btn-function-image {
+    flex: 0 0 55px;
+    margin: 0;
+  }
+
+  .btn-commit-row {
+    position: static;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 12px;
+  }
+
+  .btn-update {
+    margin: 0;
+  }
 }
 </style>

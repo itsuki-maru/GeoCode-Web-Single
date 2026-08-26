@@ -224,4 +224,19 @@ defineExpose({ initSearch });
   display: flex;
   justify-content: space-between;
 }
+
+@media (orientation: portrait) {
+  .layer-list-content {
+    box-sizing: border-box;
+    width: min(calc(100vw - 64px), 760px);
+  }
+
+  .table-sticky-imagelist {
+    overflow-x: auto;
+  }
+
+  .table-sticky-imagelist table {
+    min-width: 440px;
+  }
+}
 </style>

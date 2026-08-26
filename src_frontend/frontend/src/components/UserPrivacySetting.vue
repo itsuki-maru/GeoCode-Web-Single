@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue";
+import QRCode from "qrcode";
 import {
   getUserInfoUrl,
   userPrivacySettingUrl,
@@ -69,7 +70,7 @@ const changeTotpQRModal = async (): Promise<void> => {
       const otpAuthUrl = response.data["otpauth_url"];
       const secretBase32 = response.data["secret_base32"];
       qrCodeText.value = otpAuthUrl;
-      generateQRCode();
+      await generateQRCode();
     } catch (error) {
       console.error(error);
     }
@@ -137,29 +138,24 @@ defineExpose({
 
 // QRコードモーダルの描画
 const qrCodeText = ref("");
-const QRCode: any = (window as any).QRCode;
-
-// HTMLの描画後にqrcodeを設定
-let qrcode: any;
-onMounted(() => {
-  qrcode = new QRCode(document.getElementById("qrcode-totp"), {
-    text: qrCodeText.value,
-    width: 128,
-    height: 128,
-    colorDark: "#000000",
-    colorLight: "#ffffff",
-    correctLevel: QRCode.CorrectLevel.H,
-  });
-});
+const totpQrCodeCanvas = ref<HTMLCanvasElement | null>(null);
 
 // QRCode作成関数
-function generateQRCode(): void {
+async function generateQRCode(): Promise<void> {
   const text = qrCodeText.value;
-  if (text === "") {
+  const canvas = totpQrCodeCanvas.value;
+  if (text === "" || canvas === null) {
     return;
   }
-  qrcode.clear();
-  qrcode.makeCode(text); // make another code.
+  await QRCode.toCanvas(canvas, text, {
+    width: 128,
+    margin: 0,
+    errorCorrectionLevel: "H",
+    color: {
+      dark: "#000000",
+      light: "#ffffff",
+    },
+  });
 }
 
 // メッセージ表示モーダル機能
@@ -383,7 +379,9 @@ const updatePassword = async (): Promise<void> => {
       <h2 class="modal-h2">2段階認証</h2>
       <p>このQRコードをGoogle Authenticator等で読み取ってください。</p>
       <div class="setting-contents">
-        <div id="qrcode-totp" class="qrcode"></div>
+        <div class="qrcode">
+          <canvas ref="totpQrCodeCanvas" width="128" height="128"></canvas>
+        </div>
       </div>
       <div class="post-code">
         <label class="post-code-label">確認コード（6桁）：</label>
@@ -665,6 +663,42 @@ th:nth-child(2) {
   #content-update-password,
   #content-disable-totp {
     width: 90%;
+  }
+}
+
+@media (orientation: portrait) {
+  #overlay-update-user,
+  #overlay-update-password,
+  #overlay-disable-totp,
+  #overlay-gen-qrcode,
+  #overlay-message {
+    box-sizing: border-box;
+    padding: 16px;
+  }
+
+  #content-update-user,
+  #content-update-password,
+  #content-disable-totp,
+  #content-gen-qrcode,
+  #content-message {
+    box-sizing: border-box;
+    max-width: 100%;
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+  }
+
+  #content-update-user {
+    width: min(calc(100vw - 32px), 760px);
+  }
+
+  #content-update-password,
+  #content-disable-totp,
+  #content-message {
+    width: min(calc(100vw - 32px), 520px);
+  }
+
+  #content-gen-qrcode {
+    width: min(calc(100vw - 32px), 600px);
   }
 }
 </style>

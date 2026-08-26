@@ -108,4 +108,16 @@ const layerAdd = async (): Promise<void> => {
   display: flex;
   justify-content: space-between;
 }
+
+@media (orientation: portrait) {
+  .layer-create-content {
+    box-sizing: border-box;
+    width: min(calc(100vw - 64px), 680px);
+  }
+
+  .btn-zone {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+}
 </style>

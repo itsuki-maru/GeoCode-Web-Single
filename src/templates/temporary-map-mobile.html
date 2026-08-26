@@ -14,6 +14,7 @@
                 width: 100%;
                 height: 100%;
                 margin: 0;
+                overflow: hidden;
                 padding: 0;
             }
         </style>
@@ -28,16 +29,9 @@
         </style>
         <script src="/assets/marked.min.js"></script>
         <script src="/assets/leaflet.js"></script>
-        <script src="/assets/jquery-1.12.4.min.js"></script>
-        <script src="/assets/bootstrap.bundle.min.js"></script>
-        <script src="/assets/leaflet.awesome-markers.js"></script>
         <script src="/assets/xss.min.js"></script>
         <link rel="stylesheet" href="/assets/leaflet.css" />
-        <link rel="stylesheet" href="/assets/bootstrap.min.css" />
-        <link rel="stylesheet" href="/assets/bootstrap3.0.0.min.css" />
-        <link rel="stylesheet" href="/assets/all.min.css" />
-        <link rel="stylesheet" href="/assets/leaflet.awesome-markers.css" />
-        <link rel="stylesheet" href="/assets/leaflet.awesome.rotate.min.css" />
+        <link rel="stylesheet" href="/assets/map-compat.css" />
         <!-- Leaflet.markercluster -->
         <script src="/assets/leaflet.markercluster.js"></script>
         <link rel="stylesheet" href="/assets/MarkerCluster.css" />
@@ -114,8 +108,10 @@
                 border-radius: 999px;
                 box-shadow: none;
                 color: #7f1d1d;
+                cursor: pointer;
                 font-size: 12px;
                 font-weight: bold;
+                pointer-events: auto;
                 padding: 2px 8px;
             }
 
@@ -421,6 +417,15 @@
         var zoom = {{ zoom }};
         var initialIsMapUiHidden = {{ isMapUiHidden | json_encode_for_html | safe }};
     </script>
+    <script src="/assets/map-common-base.js"></script>
+    <script src="/assets/map-common-shape-style.js"></script>
+    <script src="/assets/map-common-shape-viewport.js"></script>
+    <script src="/assets/map-common-search.js"></script>
+    <script src="/assets/map-common-content.js"></script>
+    <script src="/assets/map-common-storage.js"></script>
+    <script src="/assets/map-common-marker.js"></script>
     <script src="/assets/map-common.js"></script>
+    <script src="/assets/temporary-map-mobile-base.js"></script>
+    <script src="/assets/temporary-map-mobile-layers.js"></script>
     <script src="/assets/temporary-map-mobile.js"></script>
 </html>

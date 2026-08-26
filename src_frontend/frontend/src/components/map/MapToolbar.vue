@@ -241,6 +241,10 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
 }
 
 .btn-head-image {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 53px;
   height: 40px;
   font-size: 16px;
@@ -261,6 +265,10 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
 }
 
 .btn-head-image-search {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 40px;
   height: 40px;
   font-size: 16px;
@@ -281,12 +289,14 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
 }
 
 .btn-img {
+  display: block;
   border: none;
   box-shadow: none;
   width: 24px;
 }
 .left-btn-header-zone {
   display: flex;
+  align-items: center;
   flex: 1 1 auto;
   flex-wrap: nowrap;
   min-width: 0;
@@ -299,11 +309,13 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
 
 .right-btn-header-zone {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   margin-left: -100px;
 }
 
 .right-btn-header-zone .select-elm {
+  box-sizing: border-box;
   width: auto;
   max-width: 130px;
   height: 40px;
@@ -326,9 +338,10 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
 }
 
 .search-box {
+  box-sizing: border-box;
   font-size: 18px;
   width: 20%;
-  height: 38px;
+  height: 40px;
   text-align: center;
   border-radius: 11px;
   margin-right: 1%;
@@ -346,6 +359,7 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
 
 @media (orientation: portrait) {
   .header-btn-zone {
+    align-items: flex-start;
     justify-content: flex-start;
     flex-wrap: nowrap;
     margin-bottom: 0;

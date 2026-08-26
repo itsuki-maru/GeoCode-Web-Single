@@ -49,4 +49,16 @@ const emit = defineEmits<{
   display: flex;
   justify-content: space-between;
 }
+
+@media (orientation: portrait) {
+  .confirm-modal-content {
+    box-sizing: border-box;
+    width: min(calc(100vw - 64px), 480px);
+  }
+
+  .btn-zone {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+}
 </style>

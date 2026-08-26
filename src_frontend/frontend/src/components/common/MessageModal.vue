@@ -44,4 +44,12 @@ const emit = defineEmits<{
 .message-btn-close {
   text-align: center;
 }
+
+@media (orientation: portrait) {
+  .message-modal-content {
+    box-sizing: border-box;
+    width: min(calc(100vw - 64px), 560px);
+    overflow-wrap: anywhere;
+  }
+}
 </style>

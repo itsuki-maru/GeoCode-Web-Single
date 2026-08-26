@@ -22,6 +22,7 @@ interface ShapeStyle {
   color?: string;
   weight?: number;
   dashArray?: string | null;
+  arrowType?: "none" | "start" | "end" | "both";
   fillColor?: string;
   fillOpacity?: number;
 }

@@ -3,6 +3,8 @@ use serde_json::Value;
 
 type Coordinate = (f64, f64);
 const SHAPE_MEMO_MAX_LENGTH: usize = 10_000;
+const SHAPE_WEIGHT_MIN: f64 = 1.0;
+const SHAPE_WEIGHT_MAX: f64 = 10.0;
 
 fn validation_error(message: &str) -> AppError {
     AppError::Validation(message.to_string())
@@ -39,6 +41,7 @@ pub fn validate_shape_geojson(shape_type: &str, geojson: &Value) -> Result<(), A
         .ok_or_else(|| validation_error("GeoJSON coordinatesがありません。"))?;
 
     validate_shape_memo(feature.get("properties"))?;
+    validate_shape_style(shape_type, feature.get("properties"))?;
 
     match shape_type {
         "polygon" => validate_polygon(coordinates, false),
@@ -47,6 +50,42 @@ pub fn validate_shape_geojson(shape_type: &str, geojson: &Value) -> Result<(), A
         "circle" => validate_circle(coordinates, feature.get("properties")),
         _ => unreachable!(),
     }
+}
+
+fn validate_shape_style(shape_type: &str, properties: Option<&Value>) -> Result<(), AppError> {
+    let Some(style) = properties
+        .and_then(Value::as_object)
+        .and_then(|properties| properties.get("style"))
+    else {
+        return Ok(());
+    };
+
+    let style = style
+        .as_object()
+        .ok_or_else(|| validation_error("図形スタイルはオブジェクトで指定してください。"))?;
+    if let Some(weight) = style.get("weight") {
+        weight
+            .as_f64()
+            .filter(|weight| {
+                weight.is_finite() && (SHAPE_WEIGHT_MIN..=SHAPE_WEIGHT_MAX).contains(weight)
+            })
+            .ok_or_else(|| validation_error("図形の線の太さは1から10の範囲で指定してください。"))?;
+    }
+
+    if let Some(arrow_type) = style.get("arrowType") {
+        if shape_type != "polyline" {
+            return Err(validation_error("矢印は折れ線にのみ指定できます。"));
+        }
+        match arrow_type.as_str() {
+            Some("none" | "start" | "end" | "both") => {},
+            _ => {
+                return Err(validation_error(
+                    "折れ線の矢印はnone、start、end、bothのいずれかで指定してください。",
+                ));
+            },
+        }
+    }
+    Ok(())
 }
 
 fn validate_shape_memo(properties: Option<&Value>) -> Result<(), AppError> {
@@ -312,5 +351,87 @@ mod tests {
             });
             assert!(validate_shape_geojson("polyline", &geojson).is_err());
         }
+    }
+
+    #[test]
+    fn accepts_supported_shape_weights_and_missing_style() {
+        for weight in [1.0, 5.0, 10.0] {
+            let geojson = json!({
+                "type": "Feature",
+                "properties": {"style": {"weight": weight}},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[139.0, 35.0], [140.0, 36.0]]
+                }
+            });
+            assert!(validate_shape_geojson("polyline", &geojson).is_ok());
+        }
+
+        let geojson_without_style = json!({
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[139.0, 35.0], [140.0, 36.0]]
+            }
+        });
+        assert!(validate_shape_geojson("polyline", &geojson_without_style).is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_shape_weights() {
+        for weight in [json!(0), json!(11), json!(-1), json!("4"), json!(null)] {
+            let geojson = json!({
+                "type": "Feature",
+                "properties": {"style": {"weight": weight}},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[139.0, 35.0], [140.0, 36.0]]
+                }
+            });
+            assert!(validate_shape_geojson("polyline", &geojson).is_err());
+        }
+    }
+
+    #[test]
+    fn accepts_supported_polyline_arrow_types() {
+        for arrow_type in ["none", "start", "end", "both"] {
+            let geojson = json!({
+                "type": "Feature",
+                "properties": {"style": {"arrowType": arrow_type}},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[139.0, 35.0], [140.0, 36.0]]
+                }
+            });
+            assert!(validate_shape_geojson("polyline", &geojson).is_ok());
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_or_non_polyline_arrow_types() {
+        for arrow_type in [json!("left"), json!(""), json!(null), json!(1)] {
+            let geojson = json!({
+                "type": "Feature",
+                "properties": {"style": {"arrowType": arrow_type}},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[139.0, 35.0], [140.0, 36.0]]
+                }
+            });
+            assert!(validate_shape_geojson("polyline", &geojson).is_err());
+        }
+
+        let polygon = json!({
+            "type": "Feature",
+            "properties": {"style": {"arrowType": "both"}},
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[
+                    [139.0, 35.0], [140.0, 35.0], [140.0, 36.0], [139.0, 35.0]
+                ]]
+            }
+        });
+        assert!(validate_shape_geojson("polygon", &polygon).is_err());
     }
 }

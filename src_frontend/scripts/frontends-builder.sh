@@ -40,7 +40,7 @@ frontendMobileDistDir="$frontendMobileDir/dist"
 
 # templates ディレクトリ
 rustTemplatesDir="$projectRoot/src/templates"
-rustTemplateJsDir="$rustTemplatesDir/js/*.js"
+rustTemplateJsDir="$rustTemplatesDir/js"
 
 # 過去のビルドファイル
 distributionDirOld="$projectRoot/dist"
@@ -53,10 +53,6 @@ faviconDir="$mainDir/dist/favicon.ico"
 faviconMovedDir="$mainDir/dist/assets/favicon.ico"
 publicImageDir="$mainDir/dist/*.png"
 publicImageMovedDir="$mainDir/dist/assets/"
-qrcodeJsDir="$mainDir/dist/qrcode.min.js"
-qrcodeJsMovedDir="$mainDir/dist/assets/qrcode.min.js"
-xssJsDir="$mainDir/dist/xss.min.js"
-xssJsMovedDir="$mainDir/dist/assets/xss.min.js"
 githubCssDir="$mainDir/dist/github.css"
 githubCssMovedDir="$mainDir/dist/assets/github.css"
 manifestJsonDir="$mainDir/dist/manifest.json"
@@ -130,9 +126,6 @@ targetHtml="$frontendDir/dist/index.html"
 # favicon.icoのパス変更
 sed -i 's|href="./favicon.ico"|href="/assets/favicon.ico"|g' "$targetHtml"
 
-# qrcode.min.jsのパス変更
-sed -i 's|src="./qrcode.min.js"|src="/assets/qrcode.min.js"|g' "$targetHtml"
-
 # manifest-tab.jsonのパス変更
 sed -i 's|href="./manifest-tab.json"|href="/assets/manifest-tab.json"|g' "$targetHtml"
 
@@ -167,9 +160,6 @@ targetHtml="$frontendMobileDir/dist/index.html"
 
 # favicon.icoのパス変更
 sed -i 's|href="./favicon.ico"|href="/assets/favicon.ico"|g' $targetHtml
-
-# qrcode.min.jsのパス変更
-sed -i 's|src="./qrcode.min.js"|src="/assets/qrcode.min.js"|g' "$targetHtml"
 
 # manifest.jsonのパス変更
 sed -i 's|href="./manifest.json"|href="/assets/manifest.json"|g' "$targetHtml"
@@ -227,10 +217,6 @@ cp -r $frontendAdminDistDir ./
 mv $faviconDir $faviconMovedDir
 # アイコンファイル（開発時にpublicに配置）をassets配下に移動
 mv $publicImageDir $publicImageMovedDir
-# qrcide.min.js（開発時にpublicに配置）をassets配下に移動
-mv $qrcodeJsDir $qrcodeJsMovedDir
-# xss.min.js（開発時にpublicに配置）をassets配下に移動
-mv $xssJsDir $xssJsMovedDir
 # github.css（開発時にpublicに配置）をassets配下に移動
 mv $githubCssDir $githubCssMovedDir
 
@@ -247,7 +233,13 @@ mv -f ./*.svg $mainDistAssetsDir
 mv $manifestJsonDir $manifestJsonMovedDir
 # manifest-tab.jsonをassets配下に移動
 mv $manifestJsonIPadDir $manifestJsonIPadMovedDir
-cp -f $rustTemplateJsDir $mainDistAssetsDir
+duplicateTemplateJsFiles="$(find "$rustTemplateJsDir" -type f -name '*.js' -exec basename {} \; | sort | uniq -d)"
+if [ -n "$duplicateTemplateJsFiles" ]; then
+  echo "Template JavaScript file names must be unique:" >&2
+  echo "$duplicateTemplateJsFiles" >&2
+  exit 1
+fi
+find "$rustTemplateJsDir" -type f -name '*.js' -exec cp -f {} "$mainDistAssetsDir" \;
 
 # 静的ファイルを配置移動
 mv $faviconDir $mainDistAssetsDir
