@@ -2,7 +2,6 @@ import { defineStore } from "pinia";
 import type { LayersData } from "@/interface";
 import { getLayersUrl, deleteLayersUrl, updateLayersUrl } from "@/router/urls";
 import apiClient from "@/axiosClient";
-import { useMapObjectStore } from "@/stores/mapobjects";
 
 interface State {
   layersList: Map<string, LayersData>;
@@ -23,7 +22,7 @@ export const useLayersStore = defineStore("layers", {
     },
   },
   actions: {
-    async initList(): Promise<void> {
+    async initList(): Promise<boolean> {
       try {
         const response = await apiClient.get(getLayersUrl);
         this.layersList.clear();
@@ -42,8 +41,10 @@ export const useLayersStore = defineStore("layers", {
           [...this.layersList.entries()].sort((a, b) => (a[0] > b[0] ? 1 : -1)),
         );
         this.layersList = sortedDsc;
+        return true;
       } catch (error) {
         console.error(`Layers Store: Init List Error.`);
+        return false;
       }
     },
     addNewLayer(layerName: string): void {
@@ -76,17 +77,15 @@ export const useLayersStore = defineStore("layers", {
         console.error(error);
       }
     },
-    async deleteLayer(id: string): Promise<void> {
-      const markersStore = useMapObjectStore();
+    async deleteLayer(id: string): Promise<boolean> {
       const deleteURL = `${deleteLayersUrl}${id}`;
       try {
-        const response = await apiClient.delete(deleteURL);
-        this.initList();
+        await apiClient.delete(deleteURL);
+        return true;
       } catch (error) {
         console.error(error);
+        return false;
       }
-      this.layersList.delete(id);
-      markersStore.initList();
     },
     clearLayers(): void {
       this.layersList.clear();

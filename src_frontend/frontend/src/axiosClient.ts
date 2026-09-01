@@ -64,6 +64,10 @@ apiClient.interceptors.response.use(
     const authStore = useAuthStore();
 
     if (error.response?.status === 401) {
+      // 認証状態の切り替え中は、並行リクエストによる先行遷移を防ぐ。
+      if (authStore.isReauthenticationPending || authStore.isTokenRotationPending) {
+        return Promise.reject(error);
+      }
       if (apiClient.isAxiosError(error) && error.response?.data) {
         const errorData = error.response.data as TokenErrorResponse;
 

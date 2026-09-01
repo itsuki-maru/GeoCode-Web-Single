@@ -17,8 +17,8 @@ const filteredObjectIds = ref<{ markerIds: string[] | null; shapeIds: string[] |
   markerIds: null,
   shapeIds: null,
 });
-let updateRequestSequence = 0;
-const pendingUpdateRequests = new Map<
+let mapObjectRequestSequence = 0;
+const pendingMapObjectRequests = new Map<
   string,
   { resolve: (updated: boolean) => void; timer: number }
 >();
@@ -36,21 +36,39 @@ const postMessageToMap = (messageData: Record<string, unknown>): boolean => {
   return true;
 };
 
-const updateMapObject = (payload: MapObjectUpdatePayload): Promise<boolean> => {
-  const requestId = `map-object-update-${Date.now()}-${++updateRequestSequence}`;
-  const cloneablePayload = JSON.parse(JSON.stringify(payload)) as MapObjectUpdatePayload;
+const reloadMapFrame = (): boolean => {
+  const iframe = getMapIframe();
+  if (!iframe) return false;
+  iframe.src = props.srcUrl;
+  return true;
+};
+
+const requestMapObjectMutation = (
+  type: "mapObjectUpdate" | "mapObjectDelete",
+  messageData: Record<string, unknown>,
+): Promise<boolean> => {
+  const requestId = `map-object-${Date.now()}-${++mapObjectRequestSequence}`;
   return new Promise((resolve) => {
     const timer = window.setTimeout(() => {
-      pendingUpdateRequests.delete(requestId);
+      pendingMapObjectRequests.delete(requestId);
       resolve(false);
     }, 2000);
-    pendingUpdateRequests.set(requestId, { resolve, timer });
-    if (!postMessageToMap({ type: "mapObjectUpdate", requestId, payload: cloneablePayload })) {
+    pendingMapObjectRequests.set(requestId, { resolve, timer });
+    if (!postMessageToMap({ type, requestId, ...messageData })) {
       window.clearTimeout(timer);
-      pendingUpdateRequests.delete(requestId);
+      pendingMapObjectRequests.delete(requestId);
       resolve(false);
     }
   });
+};
+
+const updateMapObject = (payload: MapObjectUpdatePayload): Promise<boolean> => {
+  const cloneablePayload = JSON.parse(JSON.stringify(payload)) as MapObjectUpdatePayload;
+  return requestMapObjectMutation("mapObjectUpdate", { payload: cloneablePayload });
+};
+
+const deleteMapObject = (id: string): Promise<boolean> => {
+  return requestMapObjectMutation("mapObjectDelete", { id });
 };
 
 const focusObject = (
@@ -59,7 +77,7 @@ const focusObject = (
   lat: number,
   lng: number,
 ): void => {
-  postMessageToMap({ id: objectType === "marker" ? id : "", lat, lng, type: "focus" });
+  postMessageToMap({ objectType, id, lat, lng, type: "focus" });
 };
 
 const filterMapObjects = (markerIds: string[] | null, shapeIds: string[] | null): void => {
@@ -113,11 +131,14 @@ const handleMessage = (event: MessageEvent): void => {
     emit("loginRedirect");
   } else if (event.data.type === "callParentImagePreview") {
     emit("previewImage", event.data.message);
-  } else if (event.data.type === "mapObjectUpdateResult") {
-    const request = pendingUpdateRequests.get(event.data.requestId);
+  } else if (
+    event.data.type === "mapObjectUpdateResult" ||
+    event.data.type === "mapObjectDeleteResult"
+  ) {
+    const request = pendingMapObjectRequests.get(event.data.requestId);
     if (!request) return;
     window.clearTimeout(request.timer);
-    pendingUpdateRequests.delete(event.data.requestId);
+    pendingMapObjectRequests.delete(event.data.requestId);
     request.resolve(event.data.success === true);
   }
 };
@@ -128,14 +149,14 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener("message", handleMessage);
-  pendingUpdateRequests.forEach(({ resolve, timer }) => {
+  pendingMapObjectRequests.forEach(({ resolve, timer }) => {
     window.clearTimeout(timer);
     resolve(false);
   });
-  pendingUpdateRequests.clear();
+  pendingMapObjectRequests.clear();
 });
 
-defineExpose({ focusObject, filterMapObjects, updateMapObject });
+defineExpose({ deleteMapObject, focusObject, filterMapObjects, reloadMapFrame, updateMapObject });
 </script>
 
 <template>

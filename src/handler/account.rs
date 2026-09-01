@@ -12,7 +12,7 @@ use sqlx::{query, query_as};
 
 use crate::auth::{
     build_auth_cookie_response, build_clear_auth_cookie_response, create_token,
-    refresh_access_token,
+    refresh_access_token, with_cleared_auth_cookies,
 };
 use crate::db::create_user_with_master_layer;
 use crate::error::AppError;
@@ -421,7 +421,7 @@ pub async fn account_password_update_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
     Json(payload): Json<UpdateAccountPasswordPayload>,
-) -> Result<Json<MessageApi>, AppError> {
+) -> Result<Response, AppError> {
     validate_password(&payload.new_password)?;
 
     let current_hash = sqlx::query_scalar::<_, String>(
@@ -458,9 +458,11 @@ pub async fn account_password_update_handler(
     })?;
 
     if result.rows_affected() > 0 {
-        Ok(Json(MessageApi {
+        let response = Json(MessageApi {
             message: "Password successfully updated.".to_string(),
-        }))
+        })
+        .into_response();
+        with_cleared_auth_cookies(response)
     } else {
         Err(AppError::BadRequest)
     }

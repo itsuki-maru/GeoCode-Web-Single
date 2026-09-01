@@ -157,15 +157,16 @@ export const useMapObjectStore = defineStore("mapobjects", {
         update_at: mapobje.update_at,
       });
     },
-    async deleteMapObject(id: string): Promise<void> {
+    async deleteMapObject(id: string): Promise<boolean> {
       const deleteURL = `${deleteMapObjectUrl}${id}`;
       try {
-        const response = await apiClient.delete(deleteURL);
+        await apiClient.delete(deleteURL);
+        this.mapObjectList.delete(id);
+        return true;
       } catch (error) {
         console.log(error);
+        return false;
       }
-      console.log("Delete MapObject.");
-      this.mapObjectList.delete(id);
     },
 
     clearMapObject(): void {

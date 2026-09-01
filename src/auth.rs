@@ -97,24 +97,41 @@ pub fn build_auth_cookie_response(
     status: StatusCode,
     body: axum::body::Body,
 ) -> Result<Response<axum::body::Body>, AppError> {
-    let (access_cookie, refresh_cookie) = build_cookie_strings(access_token, refresh_token);
-    let access_header =
-        HeaderValue::from_str(&access_cookie).map_err(|_| AppError::InternalServerError)?;
-    let refresh_header =
-        HeaderValue::from_str(&refresh_cookie).map_err(|_| AppError::InternalServerError)?;
-
-    let mut builder = Response::builder();
-    if let Some(headers) = builder.headers_mut() {
-        headers.append("Set-Cookie", access_header);
-        headers.append("Set-Cookie", refresh_header);
-    }
-    builder
+    let response = Response::builder()
         .status(status)
         .body(body)
-        .map_err(|_| AppError::InternalServerError)
+        .map_err(|_| AppError::InternalServerError)?;
+    with_auth_cookies(response, access_token, refresh_token)
+}
+
+pub fn with_auth_cookies(
+    mut response: Response<axum::body::Body>,
+    access_token: &str,
+    refresh_token: &str,
+) -> Result<Response<axum::body::Body>, AppError> {
+    let (access_cookie, refresh_cookie) = build_cookie_strings(access_token, refresh_token);
+    response.headers_mut().append(
+        "Set-Cookie",
+        HeaderValue::from_str(&access_cookie).map_err(|_| AppError::InternalServerError)?,
+    );
+    response.headers_mut().append(
+        "Set-Cookie",
+        HeaderValue::from_str(&refresh_cookie).map_err(|_| AppError::InternalServerError)?,
+    );
+    Ok(response)
 }
 
 pub fn build_clear_auth_cookie_response() -> Result<Response<axum::body::Body>, AppError> {
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .body(axum::body::Body::empty())
+        .map_err(|_| AppError::InternalServerError)?;
+    with_cleared_auth_cookies(response)
+}
+
+pub fn with_cleared_auth_cookies(
+    mut response: Response<axum::body::Body>,
+) -> Result<Response<axum::body::Body>, AppError> {
     let secure = if CONFIG.secure_cookie { " Secure;" } else { "" };
     let access_cookie = format!(
         "access_token=;{} HttpOnly; SameSite=Strict; Max-Age=0; Path=/",
@@ -124,10 +141,6 @@ pub fn build_clear_auth_cookie_response() -> Result<Response<axum::body::Body>, 
         "refresh_token=;{} HttpOnly; SameSite=Strict; Max-Age=0; Path=/account/refresh",
         secure
     );
-    let mut response = Response::builder()
-        .status(StatusCode::OK)
-        .body(axum::body::Body::empty())
-        .map_err(|_| AppError::InternalServerError)?;
     response.headers_mut().append(
         "Set-Cookie",
         HeaderValue::from_str(&access_cookie).map_err(|_| AppError::InternalServerError)?,

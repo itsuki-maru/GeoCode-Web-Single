@@ -170,9 +170,12 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
         />
       </button>
     </div>
-    <div class="right-btn-header-zone">
+    <div class="right-btn-header-zone" role="search" aria-label="地図オブジェクト検索">
       <input
         type="text"
+        name="map-object-search-query-1"
+        autocomplete="off"
+        aria-label="検索ワード1"
         maxlength="15"
         title="15字以内で入力してください。"
         :placeholder="isPortrait ? '検索ワード' : '検索ワード1'"
@@ -184,6 +187,9 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
       <input
         v-show="!isPortrait"
         type="text"
+        name="map-object-search-query-2"
+        autocomplete="off"
+        aria-label="検索ワード2"
         maxlength="15"
         title="15字以内で入力してください。"
         placeholder="検索ワード2"

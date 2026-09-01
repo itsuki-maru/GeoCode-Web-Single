@@ -25,6 +25,7 @@ function createViewportShapeLabelManager({
   const boundLayers = new Set();
   let isZooming = false;
   let isEnabled = Boolean(enabled);
+  let focusedLayer = null;
   let scheduledFrame = null;
 
   const listLayers = () => {
@@ -60,40 +61,65 @@ function createViewportShapeLabelManager({
     if (isZooming || !map || typeof map.getBounds !== "function") {
       return;
     }
-    if (!isEnabled) {
+    if (!isEnabled && !focusedLayer) {
       unbindAllLabels();
       return;
     }
 
     const zoom = Number(map.getZoom?.());
     const isDetailedZoom = Number.isFinite(zoom) && zoom >= minZoom;
-    if (!isDetailedZoom) {
+    if (!isDetailedZoom && !focusedLayer) {
       unbindAllLabels();
       return;
     }
 
     const bounds = map.getBounds();
     const candidates = [];
-    for (const layer of listLayers()) {
-      if (!layer || layer.isMeasurementLabel === true) {
-        continue;
-      }
+    if (isEnabled && isDetailedZoom) {
+      for (const layer of listLayers()) {
+        if (!layer || layer.isMeasurementLabel === true) {
+          continue;
+        }
 
-      const canShowLayer = Boolean(map.hasLayer?.(layer) && shouldBind(layer));
-      const labelLatLng = canShowLayer ? getCachedLabelLatLng(layer) : null;
-      const isVisible = Boolean(
-        canShowLayer && labelLatLng && bounds?.contains?.(labelLatLng),
-      );
+        const canShowLayer = Boolean(
+          map.hasLayer?.(layer) && shouldBind(layer),
+        );
+        const labelLatLng = canShowLayer ? getCachedLabelLatLng(layer) : null;
+        const isVisible = Boolean(
+          canShowLayer && labelLatLng && bounds?.contains?.(labelLatLng),
+        );
 
-      if (!isVisible) {
-        continue;
-      }
+        if (!isVisible) {
+          continue;
+        }
 
-      candidates.push({ layer, labelLatLng });
-      if (candidates.length >= renderThreshold) {
-        unbindAllLabels();
-        return;
+        candidates.push({ layer, labelLatLng });
+        if (candidates.length >= renderThreshold) {
+          candidates.length = 0;
+          break;
+        }
       }
+    }
+
+    const focusedName =
+      typeof focusedLayer?.shapeName === "string"
+        ? focusedLayer.shapeName.trim()
+        : "";
+    const canShowFocusedLayer = Boolean(
+      focusedName && map.hasLayer?.(focusedLayer) && shouldBind(focusedLayer),
+    );
+    const focusedLabelLatLng = canShowFocusedLayer
+      ? getCachedLabelLatLng(focusedLayer)
+      : null;
+    if (
+      focusedLabelLatLng &&
+      bounds?.contains?.(focusedLabelLatLng) &&
+      !candidates.some(({ layer }) => layer === focusedLayer)
+    ) {
+      candidates.push({
+        layer: focusedLayer,
+        labelLatLng: focusedLabelLatLng,
+      });
     }
 
     const candidateLayers = new Set(candidates.map(({ layer }) => layer));
@@ -127,7 +153,7 @@ function createViewportShapeLabelManager({
   };
 
   const scheduleRefresh = () => {
-    if (!isEnabled || isZooming || scheduledFrame !== null) {
+    if ((!isEnabled && !focusedLayer) || isZooming || scheduledFrame !== null) {
       return;
     }
     const run = () => {
@@ -167,7 +193,7 @@ function createViewportShapeLabelManager({
   const setEnabled = (enabled) => {
     const nextEnabled = Boolean(enabled);
     if (isEnabled === nextEnabled) {
-      if (isEnabled) {
+      if (isEnabled || focusedLayer) {
         scheduleRefresh();
       }
       return;
@@ -176,10 +202,30 @@ function createViewportShapeLabelManager({
     isEnabled = nextEnabled;
     if (!isEnabled) {
       cancelScheduledRefresh();
-      unbindAllLabels();
+      if (focusedLayer) {
+        refresh();
+      } else {
+        unbindAllLabels();
+      }
       return;
     }
     scheduleRefresh();
+  };
+
+  const setFocusedLayer = (layer) => {
+    const nextFocusedLayer = layer || null;
+    if (focusedLayer === nextFocusedLayer) {
+      scheduleRefresh();
+      return;
+    }
+
+    const previousFocusedLayer = focusedLayer;
+    focusedLayer = nextFocusedLayer;
+    cancelScheduledRefresh();
+    if (previousFocusedLayer && previousFocusedLayer !== focusedLayer) {
+      unbindLabel(previousFocusedLayer);
+    }
+    refresh();
   };
 
   map.on("zoomstart", closeForZoom);
@@ -199,6 +245,7 @@ function createViewportShapeLabelManager({
     refresh,
     scheduleRefresh,
     setEnabled,
+    setFocusedLayer,
   };
 }
 

@@ -44,6 +44,51 @@ const markerRecords = {
   },
 };
 
+const shapeRecord = {
+  geojson: {
+    geometry: {
+      coordinates: [
+        [
+          [139.76, 35.68],
+          [139.77, 35.68],
+          [139.77, 35.69],
+          [139.76, 35.68],
+        ],
+      ],
+      type: "Polygon",
+    },
+    properties: {
+      memo: "**重要**な共有メモ\n\n<script>危険な内容</script>",
+    },
+    type: "Feature",
+  },
+  id: "shape-1",
+  layer_id: "layer-1",
+  name: "避難区域",
+  shape_type: "polygon",
+};
+
+const shapeWithoutMemoRecord = {
+  ...shapeRecord,
+  geojson: {
+    ...shapeRecord.geojson,
+    geometry: {
+      coordinates: [
+        [
+          [139.78, 35.7],
+          [139.79, 35.7],
+          [139.79, 35.71],
+          [139.78, 35.7],
+        ],
+      ],
+      type: "Polygon",
+    },
+    properties: { memo: "   " },
+  },
+  id: "shape-2",
+  name: "メモなし区域",
+};
+
 type SmokePage = {
   fileName: string;
   templateName: string;
@@ -239,6 +284,60 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
 
   it.each([
     {
+      eventTypes: ["click"],
+      page: {
+        ...pages[2],
+        globals: { ...pages[2].globals, shapesFromAxum: [shapeRecord] },
+      },
+    },
+    {
+      eventTypes: ["click"],
+      page: {
+        ...pages[3],
+        globals: { ...pages[3].globals, shapesObj: { "shape-1": shapeRecord } },
+      },
+    },
+    {
+      eventTypes: ["touchend", "click"],
+      page: {
+        ...pages[4],
+        globals: { ...pages[4].globals, shapesObj: { "shape-1": shapeRecord } },
+      },
+    },
+  ])("$page.fileNameの図形名操作でMarkdownメモを開く", async ({ eventTypes, page }) => {
+    const dom = smokeLoadPage(page);
+    new Script(`
+      (() => {
+        const testShapeLayer = Object.values(shapeLayers)[0];
+        testShapeLayer.addTo(map);
+        map.setView([35.685, 139.765], 14);
+        shapeNameLabelManager.refresh();
+      })();
+    `).runInContext(dom.getInternalVMContext());
+    await new Promise<void>((resolve) => dom.window.setTimeout(resolve, 0));
+
+    new Script(`
+      globalThis.__shapeMemoPopupOpenCount = 0;
+      map.on("popupopen", () => { globalThis.__shapeMemoPopupOpenCount += 1; });
+    `).runInContext(dom.getInternalVMContext());
+
+    const shapeNameTooltip = dom.window.document.querySelector(".shape-name-tooltip");
+    expect(shapeNameTooltip).not.toBeNull();
+    eventTypes.forEach((eventType) => {
+      shapeNameTooltip!.dispatchEvent(new dom.window.Event(eventType, { bubbles: true }));
+    });
+
+    const popupContent = dom.window.document.querySelector(".leaflet-popup-content");
+    expect(popupContent?.querySelector("h1")?.textContent).toBe("避難区域");
+    expect(popupContent?.querySelector("strong")?.textContent).toBe("重要");
+    expect(popupContent?.querySelector("script")).toBeNull();
+    expect(
+      (dom.window as unknown as { __shapeMemoPopupOpenCount: number }).__shapeMemoPopupOpenCount,
+    ).toBe(1);
+  });
+
+  it.each([
+    {
       expectedHover: true,
       expectedLabelSuppressed: true,
       fileName: "map.js",
@@ -283,4 +382,241 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
     expect(profile.shouldSuppressShapeLabelClick).toBe(contract.expectedLabelSuppressed);
     expect(profile.modeDescription).toContain("入力モード");
   });
+
+  it.each([pages[0], pages[1]])("$fileNameがVue側で削除されたマーカーを完全に除去する", (page) => {
+    const dom = smokeLoadPage({
+      ...page,
+      globals: {
+        ...page.globals,
+        markersFromAxum: structuredClone(markerRecords),
+      },
+    });
+    new Script(`
+      (() => {
+        const marker = markers["marker-marker-1"];
+        globalThis.__markerDeleteContract = {
+          success: applyMarkerDeleteFromParent("marker-1"),
+          markerExists: Boolean(markers["marker-marker-1"]),
+          recordExists: Boolean(markersFromAxum["marker-1"]),
+          clusterContainsMarker: markersClusterGroup.hasLayer(marker),
+        };
+      })();
+    `).runInContext(dom.getInternalVMContext());
+
+    expect(
+      (
+        dom.window as unknown as {
+          __markerDeleteContract: {
+            clusterContainsMarker: boolean;
+            markerExists: boolean;
+            recordExists: boolean;
+            success: boolean;
+          };
+        }
+      ).__markerDeleteContract,
+    ).toEqual({
+      clusterContainsMarker: false,
+      markerExists: false,
+      recordExists: false,
+      success: true,
+    });
+  });
+
+  it.each([pages[0], pages[1]])(
+    "$fileNameが非表示中のフォーカス対象図形だけを表示してMarkdownメモを開く",
+    (page) => {
+      const dom = smokeLoadPage({
+        ...page,
+        globals: {
+          ...page.globals,
+          shapesFromAxum: [shapeRecord, shapeWithoutMemoRecord],
+        },
+      });
+      new Script(`
+        (() => {
+          const shapeLayersById = Object.fromEntries(
+            Array.from(searchableShapeLayers).map((layer) => [String(layer.shapeId), layer]),
+          );
+          const firstShape = shapeLayersById["shape-1"];
+          const secondShape = shapeLayersById["shape-2"];
+          map.removeLayer(drawnShapesGroup);
+
+          focusMapObject("shape", "shape-1", 35.685, 139.765);
+          const firstFocus = {
+            groupVisible: map.hasLayer(drawnShapesGroup),
+            firstVisible: map.hasLayer(firstShape),
+            secondVisible: map.hasLayer(secondShape),
+            popupText: document.querySelector(".leaflet-popup-content strong")?.textContent || "",
+          };
+
+          focusMapObject("shape", "shape-2", 35.705, 139.785);
+          const secondFocus = {
+            firstVisible: map.hasLayer(firstShape),
+            secondVisible: map.hasLayer(secondShape),
+            popupVisible: Boolean(document.querySelector(".leaflet-popup-content")),
+          };
+
+          drawnShapesGroup.addTo(map);
+          const allVisibleWhenEnabled =
+            map.hasLayer(firstShape) && map.hasLayer(secondShape);
+          map.removeLayer(drawnShapesGroup);
+          const noneVisibleAfterDisable =
+            !map.hasLayer(firstShape) && !map.hasLayer(secondShape);
+
+          globalThis.__shapeFocusContract = {
+            firstFocus,
+            secondFocus,
+            allVisibleWhenEnabled,
+            noneVisibleAfterDisable,
+          };
+        })();
+      `).runInContext(dom.getInternalVMContext());
+
+      expect(
+        (
+          dom.window as unknown as {
+            __shapeFocusContract: {
+              allVisibleWhenEnabled: boolean;
+              firstFocus: {
+                firstVisible: boolean;
+                groupVisible: boolean;
+                popupText: string;
+                secondVisible: boolean;
+              };
+              noneVisibleAfterDisable: boolean;
+              secondFocus: {
+                firstVisible: boolean;
+                popupVisible: boolean;
+                secondVisible: boolean;
+              };
+            };
+          }
+        ).__shapeFocusContract,
+      ).toEqual({
+        firstFocus: {
+          groupVisible: false,
+          firstVisible: true,
+          secondVisible: false,
+          popupText: "重要",
+        },
+        secondFocus: {
+          firstVisible: false,
+          secondVisible: true,
+          popupVisible: false,
+        },
+        allVisibleWhenEnabled: true,
+        noneVisibleAfterDisable: true,
+      });
+    },
+  );
+
+  it.each([pages[0], pages[1]])(
+    "$fileNameが共通処理でマーカーへ移動し図形の一時表示を解除する",
+    (page) => {
+      const dom = smokeLoadPage({
+        ...page,
+        globals: {
+          ...page.globals,
+          markersFromAxum: structuredClone(markerRecords),
+          shapesFromAxum: [shapeRecord],
+        },
+      });
+      new Script(`
+        (() => {
+          const shapeLayer = Array.from(searchableShapeLayers)[0];
+          const marker = markers["marker-marker-1"];
+          map.removeLayer(drawnShapesGroup);
+          focusMapObject("shape", "shape-1", 35.685, 139.765);
+
+          markersClusterGroup.removeLayer(marker);
+          markersClusterGroup.zoomToShowLayer = (_layer, callback) => callback();
+          focusMapObject(undefined, "marker-1", 35.6812, 139.7671);
+
+          globalThis.__markerFocusContract = {
+            markerRestored: markersClusterGroup.hasLayer(marker),
+            markerPopupOpen: marker.isPopupOpen(),
+            temporaryShapeCleared: !map.hasLayer(shapeLayer),
+            zoom: map.getZoom(),
+          };
+        })();
+      `).runInContext(dom.getInternalVMContext());
+
+      expect(
+        (
+          dom.window as unknown as {
+            __markerFocusContract: {
+              markerPopupOpen: boolean;
+              markerRestored: boolean;
+              temporaryShapeCleared: boolean;
+              zoom: number;
+            };
+          }
+        ).__markerFocusContract,
+      ).toEqual({
+        markerRestored: true,
+        markerPopupOpen: true,
+        temporaryShapeCleared: true,
+        zoom: 16,
+      });
+    },
+  );
+
+  it.each([pages[0], pages[1]])(
+    "$fileNameが図形名表示を有効化せずフォーカス対象の名前だけを表示する",
+    async (page) => {
+      const dom = smokeLoadPage({
+        ...page,
+        globals: {
+          ...page.globals,
+          shapesFromAxum: [shapeRecord, shapeWithoutMemoRecord],
+        },
+      });
+      new Script(`
+        map.removeLayer(shapeNameVisibilityLayer);
+        map.removeLayer(drawnShapesGroup);
+        focusMapObject("shape", "shape-1", 35.685, 139.765);
+      `).runInContext(dom.getInternalVMContext());
+      await new Promise<void>((resolve) => dom.window.setTimeout(resolve, 50));
+
+      new Script(`
+        globalThis.__focusedShapeNameContract = {
+          nameControlVisible: map.hasLayer(shapeNameVisibilityLayer),
+          tooltipText:
+            document.querySelector(".shape-name-tooltip")?.textContent?.trim() || "",
+          popupText:
+            document.querySelector(".leaflet-popup-content strong")?.textContent || "",
+          visibleShapeNameCount:
+            document.querySelectorAll(".shape-name-tooltip").length,
+        };
+      `).runInContext(dom.getInternalVMContext());
+
+      expect(
+        (
+          dom.window as unknown as {
+            __focusedShapeNameContract: {
+              nameControlVisible: boolean;
+              popupText: string;
+              tooltipText: string;
+              visibleShapeNameCount: number;
+            };
+          }
+        ).__focusedShapeNameContract,
+      ).toEqual({
+        nameControlVisible: false,
+        tooltipText: "避難区域",
+        popupText: "重要",
+        visibleShapeNameCount: 1,
+      });
+
+      new Script(`
+        markersClusterGroup.zoomToShowLayer = (_layer, callback) => callback();
+        focusMapObject("marker", "marker-1", 35.6812, 139.7671);
+        globalThis.__focusedShapeNameCleared =
+          document.querySelectorAll(".shape-name-tooltip").length === 0;
+      `).runInContext(dom.getInternalVMContext());
+      expect(
+        (dom.window as unknown as { __focusedShapeNameCleared: boolean }).__focusedShapeNameCleared,
+      ).toBe(true);
+    },
+  );
 });

@@ -5,7 +5,7 @@ import MapObjectFormSettingsModal from "@/components/map-object/MapObjectFormSet
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useShapeStore } from "@/stores/shapes";
 import type { LayersData, MapObjectUpdatePayload, ShapeGeoJson } from "@/interface";
-import { baseUrl, assetsUrl } from "@/setting";
+import { assetsUrl } from "@/setting";
 
 const props = defineProps<{
   isOpen: boolean;
@@ -13,18 +13,15 @@ const props = defineProps<{
   targetId: string;
   layerList: Map<string, LayersData>;
   isHttpsProtocol: boolean;
-  activeLayer: string;
-  masterLayerId: string;
 }>();
 
 const emit = defineEmits<{
   close: [];
   updated: [payload: MapObjectUpdatePayload, previousLayerId: string];
-  deleted: [];
+  deleted: [id: string];
   openImageUpload: [];
   openImageList: [];
   message: [text: string];
-  reloadMap: [url: string];
 }>();
 
 const mapobjStore = useMapObjectStore();
@@ -180,21 +177,19 @@ const updateMapObject = async (): Promise<void> => {
   activeObjectLayer.value = "";
 };
 
-const deleteMarker = (): void => {
+const deleteMarker = async (): Promise<void> => {
   if (props.targetId === "" || isShape.value) {
     return;
   }
-  mapobjStore.deleteMapObject(props.targetId);
+  const id = props.targetId;
+  const deleted = await mapobjStore.deleteMapObject(id);
   isDeleteCheckModal.value = false;
-  emit("close");
-  emit("message", "削除しました。");
-  const isMaster = props.activeLayer === props.masterLayerId;
-  if (isMaster) {
-    emit("reloadMap", `${baseUrl}/map?layer=${props.activeLayer}&is_master=true`);
-  } else {
-    emit("reloadMap", `${baseUrl}/map?layer=${props.activeLayer}`);
+  if (!deleted) {
+    emit("message", "マーカーを削除できませんでした。");
+    return;
   }
-  emit("deleted");
+  emit("close");
+  emit("deleted", id);
 };
 
 function insertMarkdown(text: string) {
