@@ -7,6 +7,8 @@ const state = vi.hoisted(() => ({
   request: vi.fn(),
   logout: vi.fn(),
   push: vi.fn(),
+  reauthenticationPending: false,
+  tokenRotationPending: false,
 }));
 
 const client = vi.hoisted(() => ({
@@ -34,7 +36,11 @@ vi.mock("axios", () => ({
   },
 }));
 vi.mock("@/stores/auth", () => ({
-  useAuthStore: () => ({ logout: state.logout }),
+  useAuthStore: () => ({
+    logout: state.logout,
+    isReauthenticationPending: state.reauthenticationPending,
+    isTokenRotationPending: state.tokenRotationPending,
+  }),
 }));
 vi.mock("@/router", () => ({
   default: { push: state.push },
@@ -54,6 +60,8 @@ beforeEach(() => {
   state.request.mockReset();
   state.logout.mockReset();
   state.push.mockReset();
+  state.reauthenticationPending = false;
+  state.tokenRotationPending = false;
 });
 
 describe("リクエストインターセプター", () => {
@@ -72,6 +80,32 @@ describe("リクエストインターセプター", () => {
 });
 
 describe("レスポンスインターセプター", () => {
+  it("再ログイン案内中の401では自動更新や画面遷移を行わない", async () => {
+    state.reauthenticationPending = true;
+    const error = {
+      response: { status: 401, data: { error: "token_expired" } },
+      config: { url: "/protected" },
+    };
+
+    await expect(state.responseHandler?.(error)).rejects.toBe(error);
+    expect(state.post).not.toHaveBeenCalled();
+    expect(state.logout).not.toHaveBeenCalled();
+    expect(state.push).not.toHaveBeenCalled();
+  });
+
+  it("トークン再発行中の401では自動更新や画面遷移を行わない", async () => {
+    state.tokenRotationPending = true;
+    const error = {
+      response: { status: 401, data: { error: "token_expired" } },
+      config: { url: "/protected" },
+    };
+
+    await expect(state.responseHandler?.(error)).rejects.toBe(error);
+    expect(state.post).not.toHaveBeenCalled();
+    expect(state.logout).not.toHaveBeenCalled();
+    expect(state.push).not.toHaveBeenCalled();
+  });
+
   it("期限切れトークンを更新して元のリクエストを再試行する", async () => {
     state.post.mockResolvedValue({ data: {} });
     state.request.mockResolvedValue({ data: "retried" });

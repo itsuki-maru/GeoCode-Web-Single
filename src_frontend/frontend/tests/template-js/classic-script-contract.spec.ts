@@ -28,6 +28,7 @@ const sharedEditorScriptNames = [
   "map-editor-shape-delete.js",
   "map-editor-shape-geometry.js",
 ] as const;
+const sharedMapObjectFocusScriptName = "map-object-focus.js";
 
 const allScriptNames = Array.from(
   new Set(pageContracts.flatMap(({ templateName }) => templateScriptNames(templateName))),
@@ -75,6 +76,28 @@ describe("テンプレートJavaScriptの本番配信契約", () => {
       );
       expect(scriptNames.indexOf("map-editor-shape-delete.js")).toBeLessThan(
         scriptNames.indexOf("map-editor-shape-geometry.js"),
+      );
+    },
+  );
+
+  it.each([
+    { controlsScript: "map-controls.js", entryScript: "map.js", templateName: "map.html" },
+    {
+      controlsScript: "map-mobile-controls.js",
+      entryScript: "map-mobile.js",
+      templateName: "map-mobile.html",
+    },
+  ])(
+    "$templateNameが共通フォーカス処理をコントロール初期化後に一度だけ読み込む",
+    ({ controlsScript, entryScript, templateName }) => {
+      const scriptNames = templateScriptNames(templateName);
+
+      expect(scriptNames.filter((name) => name === sharedMapObjectFocusScriptName)).toHaveLength(1);
+      expect(scriptNames.indexOf(controlsScript)).toBeLessThan(
+        scriptNames.indexOf(sharedMapObjectFocusScriptName),
+      );
+      expect(scriptNames.indexOf(sharedMapObjectFocusScriptName)).toBeLessThan(
+        scriptNames.indexOf(entryScript),
       );
     },
   );

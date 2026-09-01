@@ -49,8 +49,13 @@ describe("認証・アプリケーション初期化ストア", () => {
   it("現在のユーザーをログアウト状態にする", () => {
     const store = useAuthStore();
     expect(store.isAuthenticated).toBe(true);
+    store.beginReauthentication();
+    expect(store.isReauthenticationPending).toBe(true);
     store.logout();
     expect(store.isAuthenticated).toBe(false);
+    expect(store.isReauthenticationPending).toBe(false);
+    store.login();
+    expect(store.isAuthenticated).toBe(true);
   });
 
   it("アプリケーション初期化状態をクリアする", () => {
@@ -128,6 +133,22 @@ describe("地図オブジェクトストア", () => {
     expect(api.get).toHaveBeenCalledWith(expect.stringContaining("query1=tokyo"));
     expect(store.filteredShapeIds).toEqual(["shape-2", "shape-1"]);
     expect([...store.mapObjectList.keys()]).toEqual(["a"]);
+  });
+
+  it("削除API成功後だけマーカーをローカル一覧から削除する", async () => {
+    const store = useMapObjectStore();
+    store.addMapObject(marker("a"));
+    api.delete.mockResolvedValueOnce({ data: {} });
+    expect(await store.deleteMapObject("a")).toBe(true);
+    expect(store.mapObjectList.has("a")).toBe(false);
+  });
+
+  it("削除API失敗時はマーカーをローカル一覧に残す", async () => {
+    const store = useMapObjectStore();
+    store.addMapObject(marker("a"));
+    api.delete.mockRejectedValueOnce(new Error("delete failed"));
+    expect(await store.deleteMapObject("a")).toBe(false);
+    expect(store.mapObjectList.has("a")).toBe(true);
   });
 });
 
@@ -207,17 +228,21 @@ describe("レイヤー・マーカーアイコンストア", () => {
     expect(store.getById("a").name).toBe("Alpha");
   });
 
-  it("レイヤーを削除して関連データを再取得する", async () => {
+  it("レイヤー削除APIの完了結果を返し、一覧の同期は呼び出し側に委ねる", async () => {
     api.delete.mockResolvedValue({ data: {} });
     const layers = useLayersStore();
-    const mapObjects = useMapObjectStore();
     layers.layersList.set("a", { id: "a", name: "Alpha" } as never);
-    const layersReload = vi.spyOn(layers, "initList").mockResolvedValue();
-    const markersReload = vi.spyOn(mapObjects, "initList").mockResolvedValue();
-    await layers.deleteLayer("a");
-    expect(layers.layersList.has("a")).toBe(false);
-    expect(layersReload).toHaveBeenCalledOnce();
-    expect(markersReload).toHaveBeenCalledOnce();
+    expect(await layers.deleteLayer("a")).toBe(true);
+    expect(api.delete).toHaveBeenCalledWith(expect.stringContaining("a"));
+    expect(layers.layersList.has("a")).toBe(true);
+  });
+
+  it("レイヤー削除APIが失敗した場合は失敗を返して状態を維持する", async () => {
+    api.delete.mockRejectedValueOnce(new Error("delete failed"));
+    const layers = useLayersStore();
+    layers.layersList.set("a", { id: "a", name: "Alpha" } as never);
+    expect(await layers.deleteLayer("a")).toBe(false);
+    expect(layers.layersList.has("a")).toBe(true);
   });
 
   it("マーカーアイコンの取得・アップロード・削除を行う", async () => {

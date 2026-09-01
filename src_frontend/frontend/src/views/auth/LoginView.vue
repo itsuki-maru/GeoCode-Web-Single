@@ -6,8 +6,10 @@ import { getTokenUrl, licensesGetUrl, getTokenFromTotpUrl } from "@/router/urls"
 import { useRouter } from "vue-router";
 import apiClient from "@/axiosClient";
 import { useApplicationInitStore } from "@/stores/appInits";
+import { useAuthStore } from "@/stores/auth";
 
 const appInitStore = useApplicationInitStore();
+const authStore = useAuthStore();
 const isAllowUserCreateAccount = ref(appInitStore.appInitData.allowUserAccountCreate);
 
 // App.vueで定義した画面右上の機能ボタンゾーン表示非表示管理変数をinject
@@ -65,6 +67,7 @@ const loginPost = async (): Promise<void> => {
 
     // ログインユーザー名とデバイスIDをローカルストレージに保存
     localStorage.setItem("loginuser", response.data["user"]);
+    authStore.login();
 
     await fetchExternalSiteHref();
     // ログインに成功したら画面右上の機能ボタンゾーンを表示状態に変更
@@ -115,6 +118,7 @@ const tokenPost = async (): Promise<void> => {
 
     // ログインユーザー名とデバイスIDをローカルストレージに保存
     localStorage.setItem("loginUser", response.data["user"]);
+    authStore.login();
     await fetchExternalSiteHref();
     // ログインに成功したら画面右上の機能ボタンゾーンを表示状態に変更
     isShowOtherFunctionButtonZone.value = true;

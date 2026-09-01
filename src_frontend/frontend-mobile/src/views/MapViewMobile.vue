@@ -110,7 +110,12 @@ getMasterLayerId();
 const isMasterLayer = computed(() => activeLayer.value === masterLayerId.value);
 
 let loadedOnceFlag = false;
+let suppressNextActiveLayerReload = false;
 watch(activeLayer, async () => {
+  if (suppressNextActiveLayerReload) {
+    suppressNextActiveLayerReload = false;
+    return;
+  }
   if (loadedOnceFlag) showProgressModal.value = true;
   const isMaster = activeLayer.value === masterLayerId.value;
   const mapUrl =
@@ -122,18 +127,29 @@ watch(activeLayer, async () => {
 });
 
 // --- 地図操作 ---
-const reloadMap = async (mapUrl: string, absolute: boolean = false): Promise<void> => {
+const reloadMap = async (
+  mapUrl: string,
+  absolute: boolean = false,
+  forceIframeReload: boolean = false,
+): Promise<boolean> => {
   await apiClient.get(authCheckUrl);
+  const shouldForceIframeReload = forceIframeReload && srcUrl.value === mapUrl;
   srcUrl.value = mapUrl;
+  let synchronized = true;
   if (absolute) {
     mapObjectQueryFormData.value = { query1: "", query2: "" };
     const isMaster = activeLayer.value === masterLayerId.value;
-    await Promise.all([
+    const [markersLoaded, shapesLoaded] = await Promise.all([
       mapobjStore.queryMapObject(activeLayer.value, isMaster),
       shapeStore.queryShapes(activeLayer.value, isMaster),
     ]);
+    synchronized = markersLoaded && shapesLoaded;
     mapIframeRef.value?.filterMapObjects(null, null);
   }
+  if (shouldForceIframeReload) {
+    synchronized = (mapIframeRef.value?.reloadMapFrame() ?? false) && synchronized;
+  }
+  return synchronized;
 };
 
 const mapIframeRef = ref<InstanceType<typeof MapIframe> | null>(null);
@@ -327,11 +343,32 @@ const handleMapObjectUpdated = async (
   }
 };
 
-const handleDeleteMarker = (id: string): void => {
-  mapobjStore.deleteMapObject(id);
-  showMessage("削除しました。");
+const removeMarkerFromMap = async (id: string): Promise<boolean> => {
+  const removed = (await mapIframeRef.value?.deleteMapObject(id)) ?? false;
+  if (removed) return true;
+
   const isMaster = activeLayer.value === masterLayerId.value;
-  reloadMap(`${baseUrl}/map?layer=${activeLayer.value}&is_master=${isMaster}`);
+  return reloadMap(`${baseUrl}/map?layer=${activeLayer.value}&is_master=${isMaster}`, false, true);
+};
+
+const handleDeleteMarker = async (id: string): Promise<void> => {
+  const deleted = await mapobjStore.deleteMapObject(id);
+  if (!deleted) {
+    showMessage("マーカーを削除できませんでした。");
+    return;
+  }
+
+  try {
+    const synchronized = await removeMarkerFromMap(id);
+    showMessage(
+      synchronized
+        ? "削除しました。"
+        : "マーカーは削除されましたが、地図の同期に失敗しました。再読み込みしてください。",
+    );
+  } catch (error) {
+    console.error(error);
+    showMessage("マーカーは削除されましたが、地図の同期に失敗しました。再読み込みしてください。");
+  }
 };
 
 // --- 画像管理 ---
@@ -447,19 +484,54 @@ const handleLayerDelete = (id: string, name: string): void => {
   isDeleteLayerCheckModal.value = true;
 };
 
-const handleLayerDeleteConfirm = (): void => {
+const handleLayerDeleteConfirm = async (): Promise<void> => {
   if (deleteActiveLayerId.value === "") {
     showMessage("レイヤが選択されていません。");
     isDeleteLayerCheckModal.value = false;
     return;
   }
-  layersStore.deleteLayer(deleteActiveLayerId.value);
+  const id = deleteActiveLayerId.value;
+  const name = deleteLayerNameRef.value;
   isDeleteLayerCheckModal.value = false;
-  activeLayer.value = masterLayerId.value;
-  showMessage(`${deleteLayerNameRef.value} を削除しました。`);
-  showLayerListModal.value = false;
   deleteActiveLayerId.value = "";
   deleteLayerNameRef.value = "";
+  showProgressModal.value = true;
+
+  const deleted = await layersStore.deleteLayer(id);
+  if (!deleted) {
+    showProgressModal.value = false;
+    showMessage(`${name} を削除できませんでした。`);
+    return;
+  }
+
+  if (activeLayer.value !== masterLayerId.value) {
+    suppressNextActiveLayerReload = true;
+    activeLayer.value = masterLayerId.value;
+  }
+
+  let objectsSynchronized = false;
+  let layersSynchronized = false;
+  try {
+    objectsSynchronized = await reloadMap(
+      `${baseUrl}/map?layer=${masterLayerId.value}&is_master=true`,
+      true,
+      true,
+    );
+    if (objectsSynchronized) {
+      layersSynchronized = await layersStore.initList();
+    }
+  } catch (error) {
+    console.error(error);
+  } finally {
+    showProgressModal.value = false;
+    showLayerListModal.value = false;
+  }
+
+  if (objectsSynchronized && layersSynchronized) {
+    showMessage(`${name} を削除しました。`);
+  } else {
+    showMessage(`${name} は削除されましたが、画面の同期に失敗しました。再読み込みしてください。`);
+  }
 };
 
 const handleLayerDeleteCancel = (): void => {

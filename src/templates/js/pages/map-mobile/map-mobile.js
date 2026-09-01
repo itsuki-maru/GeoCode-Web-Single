@@ -1,33 +1,3 @@
-function onFocusMarker(markerId, lat, lng) {
-  if (lat === "" || lng == "") {
-    console.log("Not value.");
-    return;
-  }
-  if (isValidCoordinate(lat, lng)) {
-    let latLng = new L.LatLng(lat, lng);
-    map.setView(latLng, 16);
-    if (!markerId) {
-      return;
-    }
-
-    const marker = markers[`marker-${markerId}`];
-    if (!marker) {
-      return;
-    }
-    if (!markersClusterGroup.hasLayer(marker)) {
-      markersClusterGroup.addLayer(marker);
-    }
-
-    if (typeof markersClusterGroup.zoomToShowLayer === "function") {
-      markersClusterGroup.zoomToShowLayer(marker, () => {
-        openMarkerPopup(markerId);
-      });
-    } else {
-      openMarkerPopup(markerId);
-    }
-  }
-}
-
 // Vue 側で更新されたマーカー情報を、既存の Leaflet マーカーへ反映する
 function applyMarkerUpdateFromParent(payload) {
   const markerId = String(payload?.id || "");
@@ -84,6 +54,24 @@ function applyMarkerUpdateFromParent(payload) {
   if (wasPopupOpen && nextRecord.detail) {
     marker.openPopup();
   }
+  return true;
+}
+
+// Vue 側で削除されたマーカーを、地図の管理データと表示グループから除去する
+function applyMarkerDeleteFromParent(markerIdValue) {
+  const markerId = String(markerIdValue || "");
+  const markerKey = `marker-${markerId}`;
+  const marker = markers[markerKey];
+  if (!markerId || !marker || !markersFromAxum[markerId]) {
+    return false;
+  }
+
+  if (typeof marker.closePopup === "function") marker.closePopup();
+  if (typeof marker.closeTooltip === "function") marker.closeTooltip();
+  markersClusterGroup.removeLayer(marker);
+  delete markers[markerKey];
+  delete markersFromAxum[markerId];
+  renderVisibleMarkers();
   return true;
 }
 
@@ -146,7 +134,12 @@ window.addEventListener("message", function (event) {
     const messageData = event.data;
     if (!messageData || typeof messageData !== "object") return;
     if (messageData["type"] === "focus") {
-      onFocusMarker(messageData["id"], messageData["lat"], messageData["lng"]);
+      focusMapObject(
+        messageData["objectType"],
+        messageData["id"],
+        messageData["lat"],
+        messageData["lng"],
+      );
     } else if (messageData["type"] === "mapObjectFilter") {
       applyMapObjectFilter(messageData["markerIds"], messageData["shapeIds"]);
     } else if (messageData["type"] === "markerFilter") {
@@ -164,6 +157,21 @@ window.addEventListener("message", function (event) {
       event.source.postMessage(
         {
           type: "mapObjectUpdateResult",
+          requestId: messageData["requestId"],
+          success,
+        },
+        event.origin,
+      );
+    } else if (messageData["type"] === "mapObjectDelete") {
+      let success = false;
+      try {
+        success = applyMarkerDeleteFromParent(messageData["id"]);
+      } catch (error) {
+        console.error("Map object delete from parent failed:", error);
+      }
+      event.source.postMessage(
+        {
+          type: "mapObjectDeleteResult",
           requestId: messageData["requestId"],
           success,
         },

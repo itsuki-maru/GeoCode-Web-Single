@@ -218,9 +218,12 @@ function onTouchEnd(index: string, event: TouchEvent) {
 </script>
 
 <template>
-  <div id="map-object-search-row">
+  <div id="map-object-search-row" role="search" aria-label="地図オブジェクト検索">
     <input
       type="text"
+      name="map-object-search-query-1"
+      autocomplete="off"
+      aria-label="検索ワード1"
       maxlength="15"
       title="15字以内で入力してください。"
       placeholder="検索ワード1"
@@ -231,6 +234,9 @@ function onTouchEnd(index: string, event: TouchEvent) {
     />
     <input
       type="text"
+      name="map-object-search-query-2"
+      autocomplete="off"
+      aria-label="検索ワード2"
       maxlength="15"
       title="15字以内で入力してください。"
       placeholder="検索ワード2"

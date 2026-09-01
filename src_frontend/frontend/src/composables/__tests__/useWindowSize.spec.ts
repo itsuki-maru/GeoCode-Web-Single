@@ -8,7 +8,8 @@ const Harness = defineComponent({
   setup() {
     return useWindowSize();
   },
-  template: '<div data-width="width" data-height="height">{{ width }}x{{ height }}</div>',
+  template:
+    '<div data-width="width" data-height="height">{{ width }}x{{ height }}:{{ divHeight }}</div>',
 });
 
 describe("ウィンドウサイズの監視", () => {
@@ -24,18 +25,41 @@ describe("ウィンドウサイズの監視", () => {
       value: 800,
     });
     const wrapper = mount(Harness);
-    expect(wrapper.text()).toBe("1024x800");
+    expect(wrapper.text()).toBe("1024x800:82");
 
     window.innerWidth = 640;
     window.innerHeight = 480;
     window.dispatchEvent(new Event("resize"));
     await nextTick();
-    expect(wrapper.text()).toBe("640x480");
+    expect(wrapper.text()).toBe("640x480:82");
 
     wrapper.unmount();
     window.innerWidth = 320;
     window.dispatchEvent(new Event("resize"));
     await nextTick();
     expect(wrapper.vm.width).toBe(640);
+  });
+
+  it("ポートレート時だけ表示領域を広げ、向きの変更にも追従する", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: 800,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      writable: true,
+      value: 1024,
+    });
+    const wrapper = mount(Harness);
+    expect(wrapper.text()).toBe("800x1024:88");
+
+    window.innerWidth = 1024;
+    window.innerHeight = 800;
+    window.dispatchEvent(new Event("resize"));
+    await nextTick();
+    expect(wrapper.text()).toBe("1024x800:82");
+
+    wrapper.unmount();
   });
 });

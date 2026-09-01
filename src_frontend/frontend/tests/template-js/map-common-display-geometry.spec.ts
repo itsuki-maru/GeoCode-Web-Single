@@ -32,6 +32,7 @@ type DisplayApi = {
     refresh: () => void;
     scheduleRefresh: () => void;
     setEnabled: (enabled: boolean) => void;
+    setFocusedLayer: (layer: unknown) => void;
   };
   createViewportShapeMeasurementManager: (options: Record<string, unknown>) => {
     destroy: () => void;
@@ -468,6 +469,127 @@ describe("map-commonの図形表示と幾何計算", () => {
 
     expect(getLabelLatLng).toHaveBeenCalledTimes(50);
     expect(bindLabel).not.toHaveBeenCalled();
+  });
+
+  it("通常ラベルが無効または上限到達中でもフォーカス対象の名前だけを表示する", () => {
+    const createShapeLayer = (shapeName: string) => {
+      let tooltip: object | null = null;
+      return {
+        getTooltip: vi.fn(() => tooltip),
+        openTooltip: vi.fn(),
+        setTooltip: () => {
+          tooltip = {};
+        },
+        shapeName,
+        unbindTooltip: vi.fn(() => {
+          tooltip = null;
+        }),
+      };
+    };
+    const focusedLayer = createShapeLayer("フォーカス対象");
+    const layers = [
+      focusedLayer,
+      ...Array.from({ length: 49 }, () => createShapeLayer("通常図形")),
+    ];
+    const bindLabel = vi.fn((layer: ReturnType<typeof createShapeLayer>) => {
+      layer.setTooltip();
+    });
+    const map = {
+      getBounds: () => ({ contains: () => true }),
+      getZoom: () => 16,
+      hasLayer: () => true,
+      off: vi.fn(),
+      on: vi.fn(),
+    };
+    loaded = loadMapCommon<DisplayApi>(exportedNames, { globals: { map } });
+    const manager = loaded.api.createViewportShapeLabelManager({
+      bindLabel,
+      getLabelLatLng: () => ({ lat: 35, lng: 139 }),
+      getLayers: () => layers,
+      map,
+    });
+
+    manager.setFocusedLayer(focusedLayer);
+    expect(bindLabel).toHaveBeenCalledExactlyOnceWith(focusedLayer, {
+      lat: 35,
+      lng: 139,
+    });
+    expect(focusedLayer.openTooltip).toHaveBeenCalledOnce();
+    layers.slice(1).forEach((layer) => {
+      expect(layer.openTooltip).not.toHaveBeenCalled();
+    });
+
+    manager.setEnabled(false);
+    expect(focusedLayer.getTooltip()).not.toBeNull();
+
+    manager.setFocusedLayer(null);
+    expect(focusedLayer.getTooltip()).toBeNull();
+  });
+
+  it("フォーカス対象の図形名が空白ならTooltipを生成しない", () => {
+    const focusedLayer = {
+      getTooltip: vi.fn(() => null),
+      openTooltip: vi.fn(),
+      shapeName: "   ",
+      unbindTooltip: vi.fn(),
+    };
+    const bindLabel = vi.fn();
+    const map = {
+      getBounds: () => ({ contains: () => true }),
+      getZoom: () => 16,
+      hasLayer: () => true,
+      off: vi.fn(),
+      on: vi.fn(),
+    };
+    loaded = loadMapCommon<DisplayApi>(exportedNames, { globals: { map } });
+    const manager = loaded.api.createViewportShapeLabelManager({
+      bindLabel,
+      enabled: false,
+      getLabelLatLng: () => ({ lat: 35, lng: 139 }),
+      getLayers: () => [focusedLayer],
+      map,
+    });
+
+    manager.setFocusedLayer(focusedLayer);
+
+    expect(bindLabel).not.toHaveBeenCalled();
+    expect(focusedLayer.openTooltip).not.toHaveBeenCalled();
+  });
+
+  it("通常の図形名表示が有効ならフォーカス解除後も通常ラベルとして表示する", () => {
+    let tooltip: object | null = null;
+    const focusedLayer = {
+      getTooltip: vi.fn(() => tooltip),
+      openTooltip: vi.fn(),
+      shapeName: "通常表示対象",
+      unbindTooltip: vi.fn(() => {
+        tooltip = null;
+      }),
+    };
+    const bindLabel = vi.fn(() => {
+      tooltip = {};
+    });
+    const map = {
+      getBounds: () => ({ contains: () => true }),
+      getZoom: () => 16,
+      hasLayer: () => true,
+      off: vi.fn(),
+      on: vi.fn(),
+    };
+    loaded = loadMapCommon<DisplayApi>(exportedNames, { globals: { map } });
+    const manager = loaded.api.createViewportShapeLabelManager({
+      bindLabel,
+      getLabelLatLng: () => ({ lat: 35, lng: 139 }),
+      getLayers: () => [focusedLayer],
+      map,
+    });
+
+    manager.setFocusedLayer(focusedLayer);
+    manager.setFocusedLayer(null);
+
+    expect(focusedLayer.unbindTooltip).toHaveBeenCalledOnce();
+    expect(bindLabel).toHaveBeenCalledTimes(2);
+    expect(focusedLayer.getTooltip()).not.toBeNull();
   });
 
   it("ズーム開始時に図形名を閉じ、終了後の更新を一度だけ予約する", () => {

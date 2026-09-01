@@ -22,6 +22,7 @@ import { useApplicationInitStore } from "@/stores/appInits";
 import { useWindowSize } from "@/composables/useWindowSize";
 import { isMP4 } from "@/composables/useFileTypeCheck";
 import { getShapeCenter } from "@/composables/useShapeCenter";
+import { useMapObjectTableVisibility } from "@/composables/useMapObjectTableVisibility";
 
 // Components
 import UserPrivacySetting from "@/components/UserPrivacySetting.vue";
@@ -76,6 +77,7 @@ const shapeList = computed((): Map<string, ShapeData> => shapeStore.shapeList);
 
 // --- Window size ---
 const { divHeight } = useWindowSize();
+const { isMapObjectTableOpen, toggleMapObjectTable } = useMapObjectTableVisibility();
 
 // --- Active layer management ---
 const activeLayer = ref("");
@@ -121,7 +123,12 @@ const getMasterLayerId = async (): Promise<void> => {
 getMasterLayerId();
 
 let loadedOnceFlag = false;
+let suppressNextActiveLayerReload = false;
 watch(activeLayer, async (): Promise<void> => {
+  if (suppressNextActiveLayerReload) {
+    suppressNextActiveLayerReload = false;
+    return;
+  }
   if (loadedOnceFlag) showProgressModal.value = true;
   const isMaster = activeLayer.value === masterLayerId.value;
   const mapUrl =
@@ -133,20 +140,31 @@ watch(activeLayer, async (): Promise<void> => {
 });
 
 // --- Map operations ---
-const reloadMap = async (mapUrl: string, absolute: boolean = false): Promise<void> => {
+const reloadMap = async (
+  mapUrl: string,
+  absolute: boolean = false,
+  forceIframeReload: boolean = false,
+): Promise<boolean> => {
   await apiClient.get(authCheckUrl);
+  const shouldForceIframeReload = forceIframeReload && srcUrl.value === mapUrl;
   srcUrl.value = mapUrl;
+  let synchronized = true;
   if (absolute) {
     isReload.value = true;
     mapObjectQueryFormData.value = { query1: "", query2: "" };
     const isMaster = activeLayer.value === masterLayerId.value;
-    await Promise.all([
+    const [markersLoaded, shapesLoaded] = await Promise.all([
       mapobjStore.queryMapObject(activeLayer.value, isMaster),
       shapeStore.queryShapes(activeLayer.value, isMaster),
     ]);
+    synchronized = markersLoaded && shapesLoaded;
     mapIframeRef.value?.filterMapObjects(null, null);
     showProgressModal.value = false;
   }
+  if (shouldForceIframeReload) {
+    synchronized = (mapIframeRef.value?.reloadMapFrame() ?? false) && synchronized;
+  }
+  return synchronized;
 };
 
 const handleUploadProgressChange = (progress: UploadProgressState): void => {
@@ -221,6 +239,28 @@ const handleMapObjectUpdated = async (
       focusPosition.latitude,
       focusPosition.longitude,
     );
+  }
+};
+
+const removeMarkerFromMap = async (id: string): Promise<boolean> => {
+  const removed = (await mapIframeRef.value?.deleteMapObject(id)) ?? false;
+  if (removed) return true;
+
+  const isMaster = activeLayer.value === masterLayerId.value;
+  return reloadMap(`${baseUrl}/map?layer=${activeLayer.value}&is_master=${isMaster}`, false, true);
+};
+
+const handleMapObjectDeleted = async (id: string): Promise<void> => {
+  try {
+    const synchronized = await removeMarkerFromMap(id);
+    showMessage(
+      synchronized
+        ? "削除しました。"
+        : "マーカーは削除されましたが、地図の同期に失敗しました。再読み込みしてください。",
+    );
+  } catch (error) {
+    console.error(error);
+    showMessage("マーカーは削除されましたが、地図の同期に失敗しました。再読み込みしてください。");
   }
 };
 
@@ -352,15 +392,50 @@ const onLayerDelete = (id: string): void => {
   isDeleteLayerCheckModal.value = true;
 };
 
-const confirmLayerDelete = (): void => {
+const confirmLayerDelete = async (): Promise<void> => {
   if (deleteLayerId.value === "") return;
+  const id = deleteLayerId.value;
   const name = deleteLayerName.value;
-  layersStore.deleteLayer(deleteLayerId.value);
   isDeleteLayerCheckModal.value = false;
   deleteLayerId.value = "";
-  activeLayer.value = masterLayerId.value;
-  showMessage(`${name} を削除しました。`);
-  isLayerListModal.value = false;
+  deleteLayerName.value = "";
+  showProgressModal.value = true;
+
+  const deleted = await layersStore.deleteLayer(id);
+  if (!deleted) {
+    showProgressModal.value = false;
+    showMessage(`${name} を削除できませんでした。`);
+    return;
+  }
+
+  if (activeLayer.value !== masterLayerId.value) {
+    suppressNextActiveLayerReload = true;
+    activeLayer.value = masterLayerId.value;
+  }
+
+  let objectsSynchronized = false;
+  let layersSynchronized = false;
+  try {
+    objectsSynchronized = await reloadMap(
+      `${baseUrl}/map?layer=${masterLayerId.value}&is_master=true`,
+      true,
+      true,
+    );
+    if (objectsSynchronized) {
+      layersSynchronized = await layersStore.initList();
+    }
+  } catch (error) {
+    console.error(error);
+  } finally {
+    showProgressModal.value = false;
+    isLayerListModal.value = false;
+  }
+
+  if (objectsSynchronized && layersSynchronized) {
+    showMessage(`${name} を削除しました。`);
+  } else {
+    showMessage(`${name} は削除されましたが、画面の同期に失敗しました。再読み込みしてください。`);
+  }
 };
 
 // --- Image operations ---
@@ -619,7 +694,7 @@ const onImageDeleteRequest = (id: string): void => {
   />
 
   <div class="map-contents">
-    <div class="map-and-info-zone">
+    <div class="map-and-info-zone" :class="{ 'map-object-table-closed': !isMapObjectTableOpen }">
       <div class="map-draw">
         <MapIframe
           ref="mapIframeRef"
@@ -631,7 +706,7 @@ const onImageDeleteRequest = (id: string): void => {
           @previewImage="openReadOnlyPreview"
         />
       </div>
-      <div class="info-draw">
+      <div id="map-object-table-panel" v-show="isMapObjectTableOpen" class="info-draw">
         <MapObjectTable
           :markerList="markerList"
           :shapeList="shapeList"
@@ -645,6 +720,16 @@ const onImageDeleteRequest = (id: string): void => {
     </div>
   </div>
 
+  <button
+    type="button"
+    class="map-object-table-toggle"
+    :aria-expanded="isMapObjectTableOpen"
+    aria-controls="map-object-table-panel"
+    @click="toggleMapObjectTable"
+  >
+    {{ isMapObjectTableOpen ? "テーブルを閉じる" : "テーブルを開く" }}
+  </button>
+
   <!-- Modals -->
   <MapObjectEditModal
     ref="mapObjectEditRef"
@@ -653,12 +738,10 @@ const onImageDeleteRequest = (id: string): void => {
     :targetId="selectedObjectId"
     :layerList="layerList"
     :isHttpsProtocol="isHttpsProtocol"
-    :activeLayer="activeLayer"
-    :masterLayerId="masterLayerId"
     @close="closeEditModal"
     @updated="handleMapObjectUpdated"
+    @deleted="handleMapObjectDeleted"
     @message="showMessage"
-    @reloadMap="reloadMap"
     @openImageUpload="showImageUploadModal = true"
     @openImageList="showImageListModal = true"
   />
@@ -815,22 +898,29 @@ iframe {
 }
 
 .map-draw {
-  width: 72%;
+  width: 70%;
+  transition: width 0.2s ease;
 }
 
 .info-draw {
-  width: 28%;
+  width: 30%;
 }
 
-@media (orientation: portrait) {
-  .map-draw {
-    width: 70%;
-  }
+.map-and-info-zone.map-object-table-closed .map-draw {
+  width: 100%;
+}
 
-  .info-draw {
-    width: 30%;
-    min-width: 0;
-  }
+.info-draw {
+  min-width: 0;
+}
+
+.map-object-table-toggle {
+  position: fixed;
+  right: 2%;
+  bottom: 7%;
+  z-index: 2;
+  padding: 0.45em 0.8em;
+  font-size: 0.85em;
 }
 
 table {

@@ -64,6 +64,10 @@ apiClient.interceptors.response.use(
     const authStore = useAuthStore();
 
     if (error.response?.status === 401) {
+      // パスワード変更後の案内を表示している間は、並行リクエストによる先行遷移を防ぐ。
+      if (authStore.isReauthenticationPending) {
+        return Promise.reject(error);
+      }
       if (apiClient.isAxiosError(error) && error.response?.data) {
         const errorData = error.response.data as TokenErrorResponse;
 

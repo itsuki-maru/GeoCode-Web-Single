@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue";
+import { useRouter } from "vue-router";
 import { getUserInfoUrl, userPrivacySettingUrl, userPasswordUpdateUrl } from "@/router/urls";
 import apiClient from "@/axiosClient";
 import { useApplicationInitStore } from "@/stores/appInits";
+import { useAuthStore } from "@/stores/auth";
 
 const MIN_PASSWORD_LENGTH = 8;
 
 const appInitStore = useApplicationInitStore();
+const authStore = useAuthStore();
+const router = useRouter();
 const isAllowUserUpdatePassword = computed(
   (): boolean => appInitStore.appInitData.allowUserUpdatePassword,
 );
@@ -52,6 +56,8 @@ const isOpenPasswordUpdateModal = ref(false);
 const currentPassword = ref("");
 const newPassword = ref("");
 const checkPassword = ref("");
+const isPasswordUpdateSubmitting = ref(false);
+const isPasswordUpdatedModal = ref(false);
 const openClosePasswordUpdateModal = (): void => {
   isOpenPasswordUpdateModal.value = !isOpenPasswordUpdateModal.value;
   if (!isOpenPasswordUpdateModal.value) {
@@ -90,17 +96,28 @@ const updatePassword = async (): Promise<void> => {
     messageModalOpenClose("パスワードが一致しません。");
     return;
   }
+  if (isPasswordUpdateSubmitting.value) return;
 
+  authStore.beginReauthentication();
+  isPasswordUpdateSubmitting.value = true;
   try {
     await apiClient.post(userPasswordUpdateUrl, {
       current_password: currentPassword.value,
       new_password: newPassword.value,
     });
     openClosePasswordUpdateModal();
-    messageModalOpenClose("パスワードを更新しました。");
+    isPasswordUpdatedModal.value = true;
   } catch (error) {
+    authStore.cancelReauthentication();
     messageModalOpenClose("パスワードの更新に失敗しました。");
+  } finally {
+    isPasswordUpdateSubmitting.value = false;
   }
+};
+
+const redirectToLoginAfterPasswordUpdate = (): void => {
+  authStore.logout();
+  void router.replace("/account/login");
 };
 
 defineExpose({
@@ -168,17 +185,23 @@ defineExpose({
   </div>
 
   <!-- パスワード更新モーダル -->
-  <div id="overlay-update-password" v-show="isOpenPasswordUpdateModal">
-    <div id="content-update-password">
-      <h2 class="modal-h2">パスワード変更</h2>
+  <div id="overlay-update-password" v-if="isOpenPasswordUpdateModal">
+    <form id="content-update-password" v-on:submit.prevent="updatePassword">
+      <h2 id="password-update-title" class="modal-h2">パスワード変更</h2>
+      <label class="visually-hidden" for="current-password">現在のパスワード</label>
       <input
+        id="current-password"
+        name="current-password"
         class="password-input"
         type="password"
         placeholder="Current Password"
         autocomplete="current-password"
         v-model="currentPassword"
       />
+      <label class="visually-hidden" for="new-password">新しいパスワード</label>
       <input
+        id="new-password"
+        name="new-password"
         class="password-input"
         type="password"
         pattern=".{8,}"
@@ -186,7 +209,10 @@ defineExpose({
         autocomplete="new-password"
         v-model="newPassword"
       />
+      <label class="visually-hidden" for="check-password">新しいパスワードの確認</label>
       <input
+        id="check-password"
+        name="check-password"
         class="password-input"
         type="password"
         pattern=".{8,}"
@@ -195,9 +221,24 @@ defineExpose({
         v-model="checkPassword"
       />
       <div class="btn-zone">
-        <button v-on:click="openClosePasswordUpdateModal()">閉じる</button>
-        <button v-on:click="updatePassword()">更新</button>
+        <button type="button" v-on:click="openClosePasswordUpdateModal()">閉じる</button>
+        <button type="submit" :disabled="isPasswordUpdateSubmitting">
+          {{ isPasswordUpdateSubmitting ? "更新中..." : "更新" }}
+        </button>
       </div>
+    </form>
+  </div>
+
+  <div v-if="isPasswordUpdatedModal" class="reauthentication-overlay">
+    <div
+      class="reauthentication-content"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="password-updated-title"
+    >
+      <h2 id="password-updated-title" class="modal-h2">パスワード変更完了</h2>
+      <p>パスワードを変更しました。セキュリティ保護のため、もう一度ログインしてください。</p>
+      <button type="button" v-on:click="redirectToLoginAfterPasswordUpdate">ログイン画面へ</button>
     </div>
   </div>
 
@@ -275,6 +316,39 @@ defineExpose({
   border-radius: 5px;
   box-sizing: border-box;
   text-align: center;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.reauthentication-overlay {
+  z-index: 7;
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 16px;
+  background-color: rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+
+.reauthentication-content {
+  z-index: 8;
+  width: min(100%, 520px);
+  padding: 1em;
+  background: whitesmoke;
+  border-radius: 10px;
 }
 
 .btn-zone {

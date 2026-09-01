@@ -52,6 +52,9 @@ async function deleteShape(layer) {
   layer.isDeletedShape = true;
   deletedShapeIds.add(shapeId);
   try {
+    if (typeof clearFocusedShapeFocus === "function") {
+      clearFocusedShapeFocus(layer);
+    }
     removeShapeMeasurementMarkers(layer);
     drawnShapesGroup.removeLayer(layer);
     searchableShapeLayers.delete(layer);

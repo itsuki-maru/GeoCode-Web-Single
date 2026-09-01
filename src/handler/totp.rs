@@ -1,11 +1,18 @@
-use crate::auth::{build_auth_cookie_response, create_token};
+use crate::auth::{
+    build_auth_cookie_response, create_token, refresh_access_token, with_auth_cookies,
+};
 use crate::config::CONFIG;
 use crate::error::AppError;
 use crate::model::{
     GetUserNameFromDb, MessageApi, TotpLoginPayload, TotpSetupResponse, TotpTempSecret,
     TotpVerifyRequest,
 };
-use axum::{Json, extract::Extension, http::StatusCode, response::IntoResponse};
+use axum::{
+    Json,
+    extract::Extension,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
 use base32::Alphabet;
 use chrono::Utc;
 use rand::Rng;
@@ -87,7 +94,7 @@ pub async fn totp_verify_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
     Json(payload): Json<TotpVerifyRequest>,
-) -> Result<Json<MessageApi>, AppError> {
+) -> Result<Response, AppError> {
     let result = query_as!(
         TotpTempSecret,
         r#"
@@ -123,32 +130,42 @@ pub async fn totp_verify_handler(
         return Err(AppError::Unauthorized("Unauthorized".into()));
     };
 
-    // 検証成功時は本番用に昇格
-    let blank_text = String::new();
-    query!(
+    // 検証成功時は本番用に昇格し、現在のセッション用トークンを更新する。
+    let mut transaction = pool.begin().await?;
+    let auth_version = sqlx::query_scalar::<_, i64>(
         r#"
         UPDATE user_model
-        SET totp_secret = $1, totp_temp_secret = $2,
+        SET totp_secret = $1, totp_temp_secret = '',
             auth_version = auth_version + 1,
             totp_challenge_id = NULL,
             totp_challenge_expires_at = NULL,
             totp_challenge_attempts = 0
-        WHERE id = $3
+        WHERE id = $2 AND totp_temp_secret = $1 AND totp_temp_secret <> ''
+        RETURNING auth_version
         "#,
-        result.totp_temp_secret,
-        blank_text,
-        user_id,
     )
-    .execute(&pool)
+    .bind(&result.totp_temp_secret)
+    .bind(&user_id)
+    .fetch_optional(&mut *transaction)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "database error.");
         AppError::Sqlx(e)
-    })?;
+    })?
+    .ok_or(AppError::BadRequest)?;
 
-    Ok(Json(MessageApi {
-        message: "Success TOTP 2FA enabled.".to_string(),
-    }))
+    let new_tokens =
+        refresh_access_token(user_id, auth_version).map_err(|_| AppError::InternalServerError)?;
+    let response = with_auth_cookies(
+        Json(MessageApi {
+            message: "Success TOTP 2FA enabled.".to_string(),
+        })
+        .into_response(),
+        &new_tokens.access_token,
+        &new_tokens.refresh_token,
+    )?;
+    transaction.commit().await?;
+    Ok(response)
 }
 
 // TOTPによるログインハンドラー
@@ -269,7 +286,7 @@ pub async fn totp_disable_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
     Json(payload): Json<TotpVerifyRequest>,
-) -> Result<Json<MessageApi>, AppError> {
+) -> Result<Response, AppError> {
     let (username, current_secret) = sqlx::query_as::<_, (String, String)>(
         "SELECT username, totp_secret FROM user_model WHERE id = $1 AND is_locked = false",
     )
@@ -293,36 +310,41 @@ pub async fn totp_disable_handler(
     if !totp.check_current(&payload.token).unwrap_or(false) {
         return Err(AppError::Unauthorized("Invalid TOTP token.".into()));
     }
-    let blank_secret = String::new();
-    let blank_temp_secret = String::new();
-    let query_result = query!(
+
+    let mut transaction = pool.begin().await?;
+    let auth_version = sqlx::query_scalar::<_, i64>(
         r#"
         UPDATE user_model
-        SET totp_secret = $1, totp_temp_secret = $2,
+        SET totp_secret = '', totp_temp_secret = '',
             auth_version = auth_version + 1,
             totp_challenge_id = NULL,
             totp_challenge_expires_at = NULL,
             totp_challenge_attempts = 0
-        WHERE id = $3 AND totp_secret = $4
+        WHERE id = $1 AND totp_secret = $2 AND is_locked = false
+        RETURNING auth_version
         "#,
-        blank_secret,
-        blank_temp_secret,
-        user_id,
-        current_secret,
     )
-    .execute(&pool)
+    .bind(&user_id)
+    .bind(&current_secret)
+    .fetch_optional(&mut *transaction)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "database error.");
         AppError::Sqlx(e)
-    })?;
+    })?
+    .ok_or_else(|| AppError::Unauthorized("Failed TOTP 2FA disable.".into()))?;
 
-    let affected_rows = query_result.rows_affected();
-    if affected_rows > 0 {
-        Ok(Json(MessageApi {
+    let new_tokens =
+        refresh_access_token(user_id, auth_version).map_err(|_| AppError::InternalServerError)?;
+    let response = with_auth_cookies(
+        Json(MessageApi {
             message: "Success TOTP 2FA disabled.".to_string(),
-        }))
-    } else {
-        Err(AppError::Unauthorized("Failed TOTP 2FA disable.".into()))
-    }
+        })
+        .into_response(),
+        &new_tokens.access_token,
+        &new_tokens.refresh_token,
+    )?;
+    transaction.commit().await?;
+
+    Ok(response)
 }

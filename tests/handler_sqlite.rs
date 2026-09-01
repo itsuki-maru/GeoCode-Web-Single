@@ -10,6 +10,7 @@ use axum::{
 };
 use chrono::Utc;
 use geocode_web_single::{
+    auth::{create_token, verify_access_token, verify_refresh_token},
     handler::{
         account::{
             account_password_update_handler, account_privacy_update_handler, auth_check_handler,
@@ -44,6 +45,7 @@ use geocode_web_single::{
         },
         totp::{token_totp_handler, totp_disable_handler, totp_setup_handler, totp_verify_handler},
     },
+    middleware::token_is_active,
     model::{
         ExportPackage, GenarateUrlPayload, LayerCreateQueryParams, LayerNameUpdatePayload,
         LoginPayload, MapAnotherWindowQueryParams, MapObjectQuerySearchParams, MapReadQueryPrams,
@@ -61,7 +63,21 @@ use tera::Tera;
 use tokio::sync::Mutex;
 use totp_rs::{Algorithm, TOTP};
 use tower::ServiceExt;
-use uuid::Uuid;
+
+fn auth_cookie_value(headers: &HeaderMap, cookie_name: &str) -> String {
+    let prefix = format!("{cookie_name}=");
+    headers
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find_map(|cookie| {
+            cookie
+                .strip_prefix(&prefix)
+                .and_then(|value| value.split(';').next())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| panic!("{cookie_name} should be set"))
+}
 
 fn valid_polygon_geojson() -> Value {
     json!({
@@ -583,7 +599,27 @@ async fn account_handlers_cover_signup_login_profile_and_tokens() {
         serde_json::from_slice(&bytes).expect("account info should be json");
     assert_eq!(info["is_private"], false);
 
-    let _ = account_password_update_handler(
+    let initial_auth_version: i64 =
+        sqlx::query_scalar("SELECT auth_version FROM user_model WHERE id = $1")
+            .bind(&user_id)
+            .fetch_one(&pool)
+            .await
+            .expect("initial auth version should be returned");
+
+    assert!(
+        account_password_update_handler(
+            Extension(user_id.clone()),
+            Extension(pool.clone()),
+            Json(UpdateAccountPasswordPayload {
+                current_password: "wrong-password".to_string(),
+                new_password: "newpassword123".to_string(),
+            }),
+        )
+        .await
+        .is_err(),
+        "incorrect current password must be rejected"
+    );
+    let password_response = account_password_update_handler(
         Extension(user_id.clone()),
         Extension(pool.clone()),
         Json(UpdateAccountPasswordPayload {
@@ -592,7 +628,33 @@ async fn account_handlers_cover_signup_login_profile_and_tokens() {
         }),
     )
     .await
-    .expect("password should update");
+    .expect("password should update")
+    .into_response();
+    assert_eq!(password_response.status(), StatusCode::OK);
+    let cleared_cookies = password_response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .map(|value| value.to_str().expect("set-cookie should be valid"))
+        .collect::<Vec<_>>();
+    assert_eq!(cleared_cookies.len(), 2);
+    assert!(
+        cleared_cookies
+            .iter()
+            .any(|cookie| cookie.starts_with("access_token=") && cookie.contains("Max-Age=0"))
+    );
+    assert!(cleared_cookies.iter().any(|cookie| {
+        cookie.starts_with("refresh_token=")
+            && cookie.contains("Max-Age=0")
+            && cookie.contains("Path=/account/refresh")
+    }));
+    let password_auth_version: i64 =
+        sqlx::query_scalar("SELECT auth_version FROM user_model WHERE id = $1")
+            .bind(&user_id)
+            .fetch_one(&pool)
+            .await
+            .expect("password auth version should be returned");
+    assert_eq!(password_auth_version, initial_auth_version + 1);
 
     let refresh_response =
         refresh_token_handler(Extension(user_id.clone()), Extension(pool.clone()))
@@ -601,11 +663,18 @@ async fn account_handlers_cover_signup_login_profile_and_tokens() {
             .into_response();
     assert_eq!(refresh_response.status(), StatusCode::OK);
 
-    let disabled_response = disable_token(Extension(user_id), Extension(pool))
+    let disabled_response = disable_token(Extension(user_id.clone()), Extension(pool.clone()))
         .await
         .expect("disable token response should be built")
         .into_response();
     assert_eq!(disabled_response.status(), StatusCode::OK);
+    let logout_auth_version: i64 =
+        sqlx::query_scalar("SELECT auth_version FROM user_model WHERE id = $1")
+            .bind(&user_id)
+            .fetch_one(&pool)
+            .await
+            .expect("logout auth version should be returned");
+    assert_eq!(logout_auth_version, password_auth_version + 1);
 }
 
 // 管理者権限での管理画面表示、ユーザー一覧、パスワードリセット、ロック解除、ユーザー作成を確認する。
@@ -1108,12 +1177,27 @@ async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
 async fn totp_handlers_cover_setup_verify_login_and_disable() {
     let pool = common::test_pool().await;
     let user_id = common::create_test_user(&pool, "totp-user").await;
+    let initial_auth_version: i64 =
+        sqlx::query_scalar("SELECT auth_version FROM user_model WHERE id = $1")
+            .bind(&user_id)
+            .fetch_one(&pool)
+            .await
+            .expect("initial auth version should be returned");
+    let initial_access_token = create_token(&user_id, 30, "access_token", initial_auth_version)
+        .expect("initial access token should be created");
 
     let setup_response = totp_setup_handler(Extension(user_id.clone()), Extension(pool.clone()))
         .await
         .expect("totp setup should succeed")
         .into_response();
     assert_eq!(setup_response.status(), StatusCode::OK);
+    let setup_auth_version: i64 =
+        sqlx::query_scalar("SELECT auth_version FROM user_model WHERE id = $1")
+            .bind(&user_id)
+            .fetch_one(&pool)
+            .await
+            .expect("setup auth version should be returned");
+    assert_eq!(setup_auth_version, initial_auth_version);
 
     let temp_secret: String =
         sqlx::query_scalar("SELECT totp_temp_secret FROM user_model WHERE id = $1")
@@ -1135,24 +1219,66 @@ async fn totp_handlers_cover_setup_verify_login_and_disable() {
         .generate_current()
         .expect("current token should generate");
 
-    let _ = totp_verify_handler(
+    let enable_response = totp_verify_handler(
         Extension(user_id.clone()),
         Extension(pool.clone()),
         Json(TotpVerifyRequest { token }),
     )
     .await
-    .expect("totp verification should enable totp");
+    .expect("totp verification should enable totp")
+    .into_response();
+    assert_eq!(enable_response.status(), StatusCode::OK);
+    let enabled_access_token = auth_cookie_value(enable_response.headers(), "access_token");
+    let enabled_refresh_token = auth_cookie_value(enable_response.headers(), "refresh_token");
+    let enabled_access_claims =
+        verify_access_token(&enabled_access_token).expect("enabled access token should be valid");
+    let enabled_refresh_claims = verify_refresh_token(&enabled_refresh_token)
+        .expect("enabled refresh token should be valid");
+    assert_eq!(enabled_access_claims.auth_version, initial_auth_version + 1);
+    assert_eq!(
+        enabled_refresh_claims.auth_version,
+        initial_auth_version + 1
+    );
+    assert!(!token_is_active(&pool, &user_id, initial_auth_version).await);
+    assert!(
+        token_is_active(&pool, &user_id, enabled_access_claims.auth_version).await,
+        "newly issued token should use the active auth version"
+    );
+    assert_eq!(
+        verify_access_token(&initial_access_token)
+            .expect("old token should remain structurally valid")
+            .auth_version,
+        initial_auth_version
+    );
+    let enable_body = to_bytes(enable_response.into_body(), usize::MAX)
+        .await
+        .expect("enable response body should be readable");
+    let enabled_message: serde_json::Value =
+        serde_json::from_slice(&enable_body).expect("enable response should be JSON");
+    assert_eq!(enabled_message["message"], "Success TOTP 2FA enabled.");
 
-    let challenge_id = Uuid::now_v7().to_string();
-    sqlx::query(
-        "UPDATE user_model SET totp_challenge_id = $1, totp_challenge_expires_at = $2, totp_challenge_attempts = 0 WHERE id = $3",
+    let challenge_response = token_handler(
+        Extension(pool.clone()),
+        Json(LoginPayload {
+            username: "totp-user".to_string(),
+            password: "password123".to_string(),
+        }),
     )
-    .bind(&challenge_id)
-    .bind(Utc::now().naive_utc() + chrono::Duration::minutes(3))
-    .bind(&user_id)
-    .execute(&pool)
     .await
-    .expect("totp challenge should be stored");
+    .expect("password step should issue a TOTP challenge")
+    .into_response();
+    assert_eq!(challenge_response.status(), StatusCode::OK);
+    let challenge_body = to_bytes(challenge_response.into_body(), usize::MAX)
+        .await
+        .expect("challenge body should be readable");
+    let challenge: serde_json::Value =
+        serde_json::from_slice(&challenge_body).expect("challenge should be JSON");
+    assert_eq!(challenge["totp_required"], true);
+    let challenge_id = challenge["challenge_id"]
+        .as_str()
+        .expect("challenge_id should be present")
+        .to_string();
+
     let login_token = totp
         .generate_current()
         .expect("login token should generate");
@@ -1160,16 +1286,53 @@ async fn totp_handlers_cover_setup_verify_login_and_disable() {
         Extension(pool.clone()),
         Json(TotpLoginPayload {
             totp_token: login_token,
-            challenge_id,
+            challenge_id: challenge_id.clone(),
         }),
     )
     .await
     .expect("totp login should succeed")
     .into_response();
     assert_eq!(login_response.status(), StatusCode::OK);
-    let Json(disabled) = totp_disable_handler(
-        Extension(user_id),
-        Extension(pool),
+    let replay_result = token_totp_handler(
+        Extension(pool.clone()),
+        Json(TotpLoginPayload {
+            totp_token: totp
+                .generate_current()
+                .expect("replay token should generate"),
+            challenge_id,
+        }),
+    )
+    .await;
+    assert!(
+        replay_result.is_err(),
+        "consumed challenge must not be reusable"
+    );
+
+    assert!(
+        totp_disable_handler(
+            Extension(user_id.clone()),
+            Extension(pool.clone()),
+            Json(TotpVerifyRequest {
+                token: "not-a-totp-code".to_string(),
+            }),
+        )
+        .await
+        .is_err(),
+        "invalid TOTP token must not disable two-factor authentication"
+    );
+    let auth_version_after_invalid_disable: i64 =
+        sqlx::query_scalar("SELECT auth_version FROM user_model WHERE id = $1")
+            .bind(&user_id)
+            .fetch_one(&pool)
+            .await
+            .expect("auth version after invalid disable should be returned");
+    assert_eq!(
+        auth_version_after_invalid_disable,
+        enabled_access_claims.auth_version
+    );
+    let disable_response = totp_disable_handler(
+        Extension(user_id.clone()),
+        Extension(pool.clone()),
         Json(TotpVerifyRequest {
             token: totp
                 .generate_current()
@@ -1177,6 +1340,32 @@ async fn totp_handlers_cover_setup_verify_login_and_disable() {
         }),
     )
     .await
-    .expect("totp should disable");
-    assert!(disabled.message.contains("disabled"));
+    .expect("totp should disable")
+    .into_response();
+    assert_eq!(disable_response.status(), StatusCode::OK);
+    let disabled_access_token = auth_cookie_value(disable_response.headers(), "access_token");
+    let disabled_refresh_token = auth_cookie_value(disable_response.headers(), "refresh_token");
+    let disabled_access_claims =
+        verify_access_token(&disabled_access_token).expect("disabled access token should be valid");
+    let disabled_refresh_claims = verify_refresh_token(&disabled_refresh_token)
+        .expect("disabled refresh token should be valid");
+    assert_eq!(
+        disabled_access_claims.auth_version,
+        initial_auth_version + 2
+    );
+    assert_eq!(
+        disabled_refresh_claims.auth_version,
+        initial_auth_version + 2
+    );
+    assert!(
+        !token_is_active(&pool, &user_id, enabled_access_claims.auth_version).await,
+        "token issued before disabling should be invalidated"
+    );
+    assert!(token_is_active(&pool, &user_id, disabled_access_claims.auth_version).await);
+    let disable_body = to_bytes(disable_response.into_body(), usize::MAX)
+        .await
+        .expect("disable response body should be readable");
+    let disabled_message: serde_json::Value =
+        serde_json::from_slice(&disable_body).expect("disable response should be JSON");
+    assert_eq!(disabled_message["message"], "Success TOTP 2FA disabled.");
 }
