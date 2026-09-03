@@ -18,6 +18,10 @@
 - [ ] `npm run type-check --prefix src_frontend/frontend`
 - [ ] `npm run type-check --prefix src_frontend/frontend-mobile`
 - [ ] `npm run type-check --prefix src_frontend/frontend-admin`
+- [ ] `npm run test:run --prefix src_frontend/frontend`
+- [ ] `npm test --prefix src_frontend/template-scripts`
+- [ ] `npm run build --prefix src_frontend/template-scripts`
+- [ ] `./src_frontend/scripts/frontends-builder.ps1 -SkipCargoBuild`
 
 ## 補足
 

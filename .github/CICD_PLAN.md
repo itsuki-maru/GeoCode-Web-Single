@@ -50,9 +50,11 @@ flowchart TD
 
 PR CI では以下を確認する。
 
-- 3 系統の Vue フロントエンドの `npm ci`
+- 3 系統の Vue フロントエンドと地図テンプレート用 `template-scripts` の `npm ci`
 - 3 系統の Vue フロントエンドの `type-check`
 - 3 系統の Vue フロントエンドの `build-only`
+- 通常フロントエンドと `template-scripts` のテスト
+- `template-scripts` の型検査とビルド
 - Tauri/Rust に埋め込む `dist/` 成果物の生成
 - `cargo fmt --check`
 - `cargo test --locked`
@@ -69,9 +71,10 @@ PR CI では以下を確認する。
 npm ci --prefix src_frontend/frontend
 npm ci --prefix src_frontend/frontend-mobile
 npm ci --prefix src_frontend/frontend-admin
+npm ci --prefix src_frontend/template-scripts
 ```
 
-3 系統のフロントエンドで、`package-lock.json` に固定された依存関係をクリーンにインストールできることを確認する。これにより、ローカルの `node_modules` に残った依存や暗黙の更新に頼っていないこと、CI と同じ依存解決で検証できることを確認する。
+3 系統のフロントエンドと `template-scripts` で、`package-lock.json` に固定された依存関係をクリーンにインストールできることを確認する。これにより、ローカルの `node_modules` に残った依存や暗黙の更新に頼っていないこと、CI と同じ依存解決で検証できることを確認する。
 
 ### フロントエンド型チェック
 
@@ -79,9 +82,19 @@ npm ci --prefix src_frontend/frontend-admin
 npm run type-check --prefix src_frontend/frontend
 npm run type-check --prefix src_frontend/frontend-mobile
 npm run type-check --prefix src_frontend/frontend-admin
+npm run build --prefix src_frontend/template-scripts
 ```
 
-Vue / TypeScript の型検査を行い、コンポーネント、store、router、API 呼び出し周辺で型の不整合がないことを確認する。通常画面、モバイル画面、管理画面は別プロジェクトとして存在するため、変更箇所に関係しそうな一部だけでなく 3 系統すべてを確認する。
+Vue / TypeScript の型検査を行い、コンポーネント、store、router、API 呼び出し、地図テンプレート周辺で型の不整合がないことを確認する。通常画面、モバイル画面、管理画面、`template-scripts` は別プロジェクトとして存在するため、関連する全プロジェクトを確認する。
+
+### フロントエンドテスト
+
+```powershell
+npm run test:run --prefix src_frontend/frontend
+npm test --prefix src_frontend/template-scripts
+```
+
+通常フロントエンドの単体・ルーターテスト、地図5画面の配布契約・ランタイムスモークテスト、および地図テンプレート共通moduleの単体テストを実行する。
 
 ### 埋め込み用フロントエンド成果物の生成確認
 
@@ -133,25 +146,25 @@ actions/checkout@v4, actions/setup-node@v4, dtolnay/rust-toolchain@stable, swati
    - `main` はリリース用ブランチとして保護し、原則 `develop` からの PR のみをマージする
    - `develop` 用 branch ruleset は次のように設定する
 
-| 項目                                                             | 設定                                                                                                                                                                                                                                                                                                                   |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Ruleset Name                                                     | `protect-develop`                                                                                                                                                                                                                                                                                                      |
-| Enforcement status                                               | `Active`                                                                                                                                                                                                                                                                                                               |
-| Target branches                                                  | `Include by pattern` で `develop` を指定                                                                                                                                                                                                                                                                               |
-| Bypass list                                                      | 原則空。緊急時の直接更新を許す場合のみ、管理者またはメンテナー Team を必要最小限で追加                                                                                                                                                                                                                                 |
-| Restrict deletions                                               | 有効                                                                                                                                                                                                                                                                                                                   |
-| Block force pushes                                               | 有効                                                                                                                                                                                                                                                                                                                   |
-| Require a pull request before merging                            | 有効                                                                                                                                                                                                                                                                                                                   |
-| Required approvals                                               | `1` 以上                                                                                                                                                                                                                                                                                                               |
-| Dismiss stale pull request approvals when new commits are pushed | 有効                                                                                                                                                                                                                                                                                                                   |
-| Require conversation resolution before merging                   | 有効                                                                                                                                                                                                                                                                                                                   |
-| Require status checks to pass                                    | 有効                                                                                                                                                                                                                                                                                                                   |
-| Required status checks                                           | `CI` workflow を一度実行した後に表示されるチェック名を指定する。現状は `Frontend type-check and build (src_frontend/frontend)`, `Frontend type-check and build (src_frontend/frontend-mobile)`, `Frontend type-check and build (src_frontend/frontend-admin)`, `Rust format, test, and integration build` を必須にする |
-| Require branches to be up to date before merging                 | 有効                                                                                                                                                                                                                                                                                                                   |
-| Restrict updates                                                 | 有効。bypass 権限を持たないユーザーの `develop` への直接 push を防ぎ、PR 経由の集約を強制する                                                                                                                                                                                                                          |
-| Require linear history                                           | 必要に応じて有効。merge commit を残す運用にする場合は無効                                                                                                                                                                                                                                                              |
-| Require signed commits                                           | 署名運用を始める場合のみ有効                                                                                                                                                                                                                                                                                           |
-| Require deployments to succeed before merging                    | 現時点では未使用                                                                                                                                                                                                                                                                                                       |
+| 項目                                                             | 設定                                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ruleset Name                                                     | `protect-develop`                                                                                                                                                                                                                                                                                                                                         |
+| Enforcement status                                               | `Active`                                                                                                                                                                                                                                                                                                                                                  |
+| Target branches                                                  | `Include by pattern` で `develop` を指定                                                                                                                                                                                                                                                                                                                  |
+| Bypass list                                                      | 原則空。緊急時の直接更新を許す場合のみ、管理者またはメンテナー Team を必要最小限で追加                                                                                                                                                                                                                                                                    |
+| Restrict deletions                                               | 有効                                                                                                                                                                                                                                                                                                                                                      |
+| Block force pushes                                               | 有効                                                                                                                                                                                                                                                                                                                                                      |
+| Require a pull request before merging                            | 有効                                                                                                                                                                                                                                                                                                                                                      |
+| Required approvals                                               | `1` 以上                                                                                                                                                                                                                                                                                                                                                  |
+| Dismiss stale pull request approvals when new commits are pushed | 有効                                                                                                                                                                                                                                                                                                                                                      |
+| Require conversation resolution before merging                   | 有効                                                                                                                                                                                                                                                                                                                                                      |
+| Require status checks to pass                                    | 有効                                                                                                                                                                                                                                                                                                                                                      |
+| Required status checks                                           | `CI` workflow を一度実行した後に表示されるチェック名を指定する。現状は `Frontend type-check and build (src_frontend/frontend)`, `Frontend type-check and build (src_frontend/frontend-mobile)`, `Frontend type-check and build (src_frontend/frontend-admin)`, `Template scripts test and build`, `Rust format, test, and integration build` を必須にする |
+| Require branches to be up to date before merging                 | 有効                                                                                                                                                                                                                                                                                                                                                      |
+| Restrict updates                                                 | 有効。bypass 権限を持たないユーザーの `develop` への直接 push を防ぎ、PR 経由の集約を強制する                                                                                                                                                                                                                                                             |
+| Require linear history                                           | 必要に応じて有効。merge commit を残す運用にする場合は無効                                                                                                                                                                                                                                                                                                 |
+| Require signed commits                                           | 署名運用を始める場合のみ有効                                                                                                                                                                                                                                                                                                                              |
+| Require deployments to succeed before merging                    | 現時点では未使用                                                                                                                                                                                                                                                                                                                                          |
 
 - `main` 用 branch ruleset は次のように設定する。`main` はリリース用ブランチであり、通常の作業ブランチから直接マージしない。原則として `develop` から `main` へのリリース PR のみを通す。
 

@@ -145,6 +145,7 @@ fn build_tera_from_embed_registers_templates() {
     assert!(template_names.contains(&"notfound.html"));
     assert!(template_names.contains(&"image-preview.html"));
     assert!(template_names.contains(&"marker-form.html"));
+    assert!(template_names.iter().all(|name| name.ends_with(".html")));
 }
 // Tera拡張用のArc<Mutex<Tera>>を構築し、テンプレートへアクセスできることを確認する。
 #[tokio::test]

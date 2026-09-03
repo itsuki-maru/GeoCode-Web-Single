@@ -667,8 +667,9 @@ API エラーは原則 JSON で返る。
 
 ### 15.3 ビルド処理
 
-- `npm ci` を `frontend`、`frontend-mobile`、`frontend-admin` で実行する
-- `src_frontend/scripts/frontends-builder.ps1` でフロントエンド成果物を `dist/` に集約する
+- `npm ci` を `frontend`、`frontend-mobile`、`frontend-admin`、`template-scripts` で実行する
+- `frontend` と `template-scripts` のテスト、全4プロジェクトの型検査・ビルドを実行する
+- `src_frontend/scripts/frontends-builder.ps1 -SkipCargoBuild` でフロントエンド成果物を `dist/` に集約する
 - `cargo tauri build` で Windows インストーラを生成する
 - `target/release/bundle` 配下の `.exe` / `.msi` を成果物として収集する
 

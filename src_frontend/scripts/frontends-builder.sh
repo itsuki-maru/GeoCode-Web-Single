@@ -40,7 +40,10 @@ frontendMobileDistDir="$frontendMobileDir/dist"
 
 # templates ディレクトリ
 rustTemplatesDir="$projectRoot/src/templates"
-rustTemplateJsDir="$rustTemplatesDir/js"
+
+# Teraテンプレートから読み込むTypeScript/ES Modules
+templateScriptsDir="$projectDir/template-scripts"
+templateScriptsDistDir="$templateScriptsDir/dist"
 
 # 過去のビルドファイル
 distributionDirOld="$projectRoot/dist"
@@ -95,6 +98,11 @@ if [ -d "$distributionDirOld" ]; then
     echo "Directory '$distributionDirOld' has been removed."
 else
     echo "Directory '$distributionDirOld' does not exist."
+fi
+
+if [ -d "$templateScriptsDistDir" ]; then
+    rm -rf "$templateScriptsDistDir"
+    echo "Directory '$templateScriptsDistDir' has been removed."
 fi
 
 #################### frontendの処理 ####################
@@ -203,6 +211,21 @@ sed -i 's|href="./favicon.ico"|href="/assets/favicon.ico"|g' $targetHtml
 targetHtmlNewName="$frontendAdminDir/dist/index-admin.html"
 mv $targetHtml $targetHtmlNewName
 
+############### template-scriptsの処理 ###############
+
+cd "$templateScriptsDir"
+nodeModules="$templateScriptsDir/node_modules"
+
+if [ "$DEPENDS_DELETE_FLAG" = true ]; then
+    rm -rf "$nodeModules"
+fi
+
+if [ ! -d "$nodeModules" ]; then
+    npm ci
+fi
+
+npm run build
+
 
 ############### mainの処理 ###############
 
@@ -233,21 +256,10 @@ mv -f ./*.svg $mainDistAssetsDir
 mv $manifestJsonDir $manifestJsonMovedDir
 # manifest-tab.jsonをassets配下に移動
 mv $manifestJsonIPadDir $manifestJsonIPadMovedDir
-duplicateTemplateJsFiles="$(find "$rustTemplateJsDir" -type f -name '*.js' -exec basename {} \; | sort | uniq -d)"
-if [ -n "$duplicateTemplateJsFiles" ]; then
-  echo "Template JavaScript file names must be unique:" >&2
-  echo "$duplicateTemplateJsFiles" >&2
-  exit 1
-fi
-find "$rustTemplateJsDir" -type f -name '*.js' -exec cp -f {} "$mainDistAssetsDir" \;
-
-# 静的ファイルを配置移動
-mv $faviconDir $mainDistAssetsDir
-mv $pngFiles $mainDistAssetsDir
-mv $jsFiles $mainDistAssetsDir
-mv $jsonFiles $mainDistAssetsDir
+cp -r "$templateScriptsDistDir/." "$mainDistAssetsDir/"
 
 # フロントエンド成果物配布用ディレクトリ作成
 cd $mainDistDir
 cp -r $mainDistDir $projectRoot
-cp -r $rustTemplatesDir "$projectRoot/dist"
+mkdir -p "$projectRoot/dist/templates"
+find "$rustTemplatesDir" -maxdepth 1 -type f -name '*.html' -exec cp -f {} "$projectRoot/dist/templates" \;

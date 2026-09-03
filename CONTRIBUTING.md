@@ -32,7 +32,8 @@ sqlx migrate run
 npm ci --prefix src_frontend/frontend
 npm ci --prefix src_frontend/frontend-mobile
 npm ci --prefix src_frontend/frontend-admin
-./src_frontend/scripts/frontends-builder.ps1
+npm ci --prefix src_frontend/template-scripts
+./src_frontend/scripts/frontends-builder.ps1 -SkipCargoBuild
 ```
 
 フロントエンドの型チェック:
@@ -41,6 +42,14 @@ npm ci --prefix src_frontend/frontend-admin
 npm run type-check --prefix src_frontend/frontend
 npm run type-check --prefix src_frontend/frontend-mobile
 npm run type-check --prefix src_frontend/frontend-admin
+npm run build --prefix src_frontend/template-scripts
+```
+
+フロントエンドのテスト:
+
+```powershell
+npm run test:run --prefix src_frontend/frontend
+npm test --prefix src_frontend/template-scripts
 ```
 
 Rust 側の検証:

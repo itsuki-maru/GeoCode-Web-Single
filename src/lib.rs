@@ -115,6 +115,9 @@ pub fn build_tera_from_embed() -> anyhow::Result<Tera> {
     tera.register_filter("json_encode_for_html", json_encode_for_html_filter);
     for path in Templates::iter() {
         let path_str = path.as_ref();
+        if !path_str.ends_with(".html") {
+            continue;
+        }
         if let Some(file) = Templates::get(path_str) {
             let content = std::str::from_utf8(file.data.as_ref())?;
             tera.add_raw_template(path_str, content)?;

@@ -1,8 +1,11 @@
-# 依存関係を更新するかのフラグオプション`-d`を引数で受け取る
+# `-d`で依存関係を再構築し、`-SkipCargoBuild`でRustビルドを省略する
 Param(
-    [switch]$d
+    [switch]$d,
+    [switch]$SkipCargoBuild
 )
 
+$ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $true
 $dependsDeleteFlag = $false
 
 if ($d) {
@@ -35,7 +38,10 @@ $frontendMobileDistDir = Join-Path -Path $frontendMobileDir -ChildPath "dist"
 # templates ディレクトリ
 $rootDir = Split-Path -Path $projectDir -Parent
 $rustTemplatesDir = Join-Path -Path $rootDir -ChildPath "src/templates"
-$rustTemplateJsDir = Join-Path -Path $rustTemplatesDir -ChildPath "js"
+
+# Teraテンプレートから読み込むTypeScript/ES Modules
+$templateScriptsDir = Join-Path -Path $projectDir -ChildPath "template-scripts"
+$templateScriptsDistDir = Join-Path -Path $templateScriptsDir -ChildPath "dist"
 
 # 最終的なフロントエンド成果物の配布用ディレクトリ
 $prepareDistributionDir = Split-Path -Path $projectDir -Parent
@@ -55,7 +61,7 @@ $svgFiles = Join-Path -Path $mainDir -ChildPath "dist/*.svg"
 $movedDir = Join-Path -Path $mainDir -ChildPath "dist/assets/"
 
 # 前回のビルドファイルが存在する場合は削除
-foreach ($checkPath in $mainDistDir, $frontendDistDir, $frontendMobileDistDir, $frontendAdminDistDir, $distributionDir) {
+foreach ($checkPath in $mainDistDir, $frontendDistDir, $frontendMobileDistDir, $frontendAdminDistDir, $templateScriptsDistDir, $distributionDir) {
     CheckExistsPath $checkPath
 }
 
@@ -69,9 +75,9 @@ if ($dependsDeleteFlag) {
     CheckExistsPath $nodeModules
 }
 
-# node_modulesが存在しなければnpm installを実行
+# node_modulesが存在しなければlockfileから依存関係を復元
 if (-Not (Test-Path $nodeModules)) {
-    npm install
+    npm ci
 }
 
 # ビルド
@@ -106,9 +112,9 @@ if ($dependsDeleteFlag) {
     CheckExistsPath $nodeModules
 }
 
-# node_modulesが存在しなければnpm installを実行
+# node_modulesが存在しなければlockfileから依存関係を復元
 if (-Not (Test-Path $nodeModules)) {
-    npm install
+    npm ci
 }
 
 # ビルド
@@ -145,9 +151,9 @@ if ($dependsDeleteFlag) {
     CheckExistsPath $nodeModules
 }
 
-# node_modulesが存在しなければnpm installを実行
+# node_modulesが存在しなければlockfileから依存関係を復元
 if (-Not (Test-Path $nodeModules)) {
-    npm install
+    npm ci
 }
 
 # ビルド
@@ -161,6 +167,21 @@ $targetHtml = Join-Path -Path $frontendAdminDir -ChildPath "dist/index.html"
 } | Set-Content -Path $targetHtml
 
 Rename-Item -Path $targetHtml -NewName "index-admin.html"
+
+############### template-scriptsの処理 ###############
+
+Set-Location $templateScriptsDir
+$nodeModules = Join-Path -Path $templateScriptsDir -ChildPath "node_modules"
+
+if ($dependsDeleteFlag) {
+    CheckExistsPath $nodeModules
+}
+
+if (-Not (Test-Path $nodeModules)) {
+    npm ci
+}
+
+npm run build
 
 ############### mainの処理 ###############
 
@@ -178,22 +199,20 @@ Move-Item -Path $mjsFiles -Destination $movedDir
 Move-Item -Path $cssFiles -Destination $movedDir
 Move-Item -Path $jsonFiles -Destination $movedDir
 Move-Item -Path $svgFiles -Destination $movedDir
-$rustTemplateJsFiles = Get-ChildItem -LiteralPath $rustTemplateJsDir -Recurse -File -Filter "*.js"
-$duplicateTemplateJsFiles = $rustTemplateJsFiles | Group-Object -Property Name | Where-Object { $_.Count -gt 1 }
-if ($duplicateTemplateJsFiles) {
-    $duplicateNames = ($duplicateTemplateJsFiles | Select-Object -ExpandProperty Name) -join ", "
-    throw "Template JavaScript file names must be unique: $duplicateNames"
-}
-foreach ($templateJsFile in $rustTemplateJsFiles) {
-    Copy-Item -LiteralPath $templateJsFile.FullName -Destination $movedDir -Force
-}
+Copy-Item -Path (Join-Path $templateScriptsDistDir "*") -Destination $movedDir -Recurse -Force
 
 # 最終的なフロントエンド成果物の配置ディレクトリを作成
 New-Item -Type Directory $distributionDir
 Set-Location $mainDistDir
 Copy-Item -Path "./*" -Destination $distributionDir -Recurse -Force
-Copy-Item -Path $rustTemplatesDir -Destination $distributionDir -Recurse -Force
+$distributionTemplatesDir = Join-Path -Path $distributionDir -ChildPath "templates"
+New-Item -Type Directory $distributionTemplatesDir
+Get-ChildItem -LiteralPath $rustTemplatesDir -File -Filter "*.html" | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination $distributionTemplatesDir -Force
+}
 
-# プロジェクトディレクトリに移動し、Rustをコンパイル
-Set-Location $prepareDistributionDir
-cargo build --release
+# 必要な場合だけプロジェクトディレクトリへ移動してRustをコンパイル
+if (-Not $SkipCargoBuild) {
+    Set-Location $prepareDistributionDir
+    cargo build --release
+}

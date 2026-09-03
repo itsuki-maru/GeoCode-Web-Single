@@ -3,8 +3,6 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <script src="/assets/panzoom.min.js"></script>
-
         <title>GeoCode-Web</title>
         <style>
             body {
@@ -106,35 +104,5 @@
             <div class="instructions" id="close-tab">閉じる</div>
         </div>
     </body>
-    <script>
-        const previewImage = document.getElementById("preview-image");
-        const imageContainer = document.getElementById("image-container");
-        document.getElementById("close-tab").addEventListener("click", () => {
-            // タブを閉じる
-            callParentImagePreview();
-        });
-
-        const panzoomElement = document.getElementById("panzoom-element");
-
-        // Panzoomを初期化
-        const panzoom = Panzoom(panzoomElement, {
-            maxScale: 5, // 最大拡大率
-            minScale: 1, // 最小縮小率
-            contain: "outside", // 画像をコンテナ内に収める
-        });
-
-        // ホイール操作でズームを有効化
-        panzoomElement.parentElement.addEventListener(
-            "wheel",
-            panzoom.zoomWithWheel,
-        );
-
-        // 親要素で画像プレビューをクローズ
-        function callParentImagePreview() {
-            window.parent.postMessage(
-                { type: "callParentImagePreview", message: "" },
-                "*",
-            );
-        }
-    </script>
+    <script type="module" src="/assets/template-image-preview.js"></script>
 </html>
