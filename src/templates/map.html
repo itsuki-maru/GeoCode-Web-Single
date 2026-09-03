@@ -686,35 +686,31 @@
         <div id="draw-status" class="draw-status is-hidden">図形描画: オフ</div>
     </body>
     <script>
-        var layer = "{{ layer }}"
-        var is_master = {{ is_master }}
-        var latitude = {{ latitude }}
-        var longitude = {{ longitude }}
-        var markerId = "{{ markerId }}" // マーカーフォーカスしない場合は0が入る
-        var zoom = {{ zoom }}
-        var tileServers = {{ tileServers | json_encode_for_html | safe }}
-        var layersFromAxum = {{ layersFromAxum | json_encode_for_html | safe }}
-        var markersFromAxum = {{ markersFromAxum | json_encode_for_html | safe }}
-        var shapesFromAxum = {{ shapesFromAxum | json_encode_for_html | safe }}
-
+        window.__GEOCODE_MAP_BOOTSTRAP__ = {
+            page: "map",
+            selectedLayer: "{{ layer }}",
+            isMaster: {{ is_master }},
+            markerId: "{{ markerId }}",
+            initialView: {
+                latitude: {{ latitude }},
+                longitude: {{ longitude }},
+                zoom: {{ zoom }},
+            },
+            tileServers: {{ tileServers | json_encode_for_html | safe }},
+            layers: {{ layersFromAxum | json_encode_for_html | safe }},
+            markers: {{ markersFromAxum | json_encode_for_html | safe }},
+            shapes: {{ shapesFromAxum | json_encode_for_html | safe }},
+        };
+        var layer = window.__GEOCODE_MAP_BOOTSTRAP__.selectedLayer;
+        var is_master = window.__GEOCODE_MAP_BOOTSTRAP__.isMaster;
+        var markerId = window.__GEOCODE_MAP_BOOTSTRAP__.markerId;
+        var latitude = window.__GEOCODE_MAP_BOOTSTRAP__.initialView.latitude;
+        var longitude = window.__GEOCODE_MAP_BOOTSTRAP__.initialView.longitude;
+        var zoom = window.__GEOCODE_MAP_BOOTSTRAP__.initialView.zoom;
+        var tileServers = window.__GEOCODE_MAP_BOOTSTRAP__.tileServers;
+        var layersFromAxum = window.__GEOCODE_MAP_BOOTSTRAP__.layers;
+        var markersFromAxum = window.__GEOCODE_MAP_BOOTSTRAP__.markers;
+        var shapesFromAxum = window.__GEOCODE_MAP_BOOTSTRAP__.shapes;
     </script>
-    <script src="/assets/map-common-base.js"></script>
-    <script src="/assets/map-common-shape-style.js"></script>
-    <script src="/assets/map-common-shape-viewport.js"></script>
-    <script src="/assets/map-common-search.js"></script>
-    <script src="/assets/map-common-content.js"></script>
-    <script src="/assets/map-common-storage.js"></script>
-    <script src="/assets/map-common-marker.js"></script>
-    <script src="/assets/map-common.js"></script>
-    <script src="/assets/map-editor-mode.js"></script>
-    <script src="/assets/map-base.js"></script>
-    <script src="/assets/map-shape-state.js"></script>
-    <script src="/assets/map-editor-shape-measurement.js"></script>
-    <script src="/assets/map-shape-metadata.js"></script>
-    <script src="/assets/map-editor-shape-delete.js"></script>
-    <script src="/assets/map-editor-shape-geometry.js"></script>
-    <script src="/assets/map-shape-drawing.js"></script>
-    <script src="/assets/map-controls.js"></script>
-    <script src="/assets/map-object-focus.js"></script>
-    <script src="/assets/map.js"></script>
+    <script type="module" src="/assets/template-map.js"></script>
 </html>

@@ -21,7 +21,6 @@ const assets = [
     "MarkerCluster.Default.css",
   ],
   ["node_modules/xss/dist/xss.min.js", "xss.min.js"],
-  ["node_modules/@panzoom/panzoom/dist/panzoom.min.js", "panzoom.min.js"],
 ];
 
 const stylesheets = [["node_modules/leaflet/dist/leaflet.css", "leaflet.css"]];

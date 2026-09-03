@@ -70,6 +70,7 @@ jobs:
             src_frontend/frontend/package-lock.json
             src_frontend/frontend-admin/package-lock.json
             src_frontend/frontend-mobile/package-lock.json
+            src_frontend/template-scripts/package-lock.json
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
@@ -85,6 +86,7 @@ jobs:
           npm ci --prefix src_frontend/frontend
           npm ci --prefix src_frontend/frontend-mobile
           npm ci --prefix src_frontend/frontend-admin
+          npm ci --prefix src_frontend/template-scripts
 
       - name: Generate CI .env
         shell: pwsh
@@ -116,7 +118,7 @@ jobs:
 
       - name: Build frontend bundles
         shell: pwsh
-        run: ./src_frontend/scripts/frontends-builder.ps1
+        run: ./src_frontend/scripts/frontends-builder.ps1 -SkipCargoBuild
 
       - name: Build Tauri app
         shell: pwsh

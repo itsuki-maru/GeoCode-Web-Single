@@ -15,7 +15,6 @@
     "format": "prettier --write src/"
   },
   "dependencies": {
-    "@panzoom/panzoom": "4.6.2",
     "ace-builds": "^1.43.4",
     "axios": "^1.13.2",
     "leaflet": "1.9.3",

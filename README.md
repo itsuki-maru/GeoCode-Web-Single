@@ -283,9 +283,19 @@ sqlx migrate run
 
 ### 3. フロントエンドのビルド
 
-```bash
-cd src_frontend/scripts
-./frontends-builder.ps1
+```powershell
+npm ci --prefix src_frontend/frontend
+npm ci --prefix src_frontend/frontend-mobile
+npm ci --prefix src_frontend/frontend-admin
+npm ci --prefix src_frontend/template-scripts
+./src_frontend/scripts/frontends-builder.ps1 -SkipCargoBuild
+```
+
+地図テンプレート用TypeScriptとフロントエンド全体のテスト:
+
+```powershell
+npm test --prefix src_frontend/template-scripts
+npm run test:run --prefix src_frontend/frontend
 ```
 
 ### 4. sqlx オフラインクエリの準備
@@ -309,13 +319,13 @@ GitHub Actions では [.github/workflows/release.yml](.github/workflows/release.
 - トリガーは `v*` タグ push、または `workflow_dispatch`
 - 実行環境は `windows-latest`
 - ルートに CI 用の `.env` を生成し、`sqlx-cli` で SQLite スキーマを作成する
-- `src_frontend/scripts/frontends-builder.ps1` で 3 系統のフロントエンド成果物を `dist/` に集約する
+- `src_frontend/scripts/frontends-builder.ps1 -SkipCargoBuild` で3系統のVueフロントエンドと地図テンプレート用ES Modulesを `dist/` に集約する
 - `cargo tauri build` で Windows NSIS インストーラ、MSI インストーラ、単体実行ファイルを生成する
 - 生成したインストーラ（`.exe` / `.msi`）と cargo 生成の単体 `.exe` を収集し、SHA-256 チェックサム付きで GitHub Release の draft に添付する
 
 ## CI / PR 運用
 
-Pull Request と保護ブランチへの push では [.github/workflows/ci.yml](.github/workflows/ci.yml) により、フロントエンドの型チェック・ビルド、Tauri/Rust に埋め込む成果物生成、`cargo fmt --check`、`cargo test --locked` を実行する。
+Pull Request と保護ブランチへの push では [.github/workflows/ci.yml](.github/workflows/ci.yml) により、フロントエンドと地図テンプレート用TypeScriptの型チェック・テスト・ビルド、Tauri/Rust に埋め込む成果物生成、`cargo fmt --check`、`cargo test --locked` を実行する。
 
 通常の作業ブランチからの PR は `develop` に集約し、リリース時に `develop` から `main` へマージする。`main` 上の `v*` タグ、または手動実行により [.github/workflows/release.yml](.github/workflows/release.yml) で draft Release を作成する。
 

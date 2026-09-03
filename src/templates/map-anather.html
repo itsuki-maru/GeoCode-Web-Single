@@ -397,22 +397,14 @@
         <div class="folium-map" id="map"></div>
     </body>
     <script>
-        var tileServers = {{ tileServers | json_encode_for_html | safe }};
-        var isCluster = {{ is_cluster }};
-        var layersFromAxum = {{ layersFromAxum | json_encode_for_html | safe }}
-        var markersFromAxum = {{ markersFromAxum | json_encode_for_html | safe }}
-        var shapesFromAxum = {{ shapesFromAxum | json_encode_for_html | safe }}
-
+        window.__GEOCODE_MAP_BOOTSTRAP__ = {
+            page: "map-anather",
+            isCluster: {{ is_cluster }},
+            tileServers: {{ tileServers | json_encode_for_html | safe }},
+            layers: {{ layersFromAxum | json_encode_for_html | safe }},
+            markers: {{ markersFromAxum | json_encode_for_html | safe }},
+            shapes: {{ shapesFromAxum | json_encode_for_html | safe }},
+        };
     </script>
-    <script src="/assets/map-common-base.js"></script>
-    <script src="/assets/map-common-shape-style.js"></script>
-    <script src="/assets/map-common-shape-viewport.js"></script>
-    <script src="/assets/map-common-search.js"></script>
-    <script src="/assets/map-common-content.js"></script>
-    <script src="/assets/map-common-storage.js"></script>
-    <script src="/assets/map-common-marker.js"></script>
-    <script src="/assets/map-common.js"></script>
-    <script src="/assets/map-anather-base.js"></script>
-    <script src="/assets/map-anather-layers.js"></script>
-    <script src="/assets/map-anather.js"></script>
+    <script type="module" src="/assets/template-map-anather.js"></script>
 </html>

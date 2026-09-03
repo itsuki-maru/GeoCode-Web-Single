@@ -331,25 +331,21 @@
         <div class="folium-map" id="map"></div>
     </body>
     <script>
-        var layers = {{ layers | json_encode_for_html | safe }}
-        var markersObj = {{ markersObj | json_encode_for_html | safe }}
-        var shapesObj = {{ shapesObj | json_encode_for_html | safe }}
-        var tileServers = {{ tileServers | json_encode_for_html | safe }};
-        var isMaster = false;
-        var isChecked = {{ isChecked | json_encode_for_html | safe }};
-        var latitude = {{ latitude }};
-        var longitude = {{ longitude }};
-        var zoom = {{ zoom }};
+        window.__GEOCODE_MAP_BOOTSTRAP__ = {
+            page: "temporary-map",
+            isMaster: false,
+            isChecked: {{ isChecked | json_encode_for_html | safe }},
+            isMapUiHidden: false,
+            initialView: {
+                latitude: {{ latitude }},
+                longitude: {{ longitude }},
+                zoom: {{ zoom }},
+            },
+            tileServers: {{ tileServers | json_encode_for_html | safe }},
+            layers: {{ layers | json_encode_for_html | safe }},
+            markers: {{ markersObj | json_encode_for_html | safe }},
+            shapes: {{ shapesObj | json_encode_for_html | safe }},
+        };
     </script>
-    <script src="/assets/map-common-base.js"></script>
-    <script src="/assets/map-common-shape-style.js"></script>
-    <script src="/assets/map-common-shape-viewport.js"></script>
-    <script src="/assets/map-common-search.js"></script>
-    <script src="/assets/map-common-content.js"></script>
-    <script src="/assets/map-common-storage.js"></script>
-    <script src="/assets/map-common-marker.js"></script>
-    <script src="/assets/map-common.js"></script>
-    <script src="/assets/temporary-map-base.js"></script>
-    <script src="/assets/temporary-map-layers.js"></script>
-    <script src="/assets/temporary-map.js"></script>
+    <script type="module" src="/assets/template-temporary-map.js"></script>
 </html>

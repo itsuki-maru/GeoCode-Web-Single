@@ -56,6 +56,34 @@ jobs:
       - name: Build
         run: npm run build-only --prefix ${{ matrix.app }}
 
+      - name: Test
+        if: matrix.app == 'src_frontend/frontend'
+        run: npm run test:run --prefix ${{ matrix.app }}
+
+  template-scripts:
+    name: Template scripts test and build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: src_frontend/template-scripts/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefix src_frontend/template-scripts
+
+      - name: Test
+        run: npm test --prefix src_frontend/template-scripts
+
+      - name: Type-check and build
+        run: npm run build --prefix src_frontend/template-scripts
+
   rust:
     name: Rust format, test, and integration build
     runs-on: windows-latest
@@ -73,6 +101,7 @@ jobs:
             src_frontend/frontend/package-lock.json
             src_frontend/frontend-admin/package-lock.json
             src_frontend/frontend-mobile/package-lock.json
+            src_frontend/template-scripts/package-lock.json
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
@@ -108,10 +137,36 @@ jobs:
           npm ci --prefix src_frontend/frontend
           npm ci --prefix src_frontend/frontend-mobile
           npm ci --prefix src_frontend/frontend-admin
+          npm ci --prefix src_frontend/template-scripts
 
       - name: Build embedded frontend assets
         shell: pwsh
         run: ./src_frontend/scripts/frontends-builder.ps1 -SkipCargoBuild
+
+      - name: Validate embedded template assets
+        shell: pwsh
+        run: |
+          $requiredAssets = @(
+            "template-map.js",
+            "template-map-mobile.js",
+            "template-map-anather.js",
+            "template-temporary-map.js",
+            "template-temporary-map-mobile.js",
+            "template-image-preview.js",
+            "template-marker-form.js",
+            "template-manifest.json"
+          )
+          foreach ($asset in $requiredAssets) {
+            if (-Not (Test-Path "dist/assets/$asset")) {
+              throw "Required template asset was not generated: $asset"
+            }
+          }
+          if (Get-ChildItem "dist/assets" -File -Filter "map-common-*.js") {
+            throw "Removed compatibility scripts were included in dist/assets"
+          }
+          if (Get-ChildItem "dist/templates" -File | Where-Object Extension -ne ".html") {
+            throw "dist/templates contains a non-HTML file"
+          }
 
       - name: Check Rust formatting
         run: cargo fmt --check

@@ -3,9 +3,42 @@ import { resolve } from "node:path";
 import { Script } from "node:vm";
 
 import { JSDOM } from "jsdom";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { templateScriptNames, templateJsPath } from "./helpers/load-classic-script";
+import { createReadOnlyMapRuntime } from "../../../template-scripts/src/map/common/map-runtime";
+import * as baseModule from "../../../template-scripts/src/map/common/base";
+import * as contentActionsModule from "../../../template-scripts/src/map/common/content-actions";
+import * as contentModule from "../../../template-scripts/src/map/common/content";
+import { createMapUiVisibilityRuntime } from "../../../template-scripts/src/map/common/map-ui-visibility";
+import * as mapObjectFocusModule from "../../../template-scripts/src/map/common/map-object-focus";
+import { createReadOnlyLayerGroupRuntime } from "../../../template-scripts/src/map/common/layer-groups";
+import * as markerModule from "../../../template-scripts/src/map/common/marker";
+import { createReadOnlyShapeMeasurementDisplayRuntime } from "../../../template-scripts/src/map/common/shape-measurement-display";
+import { createReadOnlyShapeRestorationRuntime } from "../../../template-scripts/src/map/common/shape-restoration";
+import { initializeReadOnlyMapPage } from "../../../template-scripts/src/map/read-only-page";
+import {
+  createReadOnlyMarkerLayerControl,
+  hydrateReadOnlyMarkers,
+} from "../../../template-scripts/src/map/common/marker-layers";
+import { installReadOnlyOverlayHandlers } from "../../../template-scripts/src/map/common/overlay-events";
+import {
+  addReadOnlyMapVisibilityControls,
+  addReadOnlySearchControls,
+} from "../../../template-scripts/src/map/common/page-controls";
+import { createMapObjectSearchCoordinator } from "../../../template-scripts/src/map/common/search";
+import * as searchModule from "../../../template-scripts/src/map/common/search";
+import * as shapeArrowModule from "../../../template-scripts/src/map/common/shape-arrow";
+import * as shapeLayerModule from "../../../template-scripts/src/map/common/shape-layer";
+import * as shapeMeasurementModule from "../../../template-scripts/src/map/common/shape-measurement";
+import * as shapeMemoModule from "../../../template-scripts/src/map/common/shape-memo";
+import * as shapeStyleModule from "../../../template-scripts/src/map/common/shape-style";
+import * as shapeViewportModule from "../../../template-scripts/src/map/common/shape-viewport";
+import * as storageModule from "../../../template-scripts/src/map/common/storage";
+import {
+  createMeasurementVisibilityControl,
+  createTooltipVisibilityControl,
+} from "../../../template-scripts/src/map/common/visibility-controls";
+import { editorRuntimeSource } from "./helpers/editor-entry-source";
 
 const dependencyScripts = [
   "node_modules/marked/lib/marked.umd.js",
@@ -230,25 +263,103 @@ function smokeLoadPage(page: SmokePage) {
       watchPosition: () => 1,
     },
   });
-  Object.assign(dom.window, page.globals);
+  const readOnlyPageName = page.templateName.replace(/\.html$/, "");
+  const usesTypeScriptReadOnlyEntry = [
+    "map-anather",
+    "temporary-map",
+    "temporary-map-mobile",
+  ].includes(readOnlyPageName);
+  const bootstrap = readOnlyPageName === "map-anather"
+    ? {
+        isCluster: page.globals.isCluster,
+        layers: page.globals.layersFromAxum,
+        markers: page.globals.markersFromAxum,
+        page: readOnlyPageName,
+        shapes: page.globals.shapesFromAxum,
+        tileServers: page.globals.tileServers,
+      }
+    : usesTypeScriptReadOnlyEntry
+      ? {
+          initialView: {
+            latitude: page.globals.latitude,
+            longitude: page.globals.longitude,
+            zoom: page.globals.zoom,
+          },
+          isChecked: page.globals.isChecked,
+          isMapUiHidden: page.globals.initialIsMapUiHidden ?? false,
+          isMaster: false,
+          layers: page.globals.layers,
+          markers: page.globals.markersObj,
+          page: readOnlyPageName,
+          shapes: page.globals.shapesObj,
+          tileServers: page.globals.tileServers,
+        }
+      : undefined;
+  Object.assign(dom.window, page.globals, {
+    __GEOCODE_MAP_BOOTSTRAP__: bootstrap,
+    addReadOnlyMapVisibilityControls,
+    addReadOnlySearchControls,
+    createMeasurementVisibilityControl,
+    createMapObjectSearchCoordinator,
+    createMapUiVisibilityRuntime,
+    createReadOnlyLayerGroupRuntime,
+    createReadOnlyShapeMeasurementDisplayRuntime,
+    createReadOnlyShapeRestorationRuntime,
+    createReadOnlyMarkerLayerControl,
+    createReadOnlyMapRuntime,
+    createTooltipVisibilityControl,
+    hydrateReadOnlyMarkers,
+    installReadOnlyOverlayHandlers,
+    ...baseModule,
+    ...contentActionsModule,
+    ...contentModule,
+    ...mapObjectFocusModule,
+    ...markerModule,
+    ...searchModule,
+    ...shapeArrowModule,
+    ...shapeLayerModule,
+    ...shapeMeasurementModule,
+    ...shapeMemoModule,
+    ...shapeStyleModule,
+    ...shapeViewportModule,
+    ...storageModule,
+  });
 
   const context = dom.getInternalVMContext();
   dependencyScripts.forEach((scriptPath) => {
     new Script(readFrontendFile(scriptPath), { filename: scriptPath }).runInContext(context);
   });
-  templateScriptNames(page.templateName).forEach((scriptName) => {
-    new Script(readFileSync(templateJsPath(scriptName), "utf8"), {
-      filename: scriptName,
-    }).runInContext(context);
-  });
-  new Script("globalThis.__templateSmokeMarkerCount = Object.keys(markers).length;").runInContext(
-    context,
-  );
+  vi.stubGlobal("window", dom.window);
+  vi.stubGlobal("document", dom.window.document);
+  vi.stubGlobal("navigator", dom.window.navigator);
+  vi.stubGlobal("L", (dom.window as unknown as { L: unknown }).L);
+  if (usesTypeScriptReadOnlyEntry) {
+    const result = initializeReadOnlyMapPage(
+      readOnlyPageName as
+        | "map-anather"
+        | "temporary-map"
+        | "temporary-map-mobile",
+    );
+    Object.assign(dom.window, {
+      __templateSmokeMap: result.map,
+      __templateSmokeMarkerCount: Object.keys(result.markers).length,
+      __templateSmokeShapeLayers: result.shapeLayers,
+      __templateSmokeShapeNameLabelManager: result.shapeNameLabelManager,
+    });
+    return dom;
+  }
+  const entryName = page.templateName === "map-mobile.html" ? "map-mobile" : "map";
+  const implementationSource = editorRuntimeSource(entryName);
+  new Script(
+    `"use strict";\n${implementationSource}\nglobalThis.__templateSmokeMap = map;\nglobalThis.__templateSmokeMarkerCount = Object.keys(markers).length;`,
+    { filename: page.fileName },
+  ).runInContext(context);
 
   return dom;
 }
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   openWindows.splice(0).forEach((dom) => dom.window.close());
 });
 
@@ -258,10 +369,10 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
     const runtimeWindow = dom.window as unknown as {
       L: { Map: new (...args: never[]) => unknown };
       __templateSmokeMarkerCount: number;
-      map: unknown;
+      __templateSmokeMap: unknown;
     };
 
-    expect(runtimeWindow.map).toBeInstanceOf(runtimeWindow.L.Map);
+    expect(runtimeWindow.__templateSmokeMap).toBeInstanceOf(runtimeWindow.L.Map);
     expect(dom.window.document.querySelector(".leaflet-container")).not.toBeNull();
     expect(runtimeWindow.__templateSmokeMarkerCount).toBe(1);
     page.expectedControls.forEach((selector) => {
@@ -308,17 +419,19 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
     const dom = smokeLoadPage(page);
     new Script(`
       (() => {
-        const testShapeLayer = Object.values(shapeLayers)[0];
-        testShapeLayer.addTo(map);
-        map.setView([35.685, 139.765], 14);
-        shapeNameLabelManager.refresh();
+        const testShapeLayer = Object.values(globalThis.__templateSmokeShapeLayers || shapeLayers)[0];
+        const testMap = globalThis.__templateSmokeMap || map;
+        const labelManager = globalThis.__templateSmokeShapeNameLabelManager || shapeNameLabelManager;
+        testShapeLayer.addTo(testMap);
+        testMap.setView([35.685, 139.765], 14);
+        labelManager.refresh();
       })();
     `).runInContext(dom.getInternalVMContext());
     await new Promise<void>((resolve) => dom.window.setTimeout(resolve, 0));
 
     new Script(`
       globalThis.__shapeMemoPopupOpenCount = 0;
-      map.on("popupopen", () => { globalThis.__shapeMemoPopupOpenCount += 1; });
+      (globalThis.__templateSmokeMap || map).on("popupopen", () => { globalThis.__shapeMemoPopupOpenCount += 1; });
     `).runInContext(dom.getInternalVMContext());
 
     const shapeNameTooltip = dom.window.document.querySelector(".shape-name-tooltip");
