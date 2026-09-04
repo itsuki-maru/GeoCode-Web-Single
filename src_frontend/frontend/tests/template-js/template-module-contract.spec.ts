@@ -72,6 +72,14 @@ describe("地図テンプレートのES Modules配信契約", () => {
     expect(template).not.toMatch(/var tileServers\s*=\s*\{\{\s*tileServers/);
   });
 
+  it("map-anather.htmlがバックエンド指定の初期表示位置を公開する", () => {
+    const template = readRepositoryFile("src/templates/map-anather.html");
+    expect(template).toContain("initialView:");
+    expect(template).toContain("latitude: {{ latitude }}");
+    expect(template).toContain("longitude: {{ longitude }}");
+    expect(template).toContain("zoom: {{ zoom }}");
+  });
+
   it("PC・モバイルが編集機能を共有し、PC固有フィルターだけを分離する", () => {
     const sharedSources = [
       "map-editor-mode.ts",

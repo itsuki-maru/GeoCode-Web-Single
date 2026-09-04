@@ -65,7 +65,9 @@ if (editorEntryProfile.isMobile) {
 const controlsBeforeUserLocation = editorEntryProfile.isMobile
   ? getMapControlContainersSnapshot()
   : null;
-const userLocationLayer = initializeUserLocation(map);
+const userLocationLayer = initializeUserLocation(map, {
+  centerOnInitialPosition: shouldCenterOnInitialUserLocation,
+});
 if (editorEntryProfile.isMobile) {
   registerNewHideableMapControlContainers(controlsBeforeUserLocation);
 }

@@ -132,6 +132,7 @@ describe("read-only page controls", () => {
     const initializeUserLocation = vi.fn(() => null);
     const onVisibilityControlAdded = vi.fn();
     const userLocationOptions = {
+      centerOnInitialPosition: true,
       controlClassName: "temporary-user-location-control",
       position: "bottomleft",
     };

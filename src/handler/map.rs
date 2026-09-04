@@ -16,6 +16,10 @@ use std::sync::Arc;
 use tera::{Context, Tera};
 use tokio::sync::Mutex;
 
+const DEFAULT_ANOTHER_MAP_LATITUDE: f64 = 37.65;
+const DEFAULT_ANOTHER_MAP_LONGITUDE: f64 = 138.0;
+const DEFAULT_ANOTHER_MAP_ZOOM: i32 = 6;
+
 fn escape_like_term(term: &str) -> String {
     term.replace('\\', "\\\\")
         .replace('%', "\\%")
@@ -414,6 +418,9 @@ pub async fn map_another_get_handler(
     })?;
 
     let mut context = Context::new();
+    context.insert("latitude", &DEFAULT_ANOTHER_MAP_LATITUDE);
+    context.insert("longitude", &DEFAULT_ANOTHER_MAP_LONGITUDE);
+    context.insert("zoom", &DEFAULT_ANOTHER_MAP_ZOOM);
     context.insert("tileServers", &tile_servers_hash_map);
     context.insert("is_cluster", &is_cluster);
     context.insert("layersFromAxum", &layers_hash_map);

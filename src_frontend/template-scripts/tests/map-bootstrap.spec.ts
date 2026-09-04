@@ -30,6 +30,7 @@ describe("readMapBootstrap", () => {
   it("reads another-window bootstrap data", () => {
     window.__GEOCODE_MAP_BOOTSTRAP__ = {
       ...records,
+      initialView: { latitude: 37.65, longitude: 138, zoom: 6 },
       isCluster: true,
       page: "map-anather",
       shapes: [],
@@ -58,7 +59,19 @@ describe("readMapBootstrap", () => {
   it("rejects page-specific data with the wrong shape", () => {
     window.__GEOCODE_MAP_BOOTSTRAP__ = {
       ...records,
+      initialView: { latitude: 37.65, longitude: 138, zoom: 6 },
       isCluster: "yes",
+      page: "map-anather",
+      shapes: [],
+    };
+
+    expect(() => readMapBootstrap()).toThrow("Another-map bootstrap data is invalid");
+  });
+
+  it("rejects another-window bootstrap data without an initial view", () => {
+    window.__GEOCODE_MAP_BOOTSTRAP__ = {
+      ...records,
+      isCluster: true,
       page: "map-anather",
       shapes: [],
     };

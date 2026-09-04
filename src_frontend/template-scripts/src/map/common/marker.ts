@@ -19,6 +19,8 @@ interface LocationMap {
   _userLocationInitialized?: boolean;
   addControl(control: object): void;
   getZoom(): number;
+  off(eventName: string, listener: () => void): void;
+  on(eventName: string, listener: () => void): void;
   setView(latLng: object, zoom: number): void;
 }
 
@@ -114,7 +116,11 @@ export function createMarkerPopupRuntime({
 
 export function initializeUserLocation(
   map: LocationMap,
-  options: { controlClassName?: string; position?: string } = {},
+  options: {
+    centerOnInitialPosition?: boolean;
+    controlClassName?: string;
+    position?: string;
+  } = {},
 ): LocationLayer | null {
   const geolocation = (
     navigator as Navigator & { geolocation?: Geolocation }
@@ -128,9 +134,19 @@ export function initializeUserLocation(
   let userLocationAccuracyCircle: AccuracyCircle | null = null;
   let userLocationWatchId: number | null = null;
   let latestUserLatLng: object | null = null;
-  let shouldCenterOnNextUpdate = false;
+  let shouldCenterOnNextUpdate = options.centerOnInitialPosition === true;
   let hasShownError = false;
   let shouldNotifyError = false;
+
+  const cancelInitialCenter = (): void => {
+    shouldCenterOnNextUpdate = false;
+    map.off("movestart", cancelInitialCenter);
+  };
+  if (shouldCenterOnNextUpdate) map.on("movestart", cancelInitialCenter);
+
+  const finishInitialCenter = (): void => {
+    map.off("movestart", cancelInitialCenter);
+  };
 
   const renderUserLocation = (position: GeolocationPosition): void => {
     const { latitude, longitude, accuracy = 0 } = position.coords;
@@ -188,6 +204,7 @@ export function initializeUserLocation(
     }
 
     if (shouldCenterOnNextUpdate) {
+      finishInitialCenter();
       map.setView(latLng, Math.max(map.getZoom(), 16));
       shouldCenterOnNextUpdate = false;
     }
@@ -195,6 +212,7 @@ export function initializeUserLocation(
 
   const handleUserLocationError = (error: GeolocationPositionError): void => {
     if (shouldNotifyError && hasShownError) return;
+    finishInitialCenter();
     shouldCenterOnNextUpdate = false;
     if (shouldNotifyError) {
       hasShownError = true;

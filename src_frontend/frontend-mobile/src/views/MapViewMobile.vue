@@ -14,6 +14,11 @@ import apiClient from "@/axiosClient";
 import { useApplicationInitStore } from "@/stores/appInits";
 import { isPDF } from "@/composables/useFileTypeCheck";
 import { getShapeCenter } from "@/composables/useShapeCenter";
+import {
+  getLastActiveLayerId,
+  resolveInitialLayerId,
+  saveLastActiveLayerId,
+} from "@/composables/useLastActiveLayer";
 
 // コンポーネント
 import UserPrivacySetting from "@/components/UserPrivacySetting.vue";
@@ -66,7 +71,7 @@ async function loginRedirect(): Promise<void> {
 const imageStore = useImageStore();
 imageStore.initList();
 const layersStore = useLayersStore();
-layersStore.initList();
+const layersInitialization = layersStore.initList();
 const mapobjStore = useMapObjectStore();
 mapobjStore.initList();
 const shapeStore = useShapeStore();
@@ -83,10 +88,16 @@ const mapObjectQueryFormData = ref<QueryForm>({ query1: "", query2: "" });
 
 const getMasterLayerId = async (): Promise<void> => {
   try {
-    const response = await apiClient.get(getMasterLayerIdUrl);
-    activeLayer.value = response.data["id"];
+    const [response] = await Promise.all([
+      apiClient.get(getMasterLayerIdUrl),
+      layersInitialization,
+    ]);
     masterLayerId.value = response.data["id"];
-    srcUrl.value = `${baseUrl}/map?layer=${activeLayer.value}&is_master=true`;
+    activeLayer.value = resolveInitialLayerId(
+      getLastActiveLayerId(),
+      masterLayerId.value,
+      new Set(layersStore.layersList.keys()),
+    );
   } catch (error) {
     if (apiClient.isAxiosError(error)) {
       const axiosError = error as AxiosError;
@@ -113,18 +124,34 @@ const isMasterLayer = computed(() => activeLayer.value === masterLayerId.value);
 let loadedOnceFlag = false;
 let suppressNextActiveLayerReload = false;
 watch(activeLayer, async () => {
+  if (!activeLayer.value) return;
   if (suppressNextActiveLayerReload) {
     suppressNextActiveLayerReload = false;
     return;
   }
   if (loadedOnceFlag) showProgressModal.value = true;
   const isMaster = activeLayer.value === masterLayerId.value;
+  const selectedLayerId = activeLayer.value;
   const mapUrl =
     pendingLayerMapUrl.value ?? `${baseUrl}/map?layer=${activeLayer.value}&is_master=${isMaster}`;
   pendingLayerMapUrl.value = null;
-  await reloadMap(mapUrl, true);
-  showProgressModal.value = false;
-  loadedOnceFlag = true;
+  let synchronized = false;
+  try {
+    synchronized = await reloadMap(mapUrl, true);
+  } catch (error) {
+    console.error(error);
+  } finally {
+    showProgressModal.value = false;
+    loadedOnceFlag = true;
+  }
+
+  if (activeLayer.value !== selectedLayerId) return;
+
+  if (synchronized) {
+    saveLastActiveLayerId(selectedLayerId);
+  } else if (selectedLayerId !== masterLayerId.value) {
+    activeLayer.value = masterLayerId.value;
+  }
 });
 
 // --- 地図操作 ---
@@ -519,6 +546,7 @@ const handleLayerDeleteConfirm = async (): Promise<void> => {
       true,
       true,
     );
+    if (objectsSynchronized) saveLastActiveLayerId(masterLayerId.value);
     if (objectsSynchronized) {
       layersSynchronized = await layersStore.initList();
     }

@@ -11,6 +11,7 @@ import * as contentActionsModule from "../../../template-scripts/src/map/common/
 import * as contentModule from "../../../template-scripts/src/map/common/content";
 import { createMapUiVisibilityRuntime } from "../../../template-scripts/src/map/common/map-ui-visibility";
 import * as mapObjectFocusModule from "../../../template-scripts/src/map/common/map-object-focus";
+import * as mapViewPersistenceModule from "../../../template-scripts/src/map/common/map-view-persistence";
 import { createReadOnlyLayerGroupRuntime } from "../../../template-scripts/src/map/common/layer-groups";
 import * as markerModule from "../../../template-scripts/src/map/common/marker";
 import { createReadOnlyShapeMeasurementDisplayRuntime } from "../../../template-scripts/src/map/common/shape-measurement-display";
@@ -178,11 +179,14 @@ const pages: readonly SmokePage[] = [
     fileName: "map-anather.js",
     templateName: "map-anather.html",
     globals: {
+      latitude: 37.65,
       isCluster: false,
       layersFromAxum: layerRecords,
+      longitude: 138,
       markersFromAxum: markerRecords,
       shapesFromAxum: [],
       tileServers,
+      zoom: 6,
     },
   },
   {
@@ -228,11 +232,16 @@ const pages: readonly SmokePage[] = [
 
 const openWindows: JSDOM[] = [];
 
+interface SmokeLoadOptions {
+  currentPosition?: { latitude: number; longitude: number };
+  lastMapView?: { latitude: number; longitude: number; zoom: number };
+}
+
 function readFrontendFile(relativePath: string) {
   return readFileSync(resolve(process.cwd(), relativePath), "utf8");
 }
 
-function smokeLoadPage(page: SmokePage) {
+function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
   const dom = new JSDOM(
     '<!doctype html><html><body><div id="map" style="width: 1024px; height: 768px"></div><div id="draw-status" class="is-hidden"></div></body></html>',
     {
@@ -242,6 +251,12 @@ function smokeLoadPage(page: SmokePage) {
     },
   );
   openWindows.push(dom);
+  if (options.lastMapView) {
+    dom.window.localStorage.setItem(
+      mapViewPersistenceModule.LAST_MAP_VIEW_STORAGE_KEY,
+      JSON.stringify(options.lastMapView),
+    );
+  }
 
   const mapElement = dom.window.document.getElementById("map");
   Object.defineProperties(mapElement, {
@@ -260,7 +275,25 @@ function smokeLoadPage(page: SmokePage) {
     configurable: true,
     value: {
       clearWatch() {},
-      watchPosition: () => 1,
+      watchPosition: (onSuccess: (position: GeolocationPosition) => void) => {
+        if (options.currentPosition) {
+          onSuccess({
+            coords: {
+              accuracy: 10,
+              altitude: null,
+              altitudeAccuracy: null,
+              heading: null,
+              latitude: options.currentPosition.latitude,
+              longitude: options.currentPosition.longitude,
+              speed: null,
+              toJSON: () => ({}),
+            },
+            timestamp: 1,
+            toJSON: () => ({}),
+          });
+        }
+        return 1;
+      },
     },
   });
   const readOnlyPageName = page.templateName.replace(/\.html$/, "");
@@ -271,6 +304,11 @@ function smokeLoadPage(page: SmokePage) {
   ].includes(readOnlyPageName);
   const bootstrap = readOnlyPageName === "map-anather"
     ? {
+        initialView: {
+          latitude: page.globals.latitude,
+          longitude: page.globals.longitude,
+          zoom: page.globals.zoom,
+        },
         isCluster: page.globals.isCluster,
         layers: page.globals.layersFromAxum,
         markers: page.globals.markersFromAxum,
@@ -314,6 +352,7 @@ function smokeLoadPage(page: SmokePage) {
     ...contentActionsModule,
     ...contentModule,
     ...mapObjectFocusModule,
+    ...mapViewPersistenceModule,
     ...markerModule,
     ...searchModule,
     ...shapeArrowModule,
@@ -364,6 +403,51 @@ afterEach(() => {
 });
 
 describe("各地図テンプレートJavaScriptのランタイム初期化", () => {
+  const anotherMapPage = pages.find((page) => page.templateName === "map-anather.html")!;
+
+  it("map-anatherは保存された表示位置を復元する", () => {
+    const dom = smokeLoadPage(anotherMapPage, {
+      lastMapView: { latitude: 34.6937, longitude: 135.5023, zoom: 12 },
+    });
+    const map = (dom.window as unknown as { __templateSmokeMap: L.Map }).__templateSmokeMap;
+
+    expect(map.getCenter().lat).toBeCloseTo(34.6937);
+    expect(map.getCenter().lng).toBeCloseTo(135.5023);
+    expect(map.getZoom()).toBe(12);
+  });
+
+  it("map-anatherは保存位置がなければ現在位置を使用する", () => {
+    const dom = smokeLoadPage(anotherMapPage, {
+      currentPosition: { latitude: 35.6812, longitude: 139.7671 },
+    });
+    const map = (dom.window as unknown as { __templateSmokeMap: L.Map }).__templateSmokeMap;
+
+    expect(map.getCenter().lat).toBeCloseTo(35.6812);
+    expect(map.getCenter().lng).toBeCloseTo(139.7671);
+    expect(map.getZoom()).toBe(16);
+  });
+
+  it("map-anatherは現在位置を取得できなければバックエンド位置を使用する", () => {
+    const dom = smokeLoadPage(anotherMapPage);
+    const map = (dom.window as unknown as { __templateSmokeMap: L.Map }).__templateSmokeMap;
+
+    expect(map.getCenter().lat).toBeCloseTo(37.65);
+    expect(map.getCenter().lng).toBeCloseTo(138);
+    expect(map.getZoom()).toBe(6);
+  });
+
+  it("一時共有地図は保存された表示位置を使用しない", () => {
+    const temporaryPage = pages.find((page) => page.templateName === "temporary-map.html")!;
+    const dom = smokeLoadPage(temporaryPage, {
+      lastMapView: { latitude: 34.6937, longitude: 135.5023, zoom: 12 },
+    });
+    const map = (dom.window as unknown as { __templateSmokeMap: L.Map }).__templateSmokeMap;
+
+    expect(map.getCenter().lat).toBeCloseTo(35.6812);
+    expect(map.getCenter().lng).toBeCloseTo(139.7671);
+    expect(map.getZoom()).toBe(8);
+  });
+
   it.each(pages)("$fileNameが本番vendorとテンプレートスクリプトで初期化できる", (page) => {
     const dom = smokeLoadPage(page);
     const runtimeWindow = dom.window as unknown as {

@@ -1069,6 +1069,14 @@ async fn map_handlers_render_templates_with_sqlite_data() {
     .expect("another map should render")
     .into_response();
     assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("another map response body should be readable");
+    let body = String::from_utf8(bytes.to_vec()).expect("another map should be utf-8");
+    assert!(body.contains("initialView:"));
+    assert!(body.contains("latitude: 37.65"));
+    assert!(body.contains("longitude: 138"));
+    assert!(body.contains("zoom: 6"));
 }
 
 // 共有URLの生成、現在URL取得、表示状態を維持したパスワード認証、無効化を確認する。

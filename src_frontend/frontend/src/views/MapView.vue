@@ -23,6 +23,11 @@ import { useWindowSize } from "@/composables/useWindowSize";
 import { isMP4 } from "@/composables/useFileTypeCheck";
 import { getShapeCenter } from "@/composables/useShapeCenter";
 import { useMapObjectTableVisibility } from "@/composables/useMapObjectTableVisibility";
+import {
+  getLastActiveLayerId,
+  resolveInitialLayerId,
+  saveLastActiveLayerId,
+} from "@/composables/useLastActiveLayer";
 
 // Components
 import UserPrivacySetting from "@/components/UserPrivacySetting.vue";
@@ -66,7 +71,7 @@ imageStore.initList();
 const imageList = computed((): Map<string, ImageData> => imageStore.imageList);
 
 const layersStore = useLayersStore();
-layersStore.initList();
+const layersInitialization = layersStore.initList();
 const layerList = computed((): Map<string, LayersData> => layersStore.layersList);
 
 const mapobjStore = useMapObjectStore();
@@ -99,10 +104,16 @@ const isMasterLayer = computed((): boolean => activeLayer.value === masterLayerI
 
 const getMasterLayerId = async (): Promise<void> => {
   try {
-    const response = await apiClient.get(getMasterLayerIdUrl);
-    activeLayer.value = response.data["id"];
+    const [response] = await Promise.all([
+      apiClient.get(getMasterLayerIdUrl),
+      layersInitialization,
+    ]);
     masterLayerId.value = response.data["id"];
-    srcUrl.value = `${baseUrl}/map?layer=${activeLayer.value}&is_master=true`;
+    activeLayer.value = resolveInitialLayerId(
+      getLastActiveLayerId(),
+      masterLayerId.value,
+      new Set(layersStore.layersList.keys()),
+    );
   } catch (error) {
     if (apiClient.isAxiosError(error)) {
       const axiosError = error as AxiosError;
@@ -126,18 +137,34 @@ getMasterLayerId();
 let loadedOnceFlag = false;
 let suppressNextActiveLayerReload = false;
 watch(activeLayer, async (): Promise<void> => {
+  if (!activeLayer.value) return;
   if (suppressNextActiveLayerReload) {
     suppressNextActiveLayerReload = false;
     return;
   }
   if (loadedOnceFlag) showProgressModal.value = true;
   const isMaster = activeLayer.value === masterLayerId.value;
+  const selectedLayerId = activeLayer.value;
   const mapUrl =
     pendingLayerMapUrl.value ?? `${baseUrl}/map?layer=${activeLayer.value}&is_master=${isMaster}`;
   pendingLayerMapUrl.value = null;
-  await reloadMap(mapUrl, true);
-  showProgressModal.value = false;
-  loadedOnceFlag = true;
+  let synchronized = false;
+  try {
+    synchronized = await reloadMap(mapUrl, true);
+  } catch (error) {
+    console.error(error);
+  } finally {
+    showProgressModal.value = false;
+    loadedOnceFlag = true;
+  }
+
+  if (activeLayer.value !== selectedLayerId) return;
+
+  if (synchronized) {
+    saveLastActiveLayerId(selectedLayerId);
+  } else if (selectedLayerId !== masterLayerId.value) {
+    activeLayer.value = masterLayerId.value;
+  }
 });
 
 // --- Map operations ---
@@ -423,6 +450,7 @@ const confirmLayerDelete = async (): Promise<void> => {
       true,
       true,
     );
+    if (objectsSynchronized) saveLastActiveLayerId(masterLayerId.value);
     if (objectsSynchronized) {
       layersSynchronized = await layersStore.initList();
     }

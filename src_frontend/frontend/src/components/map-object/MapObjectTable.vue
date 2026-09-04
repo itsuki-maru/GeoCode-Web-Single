@@ -163,6 +163,23 @@ const focusRow = (row: TableRow): void => {
   display: block;
 }
 
+.table_sticky table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.table_sticky .layer-column {
+  width: 27%;
+}
+
+.table_sticky .object-name-column {
+  width: 50%;
+}
+
+.table_sticky .code-column {
+  width: 23%;
+}
+
 .table_sticky table tbody tr:hover {
   background-color: #69a5b8;
 }
@@ -247,22 +264,17 @@ const focusRow = (row: TableRow): void => {
     display: none;
   }
 
-  .table_sticky table {
-    width: 100%;
-    table-layout: fixed;
-  }
-
   .table_sticky th,
   .table_sticky td {
     padding-right: 4px;
     padding-left: 4px;
   }
 
-  .object-name-column {
+  .table_sticky .object-name-column {
     width: 65%;
   }
 
-  .code-column {
+  .table_sticky .code-column {
     width: 35%;
   }
 }
