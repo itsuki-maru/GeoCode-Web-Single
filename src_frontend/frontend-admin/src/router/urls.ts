@@ -8,3 +8,6 @@ export const getUserUrl = baseUrl + "/account/auth";
 export const refreshTokenUrl = baseUrl + "/account/refresh";
 export const createUserUrl = baseUrl + "/admin/user/create";
 export const getAppIniturl = baseUrl + "/app-init";
+export const liveLocationPermissionUrl = baseUrl + "/admin/users/";
+export const adminLiveLocationsUrl = baseUrl + "/admin/live-locations";
+export const adminLiveMapsUrl = baseUrl + "/admin/live-maps";

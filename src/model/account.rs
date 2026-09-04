@@ -51,10 +51,11 @@ pub struct TokenPair {
 }
 
 // ユーザー名とIDを返す構造体
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct AuthenticatedUser {
     pub id: String,
     pub username: String,
+    pub can_share_live_location: bool,
 }
 
 // アカウントプライバシー設定取得構造体

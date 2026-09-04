@@ -73,17 +73,17 @@ pub async fn get_users_handler(
 ) -> Result<Json<HashMap<String, ResponseUserData>>, AppError> {
     require_superuser(user_id, &pool).await?;
 
-    let users = query_as!(
-        ResponseUserData,
+    let users = sqlx::query_as::<_, ResponseUserData>(
         r#"
         SELECT
             id,
             username,
             create_at,
             is_superuser,
-            is_locked
+            is_locked,
+            can_share_live_location
         FROM user_model
-        "#
+        "#,
     )
     .fetch_all(&pool)
     .await

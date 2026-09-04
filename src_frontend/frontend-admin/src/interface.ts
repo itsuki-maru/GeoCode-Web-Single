@@ -9,6 +9,7 @@ interface UserData {
   create_at: string;
   is_superuser: boolean;
   is_locked: boolean;
+  can_share_live_location: boolean;
 }
 
 interface LockedUserData {

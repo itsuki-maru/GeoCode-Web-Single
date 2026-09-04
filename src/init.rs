@@ -80,6 +80,13 @@ struct ApplicationInitSetupPartial {
     tile_cache_ttl_seconds: Option<String>,
     tile_cache_namespace: Option<String>,
     marker_form_storage_quota_bytes: Option<String>,
+    live_location_upload_interval_seconds: Option<String>,
+    live_location_stale_seconds: Option<String>,
+    live_location_offline_seconds: Option<String>,
+    live_map_snapshot_cache_seconds: Option<String>,
+    live_map_viewer_session_minutes: Option<String>,
+    live_map_password_attempt_limit: Option<String>,
+    live_map_password_window_minutes: Option<String>,
 }
 
 /// 初回セットアップ作成時と既存JSON移行時で共有する既定値。
@@ -98,6 +105,13 @@ struct EnvDefaults {
     tile_cache_ttl_seconds: String,
     tile_cache_namespace: String,
     marker_form_storage_quota_bytes: String,
+    live_location_upload_interval_seconds: String,
+    live_location_stale_seconds: String,
+    live_location_offline_seconds: String,
+    live_map_snapshot_cache_seconds: String,
+    live_map_viewer_session_minutes: String,
+    live_map_password_attempt_limit: String,
+    live_map_password_window_minutes: String,
 }
 
 /// 設定ディレクトリに依存するパス系の値を含めて、現在の既定値を組み立てる。
@@ -122,6 +136,13 @@ fn env_defaults(setup_dir: &std::path::Path) -> EnvDefaults {
         tile_cache_ttl_seconds: "604800".to_string(),
         tile_cache_namespace: "default".to_string(),
         marker_form_storage_quota_bytes: "1073741824".to_string(),
+        live_location_upload_interval_seconds: "5".to_string(),
+        live_location_stale_seconds: "20".to_string(),
+        live_location_offline_seconds: "120".to_string(),
+        live_map_snapshot_cache_seconds: "2".to_string(),
+        live_map_viewer_session_minutes: "720".to_string(),
+        live_map_password_attempt_limit: "5".to_string(),
+        live_map_password_window_minutes: "10".to_string(),
     }
 }
 
@@ -211,6 +232,13 @@ pub fn build_env_from_form(
         tile_cache_ttl_seconds: defaults.tile_cache_ttl_seconds,
         tile_cache_namespace: defaults.tile_cache_namespace,
         marker_form_storage_quota_bytes: defaults.marker_form_storage_quota_bytes,
+        live_location_upload_interval_seconds: defaults.live_location_upload_interval_seconds,
+        live_location_stale_seconds: defaults.live_location_stale_seconds,
+        live_location_offline_seconds: defaults.live_location_offline_seconds,
+        live_map_snapshot_cache_seconds: defaults.live_map_snapshot_cache_seconds,
+        live_map_viewer_session_minutes: defaults.live_map_viewer_session_minutes,
+        live_map_password_attempt_limit: defaults.live_map_password_attempt_limit,
+        live_map_password_window_minutes: defaults.live_map_password_window_minutes,
     };
     let env_json_path = setup_dir.join("geocode-web-single.env.json");
     write_to_json_file(env_json_path, &env).map_err(|e| e.to_string())?;
@@ -244,6 +272,13 @@ fn env_json_requires_migration(value: &serde_json::Value) -> bool {
         "tile_cache_ttl_seconds",
         "tile_cache_namespace",
         "marker_form_storage_quota_bytes",
+        "live_location_upload_interval_seconds",
+        "live_location_stale_seconds",
+        "live_location_offline_seconds",
+        "live_map_snapshot_cache_seconds",
+        "live_map_viewer_session_minutes",
+        "live_map_password_attempt_limit",
+        "live_map_password_window_minutes",
     ]
     .iter()
     .any(|field| !object.contains_key(*field))
@@ -328,6 +363,27 @@ fn complete_env(
         marker_form_storage_quota_bytes: partial
             .marker_form_storage_quota_bytes
             .unwrap_or(defaults.marker_form_storage_quota_bytes),
+        live_location_upload_interval_seconds: partial
+            .live_location_upload_interval_seconds
+            .unwrap_or(defaults.live_location_upload_interval_seconds),
+        live_location_stale_seconds: partial
+            .live_location_stale_seconds
+            .unwrap_or(defaults.live_location_stale_seconds),
+        live_location_offline_seconds: partial
+            .live_location_offline_seconds
+            .unwrap_or(defaults.live_location_offline_seconds),
+        live_map_snapshot_cache_seconds: partial
+            .live_map_snapshot_cache_seconds
+            .unwrap_or(defaults.live_map_snapshot_cache_seconds),
+        live_map_viewer_session_minutes: partial
+            .live_map_viewer_session_minutes
+            .unwrap_or(defaults.live_map_viewer_session_minutes),
+        live_map_password_attempt_limit: partial
+            .live_map_password_attempt_limit
+            .unwrap_or(defaults.live_map_password_attempt_limit),
+        live_map_password_window_minutes: partial
+            .live_map_password_window_minutes
+            .unwrap_or(defaults.live_map_password_window_minutes),
     })
 }
 
@@ -419,6 +475,13 @@ mod tests {
         assert_eq!(env.tile_cache_ttl_seconds, "604800");
         assert_eq!(env.tile_cache_namespace, "default");
         assert_eq!(env.marker_form_storage_quota_bytes, "1073741824");
+        assert_eq!(env.live_location_upload_interval_seconds, "5");
+        assert_eq!(env.live_location_stale_seconds, "20");
+        assert_eq!(env.live_location_offline_seconds, "120");
+        assert_eq!(env.live_map_snapshot_cache_seconds, "2");
+        assert_eq!(env.live_map_viewer_session_minutes, "720");
+        assert_eq!(env.live_map_password_attempt_limit, "5");
+        assert_eq!(env.live_map_password_window_minutes, "10");
         assert_eq!(env.tile_server_base_url, None);
         assert_eq!(
             env.sqlite_database_path,
@@ -443,6 +506,16 @@ mod tests {
                 .get("marker_form_storage_quota_bytes")
                 .is_some()
         );
+        assert!(
+            migrated_value
+                .get("live_location_upload_interval_seconds")
+                .is_some()
+        );
+        assert!(
+            migrated_value
+                .get("live_map_snapshot_cache_seconds")
+                .is_some()
+        );
         assert!(setup_dir.join("geocode-web-single.env.json.bak").exists());
 
         fs::remove_dir_all(setup_dir).unwrap();
@@ -462,6 +535,11 @@ mod tests {
             "marker_form_storage_quota_bytes".to_string(),
             json!("536870912"),
         );
+        object.insert(
+            "live_location_upload_interval_seconds".to_string(),
+            json!("8"),
+        );
+        object.insert("live_map_snapshot_cache_seconds".to_string(), json!("0"));
         write_env_json(&setup_dir, value);
 
         let env = read_env_json(&setup_dir).unwrap();
@@ -472,6 +550,8 @@ mod tests {
         assert_eq!(env.redis_url.as_deref(), Some("redis://localhost:6379"));
         assert_eq!(env.tile_cache_namespace, "custom");
         assert_eq!(env.marker_form_storage_quota_bytes, "536870912");
+        assert_eq!(env.live_location_upload_interval_seconds, "8");
+        assert_eq!(env.live_map_snapshot_cache_seconds, "0");
 
         fs::remove_dir_all(setup_dir).unwrap();
     }

@@ -8,6 +8,19 @@ afterEach(() => {
 });
 
 describe("MapIframe", () => {
+  it("iframeに位置情報の利用を許可する", () => {
+    const wrapper = mount(MapIframe, {
+      props: {
+        srcUrl: "/map?layer=master&is_master=true",
+        height: 80,
+        allowedOrigins: window.location.origin,
+      },
+    });
+
+    expect(wrapper.get("iframe").attributes("allow")).toBe("geolocation");
+    wrapper.unmount();
+  });
+
   it("図形フォーカス要求に種別と図形IDを含める", () => {
     const wrapper = mount(MapIframe, {
       attachTo: document.body,
@@ -127,6 +140,29 @@ describe("MapIframe", () => {
     );
     expect(await update).toBe(true);
 
+    wrapper.unmount();
+  });
+
+  it("iframeから受け取った現在位置を親画面へ通知する", async () => {
+    const wrapper = mount(MapIframe, {
+      attachTo: document.body,
+      props: {
+        srcUrl: "/map?layer=master&is_master=true",
+        height: 80,
+        allowedOrigins: window.location.origin,
+      },
+    });
+    const iframe = wrapper.get("iframe").element as HTMLIFrameElement;
+    const position = { latitude: 35.0, longitude: 139.0, accuracy: 5, timestamp: 1 };
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: { type: "userLocationUpdate", position },
+        origin: window.location.origin,
+        source: iframe.contentWindow,
+      }),
+    );
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted("userLocation")?.[0]).toEqual([position]);
     wrapper.unmount();
   });
 });

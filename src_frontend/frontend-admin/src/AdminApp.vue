@@ -1,234 +1,130 @@
 <script setup lang="ts">
-import { reactive, provide, ref } from "vue";
-import type { LoginUser } from "./interface";
-import { useRouter } from "vue-router";
+import { computed } from "vue";
+import { storeToRefs } from "pinia";
+import { useRoute } from "vue-router";
 import { useApplicationInitStore } from "./stores/appInits";
 
+const route = useRoute();
 const appInitStore = useApplicationInitStore();
-const appTitle = ref(appInitStore.appInitData.appTitle);
-
-// Login User Status Provide.
-const loginUser: LoginUser = {
-  isAuthenticated: false,
-};
-provide("loginUser", reactive(loginUser));
-
-// List.vueへリダイレクト
-const router = useRouter();
-const listRedirect = (): void => {
-  router.push("/users/list");
-};
-
-listRedirect();
+const { appInitData } = storeToRefs(appInitStore);
+const isLoginView = computed(() => route.name === "login");
 </script>
 
 <template>
-  <div class="container">
-    <header class="parent-header">
-      <h1 class="app-header" id="application-title">{{ appTitle }} -管理者画面-</h1>
+  <div class="admin-app">
+    <header class="app-header">
+      <div class="header-inner">
+        <div class="brand">
+          <span class="brand-title" id="application-title">{{ appInitData.appTitle }}</span>
+          <span class="admin-label">管理者画面</span>
+        </div>
+        <nav v-if="!isLoginView" class="admin-nav" aria-label="管理メニュー">
+          <RouterLink to="/users/list">ユーザー管理</RouterLink>
+          <RouterLink to="/live-maps">位置共有マップ</RouterLink>
+        </nav>
+      </div>
     </header>
-    <RouterView />
+    <main class="main-content" :class="{ 'login-content': isLoginView }">
+      <RouterView />
+    </main>
   </div>
 </template>
 
-<style>
-html {
-  scroll-behavior: smooth;
+<style scoped>
+.admin-app {
+  min-height: 100vh;
 }
-
-.container {
-  height: 100%;
-}
-
-.v-enter-active,
-.v-leave-active {
-  transition: all 0.3s ease-in-out;
-}
-
-.v-enter-from,
-.v-leave-to {
-  opacity: 0;
-}
-
-.parent-header {
-  border-bottom: solid 1px gray;
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 7px;
-}
-
 .app-header {
-  color: #303030;
-  text-shadow: 2px 1px 2px rgb(165, 165, 165);
-  letter-spacing: 1px;
-  font-size: 40px;
-  margin-bottom: 0;
+  color: whitesmoke;
+  background: var(--admin-header);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
 }
-
-.app-header a {
-  color: #4183c4;
-}
-
-.other-function-btn-zone {
+.header-inner {
+  width: min(1180px, calc(100% - 32px));
+  min-height: 70px;
+  margin: 0 auto;
   display: flex;
-  z-index: 5;
-  position: fixed;
-  top: 1%;
-  right: 1%;
-}
-
-a {
-  text-decoration: none;
-}
-
-/* 目次のリンク（github.cssを上書き） */
-.toc-content a {
-  text-decoration: none;
-  color: black;
-}
-
-/* ホバー */
-.toc-content a:hover {
-  background-color: #c1d1d6;
-  display: inline-block;
-  text-decoration: underline;
-  /* transform を適用するために必要 */
-}
-
-.app-header a:hover {
-  transform: scale(1.03);
-  display: inline-block;
-  text-decoration: underline;
-  /* transform を適用するために必要 */
-}
-
-/**
-* マークダウンプレビューのh1、h2タイトル用
-*/
-.head1 {
-  font-size: 32px;
-  margin-bottom: -1%;
-  border-bottom: solid 3px #d7d7d7;
-}
-
-.head2 {
-  font-size: 20px;
-  color: black;
-  margin-top: 2%;
-  padding: 0.1em 0.3em;
-  background: #f4f4f4;
-  border-left: solid 5px #daac9e;
-  border-bottom: solid 3px #d7d7d7;
-}
-
-.input-textbox {
-  font-size: 24px;
-  width: 100%;
-  height: 40px;
-  text-align: center;
-  border-radius: 5px;
-}
-
-.btn-modal-save {
-  width: 90px;
-  box-shadow: 3px 3px 5px 0 rgba(75, 75, 75, 0.5);
-  height: 40px;
-  font-size: 16px;
-  background: rgb(36, 164, 168);
-  color: #fff;
-  padding: 10px 7px;
-  text-decoration: none;
-  border: 1px;
-  border-radius: 5px;
-  transition-property: opacity;
-  -webkit-transition-property: opacity;
-  transition-duration: 0.5s;
-  -webkit-transition-duration: 0.5s;
-  margin: 5px 5px 10px 5px;
-}
-
-.btn-modal-save:hover {
-  opacity: 0.7;
-}
-
-.btn-modal-yes {
-  width: 90px;
-  box-shadow: 3px 3px 5px 0 rgba(75, 75, 75, 0.5);
-  height: 40px;
-  font-size: 16px;
-  background: rgb(70, 54, 219);
-  color: #fff;
-  padding: 10px 7px;
-  text-decoration: none;
-  border: 1px;
-  border-radius: 5px;
-  transition-property: opacity;
-  -webkit-transition-property: opacity;
-  transition-duration: 0.5s;
-  -webkit-transition-duration: 0.5s;
-  margin: 5px 5px 10px 5px;
-}
-
-.btn-modal-yes:hover {
-  opacity: 0.7;
-}
-
-.btn-modal-no {
-  width: 90px;
-  box-shadow: 3px 3px 5px 0 rgba(75, 75, 75, 0.5);
-  height: 40px;
-  font-size: 16px;
-  background: rgb(100, 126, 140);
-  color: #fff;
-  padding: 10px 7px;
-  text-decoration: none;
-  border: 1px;
-  border-radius: 5px;
-  transition-property: opacity;
-  -webkit-transition-property: opacity;
-  transition-duration: 0.5s;
-  -webkit-transition-duration: 0.5s;
-  margin: 5px 5px 10px 5px;
-}
-
-.btn-modal-no:hover {
-  opacity: 0.7;
-}
-
-.setting-contents {
-  text-align: center;
-}
-
-/* QR生成ボタンの間隔 */
-.btn-zone {
-  margin-top: 5%;
-  display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 24px;
 }
-
-/* 最後のボタンの右側のマージンを0にする（オプショナル） */
-.btn-zone button:last-child {
-  margin-right: 0;
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
-
-/**
-* Update.vueのDiffモーダル用
-*/
-/* 削除されたテキスト */
-.delete {
-  display: inline-block;
-  margin-top: 1px;
+.brand-title {
+  overflow: hidden;
+  font-size: clamp(1.3rem, 3vw, 1.8rem);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.admin-label {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border: 1px solid #777;
+  border-radius: 999px;
+  color: #e8e8e8;
+  font-size: 0.75rem;
+}
+.admin-nav {
+  display: flex;
+  align-self: stretch;
+  gap: 6px;
+}
+.admin-nav a {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  border-bottom: 3px solid transparent;
+  color: #d8d8d8;
+  font-weight: 600;
+}
+.admin-nav a:hover {
+  color: #fff;
+  background: #282828;
   text-decoration: none;
-  background-color: #ffb6ba;
-  border-radius: 0.2em;
+}
+.admin-nav a.router-link-active {
+  border-bottom-color: #7ea2ef;
+  color: #fff;
+}
+.main-content {
+  min-height: calc(100vh - 70px);
+}
+.login-content {
+  display: grid;
+  place-items: center;
 }
 
-/* 追加されたテキスト */
-.added {
-  display: inline-block;
-  margin-top: -1px;
-  text-decoration: none;
-  background-color: #97f295;
-  border-radius: 0.2em;
+@media (max-width: 700px) {
+  .header-inner {
+    width: 100%;
+    min-height: auto;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0;
+    padding-top: 14px;
+  }
+  .brand {
+    width: min(100% - 24px, 1180px);
+    margin: 0 auto 10px;
+  }
+  .admin-nav {
+    width: 100%;
+  }
+  .admin-nav a {
+    flex: 1;
+    justify-content: center;
+    min-height: 48px;
+    padding: 0 8px;
+    font-size: 0.9rem;
+  }
+  .main-content {
+    min-height: calc(100vh - 118px);
+  }
 }
 </style>

@@ -20,6 +20,8 @@ pub enum AppError {
     Conflict,
     #[error("unauthorized error: {0}")]
     Unauthorized(String),
+    #[error("forbidden: {0}")]
+    Forbidden(String),
     #[error("bad request")]
     BadRequest,
     #[error("too many requests: {0}")]
@@ -41,6 +43,7 @@ impl AppError {
             AppError::BadGateway => StatusCode::BAD_GATEWAY,
             AppError::Conflict => StatusCode::CONFLICT,
             AppError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+            AppError::Forbidden(_) => StatusCode::FORBIDDEN,
             AppError::Sqlx(_) => StatusCode::INTERNAL_SERVER_ERROR,
             AppError::BadRequest => StatusCode::BAD_REQUEST,
             AppError::TooManyRequests(_) => StatusCode::TOO_MANY_REQUESTS,
@@ -53,6 +56,7 @@ impl AppError {
             AppError::Validation(_)
             | AppError::PayloadTooLarge(_)
             | AppError::Unauthorized(_)
+            | AppError::Forbidden(_)
             | AppError::TooManyRequests(_) => self.to_string(),
 
             // 内部エラーは隠す

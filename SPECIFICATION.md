@@ -122,8 +122,17 @@ PostgreSQL から SQLite を使用することによる差分吸収は **全て�
 - `TILE_CACHE_TTL_SECONDS`
 - `TILE_CACHE_NAMESPACE`
 - `MARKER_FORM_STORAGE_QUOTA_BYTES`（未設定時は1 GiB）
+- `LIVE_LOCATION_UPLOAD_INTERVAL_SECONDS`（未設定時は5秒）
+- `LIVE_LOCATION_STALE_SECONDS`（未設定時は20秒）
+- `LIVE_LOCATION_OFFLINE_SECONDS`（未設定時は120秒）
+- `LIVE_MAP_SNAPSHOT_CACHE_SECONDS`（未設定時は2秒）
+- `LIVE_MAP_VIEWER_SESSION_MINUTES`（未設定時は720分）
+- `LIVE_MAP_PASSWORD_ATTEMPT_LIMIT`（未設定時は5回）
+- `LIVE_MAP_PASSWORD_WINDOW_MINUTES`（未設定時は10分）
 
 設定 JSON は `src/model/common.rs` の `ApplicationInitSetup` に対応する。起動時の読み込みは `src/init.rs` の `read_env_json` が行い、環境変数への注入は `src/main.rs` の `apply_env_vars` が行う。
+
+Redisは現在位置共有機能の必須構成ではない。接続がない場合はSQLiteを直接参照し、接続できる場合だけ公開位置スナップショットの短時間キャッシュに使用する。`LIVE_MAP_SNAPSHOT_CACHE_SECONDS=0` では新規キャッシュ保存を無効化する。
 
 ### 5.2 設定 JSON の必須項目と任意項目
 
@@ -160,6 +169,14 @@ PostgreSQL から SQLite を使用することによる差分吸収は **全て�
 - `redis_connect_timeout_seconds`
 - `tile_cache_ttl_seconds`
 - `tile_cache_namespace`
+- `marker_form_storage_quota_bytes`
+- `live_location_upload_interval_seconds`
+- `live_location_stale_seconds`
+- `live_location_offline_seconds`
+- `live_map_snapshot_cache_seconds`
+- `live_map_viewer_session_minutes`
+- `live_map_password_attempt_limit`
+- `live_map_password_window_minutes`
 
 任意項目が欠落している場合、`read_env_json` は現在の既定値で補完し、元ファイルを `geocode-web-single.env.json.bak` としてバックアップしたうえで、補完済みの `geocode-web-single.env.json` を保存する。バックアップファイルが既に存在する場合は上書きしない。
 
@@ -216,6 +233,7 @@ JSON として不正な場合、または必須項目が欠落している場合
 - プライバシーモード
 - TOTP 一時認証状態
 - TOTP 本番シークレット / 仮シークレット
+- 現在位置共有許可フラグ `can_share_live_location`（既定値は `false`）
 
 ### 6.2 `layer_model` / `marker_info_model`
 
@@ -286,6 +304,47 @@ JSON として不正な場合、または必須項目が欠落している場合
 - `next_challenge_minutes`
 - `challenge_limit_start`
 
+### 6.7 `live_location_session`
+
+- `user_id`: TEXT、主キー
+- `session_id`: TEXT、共有開始ごとに更新するUUID
+- `latitude` / `longitude`
+- `accuracy_m` / `heading_deg` / `speed_mps`
+- `sequence_no`: 同一セッション内の更新順序
+- `observed_at`: ブラウザ側の観測時刻
+- `received_at`: サーバー側の最終受信時刻
+- `started_at`
+
+1アカウントにつき最新位置を1件だけ保持し、履歴は保存しない。新しい共有開始時は同じ `user_id` の行を更新し、以前の `session_id` からの更新を無効にする。
+
+### 6.8 `live_map`
+
+- `id`: TEXT、主キーとなるUUID
+- `public_id`: 公開URLに使用する一意なUUID
+- `name` / `created_by`
+- `password_hash`: 任意の共有パスワードのbcryptハッシュ
+- `access_version`: 認証Cookieとキャッシュを無効化する世代番号
+- `created_at` / `updated_at` / `expires_at` / `revoked_at`
+
+`revoked_at IS NULL` の行はアプリケーション全体で1件に制限する。期限切れの行は新しい共有マップ作成時に失効させる。
+
+### 6.9 `live_map_member`
+
+- `id`: TEXT、主キーとなるUUID
+- `map_id` / `user_id`
+- `display_name`: 公開マップ上の表示名
+- `marker_color`: `#RRGGBB` 形式の表示色
+- `sort_order`
+
+同じマップへ同じユーザーを重複登録できない。
+
+### 6.10 `live_map_password_rate_limit`
+
+- `map_id` / `client_key`: 複合主キー
+- `window_started_at` / `attempt_count`
+
+接続元IPアドレスとUser-Agentから生成したキーにより、共有パスワードの試行回数を接続元単位で保持する。
+
 ## 7. 認証とセキュリティ
 
 ### 7.1 認証方式
@@ -332,6 +391,15 @@ JSON として不正な場合、または必須項目が欠落している場合
 - 共有パスワードは 4 文字以上 64 文字以内
 - パスワードは bcrypt ハッシュとして `temporary_urls.password_hash` に保存する
 - パスワード保護された共有 URL への GET は入力画面を返し、POST で検証成功した場合に共有マップを描画する
+
+### 7.7 現在位置共有マップの保護
+
+- 公開URLはログイン不要とし、必要な場合だけ共有パスワードを設定する
+- パスワードは4文字以上、64バイト以内とし、bcryptハッシュだけを保存する
+- 認証成功時は署名済みHttpOnly Cookieを発行する。既定の有効期間は12時間で、マップの有効期限を超えない
+- パスワード変更・解除、URL再発行、マップ失効では `access_version` を更新し、既存の認証Cookieとキャッシュを無効化する
+- 同一接続元のパスワード試行を既定で10分間に5回までに制限する
+- 公開ページと位置APIは `Cache-Control: no-store` と `Referrer-Policy: no-referrer` を返す
 
 ## 8. 権限モデル
 
@@ -474,6 +542,17 @@ JSON として不正な場合、または必須項目が欠落している場合
 - 画像はブラウザで縮小したBlobをmultipart/form-dataで受け付ける。JPEGへ再エンコードして既存画像領域へ保存し、DB本文へ画像バイナリを保存しない
 - 設定テーブルと投稿履歴テーブルは対象マーカー削除時にCASCADE削除される
 
+### 9.9 現在位置共有
+
+- `can_share_live_location` が有効なアカウントだけが、自身の位置共有を開始できる
+- 利用者の明示操作後、画面が表示されている間だけ既定5秒間隔で送信する
+- 管理者は共有許可の切替、共有マップの作成・更新・失効・URL再発行を行える
+- 共有マップには1～20アカウントを登録でき、未失効の共有マップはアプリケーション全体で1件だけとする
+- 公開マップでは `tileserver_model` の背景地図と、対象ごとの表示・非表示を切り替えられる
+- 対象一覧から最新位置へ移動でき、閲覧者自身の現在位置表示と対象名の一括表示も利用できる
+- 最終受信から20秒を超える位置は更新遅延、120秒を超える位置はオフラインとして座標を公開しない
+- RedisがなくてもSQLiteから公開位置を取得する。Redisがある場合だけ短時間のスナップショットキャッシュを利用する
+
 ## 10. 画面仕様
 
 ### 10.1 主画面一覧
@@ -502,6 +581,10 @@ JSON として不正な場合、または必須項目が欠落している場合
   - 一般ユーザー作成
   - パスワードリセット
   - アカウントロック解除
+  - 現在位置共有許可の切替
+- 管理者の現在位置共有マップ管理画面
+- 現在位置共有マップ公開画面
+- 現在位置共有マップの共有パスワード入力画面
 
 ### 10.2 初回セットアップ画面
 
@@ -515,6 +598,8 @@ JSON として不正な場合、または必須項目が欠落している場合
 - モバイル UI は地図を全画面寄りに表示し、機能群はフローティングボタンと全画面モーダル中心で操作する
 - デスクトップ版の左右 2 カラム構成に対し、モバイル版はツール表示と一覧表示を重ね合わせる構成を採る
 - HTTPS または localhost では共有 URL やファイルリンクをクリップボードへ直接コピーできる
+- 現在位置共有マップは地図を全画面表示し、共有対象一覧を地図下部の横スワイプ式カードとして重ねる
+- 現在位置共有マップではタイトルを非表示とし、対象が4件以上の場合はレイヤ一覧を「すべて表示」「折り畳む」で切り替える
 
 ## 11. API 概要
 
@@ -533,6 +618,9 @@ JSON として不正な場合、または必須項目が欠落している場合
 - `GET /images/html/{image_name}`
 - `GET /licanses`
 - `POST /account/signup` (`ALLOW_USER_CREATE_ACCOUNT=true` の場合のみ)
+- `GET /live/{public_id}`
+- `POST /live/{public_id}/authenticate`
+- `GET /live-api/maps/{public_id}/positions`
 
 ### 11.2 アクセストークン必須
 
@@ -568,6 +656,17 @@ JSON として不正な場合、または必須項目が欠落している場合
 - `POST /onetimeurl/generate`
 - `GET /onetimeurl/current`
 - `DELETE /onetimeurl/delete/{id_url}`
+- `POST /live-location/session`
+- `PUT /live-location/session/{session_id}`
+- `DELETE /live-location/session/{session_id}`
+- `POST /live-location/session/{session_id}/stop`
+- `GET /admin/live-locations`
+- `PUT /admin/users/{user_id}/live-location-permission`
+- `GET /admin/live-maps`
+- `POST /admin/live-maps`
+- `PUT /admin/live-maps/{map_id}`
+- `DELETE /admin/live-maps/{map_id}`
+- `POST /admin/live-maps/{map_id}/rotate-url`
 - `GET /account/info`
 - `POST /account/password-update`
   - `ALLOW_USER_UPDATE_PASSWORD=true` の場合のみルート登録
@@ -610,6 +709,16 @@ JSON として不正な場合、または必須項目が欠落している場合
 
 更新 API の `shape_type` と `geojson` は任意項目である。いずれかが指定された場合、指定されなかった側は DB の既存値を使用し、更新後の組み合わせとして検証する。検証に失敗した場合は `400 Bad Request` を返し、更新 SQL は実行しない。
 
+### 11.6 現在位置共有 API
+
+位置ペイロードは緯度、経度、精度、進行方向、速度、観測時刻、連番を持つ。緯度・経度の範囲、非負の精度・速度、0～360度の進行方向、非負の連番、サーバー時刻との差が24時間以内の観測時刻を検証する。同一セッションでは連番が増加する更新だけを受け付け、受信間隔を1秒以上に制限する。
+
+ユーザー向けAPIは位置共有セッションの開始、更新、停止を提供する。`GET /account/auth` の `can_share_live_location` でログイン中アカウントの共有可否を返す。
+
+管理者向けAPIは、共有許可済みユーザーと最新位置の取得、共有許可の変更、固定URLを持つ共有マップの作成・取得・更新・失効・URL再発行を提供する。
+
+公開位置APIはマップ情報、サーバー時刻、更新間隔、共有対象の最新状態を返す。Redis接続を取得できた場合は `access_version` を含むキーへ短時間キャッシュし、接続がない場合やRedis操作に失敗した場合はSQLiteから取得して応答を継続する。
+
 ## 12. エラー応答
 
 API エラーは原則 JSON で返る。
@@ -638,6 +747,8 @@ API エラーは原則 JSON で返る。
 - JSON エクスポートは v2 パッケージ形式だが、旧形式のマーカー配列もインポートできる
 - フロントエンドは JST 前提の表示補正を複数箇所で行う
 - `SECURE_COOKIE=true` が既定のため、HTTP 運用時は設定変更が必要
+- ブラウザの位置情報APIはHTTPSまたはlocalhostで利用する。通常のTauri起動は同一PC向けであり、別端末へ公開する場合はサーバー単体モードとHTTPS対応のリバースプロキシを使用する
+- Redisは任意であり、未設定・未接続でも現在位置共有を含む主要機能はSQLiteだけで動作する
 
 ## 14. 配布物
 

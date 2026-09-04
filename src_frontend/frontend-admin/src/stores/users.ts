@@ -34,6 +34,7 @@ export const useUsersStore = defineStore("user", {
             create_at: usersData[key]["create_at"],
             is_superuser: usersData[key]["is_superuser"],
             is_locked: usersData[key]["is_locked"],
+            can_share_live_location: usersData[key]["can_share_live_location"],
           });
         }
         let sortedDsc = new Map(

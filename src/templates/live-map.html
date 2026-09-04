@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="ja">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta name="referrer" content="no-referrer" />
+        <title>現在位置共有マップ</title>
+        <script src="/assets/leaflet.js"></script>
+        <link rel="stylesheet" href="/assets/leaflet.css" />
+        <style>
+            html,
+            body {
+                height: 100%;
+                margin: 0;
+                font-family: sans-serif;
+            }
+            body {
+                display: grid;
+                grid-template-rows: auto auto minmax(0, 1fr);
+                background: #f6f8fa;
+            }
+            header {
+                align-items: center;
+                background: #000;
+                display: flex;
+                gap: 16px;
+                justify-content: space-between;
+                padding: 10px 16px;
+            }
+            #map-title {
+                color: #f5f5f5;
+                font-size: 18px;
+                margin: 0;
+            }
+            #connection-status {
+                color: #f5f5f5;
+                font-size: 13px;
+            }
+            main {
+                display: grid;
+                grid-row: 3;
+                grid-template-columns: 1fr 280px;
+                min-height: 0;
+            }
+            #map {
+                height: 100%;
+                min-height: 0;
+            }
+            #vehicle-list {
+                background: #fff;
+                border-left: 1px solid #d0d7de;
+                list-style: none;
+                margin: 0;
+                overflow-y: auto;
+                padding: 8px;
+            }
+            .vehicle {
+                border-bottom: 1px solid #eaeef2;
+            }
+            .vehicle-focus {
+                align-items: center;
+                appearance: none;
+                background: transparent;
+                border: 0;
+                box-sizing: border-box;
+                color: inherit;
+                cursor: pointer;
+                display: grid;
+                font: inherit;
+                gap: 2px 8px;
+                grid-template-columns: 12px 1fr auto;
+                padding: 10px 6px;
+                text-align: left;
+                width: 100%;
+            }
+            .vehicle-focus:hover {
+                background: #f6f8fa;
+            }
+            .vehicle-focus:focus-visible {
+                outline: 2px solid #0969da;
+                outline-offset: -2px;
+            }
+            .vehicle-focus:disabled {
+                cursor: default;
+                opacity: 0.7;
+            }
+            .vehicle-dot {
+                border-radius: 50%;
+                height: 10px;
+                width: 10px;
+            }
+            .vehicle-name {
+                font-weight: 600;
+            }
+            .vehicle-time {
+                color: #57606a;
+                font-size: 12px;
+                grid-column: 2 / 4;
+            }
+            .status-live {
+                color: #1a7f37;
+            }
+            .status-stale {
+                color: #9a6700;
+            }
+            .status-offline {
+                color: #57606a;
+            }
+            .live-location-marker {
+                background: transparent;
+                border: 0;
+            }
+            .live-location-dot {
+                border: 3px solid #fff;
+                border-radius: 50%;
+                box-shadow: 0 1px 5px #24292f80;
+                box-sizing: border-box;
+                height: 20px;
+                width: 20px;
+            }
+            .live-location-dot.stale {
+                filter: grayscale(1);
+                opacity: 0.55;
+            }
+            .radio-zone {
+                background-color: white;
+                max-height: min(40vh, 320px);
+                overflow-y: auto;
+                padding: 5px;
+            }
+            .tile-option {
+                align-items: center;
+                cursor: pointer;
+                display: flex;
+                gap: 5px;
+                min-height: 28px;
+                white-space: nowrap;
+            }
+            .tile-option + .tile-option {
+                margin-top: 6px;
+            }
+            .tile-radio {
+                background-color: white;
+                height: 20px;
+                vertical-align: middle;
+                width: 20px;
+            }
+            .tile-radio-label {
+                background-color: white;
+                font-size: 14px;
+                line-height: 20px;
+                margin-top: 10px;
+                padding-left: 5px;
+                vertical-align: middle;
+            }
+            .tile-radio:checked + .tile-radio-label {
+                font-weight: bold;
+            }
+            .custom-tooltip {
+                background-color: white;
+                color: black;
+                font-size: 14px;
+            }
+            .custom-control-button {
+                background-color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 5px 10px;
+            }
+            .custom-control-button:hover {
+                background-color: rgb(238, 238, 238);
+            }
+            .custom-control-button:disabled {
+                cursor: wait;
+                opacity: 0.65;
+            }
+            .leaflet-control-layers-list {
+                max-height: min(45vh, 360px);
+                overflow-y: auto;
+            }
+            .leaflet-control-layers-overlays {
+                font-size: 14px;
+            }
+            #error {
+                background: #ffebe9;
+                color: #cf222e;
+                display: none;
+                padding: 8px 16px;
+            }
+            @media (max-width: 700px) {
+                body {
+                    display: block;
+                    height: 100vh;
+                    height: 100dvh;
+                    overflow: hidden;
+                    position: relative;
+                }
+                main {
+                    display: block;
+                    height: 100vh;
+                    height: 100dvh;
+                    inset: 0;
+                    position: absolute;
+                    width: 100vw;
+                }
+                #map {
+                    height: 100%;
+                    inset: 0;
+                    position: absolute;
+                    width: 100%;
+                }
+                #vehicle-list {
+                    -webkit-overflow-scrolling: touch;
+                    background: transparent;
+                    border: 0;
+                    bottom: calc(56px + env(safe-area-inset-bottom));
+                    display: flex;
+                    gap: 10px;
+                    left: 0;
+                    overflow-x: auto;
+                    overflow-y: hidden;
+                    padding: 4px 12px;
+                    position: absolute;
+                    right: 0;
+                    scroll-padding-inline: 12px;
+                    scroll-snap-type: x mandatory;
+                    touch-action: pan-x;
+                    z-index: 1000;
+                }
+                #vehicle-list:empty {
+                    display: none;
+                }
+                .vehicle {
+                    background: rgb(255 255 255 / 94%);
+                    border: 1px solid #d0d7de;
+                    border-radius: 8px;
+                    box-shadow: 0 2px 8px rgb(36 41 47 / 20%);
+                    flex: 0 0 min(78vw, 300px);
+                    scroll-snap-align: start;
+                }
+                .vehicle-focus {
+                    min-height: 74px;
+                    padding: 10px;
+                }
+                header {
+                    display: none;
+                }
+                #error {
+                    border-radius: 6px;
+                    left: 12px;
+                    padding: 8px 12px;
+                    position: absolute;
+                    right: 12px;
+                    top: calc(58px + env(safe-area-inset-top));
+                    z-index: 1100;
+                }
+                .live-layer-control {
+                    padding-bottom: 4px;
+                }
+                .live-layer-control.is-collapsed
+                    .live-layer-control-collapsible-item {
+                    display: none;
+                }
+                .live-layer-control-toggle {
+                    background-color: white;
+                    border: 1px solid #b7c3d0;
+                    border-radius: 4px;
+                    color: #0f172a;
+                    cursor: pointer;
+                    display: block;
+                    font-size: 12px;
+                    font-weight: bold;
+                    line-height: 1.2;
+                    margin: 4px 6px 2px auto;
+                    padding: 4px 8px;
+                }
+                .live-layer-control-toggle:hover {
+                    background-color: rgb(238, 238, 238);
+                }
+                .live-layer-control-toggle[hidden] {
+                    display: none;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <header>
+            <h1 id="map-title">現在位置共有マップ</h1>
+            <div id="connection-status">接続しています…</div>
+        </header>
+        <div id="error"></div>
+        <main>
+            <div id="map"></div>
+            <ul id="vehicle-list" aria-label="共有対象一覧"></ul>
+        </main>
+        <script>
+            window.__GEOCODE_LIVE_MAP_BOOTSTRAP__ = {
+                publicId: "{{ publicId }}",
+                tileServers: {{ tileServers | json_encode_for_html | safe }},
+            };
+        </script>
+        <script type="module" src="/assets/template-live-map.js"></script>
+    </body>
+</html>

@@ -11,6 +11,8 @@ const emit = defineEmits<{
   mapReloadRequested: [layerId?: string | null];
   loginRedirect: [];
   previewImage: [filename: string];
+  userLocation: [position: Record<string, number | null>];
+  userLocationError: [code: number];
 }>();
 
 const filteredObjectIds = ref<{ markerIds: string[] | null; shapeIds: string[] | null }>({
@@ -140,6 +142,10 @@ const handleMessage = (event: MessageEvent): void => {
     window.clearTimeout(request.timer);
     pendingMapObjectRequests.delete(event.data.requestId);
     request.resolve(event.data.success === true);
+  } else if (event.data.type === "userLocationUpdate" && event.data.position) {
+    emit("userLocation", event.data.position);
+  } else if (event.data.type === "userLocationError") {
+    emit("userLocationError", Number(event.data.code));
   }
 };
 

@@ -5,6 +5,14 @@ import apiClient from "@/axiosClient";
 
 const routeSettings: RouteRecordRaw[] = [
   {
+    path: "/",
+    redirect: "/users/list",
+  },
+  {
+    path: "/admin",
+    redirect: "/users/list",
+  },
+  {
     path: "/users/list",
     name: "List",
     component: () => {
@@ -31,6 +39,24 @@ const routeSettings: RouteRecordRaw[] = [
     beforeEnter: (to, from, next) => {
       next();
     },
+  },
+  {
+    path: "/live-maps",
+    name: "LiveMaps",
+    component: () => import("@/views/live/AdminLiveMaps.vue"),
+    beforeEnter: async (_to, _from, next) => {
+      try {
+        await apiClient.get(getUserUrl);
+        next();
+      } catch {
+        next({ name: "login" });
+      }
+    },
+  },
+  {
+    path: "/:pathMatch(.*)*",
+    name: "NotFound",
+    component: () => import("@/views/NotFoundAdmin.vue"),
   },
 ];
 
