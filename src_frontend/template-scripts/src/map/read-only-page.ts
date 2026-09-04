@@ -8,6 +8,7 @@ import { installMapMarkdownExtensions } from "./common/markdown-extensions";
 import { downloadMapContentFile, installMapMarkdownRenderer } from "./common/markdown-renderer";
 import { createReadOnlyMapRuntime } from "./common/map-runtime";
 import { createMapUiVisibilityRuntime } from "./common/map-ui-visibility";
+import { loadLastMapView, observeMapView } from "./common/map-view-persistence";
 import { enableMarkerIconFallback, escapeHtml, initializeUserLocation, markerOptionsForLayer } from "./common/marker";
 import { createReadOnlyMarkerLayerControl, hydrateReadOnlyMarkers } from "./common/marker-layers";
 import { installReadOnlyOverlayHandlers } from "./common/overlay-events";
@@ -175,8 +176,9 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
     MapUiVisibilityToggleControl = mobileUi.MapUiVisibilityToggleControl;
   }
 
+  const lastMapView = isAnother ? loadLastMapView() : null;
   const initialView = isAnother
-    ? { latitude: 37.65, longitude: 138, zoom: 6 }
+    ? (lastMapView ?? bootstrap.initialView)
     : temporaryBootstrap!.initialView;
   const mapRuntime = createReadOnlyMapRuntime({
     center: [initialView.latitude, initialView.longitude],
@@ -188,6 +190,7 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
     zoom: initialView.zoom,
   });
   map = mapRuntime.map as DynamicRecord;
+  if (isAnother) observeMapView(map);
   bounds = mapRuntime.bounds;
   tileLayer = mapRuntime.tileLayer as DynamicRecord;
 
@@ -478,7 +481,9 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
     shapeVisibilityLayer,
     userLocationOptions: isMobile
       ? { controlClassName: "temporary-user-location-control", position: "bottomleft" }
-      : undefined,
+      : isAnother
+        ? { centerOnInitialPosition: !lastMapView }
+        : undefined,
     visibleMarkerGroup,
   });
 

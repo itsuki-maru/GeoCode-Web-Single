@@ -43,6 +43,7 @@ interface AddSearchControlsOptions extends MarkerSearchControlOptions {
 }
 
 interface UserLocationOptions {
+  centerOnInitialPosition?: boolean;
   controlClassName?: string;
   position?: string;
 }

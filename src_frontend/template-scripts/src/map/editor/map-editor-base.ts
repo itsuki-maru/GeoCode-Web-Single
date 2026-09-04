@@ -221,16 +221,28 @@ let xssOptions = {
   stripIgnoreTagBody: ["script"],
 };
 
+// 保存位置を優先し、なければバックエンド指定の初期位置を使用する
+const lastMapView = loadLastMapView();
+const hasExplicitInitialFocus =
+  new URLSearchParams(window.location.search).has("latitude") &&
+  new URLSearchParams(window.location.search).has("longitude");
+const shouldCenterOnInitialUserLocation =
+  !lastMapView && !hasExplicitInitialFocus;
+
 // 地図オブジェクトの初期化
 var map = L.map("map", {
-  center: [latitude, longitude],
+  center: [
+    lastMapView?.latitude ?? latitude,
+    lastMapView?.longitude ?? longitude,
+  ],
   crs: L.CRS.EPSG3857,
-  zoom: zoom,
+  zoom: lastMapView?.zoom ?? zoom,
   zoomControl: true,
   preferCanvas: false,
   // Leafletの著作権表示に_blank属性を追加するために、デフォルト値を無効化
   attributionControl: false,
 });
+observeMapView(map);
 
 // 日本の最南端と最北端の座標を使用して境界を設定
 const southWest = L.latLng(20.25, 122.56), // 最南端の座標

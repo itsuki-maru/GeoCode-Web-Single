@@ -61,6 +61,7 @@ export interface EditableMapBootstrap extends MapBootstrapBase {
 }
 
 export interface AnotherMapBootstrap extends MapBootstrapBase {
+  initialView: InitialMapView;
   isCluster: boolean;
   page: "map-anather";
   shapes: ShapeRecord[];

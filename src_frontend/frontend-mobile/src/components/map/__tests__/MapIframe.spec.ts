@@ -8,6 +8,18 @@ afterEach(() => {
 });
 
 describe("MapIframe", () => {
+  it("iframeに位置情報の利用を許可する", () => {
+    const wrapper = mount(MapIframe, {
+      props: {
+        srcUrl: "/map?layer=master&is_master=true",
+        allowedOrigins: window.location.origin,
+      },
+    });
+
+    expect(wrapper.get("iframe").attributes("allow")).toBe("geolocation");
+    wrapper.unmount();
+  });
+
   it("図形フォーカス要求に種別と図形IDを含める", () => {
     const wrapper = mount(MapIframe, {
       attachTo: document.body,

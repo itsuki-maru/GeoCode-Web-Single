@@ -46,8 +46,7 @@ describe("map common marker", () => {
     expect(options.draggable).toBe(true);
     expect(leaflet.icon).toHaveBeenCalledWith(
       expect.objectContaining({
-        iconUrl:
-          "/static/marker-icons/%E9%81%BF%E9%9B%A3%E6%89%80%20icon.png",
+        iconUrl: "/static/marker-icons/%E9%81%BF%E9%9B%A3%E6%89%80%20icon.png",
       }),
     );
     expect(
@@ -83,9 +82,7 @@ describe("map common marker", () => {
   });
 
   it("starts one location watch and renders location updates", () => {
-    let success:
-      | ((position: GeolocationPosition) => void)
-      | undefined;
+    let success: ((position: GeolocationPosition) => void) | undefined;
     const clearWatch = vi.fn();
     const watchPosition = vi.fn(
       (onSuccess: (position: GeolocationPosition) => void) => {
@@ -102,6 +99,8 @@ describe("map common marker", () => {
     const map = {
       addControl: (control: object) => void controls.push(control),
       getZoom: () => 10,
+      off: vi.fn(),
+      on: vi.fn(),
       setView,
     };
 
@@ -134,7 +133,128 @@ describe("map common marker", () => {
     expect(clearWatch).toHaveBeenCalledWith(42);
     expect(setView).not.toHaveBeenCalled();
   });
+
+  it("centers the initial view on the first location update when requested", () => {
+    let success: ((position: GeolocationPosition) => void) | undefined;
+    const watchPosition = vi.fn(
+      (onSuccess: (position: GeolocationPosition) => void) => {
+        success = onSuccess;
+        return 7;
+      },
+    );
+    Object.defineProperty(navigator, "geolocation", {
+      configurable: true,
+      value: { clearWatch: vi.fn(), watchPosition },
+    });
+    const setView = vi.fn();
+    const off = vi.fn();
+    const on = vi.fn();
+    const map = {
+      addControl: vi.fn(),
+      getZoom: () => 8,
+      off,
+      on,
+      setView,
+    };
+
+    initializeUserLocation(map, { centerOnInitialPosition: true });
+    success?.(createPosition(35.6812, 139.7671));
+
+    expect(on).toHaveBeenCalledWith("movestart", expect.any(Function));
+    expect(off).toHaveBeenCalledWith("movestart", expect.any(Function));
+    expect(setView).toHaveBeenCalledWith(expect.anything(), 16);
+  });
+
+  it("does not override map movement made before the initial location update", () => {
+    let success: ((position: GeolocationPosition) => void) | undefined;
+    let moveStart: (() => void) | undefined;
+    Object.defineProperty(navigator, "geolocation", {
+      configurable: true,
+      value: {
+        clearWatch: vi.fn(),
+        watchPosition: vi.fn(
+          (onSuccess: (position: GeolocationPosition) => void) => {
+            success = onSuccess;
+            return 8;
+          },
+        ),
+      },
+    });
+    const setView = vi.fn();
+    const map = {
+      addControl: vi.fn(),
+      getZoom: () => 8,
+      off: vi.fn(),
+      on: vi.fn((_eventName: string, listener: () => void) => {
+        moveStart = listener;
+      }),
+      setView,
+    };
+
+    initializeUserLocation(map, { centerOnInitialPosition: true });
+    moveStart?.();
+    success?.(createPosition(35.6812, 139.7671));
+
+    expect(setView).not.toHaveBeenCalled();
+  });
+
+  it("keeps the backend view when the initial location lookup fails", () => {
+    let failure: ((error: GeolocationPositionError) => void) | undefined;
+    Object.defineProperty(navigator, "geolocation", {
+      configurable: true,
+      value: {
+        clearWatch: vi.fn(),
+        watchPosition: vi.fn(
+          (
+            _onSuccess: (position: GeolocationPosition) => void,
+            onError: (error: GeolocationPositionError) => void,
+          ) => {
+            failure = onError;
+            return 9;
+          },
+        ),
+      },
+    });
+    const setView = vi.fn();
+    const map = {
+      addControl: vi.fn(),
+      getZoom: () => 6,
+      off: vi.fn(),
+      on: vi.fn(),
+      setView,
+    };
+
+    initializeUserLocation(map, { centerOnInitialPosition: true });
+    failure?.({
+      code: 1,
+      message: "denied",
+      PERMISSION_DENIED: 1,
+    } as GeolocationPositionError);
+
+    expect(setView).not.toHaveBeenCalled();
+    expect(map.off).toHaveBeenCalledWith("movestart", expect.any(Function));
+  });
 });
+
+function createPosition(
+  latitude: number,
+  longitude: number,
+): GeolocationPosition {
+  return {
+    coords: {
+      accuracy: 12,
+      altitude: null,
+      altitudeAccuracy: null,
+      heading: null,
+      latitude,
+      longitude,
+      speed: null,
+      toJSON: () => ({}),
+    },
+    timestamp: 1,
+    toJSON: () => ({}),
+  };
+}
 
 function createLeafletMock() {
   const createLocationMarker = (withRadius: boolean) => {
@@ -167,11 +287,7 @@ function createLeafletMock() {
       stop: vi.fn(),
     },
     DomUtil: {
-      create: (
-        tagName: string,
-        className: string,
-        container?: HTMLElement,
-      ) => {
+      create: (tagName: string, className: string, container?: HTMLElement) => {
         const element = document.createElement(tagName);
         element.className = className;
         container?.append(element);

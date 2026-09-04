@@ -17,6 +17,7 @@ import { createLayerBulkToggleControl, extractYouTubeId } from "/src/map/common/
 import { installMapContentActions, resolveSameOriginContentUrl } from "/src/map/common/content-actions.ts";
 import { createNestedTokenizer, isLocalhost, isPDF, isValidCoordinate, renderIframe, setupDetailsLazyImages } from "/src/map/common/content.ts";
 import { createMapObjectFocusController } from "/src/map/common/map-object-focus.ts";
+import { loadLastMapView, observeMapView } from "/src/map/common/map-view-persistence.ts";
 import { createMarkerPopupRuntime, enableMarkerIconFallback, escapeHtml, initializeUserLocation, markerOptionsForLayer } from "/src/map/common/marker.ts";
 import { createLayeredMarkerDisplayManager, createLayeredShapeDisplayManager, createMapSearchRuntime, filterMeasurementMarkersForBounds, getShapeRecords, matchesMarkerSearch, matchesShapeSearch, normalizeMarkerSearchText } from "/src/map/common/search.ts";
 import { createShapeArrowRuntime } from "/src/map/common/shape-arrow.ts";

@@ -400,6 +400,11 @@
         window.__GEOCODE_MAP_BOOTSTRAP__ = {
             page: "map-anather",
             isCluster: {{ is_cluster }},
+            initialView: {
+                latitude: {{ latitude }},
+                longitude: {{ longitude }},
+                zoom: {{ zoom }},
+            },
             tileServers: {{ tileServers | json_encode_for_html | safe }},
             layers: {{ layersFromAxum | json_encode_for_html | safe }},
             markers: {{ markersFromAxum | json_encode_for_html | safe }},

@@ -28,7 +28,11 @@ export function readMapBootstrap(): MapBootstrap {
   }
 
   if (value.page === "map-anather") {
-    if (typeof value.isCluster !== "boolean" || !Array.isArray(value.shapes)) {
+    if (
+      typeof value.isCluster !== "boolean" ||
+      !Array.isArray(value.shapes) ||
+      !isInitialView(value.initialView)
+    ) {
       throw new Error("Another-map bootstrap data is invalid");
     }
   } else if (value.page === "map" || value.page === "map-mobile") {
