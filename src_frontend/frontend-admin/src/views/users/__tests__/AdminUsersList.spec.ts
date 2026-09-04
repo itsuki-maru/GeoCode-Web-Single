@@ -50,7 +50,7 @@ describe("管理ユーザー一覧画面", () => {
     await flushPromises();
     expect(wrapper.text()).toContain("admin");
     expect(wrapper.text()).toContain("2026-08-23");
-    expect(wrapper.findAll("button").some((button) => button.text() === "Unlock")).toBe(true);
+    expect(wrapper.findAll("button").some((button) => button.text() === "ロック解除")).toBe(true);
   });
 
   it("リクエスト送信前にアカウント作成入力を検証する", async () => {
@@ -108,7 +108,7 @@ describe("管理ユーザー一覧画面", () => {
     api.post.mockResolvedValue({ data: {} });
     const wrapper = mount(AdminUsersList);
     await flushPromises();
-    const unlock = wrapper.findAll("button").find((button) => button.text() === "Unlock");
+    const unlock = wrapper.findAll("button").find((button) => button.text() === "ロック解除");
 
     await unlock?.trigger("click");
     await flushPromises();

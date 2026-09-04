@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
 use std::collections::HashMap;
 
 use super::MarkerObject;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct TileServers {
     pub id: i64,
     pub layer_name: String,

@@ -32,6 +32,7 @@ import MessageModal from "@/components/common/MessageModal.vue";
 import ConfirmModal from "@/components/common/ConfirmModal.vue";
 import MapToolbar from "@/components/map/MapToolbar.vue";
 import MapIframe from "@/components/map/MapIframe.vue";
+import LiveLocationSharing from "@/components/location/LiveLocationSharing.vue";
 import FullScreenMapModal from "@/components/map/FullScreenMapModal.vue";
 import MapObjectTable from "@/components/map-object/MapObjectTable.vue";
 import MapObjectEditModal from "@/components/map-object/MapObjectEditModal.vue";
@@ -180,6 +181,7 @@ const getMarker = (id: string): void => {
 };
 
 const mapIframeRef = ref<InstanceType<typeof MapIframe> | null>(null);
+const liveLocationSharingRef = ref<InstanceType<typeof LiveLocationSharing> | null>(null);
 
 const getMapObjectFocusPosition = (
   payload: MapObjectUpdatePayload,
@@ -692,6 +694,7 @@ const onImageDeleteRequest = (id: string): void => {
     @update:mapObjectQueryFormData="mapObjectQueryFormData = $event"
     @update:activeLayer="activeLayer = $event"
   />
+  <LiveLocationSharing ref="liveLocationSharingRef" />
 
   <div class="map-contents">
     <div class="map-and-info-zone" :class="{ 'map-object-table-closed': !isMapObjectTableOpen }">
@@ -704,6 +707,8 @@ const onImageDeleteRequest = (id: string): void => {
           @mapReloadRequested="onMapReloadRequested"
           @loginRedirect="loginRedirect()"
           @previewImage="openReadOnlyPreview"
+          @userLocation="liveLocationSharingRef?.receivePosition($event)"
+          @userLocationError="liveLocationSharingRef?.receiveError()"
         />
       </div>
       <div id="map-object-table-panel" v-show="isMapObjectTableOpen" class="info-draw">

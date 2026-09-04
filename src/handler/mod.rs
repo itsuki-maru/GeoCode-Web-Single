@@ -5,6 +5,8 @@ pub mod external_site;
 pub mod files;
 pub mod images;
 pub mod layers;
+pub mod live_location;
+pub mod live_map;
 pub mod map;
 pub mod marker_forms;
 pub mod marker_icons;

@@ -23,6 +23,7 @@ import MessageModal from "@/components/common/MessageModal.vue";
 import ConfirmModal from "@/components/common/ConfirmModal.vue";
 import MapToolbar from "@/components/map/MapToolbar.vue";
 import MapIframe from "@/components/map/MapIframe.vue";
+import LiveLocationSharing from "@/components/location/LiveLocationSharing.vue";
 import FullScreenMapModal from "@/components/map/FullScreenMapModal.vue";
 import MapObjectTable from "@/components/map-object/MapObjectTable.vue";
 import MapObjectEditModal from "@/components/map-object/MapObjectEditModal.vue";
@@ -153,6 +154,7 @@ const reloadMap = async (
 };
 
 const mapIframeRef = ref<InstanceType<typeof MapIframe> | null>(null);
+const liveLocationSharingRef = ref<InstanceType<typeof LiveLocationSharing> | null>(null);
 
 const getMapObjectFocusPosition = (
   payload: MapObjectUpdatePayload,
@@ -618,6 +620,7 @@ watch(
     @openFunction="onOpenCloseFunctionModal"
     @openToolbar="isOpenToolbar = !isOpenToolbar"
   />
+  <LiveLocationSharing ref="liveLocationSharingRef" />
 
   <!-- ツールバーボタン群 -->
   <transition>
@@ -756,6 +759,8 @@ watch(
     @mapReloadRequested="onMapReloadRequested"
     @loginRedirect="loginRedirect"
     @previewImage="handlePreviewImageFromIframe"
+    @userLocation="liveLocationSharingRef?.receivePosition($event)"
+    @userLocationError="liveLocationSharingRef?.receiveError()"
   />
 
   <!-- 地図オブジェクト編集モーダル -->

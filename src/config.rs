@@ -29,6 +29,13 @@ pub struct Config {
     pub tile_cache_ttl_seconds: u64,
     pub tile_cache_namespace: String,
     pub marker_form_storage_quota_bytes: i64,
+    pub live_location_upload_interval_seconds: u64,
+    pub live_location_stale_seconds: i64,
+    pub live_location_offline_seconds: i64,
+    pub live_map_snapshot_cache_seconds: u64,
+    pub live_map_viewer_session_minutes: i64,
+    pub live_map_password_attempt_limit: i32,
+    pub live_map_password_window_minutes: i64,
 }
 
 pub static CONFIG: Lazy<Config> = Lazy::new(|| Config {
@@ -87,6 +94,40 @@ pub static CONFIG: Lazy<Config> = Lazy::new(|| Config {
         .and_then(|value| value.parse::<i64>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(1024 * 1024 * 1024),
+    live_location_upload_interval_seconds: env::var("LIVE_LOCATION_UPLOAD_INTERVAL_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(5),
+    live_location_stale_seconds: env::var("LIVE_LOCATION_STALE_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(20),
+    live_location_offline_seconds: env::var("LIVE_LOCATION_OFFLINE_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(120),
+    live_map_snapshot_cache_seconds: env::var("LIVE_MAP_SNAPSHOT_CACHE_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(2),
+    live_map_viewer_session_minutes: env::var("LIVE_MAP_VIEWER_SESSION_MINUTES")
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(720),
+    live_map_password_attempt_limit: env::var("LIVE_MAP_PASSWORD_ATTEMPT_LIMIT")
+        .ok()
+        .and_then(|value| value.parse::<i32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(5),
+    live_map_password_window_minutes: env::var("LIVE_MAP_PASSWORD_WINDOW_MINUTES")
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(10),
 });
 
 fn get_required_secret(name: &str, minimum_length: usize) -> String {

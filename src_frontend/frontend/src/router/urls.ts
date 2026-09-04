@@ -40,6 +40,7 @@ export const getCurrentOnetimeMapUrl = baseUrl + "/onetimeurl/current";
 export const invalidateOntimeMapUrl = baseUrl + "/onetimeurl/delete/";
 export const refreshTokenUrl = baseUrl + "/account/refresh";
 export const getUserInfoUrl = baseUrl + "/account/info";
+export const liveLocationSessionUrl = baseUrl + "/live-location/session";
 export const userPrivacySettingUrl = baseUrl + "/account/privacy";
 export const userPasswordUpdateUrl = baseUrl + "/account/password-update";
 export const userTotpSettingUrl = baseUrl + "/account/totp/setup";

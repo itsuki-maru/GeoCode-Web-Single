@@ -334,16 +334,16 @@ pub async fn auth_check_handler(
     Extension(pool): Extension<SqlitePool>,
 ) -> Result<Json<AuthenticatedUser>, AppError> {
     // SQLクエリの実行
-    let user = query_as!(
-        AuthenticatedUser,
+    let user = sqlx::query_as::<_, AuthenticatedUser>(
         r#"
-        SELECT id, username FROM user_model WHERE id = $1
+        SELECT id, username, can_share_live_location
+        FROM user_model WHERE id = $1
         "#,
-        user_id
     )
+    .bind(user_id)
     .fetch_one(&pool)
     .await
-    .map_err(|e| AppError::Sqlx(e))?;
+    .map_err(AppError::Sqlx)?;
 
     Ok(Json(user))
 }

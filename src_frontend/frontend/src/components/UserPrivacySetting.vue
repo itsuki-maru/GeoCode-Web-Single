@@ -442,11 +442,7 @@ const redirectToLoginAfterPasswordUpdate = (): void => {
           required
           placeholder="XXXXXX"
         />
-        <button
-          class="post-code-btn"
-          v-on:click="verifyTotp()"
-          :disabled="isTotpVerifySubmitting"
-        >
+        <button class="post-code-btn" v-on:click="verifyTotp()" :disabled="isTotpVerifySubmitting">
           {{ isTotpVerifySubmitting ? "確認中..." : "認証して有効化" }}
         </button>
       </div>

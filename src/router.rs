@@ -40,6 +40,16 @@ use crate::handler::layers::{
     create_layer_handler, delete_layer_handler, get_all_layers_handler, master_layer_get_handler,
     update_layername_handler,
 };
+use crate::handler::live_location::{
+    create_live_location_session_handler, delete_live_location_session_handler,
+    stop_live_location_session_handler, update_live_location_session_handler,
+};
+use crate::handler::live_map::{
+    authenticate_live_map_handler, create_live_map_handler, get_admin_live_locations_handler,
+    get_public_live_map_positions_handler, list_live_maps_handler, live_map_page_handler,
+    revoke_live_map_handler, rotate_live_map_url_handler, update_live_location_permission_handler,
+    update_live_map_handler,
+};
 use crate::handler::map::{map_another_get_handler, map_get_handler, query_map_objects_handler};
 use crate::handler::marker_forms::{
     get_marker_form_config_handler, get_shape_form_config_handler, public_marker_form_get_handler,
@@ -193,6 +203,40 @@ pub fn build_router(
         )
         .route("/account/token/disable", post(disable_token));
 
+    secured_routes = secured_routes
+        .route(
+            "/live-location/session",
+            post(create_live_location_session_handler),
+        )
+        .route(
+            "/live-location/session/{session_id}",
+            put(update_live_location_session_handler).delete(delete_live_location_session_handler),
+        )
+        .route(
+            "/live-location/session/{session_id}/stop",
+            post(stop_live_location_session_handler),
+        )
+        .route(
+            "/admin/live-locations",
+            get(get_admin_live_locations_handler),
+        )
+        .route(
+            "/admin/users/{user_id}/live-location-permission",
+            put(update_live_location_permission_handler),
+        )
+        .route(
+            "/admin/live-maps",
+            get(list_live_maps_handler).post(create_live_map_handler),
+        )
+        .route(
+            "/admin/live-maps/{map_id}",
+            put(update_live_map_handler).delete(revoke_live_map_handler),
+        )
+        .route(
+            "/admin/live-maps/{map_id}/rotate-url",
+            post(rotate_live_map_url_handler),
+        );
+
     if CONFIG.allow_user_update_password {
         secured_routes = secured_routes.route(
             "/account/password-update",
@@ -228,6 +272,15 @@ pub fn build_router(
         .route("/account/token", post(token_handler))
         .route("/account/totp/token", post(token_totp_handler))
         .route("/licanses", get(crate::licenses_get_handler))
+        .route("/live/{public_id}", get(live_map_page_handler))
+        .route(
+            "/live/{public_id}/authenticate",
+            post(authenticate_live_map_handler),
+        )
+        .route(
+            "/live-api/maps/{public_id}/positions",
+            get(get_public_live_map_positions_handler),
+        )
         .route(
             "/onetime/{url_id}",
             get(temporary_map_get_handler).post(temporary_map_auth_handler),

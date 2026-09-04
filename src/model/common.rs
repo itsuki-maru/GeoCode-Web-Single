@@ -32,6 +32,13 @@ pub struct ApplicationInitSetup {
     pub tile_cache_ttl_seconds: String,
     pub tile_cache_namespace: String,
     pub marker_form_storage_quota_bytes: String,
+    pub live_location_upload_interval_seconds: String,
+    pub live_location_stale_seconds: String,
+    pub live_location_offline_seconds: String,
+    pub live_map_snapshot_cache_seconds: String,
+    pub live_map_viewer_session_minutes: String,
+    pub live_map_password_attempt_limit: String,
+    pub live_map_password_window_minutes: String,
 }
 
 #[derive(Serialize, Deserialize, FromRow)]

@@ -100,6 +100,32 @@ Rust/Axum 製 API サーバーと Vue 3 製フロントエンドを Tauri 2 で�
 - `zoom` には初期ズームレベルを指定する。未指定時や範囲外の値の場合は従来どおり `zoom=6` を使用する
 - パスワード保護された共有 URL でも、認証後に同じクエリパラメータが引き継がれる
 
+**現在位置共有マップ**
+
+- 管理者が位置共有を許可したアカウントだけに「現在位置を共有」ボタンを表示する
+- 利用者が明示的に共有を開始すると、アプリを表示している間だけ現在位置を定期送信する。画面非表示時や終了時は送信を停止する
+- 位置履歴は保持せず、アカウントごとの最新位置だけを SQLite に保存する
+- 管理者は許可済みアカウントから1～20件を選び、アプリケーション全体で1件の現在位置共有マップを作成できる
+- 管理画面で固定の共有URLを常時確認でき、必要な場合だけ共有パスワードを設定できる。URL再発行後は以前のURLが失効する
+- 公開マップはログイン不要で閲覧でき、背景地図、対象ごとの表示、対象名、閲覧者自身の現在位置表示を切り替えられる
+- 最終受信から20秒を超えると更新遅延、120秒を超えるとオフラインになり、オフラインの座標は公開しない
+- 不正、存在しない、期限切れ、失効済みの公開URLは共通の404ページを返す
+
+位置情報APIは HTTPS または localhost でのみ利用できる。通常のTauri起動は同じPC上での利用を想定しているため、別端末から共有マップを閲覧させる場合はサーバー単体モードとHTTPS対応のリバースプロキシを使用する。
+
+Redisは任意である。未設定または接続できない場合も、公開位置情報はSQLiteから直接取得され、現在位置共有機能は動作する。Redisを設定した場合だけ、不特定多数の同時閲覧によるDB負荷を抑える短時間キャッシュとして利用する。
+
+主なURL:
+
+```text
+POST        /live-location/session
+PUT/DELETE  /live-location/session/{session_id}
+POST        /live-location/session/{session_id}/stop
+GET         /live/{public_id}
+POST        /live/{public_id}/authenticate
+GET         /live-api/maps/{public_id}/positions
+```
+
 **プライバシーモード**
 
 - ユーザー単位で画像の外部公開を制御する
@@ -264,6 +290,13 @@ Copy-Item .env.example .env
 ```
 DATABASE_URL=sqlite:/path/to/GeoCode-Web-SingleBin/geocode-web.sqlite
 CREATEDATABASE_PATH=/path/to/GeoCode-Web-SingleBin/geocode-web.sqlite
+LIVE_LOCATION_UPLOAD_INTERVAL_SECONDS=5
+LIVE_LOCATION_STALE_SECONDS=20
+LIVE_LOCATION_OFFLINE_SECONDS=120
+LIVE_MAP_SNAPSHOT_CACHE_SECONDS=2
+LIVE_MAP_VIEWER_SESSION_MINUTES=720
+LIVE_MAP_PASSWORD_ATTEMPT_LIMIT=5
+LIVE_MAP_PASSWORD_WINDOW_MINUTES=10
 
 # 開発時（フロントエンド開発サーバー使用時）
 # VITE_IP_ADDRESS=http://localhost:3000
@@ -273,6 +306,8 @@ CREATEDATABASE_PATH=/path/to/GeoCode-Web-SingleBin/geocode-web.sqlite
 VITE_IP_ADDRESS=
 VITE_ASSET_PATH=/assets/
 ```
+
+現在位置共有関連の値はすべて任意で、上記が既定値となる。`LIVE_MAP_SNAPSHOT_CACHE_SECONDS` はRedisを利用できる場合の公開位置キャッシュ時間であり、Redisがない場合は無視される。`0` を指定すると新しい位置スナップショットをキャッシュしない。
 
 ### 2. SQLite データベースの作成
 

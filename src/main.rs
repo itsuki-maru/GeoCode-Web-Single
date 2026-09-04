@@ -103,6 +103,34 @@ unsafe fn apply_env_vars(env: &ApplicationInitSetup, server_addr: &str) {
             "MARKER_FORM_STORAGE_QUOTA_BYTES",
             &env.marker_form_storage_quota_bytes,
         );
+        env::set_var(
+            "LIVE_LOCATION_UPLOAD_INTERVAL_SECONDS",
+            &env.live_location_upload_interval_seconds,
+        );
+        env::set_var(
+            "LIVE_LOCATION_STALE_SECONDS",
+            &env.live_location_stale_seconds,
+        );
+        env::set_var(
+            "LIVE_LOCATION_OFFLINE_SECONDS",
+            &env.live_location_offline_seconds,
+        );
+        env::set_var(
+            "LIVE_MAP_SNAPSHOT_CACHE_SECONDS",
+            &env.live_map_snapshot_cache_seconds,
+        );
+        env::set_var(
+            "LIVE_MAP_VIEWER_SESSION_MINUTES",
+            &env.live_map_viewer_session_minutes,
+        );
+        env::set_var(
+            "LIVE_MAP_PASSWORD_ATTEMPT_LIMIT",
+            &env.live_map_password_attempt_limit,
+        );
+        env::set_var(
+            "LIVE_MAP_PASSWORD_WINDOW_MINUTES",
+            &env.live_map_password_window_minutes,
+        );
     }
 }
 

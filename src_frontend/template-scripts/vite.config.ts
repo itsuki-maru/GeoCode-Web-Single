@@ -231,6 +231,9 @@ export default defineConfig({
         "image-preview": fileURLToPath(
           new URL("./src/entries/image-preview.ts", import.meta.url),
         ),
+        "live-map": fileURLToPath(
+          new URL("./src/entries/live-map.ts", import.meta.url),
+        ),
         "map-anather": fileURLToPath(
           new URL("./src/entries/map-anather.ts", import.meta.url),
         ),

@@ -139,6 +139,23 @@ export function initializeUserLocation(
     hasShownError = false;
     shouldNotifyError = false;
 
+    if (window.parent !== window) {
+      window.parent.postMessage(
+        {
+          type: "userLocationUpdate",
+          position: {
+            latitude,
+            longitude,
+            accuracy,
+            heading: position.coords.heading,
+            speed: position.coords.speed,
+            timestamp: position.timestamp,
+          },
+        },
+        window.location.origin,
+      );
+    }
+
     if (!userLocationMarker) {
       userLocationMarker = leaflet
         .circleMarker(latLng, {
@@ -184,6 +201,12 @@ export function initializeUserLocation(
       window.alert("位置情報の取得に失敗しました");
     }
     console.error("Get location error", error);
+    if (window.parent !== window) {
+      window.parent.postMessage(
+        { type: "userLocationError", code: error.code },
+        window.location.origin,
+      );
+    }
   };
 
   const startUserLocationWatch = (): void => {
