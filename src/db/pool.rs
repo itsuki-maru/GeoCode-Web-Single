@@ -411,6 +411,13 @@ CREATE TABLE IF NOT EXISTS live_map_password_rate_limit (
             "#,
         ],
     },
+    Migration {
+        version: 10,
+        name: "create_live_location_history",
+        statements: &[include_str!(
+            "../../migrations/20260909120000_create_live_location_history.sql"
+        )],
+    },
 ];
 
 // データベース接続の確立

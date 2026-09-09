@@ -80,6 +80,7 @@ struct ApplicationInitSetupPartial {
     tile_cache_ttl_seconds: Option<String>,
     tile_cache_namespace: Option<String>,
     marker_form_storage_quota_bytes: Option<String>,
+    live_location_history_enabled: Option<String>,
     live_location_upload_interval_seconds: Option<String>,
     live_location_stale_seconds: Option<String>,
     live_location_offline_seconds: Option<String>,
@@ -105,6 +106,7 @@ struct EnvDefaults {
     tile_cache_ttl_seconds: String,
     tile_cache_namespace: String,
     marker_form_storage_quota_bytes: String,
+    live_location_history_enabled: String,
     live_location_upload_interval_seconds: String,
     live_location_stale_seconds: String,
     live_location_offline_seconds: String,
@@ -136,6 +138,7 @@ fn env_defaults(setup_dir: &std::path::Path) -> EnvDefaults {
         tile_cache_ttl_seconds: "604800".to_string(),
         tile_cache_namespace: "default".to_string(),
         marker_form_storage_quota_bytes: "1073741824".to_string(),
+        live_location_history_enabled: "false".to_string(),
         live_location_upload_interval_seconds: "5".to_string(),
         live_location_stale_seconds: "20".to_string(),
         live_location_offline_seconds: "120".to_string(),
@@ -232,6 +235,7 @@ pub fn build_env_from_form(
         tile_cache_ttl_seconds: defaults.tile_cache_ttl_seconds,
         tile_cache_namespace: defaults.tile_cache_namespace,
         marker_form_storage_quota_bytes: defaults.marker_form_storage_quota_bytes,
+        live_location_history_enabled: defaults.live_location_history_enabled,
         live_location_upload_interval_seconds: defaults.live_location_upload_interval_seconds,
         live_location_stale_seconds: defaults.live_location_stale_seconds,
         live_location_offline_seconds: defaults.live_location_offline_seconds,
@@ -272,6 +276,7 @@ fn env_json_requires_migration(value: &serde_json::Value) -> bool {
         "tile_cache_ttl_seconds",
         "tile_cache_namespace",
         "marker_form_storage_quota_bytes",
+        "live_location_history_enabled",
         "live_location_upload_interval_seconds",
         "live_location_stale_seconds",
         "live_location_offline_seconds",
@@ -363,6 +368,9 @@ fn complete_env(
         marker_form_storage_quota_bytes: partial
             .marker_form_storage_quota_bytes
             .unwrap_or(defaults.marker_form_storage_quota_bytes),
+        live_location_history_enabled: partial
+            .live_location_history_enabled
+            .unwrap_or(defaults.live_location_history_enabled),
         live_location_upload_interval_seconds: partial
             .live_location_upload_interval_seconds
             .unwrap_or(defaults.live_location_upload_interval_seconds),
@@ -475,6 +483,7 @@ mod tests {
         assert_eq!(env.tile_cache_ttl_seconds, "604800");
         assert_eq!(env.tile_cache_namespace, "default");
         assert_eq!(env.marker_form_storage_quota_bytes, "1073741824");
+        assert_eq!(env.live_location_history_enabled, "false");
         assert_eq!(env.live_location_upload_interval_seconds, "5");
         assert_eq!(env.live_location_stale_seconds, "20");
         assert_eq!(env.live_location_offline_seconds, "120");
@@ -499,6 +508,13 @@ mod tests {
             migrated_value
                 .get("redis_connect_timeout_seconds")
                 .is_some()
+        );
+        assert_eq!(migrated_value["live_location_history_enabled"], "false");
+        assert_eq!(
+            read_env_json(&setup_dir)
+                .unwrap()
+                .live_location_history_enabled,
+            "false"
         );
         assert!(migrated_value.get("tile_cache_ttl_seconds").is_some());
         assert!(
@@ -526,6 +542,7 @@ mod tests {
         let setup_dir = test_setup_dir("preserve");
         let mut value = minimum_required_env_json();
         let object = value.as_object_mut().unwrap();
+        object.insert("live_location_history_enabled".to_string(), json!("true"));
         object.insert("cache_control".to_string(), json!("public"));
         object.insert("secure_cookie".to_string(), json!("false"));
         object.insert("service_name".to_string(), json!("Custom Service"));
@@ -544,6 +561,13 @@ mod tests {
 
         let env = read_env_json(&setup_dir).unwrap();
 
+        assert_eq!(env.live_location_history_enabled, "true");
+        assert_eq!(
+            read_env_json(&setup_dir)
+                .unwrap()
+                .live_location_history_enabled,
+            "true"
+        );
         assert_eq!(env.cache_control, "public");
         assert_eq!(env.secure_cookie, "false");
         assert_eq!(env.service_name, "Custom Service");

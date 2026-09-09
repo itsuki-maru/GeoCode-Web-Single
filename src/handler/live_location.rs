@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
 };
 use chrono::Utc;
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, SqliteConnection, SqlitePool};
 
 use crate::{
     config::CONFIG,
@@ -48,12 +48,15 @@ fn validate_position(payload: &LiveLocationPositionPayload) -> Result<(), AppErr
     Ok(())
 }
 
-async fn sharing_is_allowed(pool: &SqlitePool, user_id: &str) -> Result<bool, AppError> {
+async fn sharing_is_allowed(
+    connection: &mut SqliteConnection,
+    user_id: &str,
+) -> Result<bool, AppError> {
     sqlx::query_scalar::<_, bool>(
         "SELECT can_share_live_location FROM user_model WHERE id = $1 AND is_locked = false",
     )
     .bind(user_id)
-    .fetch_optional(pool)
+    .fetch_optional(connection)
     .await?
     .ok_or_else(|| AppError::Forbidden("Live location sharing is not available.".into()))
 }
@@ -64,7 +67,8 @@ pub async fn create_live_location_session_handler(
     Json(payload): Json<LiveLocationPositionPayload>,
 ) -> Result<Json<LiveLocationSessionResponse>, AppError> {
     validate_position(&payload)?;
-    if !sharing_is_allowed(&pool, &user_id).await? {
+    let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
+    if !sharing_is_allowed(&mut transaction, &user_id).await? {
         return Err(AppError::Forbidden(
             "Live location sharing is not permitted for this account.".into(),
         ));
@@ -108,9 +112,11 @@ pub async fn create_live_location_session_handler(
     .bind(payload.heading_deg)
     .bind(payload.speed_mps)
     .bind(payload.observed_at)
-    .execute(&pool)
+    .execute(&mut *transaction)
     .await?;
 
+    record_history(&mut transaction, &user_id).await?;
+    transaction.commit().await?;
     Ok(Json(LiveLocationSessionResponse {
         session_id,
         upload_interval_ms: CONFIG.live_location_upload_interval_seconds * 1000,
@@ -124,7 +130,8 @@ pub async fn update_live_location_session_handler(
     Json(payload): Json<LiveLocationPositionPayload>,
 ) -> Result<StatusCode, AppError> {
     validate_position(&payload)?;
-    if !sharing_is_allowed(&pool, &user_id).await? {
+    let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
+    if !sharing_is_allowed(&mut transaction, &user_id).await? {
         return Err(AppError::Forbidden(
             "Live location sharing is not permitted for this account.".into(),
         ));
@@ -135,7 +142,7 @@ pub async fn update_live_location_session_handler(
     )
     .bind(&user_id)
     .bind(&session_id)
-    .fetch_optional(&pool)
+    .fetch_optional(&mut *transaction)
     .await?
     .ok_or(AppError::Conflict)?;
     if payload.sequence_no <= guard.sequence_no {
@@ -170,13 +177,36 @@ pub async fn update_live_location_session_handler(
     .bind(payload.observed_at)
     .bind(&user_id)
     .bind(&session_id)
-    .execute(&pool)
+    .execute(&mut *transaction)
     .await?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::Conflict);
     }
+    record_history(&mut transaction, &user_id).await?;
+    transaction.commit().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// Copy the accepted row, including the server-assigned sequence and timestamps.
+async fn record_history(connection: &mut SqliteConnection, user_id: &str) -> Result<(), AppError> {
+    if CONFIG.live_location_history_enabled {
+        sqlx::query(
+            r#"
+            INSERT INTO live_location_history (
+                user_id, session_id, sequence_no, latitude, longitude,
+                accuracy_m, heading_deg, speed_mps, observed_at, received_at
+            )
+            SELECT user_id, session_id, sequence_no, latitude, longitude,
+                accuracy_m, heading_deg, speed_mps, observed_at, received_at
+            FROM live_location_session WHERE user_id = $1
+            "#,
+        )
+        .bind(user_id)
+        .execute(connection)
+        .await?;
+    }
+    Ok(())
 }
 
 async fn delete_session(

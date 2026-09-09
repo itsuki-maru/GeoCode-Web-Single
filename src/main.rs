@@ -104,6 +104,10 @@ unsafe fn apply_env_vars(env: &ApplicationInitSetup, server_addr: &str) {
             &env.marker_form_storage_quota_bytes,
         );
         env::set_var(
+            "LIVE_LOCATION_HISTORY_ENABLED",
+            &env.live_location_history_enabled,
+        );
+        env::set_var(
             "LIVE_LOCATION_UPLOAD_INTERVAL_SECONDS",
             &env.live_location_upload_interval_seconds,
         );
