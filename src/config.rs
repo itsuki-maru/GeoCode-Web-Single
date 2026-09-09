@@ -29,6 +29,7 @@ pub struct Config {
     pub tile_cache_ttl_seconds: u64,
     pub tile_cache_namespace: String,
     pub marker_form_storage_quota_bytes: i64,
+    pub live_location_history_enabled: bool,
     pub live_location_upload_interval_seconds: u64,
     pub live_location_stale_seconds: i64,
     pub live_location_offline_seconds: i64,
@@ -94,6 +95,10 @@ pub static CONFIG: Lazy<Config> = Lazy::new(|| Config {
         .and_then(|value| value.parse::<i64>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(1024 * 1024 * 1024),
+    live_location_history_enabled: parse_history_enabled(
+        env::var("LIVE_LOCATION_HISTORY_ENABLED").ok().as_deref(),
+    )
+    .expect("LIVE_LOCATION_HISTORY_ENABLED must be true or false"),
     live_location_upload_interval_seconds: env::var("LIVE_LOCATION_UPLOAD_INTERVAL_SECONDS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -193,4 +198,22 @@ fn get_cache_control_from_env() -> CacheControl {
     let default = "no-store".to_string();
     let value = env::var("CACHE_CONTROL").unwrap_or(default);
     CacheControl::from_str(&value).unwrap_or(CacheControl::NoStore)
+}
+
+fn parse_history_enabled(value: Option<&str>) -> Result<bool, std::str::ParseBoolError> {
+    value.unwrap_or("false").parse()
+}
+
+#[cfg(test)]
+mod history_config_tests {
+    use super::parse_history_enabled;
+
+    #[test]
+    fn history_requires_explicit_true() {
+        assert_eq!(parse_history_enabled(None), Ok(false));
+        assert_eq!(parse_history_enabled(Some("false")), Ok(false));
+        assert_eq!(parse_history_enabled(Some("true")), Ok(true));
+        assert!(parse_history_enabled(Some("yes")).is_err());
+        assert!(parse_history_enabled(Some("")).is_err());
+    }
 }

@@ -32,6 +32,7 @@ pub struct ApplicationInitSetup {
     pub tile_cache_ttl_seconds: String,
     pub tile_cache_namespace: String,
     pub marker_form_storage_quota_bytes: String,
+    pub live_location_history_enabled: String,
     pub live_location_upload_interval_seconds: String,
     pub live_location_stale_seconds: String,
     pub live_location_offline_seconds: String,
