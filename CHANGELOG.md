@@ -1,5 +1,10 @@
 # 変更履歴
 
+## Version 1.3.1
+
+- Prettier を template-scripts に導入
+- ライブマップの位置履歴機能を有効にする設定を追加
+
 ## Version 1.3.0
 
 ### 位置情報の共有機能
