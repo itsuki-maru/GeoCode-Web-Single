@@ -90,10 +90,9 @@ function createShapeMeasurementMarkers(layer) {
     } else {
       segments.forEach((segment) => {
         markers.push(
-          createMeasurementLabelMarker(
-            getSegmentMidpoint(segment.start, segment.end),
-            [formatDistance(segment.distance)],
-          ),
+          createMeasurementLabelMarker(getSegmentMidpoint(segment.start, segment.end), [
+            formatDistance(segment.distance),
+          ]),
         );
       });
     }
@@ -125,18 +124,16 @@ function createShapeMeasurementMarkers(layer) {
     } else {
       segments.forEach((segment) => {
         markers.push(
-          createMeasurementLabelMarker(
-            getSegmentMidpoint(segment.start, segment.end),
-            [formatDistance(segment.distance)],
-          ),
+          createMeasurementLabelMarker(getSegmentMidpoint(segment.start, segment.end), [
+            formatDistance(segment.distance),
+          ]),
         );
       });
     }
 
     const summaryLatLng = getShapeLabelLatLng(layer);
     if (summaryLatLng) {
-      const summaryVariant =
-        layer.shapeType === "rectangle" ? "summary-rectangle" : "summary";
+      const summaryVariant = layer.shapeType === "rectangle" ? "summary-rectangle" : "summary";
       markers.push(
         createMeasurementLabelMarker(
           summaryLatLng,
@@ -152,10 +149,7 @@ function createShapeMeasurementMarkers(layer) {
       markers.push(
         createMeasurementLabelMarker(
           centerLatLng,
-          [
-            `半径 ${formatDistance(measurement.radius)}`,
-            `面積 ${formatArea(measurement.area)}`,
-          ],
+          [`半径 ${formatDistance(measurement.radius)}`, `面積 ${formatArea(measurement.area)}`],
           "summary-circle",
         ),
       );
@@ -163,9 +157,7 @@ function createShapeMeasurementMarkers(layer) {
   }
 
   if (isMeasurementSegmentMerged) {
-    markers.push(
-      ...createGroupedSegmentEndpointMarkers(measurementSegments, layer),
-    );
+    markers.push(...createGroupedSegmentEndpointMarkers(measurementSegments, layer));
   } else {
     getMeasurementVertexLatLngs(layer).forEach((latLng) => {
       markers.push(createMeasurementVertexMarker(latLng, layer));
@@ -181,10 +173,7 @@ function attachShapeMeasurementMarkers(layer, bounds = null) {
     return;
   }
 
-  const markers = filterMeasurementMarkersForBounds(
-    createShapeMeasurementMarkers(layer),
-    bounds,
-  );
+  const markers = filterMeasurementMarkersForBounds(createShapeMeasurementMarkers(layer), bounds);
   layer.measurementMarkers = markers;
   if (markers.length === 0) {
     return;
@@ -237,20 +226,14 @@ function applyMeasurementVisibilityToDrawnShapesGroup() {
 
 // 図形ラベルへ現在の図形色を反映する
 function applyShapeLabelStyle(layer) {
-  const tooltip =
-    typeof layer?.getTooltip === "function" ? layer.getTooltip() : null;
+  const tooltip = typeof layer?.getTooltip === "function" ? layer.getTooltip() : null;
   const tooltipElement =
-    tooltip && typeof tooltip.getElement === "function"
-      ? tooltip.getElement()
-      : null;
+    tooltip && typeof tooltip.getElement === "function" ? tooltip.getElement() : null;
   if (!tooltipElement) {
     return;
   }
 
-  const shapeColor = normalizeShapeColor(
-    layer?.shapeStyle?.color,
-    SHAPE_STYLE.color,
-  );
+  const shapeColor = normalizeShapeColor(layer?.shapeStyle?.color, SHAPE_STYLE.color);
   tooltipElement.style.borderColor = shapeColor;
   tooltipElement.style.color = shapeColor;
 }
@@ -260,16 +243,10 @@ function attachShapeNameTooltipClick(layer) {
   if (!layer) {
     return;
   }
-  const tooltip =
-    typeof layer.getTooltip === "function" ? layer.getTooltip() : null;
+  const tooltip = typeof layer.getTooltip === "function" ? layer.getTooltip() : null;
   const tooltipElement =
-    tooltip && typeof tooltip.getElement === "function"
-      ? tooltip.getElement()
-      : null;
-  if (
-    !tooltipElement ||
-    tooltipElement.dataset.shapeNameClickBound === "true"
-  ) {
+    tooltip && typeof tooltip.getElement === "function" ? tooltip.getElement() : null;
+  if (!tooltipElement || tooltipElement.dataset.shapeNameClickBound === "true") {
     return;
   }
 
@@ -319,9 +296,7 @@ function bindShapeNameLabelTooltip(layer, labelLatLng) {
   }
 
   const normalizedName = normalizeShapeName(layer.shapeName);
-  const labelClassName = normalizedName
-    ? "shape-name-label"
-    : "shape-name-label is-empty";
+  const labelClassName = normalizedName ? "shape-name-label" : "shape-name-label is-empty";
   const labelContent = normalizedName ? escapeHtml(normalizedName) : "&nbsp;";
   layer.bindTooltip(`<div class="${labelClassName}">${labelContent}</div>`, {
     interactive: true,
@@ -330,8 +305,7 @@ function bindShapeNameLabelTooltip(layer, labelLatLng) {
     className: "shape-name-tooltip",
   });
 
-  const tooltip =
-    typeof layer.getTooltip === "function" ? layer.getTooltip() : null;
+  const tooltip = typeof layer.getTooltip === "function" ? layer.getTooltip() : null;
   if (tooltip && labelLatLng && typeof tooltip.setLatLng === "function") {
     tooltip.setLatLng(labelLatLng);
   }

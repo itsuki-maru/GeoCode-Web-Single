@@ -51,9 +51,7 @@ interface ShapeMeasurementDisplayDependencies {
     segments: MeasurementSegment[],
     layer?: MeasurementLayer | null,
   ): MeasurementMarker[];
-  createGroupedSegmentMeasurementMarkers(
-    segments: MeasurementSegment[],
-  ): MeasurementMarker[];
+  createGroupedSegmentMeasurementMarkers(segments: MeasurementSegment[]): MeasurementMarker[];
   createMeasurementLabelMarker(
     latLng: LatLng | null | undefined,
     lines: string[],
@@ -64,9 +62,7 @@ interface ShapeMeasurementDisplayDependencies {
     layer?: MeasurementLayer | null,
     emphasized?: boolean,
   ): MeasurementMarker | null;
-  ensureShapeGroup(
-    layerId: string | null | undefined,
-  ): MeasurementGroup | null;
+  ensureShapeGroup(layerId: string | null | undefined): MeasurementGroup | null;
   filterMeasurementMarkersForBounds<TMarker extends MeasurementMarker>(
     markers: TMarker[] | unknown,
     bounds: MeasurementBounds | null | undefined,
@@ -74,9 +70,7 @@ interface ShapeMeasurementDisplayDependencies {
   formatArea(areaInSquareMeters: number): string;
   formatDistance(distanceInMeters: number): string;
   getMeasurementSegmentMerged(): boolean;
-  getMeasurementVertexLatLngs(
-    layer?: MeasurementLayer | null,
-  ): LatLng[];
+  getMeasurementVertexLatLngs(layer?: MeasurementLayer | null): LatLng[];
   getMeasurementVisible(): boolean;
   getPolylineCenterLatLng(layer: MeasurementLayer): LatLng | null;
   getSegmentMidpoint(start: LatLng, end: LatLng): LatLng;
@@ -90,10 +84,7 @@ interface ShapeMeasurementDisplayDependencies {
     segments: MeasurementSegment[];
     totalDistance: number;
   };
-  setMeasurementMarkerVisibility(
-    marker: MeasurementMarker,
-    visible: boolean,
-  ): void;
+  setMeasurementMarkerVisibility(marker: MeasurementMarker, visible: boolean): void;
   trimClosedLatLngs(latLngs: unknown): LatLng[];
 }
 
@@ -141,9 +132,7 @@ export function createReadOnlyShapeMeasurementDisplayRuntime({
   };
 
   const measurePolygon = (layer: MeasurementLayer) => {
-    const latLngs = trimClosedLatLngs(
-      flattenShapeLatLngs(layer?.getLatLngs?.()),
-    );
+    const latLngs = trimClosedLatLngs(flattenShapeLatLngs(layer?.getLatLngs?.()));
     const edges: MeasurementSegment[] = [];
     let perimeter = 0;
 
@@ -197,7 +186,9 @@ export function createReadOnlyShapeMeasurementDisplayRuntime({
           start: latLngs[index],
         }))
         .filter(
-          (segment): segment is MeasurementSegment & {
+          (
+            segment,
+          ): segment is MeasurementSegment & {
             end: LatLng;
             start: LatLng;
           } => Boolean(segment.start && segment.end),
@@ -210,13 +201,8 @@ export function createReadOnlyShapeMeasurementDisplayRuntime({
         "summary-polyline",
       );
       if (summaryMarker) markers.push(summaryMarker);
-    } else if (
-      layer.shapeType === "polygon" ||
-      layer.shapeType === "rectangle"
-    ) {
-      const latLngs = trimClosedLatLngs(
-        flattenShapeLatLngs(layer.getLatLngs?.()),
-      );
+    } else if (layer.shapeType === "polygon" || layer.shapeType === "rectangle") {
+      const latLngs = trimClosedLatLngs(flattenShapeLatLngs(layer.getLatLngs?.()));
       const measurement = measurePolygon(layer);
       measurementSegments = measurement.edges
         .map((edge, index) => ({
@@ -225,7 +211,9 @@ export function createReadOnlyShapeMeasurementDisplayRuntime({
           start: latLngs[index],
         }))
         .filter(
-          (segment): segment is MeasurementSegment & {
+          (
+            segment,
+          ): segment is MeasurementSegment & {
             end: LatLng;
             start: LatLng;
           } => Boolean(segment.start && segment.end),
@@ -242,19 +230,14 @@ export function createReadOnlyShapeMeasurementDisplayRuntime({
       const measurement = measureCircle(layer);
       const summaryMarker = createMeasurementLabelMarker(
         getShapeLabelLatLng(layer),
-        [
-          `半径 ${formatDistance(measurement.radius)}`,
-          `面積 ${formatArea(measurement.area)}`,
-        ],
+        [`半径 ${formatDistance(measurement.radius)}`, `面積 ${formatArea(measurement.area)}`],
         "summary-circle",
       );
       if (summaryMarker) markers.push(summaryMarker);
     }
 
     if (getMeasurementSegmentMerged()) {
-      markers.push(
-        ...createGroupedSegmentEndpointMarkers(measurementSegments, layer),
-      );
+      markers.push(...createGroupedSegmentEndpointMarkers(measurementSegments, layer));
     } else {
       getMeasurementVertexLatLngs(layer).forEach((latLng) => {
         const marker = createMeasurementVertexMarker(latLng, layer);
@@ -272,10 +255,7 @@ export function createReadOnlyShapeMeasurementDisplayRuntime({
   ): void => {
     if (!layer) return;
 
-    const markers = filterMeasurementMarkersForBounds(
-      createShapeMeasurementMarkers(layer),
-      bounds,
-    );
+    const markers = filterMeasurementMarkersForBounds(createShapeMeasurementMarkers(layer), bounds);
     layer.measurementMarkers = markers;
     layer.measurementLayerId = layerId;
     if (markers.length === 0) return;
@@ -289,9 +269,7 @@ export function createReadOnlyShapeMeasurementDisplayRuntime({
     });
   };
 
-  const removeShapeMeasurementMarkers = (
-    layer: MeasurementLayer | null | undefined,
-  ): void => {
+  const removeShapeMeasurementMarkers = (layer: MeasurementLayer | null | undefined): void => {
     if (!layer || !Array.isArray(layer.measurementMarkers)) return;
 
     const targetShapeGroup = ensureShapeGroup(layer.measurementLayerId);

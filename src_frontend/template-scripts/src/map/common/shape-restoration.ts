@@ -17,10 +17,7 @@ interface ShapeTooltip {
 }
 
 interface RestoredShapeLayer {
-  bindTooltip?(
-    content: string,
-    options: Record<string, unknown>,
-  ): unknown;
+  bindTooltip?(content: string, options: Record<string, unknown>): unknown;
   getTooltip?(): ShapeTooltip | null;
   isShapeNameLayer?: boolean;
   layerId?: string | null;
@@ -42,14 +39,8 @@ type ShapeLabelAppearance = "pill" | "plain";
 
 interface ShapeRestorationDependencies {
   attachShapeMemoPopup(layer: RestoredShapeLayer): void;
-  attachShapeMemoTooltipOpen(
-    layer: RestoredShapeLayer,
-    labelLatLng: unknown,
-  ): void;
-  bindPolylineHoverHighlight(
-    layer: RestoredShapeLayer,
-    options?: { restoreStyle(): void },
-  ): void;
+  attachShapeMemoTooltipOpen(layer: RestoredShapeLayer, labelLatLng: unknown): void;
+  bindPolylineHoverHighlight(layer: RestoredShapeLayer, options?: { restoreStyle(): void }): void;
   createLeafletShapeLayer(
     shapeType: string,
     geojson: unknown,
@@ -60,10 +51,7 @@ interface ShapeRestorationDependencies {
   getShapeMemoFromGeoJson(geojson: unknown): string;
   getShapeNameLabelManager(): ShapeNameLabelManager | null;
   getShapeRecords(records: unknown): ShapeRecord[];
-  getShapeStyleFromGeoJson(
-    shapeType: string,
-    geojson: unknown,
-  ): ShapeStyle;
+  getShapeStyleFromGeoJson(shapeType: string, geojson: unknown): ShapeStyle;
   labelAppearance?: ShapeLabelAppearance;
   normalizeShapeColor(value: unknown, fallback?: string): string;
   normalizeShapeName(value: unknown): string;
@@ -71,10 +59,7 @@ interface ShapeRestorationDependencies {
 }
 
 interface RestoreSavedShapesOptions {
-  addLayer(
-    layer: RestoredShapeLayer,
-    layerId: string | null | undefined,
-  ): unknown;
+  addLayer(layer: RestoredShapeLayer, layerId: string | null | undefined): unknown;
   applyShapeStyle?: boolean;
   bindPolylineHover?: boolean;
   records: unknown;
@@ -118,19 +103,13 @@ export function createReadOnlyShapeRestorationRuntime({
     else layer.unbindTooltip?.();
   };
 
-  const bindShapeNameLabelTooltip = (
-    layer: RestoredShapeLayer,
-    labelLatLng: unknown,
-  ): void => {
+  const bindShapeNameLabelTooltip = (layer: RestoredShapeLayer, labelLatLng: unknown): void => {
     if (typeof layer?.bindTooltip !== "function") return;
 
     const normalizedName = normalizeShapeName(layer.shapeName);
     if (!normalizedName && labelAppearance === "plain") return;
 
-    const labelColor = normalizeShapeColor(
-      layer.shapeStyle?.color,
-      getDefaultShapeColor(),
-    );
+    const labelColor = normalizeShapeColor(layer.shapeStyle?.color, getDefaultShapeColor());
     const labelContent = normalizedName ? escapeHtml(normalizedName) : "&nbsp;";
     const content =
       labelAppearance === "pill"
@@ -179,15 +158,8 @@ export function createReadOnlyShapeRestorationRuntime({
 
     getShapeRecords(records).forEach((shape) => {
       if (!shape.shape_type) return;
-      const shapeStyle = getShapeStyleFromGeoJson(
-        shape.shape_type,
-        shape.geojson,
-      );
-      const layer = createLeafletShapeLayer(
-        shape.shape_type,
-        shape.geojson,
-        shapeStyle,
-      );
+      const shapeStyle = getShapeStyleFromGeoJson(shape.shape_type, shape.geojson);
+      const layer = createLeafletShapeLayer(shape.shape_type, shape.geojson, shapeStyle);
       if (!layer) return;
 
       layer.shapeId = shape.id;

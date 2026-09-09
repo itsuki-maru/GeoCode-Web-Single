@@ -43,23 +43,14 @@ interface LayeredMarkerDisplay {
 
 interface LeafletNamespace {
   control: {
-    layers(
-      baseLayers: null,
-      overlays: null,
-      options: { collapsed: boolean },
-    ): LayerControl;
+    layers(baseLayers: null, overlays: null, options: { collapsed: boolean }): LayerControl;
   };
-  marker(
-    latLng: [number, number],
-    options: Record<string, unknown>,
-  ): MarkerLayer;
+  marker(latLng: [number, number], options: Record<string, unknown>): MarkerLayer;
 }
 
 interface HydrateMarkerOptions {
   clusterGroups: Record<string, LayerGroup>;
-  createMarkerGroupForLayer: (
-    layerId: string | null | undefined,
-  ) => LayerGroup | null;
+  createMarkerGroupForLayer: (layerId: string | null | undefined) => LayerGroup | null;
   documentRoot?: Document;
   enableMarkerIconFallback?: (
     marker: MarkerLayer,
@@ -83,9 +74,7 @@ interface HydrateMarkerOptions {
   renderIframe: (html: string) => string;
   sanitizeHtml: (html: string) => string;
   setupDetailsLazyImages: (documentRoot: Document) => void;
-  shapeRecords:
-    | ReadOnlyShapeRecord[]
-    | Record<string, ReadOnlyShapeRecord>;
+  shapeRecords: ReadOnlyShapeRecord[] | Record<string, ReadOnlyShapeRecord>;
 }
 
 interface CreateMarkerLayerControlOptions {
@@ -143,17 +132,11 @@ export function hydrateReadOnlyMarkers({
         markerOptionsForLayer(markerData.layer_id, layerRecords),
       )
       .bindPopup(escapeHtml(markerData.marker_name));
-    enableMarkerIconFallback?.(
-      marker,
-      markerData.layer_id,
-      layerRecords,
-    );
+    enableMarkerIconFallback?.(marker, markerData.layer_id, layerRecords);
     marker.on("popupopen", () => setupDetailsLazyImages(documentRoot));
     markerGroup.addLayer(marker);
 
-    const tooltipName = markerData.marker_name
-      ? escapeHtml(markerData.marker_name)
-      : "No Name";
+    const tooltipName = markerData.marker_name ? escapeHtml(markerData.marker_name) : "No Name";
     marker.bindTooltip(`<div class="custom-tooltip">${tooltipName}</div>`, {
       permanent: false,
     });

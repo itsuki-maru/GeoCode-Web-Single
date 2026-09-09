@@ -41,8 +41,7 @@ export function isRunningAsPwa(): boolean {
   };
   if (extendedNavigator.standalone) return true;
   const extendedWindow = window as Window & { opera?: string };
-  const userAgent =
-    navigator.userAgent || extendedNavigator.vendor || extendedWindow.opera || "";
+  const userAgent = navigator.userAgent || extendedNavigator.vendor || extendedWindow.opera || "";
   return /WebView|wv/.test(userAgent);
 }
 

@@ -22,11 +22,7 @@ interface ViewportMap {
   on(eventNames: string, listener: () => void): void;
 }
 
-type LayerCollection =
-  | Iterable<ViewportLayer>
-  | Record<string, ViewportLayer>
-  | null
-  | undefined;
+type LayerCollection = Iterable<ViewportLayer> | Record<string, ViewportLayer> | null | undefined;
 
 type LayerSource = LayerCollection | (() => LayerCollection);
 
@@ -141,12 +137,8 @@ export function createShapeViewportRuntime({
         for (const layer of listLayers(getLayers)) {
           if (!layer || layer.isMeasurementLabel === true) continue;
           const canShowLayer = Boolean(map.hasLayer?.(layer) && shouldBind(layer));
-          const labelLatLng = canShowLayer
-            ? getCachedLabelLatLng(layer)
-            : null;
-          const isVisible = Boolean(
-            canShowLayer && labelLatLng && bounds?.contains?.(labelLatLng),
-          );
+          const labelLatLng = canShowLayer ? getCachedLabelLatLng(layer) : null;
+          const isVisible = Boolean(canShowLayer && labelLatLng && bounds?.contains?.(labelLatLng));
           if (!isVisible) continue;
 
           candidates.push({ layer, labelLatLng });
@@ -158,17 +150,11 @@ export function createShapeViewportRuntime({
       }
 
       const focusedName =
-        typeof focusedLayer?.shapeName === "string"
-          ? focusedLayer.shapeName.trim()
-          : "";
+        typeof focusedLayer?.shapeName === "string" ? focusedLayer.shapeName.trim() : "";
       const canShowFocusedLayer = Boolean(
-        focusedName &&
-          map.hasLayer?.(focusedLayer!) &&
-          shouldBind(focusedLayer!),
+        focusedName && map.hasLayer?.(focusedLayer!) && shouldBind(focusedLayer!),
       );
-      const focusedLabelLatLng = canShowFocusedLayer
-        ? getCachedLabelLatLng(focusedLayer!)
-        : null;
+      const focusedLabelLatLng = canShowFocusedLayer ? getCachedLabelLatLng(focusedLayer!) : null;
       if (
         focusedLabelLatLng &&
         bounds?.contains?.(focusedLabelLatLng) &&
@@ -298,10 +284,7 @@ export function createShapeViewportRuntime({
       listLayers(getLayers).forEach((layer) => removeMarkers?.(layer));
     };
 
-    const intersectsViewport = (
-      layer: ViewportLayer,
-      bounds: ViewportBounds,
-    ): boolean => {
+    const intersectsViewport = (layer: ViewportLayer, bounds: ViewportBounds): boolean => {
       const layerBounds = layer?.getBounds?.();
       if (layerBounds && typeof bounds?.intersects === "function") {
         return bounds.intersects(layerBounds);

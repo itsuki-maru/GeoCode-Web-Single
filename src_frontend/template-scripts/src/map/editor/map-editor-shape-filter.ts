@@ -5,15 +5,12 @@ function isShapeVisibleForExternalFilter(layer) {
   return Boolean(
     layer &&
       !layer.isDeletedShape &&
-      (!externalShapeFilterIdSet ||
-        externalShapeFilterIdSet.has(String(layer.shapeId))),
+      (!externalShapeFilterIdSet || externalShapeFilterIdSet.has(String(layer.shapeId))),
   );
 }
 
 function applyMapObjectFilter(markerIds, shapeIds) {
   applyMarkerFilter(markerIds);
-  externalShapeFilterIdSet = Array.isArray(shapeIds)
-    ? new Set(shapeIds.map(String))
-    : null;
+  externalShapeFilterIdSet = Array.isArray(shapeIds) ? new Set(shapeIds.map(String)) : null;
   renderVisibleShapes();
 }

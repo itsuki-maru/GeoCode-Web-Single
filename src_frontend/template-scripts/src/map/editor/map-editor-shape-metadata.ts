@@ -5,11 +5,7 @@ function getCurrentShapeLayerId() {
   }
 
   const trimmedLayerId = layer.trim();
-  if (
-    !trimmedLayerId ||
-    trimmedLayerId === "null" ||
-    trimmedLayerId === "None"
-  ) {
+  if (!trimmedLayerId || trimmedLayerId === "null" || trimmedLayerId === "None") {
     return null;
   }
 
@@ -19,9 +15,7 @@ function getCurrentShapeLayerId() {
 // 図形編集用に選択可能なレイヤ一覧を取得する
 function getEditableShapeLayers() {
   return Object.values(layersFromAxum || {})
-    .filter(
-      (layerRecord) => layerRecord && layerRecord.id && layerRecord.layer_name,
-    )
+    .filter((layerRecord) => layerRecord && layerRecord.id && layerRecord.layer_name)
     .sort((left, right) => {
       if (left.is_master && !right.is_master) {
         return -1;
@@ -35,12 +29,7 @@ function getEditableShapeLayers() {
 
 // 図形編集ポップアップの既定レイヤを決める
 function getShapeEditorLayerId(targetLayer) {
-  return (
-    targetLayer?.layerId ||
-    getCurrentShapeLayerId() ||
-    getEditableShapeLayers()[0]?.id ||
-    ""
-  );
+  return targetLayer?.layerId || getCurrentShapeLayerId() || getEditableShapeLayers()[0]?.id || "";
 }
 
 // レイヤ選択プルダウンの option 群を組み立てる
@@ -48,9 +37,7 @@ function buildShapeLayerOptions(selectedLayerId) {
   return getEditableShapeLayers()
     .map((layerRecord) => {
       const selected = layerRecord.id === selectedLayerId ? "selected" : "";
-      const layerLabel = escapeHtml(
-        layerRecord.layer_name || "名称未設定レイヤ",
-      );
+      const layerLabel = escapeHtml(layerRecord.layer_name || "名称未設定レイヤ");
       return `<option value="${layerRecord.id}" ${selected}>${layerLabel}</option>`;
     })
     .join("");
@@ -94,10 +81,7 @@ function applyShapeRecord(layer, shapeRecord) {
   layer.shapeType = shapeRecord.shape_type;
   layer.shapeName = normalizeShapeName(shapeRecord.name || "");
   layer.shapeMemo = getShapeMemoFromGeoJson(shapeRecord.geojson);
-  layer.shapeStyle = getShapeStyleFromGeoJson(
-    shapeRecord.shape_type,
-    shapeRecord.geojson,
-  );
+  layer.shapeStyle = getShapeStyleFromGeoJson(shapeRecord.shape_type, shapeRecord.geojson);
   layer.feature = shapeRecord.geojson;
   bindShapeArrowStyle(layer);
   if (shapeRecord.id) {
@@ -110,8 +94,7 @@ function isShapeVisibleForSearch(layer) {
   return Boolean(
     layer &&
       !layer.isDeletedShape &&
-      (!externalShapeFilterIdSet ||
-        externalShapeFilterIdSet.has(String(layer.shapeId))) &&
+      (!externalShapeFilterIdSet || externalShapeFilterIdSet.has(String(layer.shapeId))) &&
       matchesShapeSearch(layer.options?.shapeRecord, localMarkerSearchQuery),
   );
 }
@@ -195,12 +178,8 @@ function openShapeNameEditor(layer) {
   closeShapeNameEditor();
   editingShapeLayer = layer;
   const selectedLayerId = getShapeEditorLayerId(layer);
-  const selectedLineType = getShapeLineTypeFromDashArray(
-    layer.shapeStyle?.dashArray,
-  );
-  const selectedArrowType = normalizeShapeArrowType(
-    layer.shapeStyle?.arrowType,
-  );
+  const selectedLineType = getShapeLineTypeFromDashArray(layer.shapeStyle?.dashArray);
+  const selectedArrowType = normalizeShapeArrowType(layer.shapeStyle?.arrowType);
   const selectedWeight = normalizeShapeWeight(layer.shapeStyle?.weight);
 
   // 図形の編集ポップアップ（カラーピッカーはブラウザ標準のカラーピッカーを呼び出して使用）
@@ -291,12 +270,8 @@ function openShapeNameEditor(layer) {
     const input = document.getElementById("shape-name-editor-input");
     const layerSelect = document.getElementById("shape-layer-editor-select");
     const colorInput = document.getElementById("shape-color-editor-input");
-    const lineTypeSelect = document.getElementById(
-      "shape-line-type-editor-select",
-    );
-    const arrowTypeSelect = document.getElementById(
-      "shape-arrow-type-editor-select",
-    );
+    const lineTypeSelect = document.getElementById("shape-line-type-editor-select");
+    const arrowTypeSelect = document.getElementById("shape-arrow-type-editor-select");
     const weightInput = document.getElementById("shape-weight-editor-input");
     const weightValue = document.getElementById("shape-weight-editor-value");
     const memoInput = document.getElementById("shape-memo-editor-input");
@@ -342,8 +317,7 @@ function openShapeNameEditor(layer) {
 
     const submitEdit = async () => {
       const nextName = normalizeShapeName(input.value);
-      const previousLayerId =
-        layer.layerId || layer.options?.shapeRecord?.layer_id || null;
+      const previousLayerId = layer.layerId || layer.options?.shapeRecord?.layer_id || null;
       const nextLayerId = layerSelect.value || getShapeEditorLayerId(layer);
       const nextShapeStyle = buildShapeStyleFromColor(
         layer.shapeType,
@@ -450,15 +424,8 @@ function getSavedShapes() {
 // サーバーから渡された図形一覧を地図へ復元する
 function restoreSavedShapes() {
   getSavedShapes().forEach((shape) => {
-    const shapeStyle = getShapeStyleFromGeoJson(
-      shape.shape_type,
-      shape.geojson,
-    );
-    const shapeLayer = createLeafletShapeLayer(
-      shape.shape_type,
-      shape.geojson,
-      shapeStyle,
-    );
+    const shapeStyle = getShapeStyleFromGeoJson(shape.shape_type, shape.geojson);
+    const shapeLayer = createLeafletShapeLayer(shape.shape_type, shape.geojson, shapeStyle);
     if (!shapeLayer) {
       return;
     }

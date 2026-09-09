@@ -12,10 +12,7 @@ export function initializeImagePreview(): void {
   }
 
   closeButton.addEventListener("click", () => {
-    window.parent.postMessage(
-      { type: "callParentImagePreview", message: "" },
-      "*",
-    );
+    window.parent.postMessage({ type: "callParentImagePreview", message: "" }, "*");
   });
 
   const panzoom = Panzoom(panzoomElement, {

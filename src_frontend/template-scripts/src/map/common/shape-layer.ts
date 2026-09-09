@@ -12,10 +12,7 @@ interface ShapeLayerMap {
 }
 
 interface ShapeLayerLeaflet {
-  circle(
-    latLng: unknown,
-    options: Record<string, unknown>,
-  ): ShapeLayer;
+  circle(latLng: unknown, options: Record<string, unknown>): ShapeLayer;
   geoJSON(
     geojson: unknown,
     options: { style: () => Record<string, unknown> },
@@ -49,8 +46,7 @@ export function createShapeLayerRuntime({
     if (shapeType === "circle") {
       const coordinates =
         geojson && typeof geojson === "object"
-          ? (geojson as { geometry?: { coordinates?: unknown } }).geometry
-              ?.coordinates
+          ? (geojson as { geometry?: { coordinates?: unknown } }).geometry?.coordinates
           : undefined;
       const radius = getCircleRadiusFromGeoJson(geojson);
       if (!Array.isArray(coordinates) || coordinates.length < 2 || !radius) {
@@ -62,9 +58,7 @@ export function createShapeLayerRuntime({
       });
     }
 
-    const layers = leaflet
-      .geoJSON(geojson, { style: () => shapeStyle })
-      .getLayers();
+    const layers = leaflet.geoJSON(geojson, { style: () => shapeStyle }).getLayers();
     const layer = layers.length === 0 ? null : (layers[0] ?? null);
     if (layer) {
       layer.shapeType = shapeType;

@@ -86,31 +86,22 @@ function getPointToSegmentDistance(point, segmentStart, segmentEnd) {
     0,
     Math.min(
       1,
-      ((point.x - segmentStart.x) * dx + (point.y - segmentStart.y) * dy) /
-        (dx * dx + dy * dy),
+      ((point.x - segmentStart.x) * dx + (point.y - segmentStart.y) * dy) / (dx * dx + dy * dy),
     ),
   );
 
-  return point.distanceTo(
-    L.point(segmentStart.x + ratio * dx, segmentStart.y + ratio * dy),
-  );
+  return point.distanceTo(L.point(segmentStart.x + ratio * dx, segmentStart.y + ratio * dy));
 }
 
 function isPointInProjectedPolygon(point, polygonPoints) {
   let isInside = false;
-  for (
-    let i = 0, j = polygonPoints.length - 1;
-    i < polygonPoints.length;
-    j = i++
-  ) {
+  for (let i = 0, j = polygonPoints.length - 1; i < polygonPoints.length; j = i++) {
     const current = polygonPoints[i];
     const previous = polygonPoints[j];
     const intersects =
       current.y > point.y !== previous.y > point.y &&
       point.x <
-        ((previous.x - current.x) * (point.y - current.y)) /
-          (previous.y - current.y) +
-          current.x;
+        ((previous.x - current.x) * (point.y - current.y)) / (previous.y - current.y) + current.x;
     if (intersects) {
       isInside = !isInside;
     }
@@ -119,9 +110,7 @@ function isPointInProjectedPolygon(point, polygonPoints) {
 }
 
 function getProjectedSegmentDistance(point, latLngs, isClosed = false) {
-  const projectedPoints = latLngs.map((latlng) =>
-    map.latLngToLayerPoint(latlng),
-  );
+  const projectedPoints = latLngs.map((latlng) => map.latLngToLayerPoint(latlng));
   if (projectedPoints.length === 0) {
     return Infinity;
   }
@@ -133,11 +122,7 @@ function getProjectedSegmentDistance(point, latLngs, isClosed = false) {
   for (let i = 1; i < projectedPoints.length; i += 1) {
     minDistance = Math.min(
       minDistance,
-      getPointToSegmentDistance(
-        point,
-        projectedPoints[i - 1],
-        projectedPoints[i],
-      ),
+      getPointToSegmentDistance(point, projectedPoints[i - 1], projectedPoints[i]),
     );
   }
   if (isClosed) {
@@ -178,10 +163,7 @@ function getDeleteHitDistance(layer, latlng) {
     const polygonPoints = polygonLatLngs.map((polygonLatLng) =>
       map.latLngToLayerPoint(polygonLatLng),
     );
-    if (
-      polygonPoints.length >= 3 &&
-      isPointInProjectedPolygon(point, polygonPoints)
-    ) {
+    if (polygonPoints.length >= 3 && isPointInProjectedPolygon(point, polygonPoints)) {
       return 0;
     }
     return getProjectedSegmentDistance(point, polygonLatLngs, true);

@@ -25,11 +25,7 @@ export function createMapStorage(
 ) {
   let isTileServerSelectionPersistenceEnabled = false;
 
-  const readBoolean = (
-    key: string,
-    fallback: boolean,
-    warningMessage: string,
-  ): boolean => {
+  const readBoolean = (key: string, fallback: boolean, warningMessage: string): boolean => {
     try {
       const savedValue = getStorage().getItem(key);
       if (savedValue === "true") return true;
@@ -40,11 +36,7 @@ export function createMapStorage(
     return fallback;
   };
 
-  const writeBoolean = (
-    key: string,
-    value: boolean,
-    warningMessage: string,
-  ): void => {
+  const writeBoolean = (key: string, value: boolean, warningMessage: string): void => {
     try {
       getStorage().setItem(key, value ? "true" : "false");
     } catch (error) {
@@ -66,9 +58,7 @@ export function createMapStorage(
     if (!isTileServerSelectionPersistenceEnabled) return defaultTileServerId;
 
     try {
-      const savedTileServerId = getStorage().getItem(
-        STORAGE_KEYS.selectedTileServer,
-      );
+      const savedTileServerId = getStorage().getItem(STORAGE_KEYS.selectedTileServer);
       if (savedTileServerId && tileServers[savedTileServerId]) {
         return savedTileServerId;
       }
@@ -79,10 +69,7 @@ export function createMapStorage(
   };
 
   const saveSelectedTileServerId = (tileServerId: string): void => {
-    if (
-      !isTileServerSelectionPersistenceEnabled ||
-      !tileServers[tileServerId]
-    ) {
+    if (!isTileServerSelectionPersistenceEnabled || !tileServers[tileServerId]) {
       return;
     }
     try {
@@ -102,11 +89,7 @@ export function createMapStorage(
         "Failed to restore mobile map UI visibility:",
       ),
     getInitialMarkerVisibility: () =>
-      readBoolean(
-        STORAGE_KEYS.markerVisibility,
-        true,
-        "Failed to restore marker visibility:",
-      ),
+      readBoolean(STORAGE_KEYS.markerVisibility, true, "Failed to restore marker visibility:"),
     getInitialShapeLayerVisibility: () =>
       readBoolean(
         STORAGE_KEYS.shapeLayerVisibility,
@@ -133,11 +116,7 @@ export function createMapStorage(
         "Failed to save mobile map UI visibility:",
       ),
     saveMarkerVisibility: (isVisible: boolean) =>
-      writeBoolean(
-        STORAGE_KEYS.markerVisibility,
-        isVisible,
-        "Failed to save marker visibility:",
-      ),
+      writeBoolean(STORAGE_KEYS.markerVisibility, isVisible, "Failed to save marker visibility:"),
     saveSelectedTileServerId,
     saveShapeLayerVisibility: (isVisible: boolean) =>
       writeBoolean(
@@ -185,9 +164,7 @@ export function createTileChangeHandler<TLayer, TBounds>({
   tileServers,
 }: TileChangeDependencies<TLayer, TBounds>) {
   return (event: Event): void => {
-    const selectedTileServerId = (
-      event.target as HTMLInputElement | null
-    )?.value;
+    const selectedTileServerId = (event.target as HTMLInputElement | null)?.value;
     if (!selectedTileServerId) return;
 
     const selectedTile = tileServers[selectedTileServerId];
@@ -195,9 +172,7 @@ export function createTileChangeHandler<TLayer, TBounds>({
 
     const map = getMap();
     map.removeLayer(getTileLayer());
-    map.setMaxBounds(
-      selectedTile.include_foreign_tiles ? null : getBounds(),
-    );
+    map.setMaxBounds(selectedTile.include_foreign_tiles ? null : getBounds());
 
     const tileLayer = createTileLayer(selectedTile);
     setTileLayer(tileLayer);

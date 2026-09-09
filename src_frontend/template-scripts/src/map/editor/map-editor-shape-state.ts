@@ -71,12 +71,10 @@ function setDrawStatus(message, isError = false, forceVisible = false) {
   }
   status.textContent = message;
   status.classList.toggle("is-error", isError);
-  if (!forceVisible) {
+  // モバイルではパネルを閉じている間、現在のモード説明を優先する。
+  if (!forceVisible || editorEntryProfile.isMobile) {
     const panel = document.getElementById("draw-control-panel");
-    status.classList.toggle(
-      "is-hidden",
-      !panel || panel.classList.contains("is-collapsed"),
-    );
+    status.classList.toggle("is-hidden", !panel || panel.classList.contains("is-collapsed"));
     return;
   }
 
@@ -127,12 +125,7 @@ function buildShapeStyleFromColor(
 }
 
 // 図形レイヤから保存用 GeoJSON を組み立てる
-function buildShapeGeoJson(
-  layer,
-  shapeType,
-  shapeStyle,
-  shapeMemo = layer?.shapeMemo,
-) {
+function buildShapeGeoJson(layer, shapeType, shapeStyle, shapeMemo = layer?.shapeMemo) {
   const geojson = layer.toGeoJSON();
   const normalizedStyle = {
     color: normalizeShapeColor(shapeStyle?.color, SHAPE_STYLE.color),
@@ -143,21 +136,14 @@ function buildShapeGeoJson(
   if (shapeType === "polyline") {
     normalizedStyle.arrowType = normalizeShapeArrowType(shapeStyle?.arrowType);
   } else {
-    normalizedStyle.fillColor = normalizeShapeColor(
-      shapeStyle?.color,
-      normalizedStyle.color,
-    );
-    normalizedStyle.fillOpacity = Number.isFinite(
-      Number(shapeStyle?.fillOpacity),
-    )
+    normalizedStyle.fillColor = normalizeShapeColor(shapeStyle?.color, normalizedStyle.color);
+    normalizedStyle.fillOpacity = Number.isFinite(Number(shapeStyle?.fillOpacity))
       ? Number(shapeStyle.fillOpacity)
       : SHAPE_STYLE.fillOpacity;
   }
 
   geojson.properties = {
-    ...(geojson.properties && typeof geojson.properties === "object"
-      ? geojson.properties
-      : {}),
+    ...(geojson.properties && typeof geojson.properties === "object" ? geojson.properties : {}),
     style: normalizedStyle,
     memo: normalizeShapeMemo(shapeMemo),
   };
@@ -275,10 +261,7 @@ function updateShapeDrawingState() {
   const mapContainer = map.getContainer();
   if (mapContainer) {
     mapContainer.classList.toggle("is-shape-drawing", Boolean(activeDrawMode));
-    mapContainer.classList.toggle(
-      "is-shape-delete",
-      activeDrawMode === "delete",
-    );
+    mapContainer.classList.toggle("is-shape-delete", activeDrawMode === "delete");
   }
   setDrawingMapInteractionsDisabled(Boolean(activeDrawMode));
 }
@@ -336,8 +319,7 @@ function getLatLngFromTouchEvent(event) {
   }
 
   const originalEvent = event.originalEvent;
-  const touch =
-    originalEvent?.changedTouches?.[0] || originalEvent?.touches?.[0];
+  const touch = originalEvent?.changedTouches?.[0] || originalEvent?.touches?.[0];
   if (!touch) {
     return null;
   }
@@ -419,10 +401,7 @@ function updateExistingPreviewLayer(mode, latLngs) {
     return;
   }
 
-  if (
-    drawPreviewLayer?.previewMode === mode &&
-    typeof drawPreviewLayer.setLatLngs === "function"
-  ) {
+  if (drawPreviewLayer?.previewMode === mode && typeof drawPreviewLayer.setLatLngs === "function") {
     drawPreviewLayer.setLatLngs(latLngs);
     drawPreviewLayer.setStyle(previewStyle);
     return;
@@ -436,10 +415,7 @@ function updateExistingPreviewLayer(mode, latLngs) {
 function updateDrawButtons(container) {
   const buttons = container.querySelectorAll("[data-draw-mode]");
   buttons.forEach((button) => {
-    button.classList.toggle(
-      "is-active",
-      button.dataset.drawMode === activeDrawMode,
-    );
+    button.classList.toggle("is-active", button.dataset.drawMode === activeDrawMode);
   });
 }
 
@@ -462,14 +438,15 @@ function toggleDrawPanel(forceExpanded = null) {
   }
 
   const shouldExpand =
-    forceExpanded === null
-      ? panel.classList.contains("is-collapsed")
-      : forceExpanded;
+    forceExpanded === null ? panel.classList.contains("is-collapsed") : forceExpanded;
 
   panel.classList.toggle("is-collapsed", !shouldExpand);
   toggleButton.textContent = shouldExpand ? "図形ツールを閉じる" : "図形ツール";
   if (status) {
     status.classList.toggle("is-hidden", !shouldExpand);
+  }
+  if (editorEntryProfile.isMobile) {
+    document.getElementById("mode-description")?.classList.toggle("is-hidden", shouldExpand);
   }
 }
 
@@ -501,10 +478,7 @@ function updateShapesInteractionStyle() {
       return;
     }
     applyShapeStyle(layer, activeDrawMode === "delete");
-    if (
-      activeDrawMode === "delete" &&
-      typeof layer.bringToFront === "function"
-    ) {
+    if (activeDrawMode === "delete" && typeof layer.bringToFront === "function") {
       layer.bringToFront();
     }
   });

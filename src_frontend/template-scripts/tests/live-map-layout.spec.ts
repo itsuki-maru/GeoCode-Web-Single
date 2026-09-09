@@ -45,7 +45,7 @@ describe("live map layout", () => {
     expect(script).toContain("Object.entries(tileServers)");
     expect(script).toContain("selectTileServer");
     expect(script).toContain("tileServer.include_foreign_tiles");
-    expect(script).toContain("L.control.layers(null, null");
+    expect(script).toMatch(/L\.control\s*\.layers\(null,\s*null/);
     expect(script).toContain("collapsed: false");
     expect(script).toContain("createCollapsibleLayerControl");
     expect(script).toContain("locationLayersControl.addOverlay");
@@ -66,10 +66,10 @@ describe("live map layout", () => {
     expect(script).toContain("createCurrentLocationControl");
     expect(script).toContain("createNameVisibilityControl");
     expect(script).toContain("setTooltipContent");
-    expect(template).toContain(".custom-control-button");
+    expect(template).toContain('href="/assets/map-controls.css"');
     expect(template).toContain(".custom-tooltip");
     expect(template).not.toContain(".custom-control-button.is-active");
-    expect(template).toMatch(/\.tile-option \+ \.tile-option\s*\{[^}]*margin-top:\s*6px/);
+    expect(script).toContain("label.htmlFor = radio.id");
   });
 
   it("uses a full-screen map and horizontally swipeable target cards on mobile", () => {

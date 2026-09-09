@@ -12,19 +12,11 @@ interface LeafletNamespace {
   DomEvent: {
     disableClickPropagation(element: HTMLElement): void;
     disableScrollPropagation?: (element: HTMLElement) => void;
-    on(
-      element: HTMLElement,
-      eventName: string,
-      handler: (event: Event) => void,
-    ): void;
+    on(element: HTMLElement, eventName: string, handler: (event: Event) => void): void;
     stop(event: Event): void;
   };
   DomUtil: {
-    create(
-      tagName: string,
-      className: string,
-      container?: HTMLElement,
-    ): HTMLElement;
+    create(tagName: string, className: string, container?: HTMLElement): HTMLElement;
   };
 }
 
@@ -58,9 +50,7 @@ export function createMapUiVisibilityRuntime({
     updateToggleButton();
   };
 
-  const registerHideableContainer = (
-    container: HTMLElement | null | undefined,
-  ): void => {
+  const registerHideableContainer = (container: HTMLElement | null | undefined): void => {
     if (!container) return;
 
     container.classList.add("temporary-map-hideable-ui");

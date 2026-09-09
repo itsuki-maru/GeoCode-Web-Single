@@ -26,8 +26,7 @@ function applyMarkerUpdateFromParent(payload) {
   markersFromAxum[markerId] = nextRecord;
   marker.setLatLng([nextRecord.latitude, nextRecord.longitude]);
 
-  const wasPopupOpen =
-    typeof marker.isPopupOpen === "function" && marker.isPopupOpen();
+  const wasPopupOpen = typeof marker.isPopupOpen === "function" && marker.isPopupOpen();
   marker.unbindTooltip();
   marker.unbindPopup();
   marker.bindTooltip(
@@ -38,15 +37,10 @@ function applyMarkerUpdateFromParent(payload) {
   if (nextRecord.detail) {
     const mdText = `# ${nextRecord.marker_name}\n\n${nextRecord.detail}`;
     const cleanHtml = filterXSS(marked.parse(mdText), xssOptions);
-    marker.bindPopup(
-      `<div class="md-detail-contents">${renderIframe(cleanHtml)}</div>`,
-    );
+    marker.bindPopup(`<div class="md-detail-contents">${renderIframe(cleanHtml)}</div>`);
   }
 
-  const markerOptions = markerOptionsForLayer(
-    nextRecord.layer_id,
-    layersFromAxum,
-  );
+  const markerOptions = markerOptionsForLayer(nextRecord.layer_id, layersFromAxum);
   marker.setIcon(markerOptions.icon || new L.Icon.Default());
   const markerElement = marker.getElement();
   if (markerElement) {
@@ -82,18 +76,12 @@ function applyShapeUpdateFromParent(payload) {
   const targetLayer = Array.from(searchableShapeLayers).find(
     (shapeLayer) => String(shapeLayer?.shapeId || "") === shapeId,
   );
-  if (
-    !targetLayer ||
-    !payload?.geojson ||
-    targetLayer.shapeType !== payload.shapeType
-  ) {
+  if (!targetLayer || !payload?.geojson || targetLayer.shapeType !== payload.shapeType) {
     return false;
   }
 
   const currentGeometry = targetLayer.options?.shapeRecord?.geojson?.geometry;
-  if (
-    JSON.stringify(currentGeometry) !== JSON.stringify(payload.geojson.geometry)
-  ) {
+  if (JSON.stringify(currentGeometry) !== JSON.stringify(payload.geojson.geometry)) {
     return false;
   }
 
@@ -128,10 +116,7 @@ window.addEventListener("message", function (event) {
 
   const isSameOrigin = event.origin === window.location.origin;
 
-  if (
-    event.source === window.parent &&
-    (allowOrigins.includes(event.origin) || isSameOrigin)
-  ) {
+  if (event.source === window.parent && (allowOrigins.includes(event.origin) || isSameOrigin)) {
     const messageData = event.data;
     if (!messageData || typeof messageData !== "object") return;
     if (messageData["type"] === "focus") {
@@ -188,10 +173,7 @@ window.addEventListener("message", function (event) {
 
 // 親ウィンドウへログイン画面遷移要求を送る
 function callParentLogin() {
-  window.parent.postMessage(
-    { type: "callParentLoginRedirect", message: "Token expired" },
-    "*",
-  );
+  window.parent.postMessage({ type: "callParentLoginRedirect", message: "Token expired" }, "*");
 }
 
 // 親ウィンドウへ再読み込み要求を送る
@@ -210,9 +192,7 @@ function callParentReload(layerId = null) {
 function callParentImagePreview(url) {
   window.parent.postMessage(
     {
-      type: editorEntryProfile.isMobile
-        ? "callParentImagePreview"
-        : "callParentFunction",
+      type: editorEntryProfile.isMobile ? "callParentImagePreview" : "callParentFunction",
       message: url,
     },
     "*",

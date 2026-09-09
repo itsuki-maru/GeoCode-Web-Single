@@ -32,6 +32,7 @@
         <script src="/assets/xss.min.js"></script>
         <link rel="stylesheet" href="/assets/leaflet.css" />
         <link rel="stylesheet" href="/assets/map-compat.css" />
+        <link rel="stylesheet" href="/assets/map-controls.css" />
         <!-- Leaflet.markercluster -->
         <script src="/assets/leaflet.markercluster.js"></script>
         <link rel="stylesheet" href="/assets/MarkerCluster.css" />
@@ -164,59 +165,6 @@
                 margin-top: 2px;
             }
 
-            /* ラジオボタンの全体 */
-            .radio-zone {
-                background-color: white; /* 背景色をWhiteにする */
-                padding: 5px 5px 5px 5px;
-            }
-            /* ラジオボタンのスタイル変更 */
-            .custom-radio {
-                width: 20px; /* 幅を大きくする */
-                height: 20px; /* 高さを大きくする */
-                background-color: white; /* 背景色をWhiteにする */
-            }
-            /* ラジオボタンのラベルのスタイル変更 */
-            .custom-radio-label {
-                font-size: 14px; /* テキストサイズを大きくする */
-                background-color: white; /* 背景色をWhiteにする */
-                padding-left: 5px; /* パディングを追加して余白を作る */
-                line-height: 20px; /* ラジオボタンの高さと同じにする */
-                margin-top: 10px;
-            }
-            /* ラジオボタンがチェックされたときのスタイル変更 */
-            .custom-radio:checked + .custom-radio-label {
-                font-weight: bold; /* チェックされたときのテキストを太字にする */
-            }
-            /* ラジオボタンとラベルの中央揃え */
-            .custom-radio,
-            .custom-radio-label {
-                vertical-align: middle;
-            }
-
-            /* ラジオボタンのスタイル変更 */
-            .tile-radio {
-                width: 20px; /* 幅を大きくする */
-                height: 20px; /* 高さを大きくする */
-                background-color: white; /* 背景色をWhiteにする */
-            }
-            /* ラジオボタンのラベルのスタイル変更 */
-            .tile-radio-label {
-                font-size: 14px; /* テキストサイズを大きくする */
-                background-color: white; /* 背景色をWhiteにする */
-                padding-left: 5px; /* パディングを追加して余白を作る */
-                line-height: 20px; /* ラジオボタンの高さと同じにする */
-                margin-top: 10px;
-            }
-            /* ラジオボタンがチェックされたときのスタイル変更 */
-            .tile-radio:checked + .tile-radio-label {
-                font-weight: bold; /* チェックされたときのテキストを太字にする */
-            }
-            /* ラジオボタンとラベルの中央揃え */
-            .tile-radio,
-            .tile-radio-label {
-                vertical-align: middle;
-            }
-
             /* モード説明部分のスタイル */
             .mode-desc-container {
                 z-index: 1000;
@@ -228,33 +176,9 @@
                 border-radius: 5px;
             }
 
-            /* ツールチップの表示・非表示切替ボタン*/
-            .custom-control-button {
-                background-color: white;
-                border: none;
-                cursor: pointer;
-                padding: 5px 10px;
-                font-size: 14px;
-                font-weight: bold;
-                border-radius: 4px;
-            }
-
-            .custom-control-button:hover {
-                background-color: rgb(238, 238, 238);
-            }
-
             /* 地図だけを見せる時に対象 UI を隠す */
             .temporary-map-hideable-ui.is-hidden {
                 display: none;
-            }
-
-            /* 画面左下の現在位置ボタンと UI 表示切替ボタン */
-            .temporary-user-location-control .custom-control-button,
-            .map-ui-visibility-toggle-control .custom-control-button {
-                box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
-                font-size: 18px;
-                min-width: 116px;
-                padding: 8px 14px;
             }
 
             .leaflet-bottom.leaflet-left
@@ -262,47 +186,10 @@
                 margin-bottom: 6px;
             }
 
-            .measurement-control {
-                display: flex;
-                flex-direction: column;
-            }
-
-            .measurement-control .custom-control-button {
-                border-radius: 0;
-                text-align: left;
-            }
-
-            .measurement-control .custom-control-button:first-child {
-                border-radius: 4px 4px 0 0;
-            }
-
-            .measurement-control .custom-control-button:last-child {
-                border-radius: 0 0 4px 4px;
-                border-top: 1px solid #d0d7de;
-            }
-
-            .measurement-control .custom-control-button.is-active {
-                background-color: #e7f5ff;
-                color: #075985;
-            }
-
-            .measurement-control .custom-control-button.is-hidden {
-                display: none;
-            }
-
             .leaflet-control-layers-overlays {
-                font-size: 14px;
                 max-height: calc(100vh - 220px);
                 overflow-y: auto;
                 padding-bottom: 0;
-            }
-
-            .leaflet-control-layers-overlays label {
-                margin-bottom: 8px;
-            }
-
-            .leaflet-control-layers-overlays label:last-child {
-                margin-bottom: 0;
             }
 
             .temporary-layer-control {
@@ -315,21 +202,8 @@
             }
 
             .temporary-layer-control-toggle {
-                background-color: white;
-                border: 1px solid #b7c3d0;
-                border-radius: 4px;
-                color: #0f172a;
-                cursor: pointer;
                 display: block;
-                font-size: 12px;
-                font-weight: bold;
-                line-height: 1.2;
                 margin: 4px 6px 2px auto;
-                padding: 4px 8px;
-            }
-
-            .temporary-layer-control-toggle:hover {
-                background-color: rgb(238, 238, 238);
             }
 
             .search-zone {
@@ -402,7 +276,7 @@
         </style>
         <title>GeoCode-Web</title>
     </head>
-    <body>
+    <body class="temporary-map-mobile-controls">
         <div class="folium-map" id="map"></div>
     </body>
     <script>

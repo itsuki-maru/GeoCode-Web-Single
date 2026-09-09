@@ -34,11 +34,7 @@ export function resizeImage(file: File): Promise<Blob> {
           if (!blob) {
             reject(new Error("画像を変換できませんでした。"));
           } else if (blob.size > MAX_OUTPUT_SIZE) {
-            reject(
-              new Error(
-                "縮小後の画像が1.5MBを超えています。別の画像を選択してください。",
-              ),
-            );
+            reject(new Error("縮小後の画像が1.5MBを超えています。別の画像を選択してください。"));
           } else {
             resolve(blob);
           }

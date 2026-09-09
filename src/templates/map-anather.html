@@ -32,6 +32,7 @@
         <script src="/assets/xss.min.js"></script>
         <link rel="stylesheet" href="/assets/leaflet.css" />
         <link rel="stylesheet" href="/assets/map-compat.css" />
+        <link rel="stylesheet" href="/assets/map-controls.css" />
         <!-- Leaflet.markercluster -->
         <script src="/assets/leaflet.markercluster.js"></script>
         <link rel="stylesheet" href="/assets/MarkerCluster.css" />
@@ -76,64 +77,11 @@
                 height: auto;
             }
 
-            /* ラジオボタンの全体 */
-            .radio-zone {
-                background-color: white; /* 背景色をWhiteにする */
-                padding: 5px 5px 5px 5px;
-            }
-            /* ラジオボタンのスタイル変更 */
-            .custom-radio {
-                width: 20px; /* 幅を大きくする */
-                height: 20px; /* 高さを大きくする */
-                background-color: white; /* 背景色をWhiteにする */
-            }
-            /* ラジオボタンのラベルのスタイル変更 */
-            .custom-radio-label {
-                font-size: 14px; /* テキストサイズを大きくする */
-                background-color: white; /* 背景色をWhiteにする */
-                padding-left: 5px; /* パディングを追加して余白を作る */
-                line-height: 20px; /* ラジオボタンの高さと同じにする */
-                margin-top: 10px;
-            }
-            /* ラジオボタンがチェックされたときのスタイル変更 */
-            .custom-radio:checked + .custom-radio-label {
-                font-weight: bold; /* チェックされたときのテキストを太字にする */
-            }
-            /* ラジオボタンとラベルの中央揃え */
-            .custom-radio,
-            .custom-radio-label {
-                vertical-align: middle;
-            }
-
             /* カスタムツールチップ */
             .custom-tooltip {
                 font-size: 14px;
                 color: black;
                 background-color: white;
-            }
-
-            /* ラジオボタンのスタイル変更 */
-            .tile-radio {
-                width: 20px; /* 幅を大きくする */
-                height: 20px; /* 高さを大きくする */
-                background-color: white; /* 背景色をWhiteにする */
-            }
-            /* ラジオボタンのラベルのスタイル変更 */
-            .tile-radio-label {
-                font-size: 14px; /* テキストサイズを大きくする */
-                background-color: white; /* 背景色をWhiteにする */
-                padding-left: 5px; /* パディングを追加して余白を作る */
-                line-height: 20px; /* ラジオボタンの高さと同じにする */
-                margin-top: 10px;
-            }
-            /* ラジオボタンがチェックされたときのスタイル変更 */
-            .tile-radio:checked + .tile-radio-label {
-                font-weight: bold; /* チェックされたときのテキストを太字にする */
-            }
-            /* ラジオボタンとラベルの中央揃え */
-            .tile-radio,
-            .tile-radio-label {
-                vertical-align: middle;
             }
 
             /* モード説明部分のスタイル */
@@ -145,53 +93,6 @@
                 background-color: white;
                 padding: 5px;
                 border-radius: 5px;
-            }
-
-            /* ツールチップの表示・非表示切替ボタン*/
-            .custom-control-button {
-                background-color: white;
-                border: none;
-                cursor: pointer;
-                padding: 5px 10px;
-                font-size: 14px;
-                font-weight: bold;
-                border-radius: 4px;
-            }
-
-            .custom-control-button:hover {
-                background-color: rgb(238, 238, 238);
-            }
-
-            .measurement-control {
-                display: flex;
-                flex-direction: column;
-            }
-
-            .measurement-control .custom-control-button {
-                border-radius: 0;
-                text-align: left;
-            }
-
-            .measurement-control .custom-control-button:first-child {
-                border-radius: 4px 4px 0 0;
-            }
-
-            .measurement-control .custom-control-button:last-child {
-                border-radius: 0 0 4px 4px;
-                border-top: 1px solid #d0d7de;
-            }
-
-            .measurement-control .custom-control-button.is-active {
-                background-color: #e7f5ff;
-                color: #075985;
-            }
-
-            .measurement-control .custom-control-button.is-hidden {
-                display: none;
-            }
-
-            .leaflet-control-layers-overlays {
-                font-size: 14px;
             }
 
             .leaflet-overlay-pane .leaflet-interactive {

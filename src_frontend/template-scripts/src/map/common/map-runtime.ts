@@ -97,18 +97,12 @@ export function createReadOnlyMapRuntime({
     map.setMaxBounds(bounds);
   }
 
-  leaflet.control
-    .attribution({ prefix: false })
-    .addAttribution(LEAFLET_ATTRIBUTION)
-    .addTo(map);
+  leaflet.control.attribution({ prefix: false }).addAttribution(LEAFLET_ATTRIBUTION).addTo(map);
 
   const TileControl = leaflet.Control.extend({
     options: { position: "topright" },
     onAdd() {
-      const container = leaflet.DomUtil.create(
-        "div",
-        "leaflet-bar leaflet-control",
-      );
+      const container = leaflet.DomUtil.create("div", "leaflet-bar leaflet-control");
       let radioHtml = '<div class="radio-zone"><form>';
 
       for (const [tileServerId, tileServer] of Object.entries(tileServers)) {

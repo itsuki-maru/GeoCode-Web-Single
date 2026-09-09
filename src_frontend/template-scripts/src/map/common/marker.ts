@@ -37,39 +37,22 @@ interface PopupMarker {
 
 interface LeafletNamespace {
   Control: {
-    extend(definition: {
-      options: { position: string };
-      onAdd(): HTMLElement;
-    }): new () => object;
+    extend(definition: { options: { position: string }; onAdd(): HTMLElement }): new () => object;
   };
   DomEvent: {
     disableClickPropagation(element: HTMLElement): void;
-    on(
-      element: HTMLElement,
-      eventName: string,
-      listener: (event: Event) => void,
-    ): void;
+    on(element: HTMLElement, eventName: string, listener: (event: Event) => void): void;
     stop(event: Event): void;
   };
   DomUtil: {
-    create(
-      tagName: string,
-      className: string,
-      container?: HTMLElement,
-    ): HTMLElement;
+    create(tagName: string, className: string, container?: HTMLElement): HTMLElement;
   };
   Icon: {
     Default: new () => object;
   };
   LatLng: new (latitude: number, longitude: number) => object;
-  circle(
-    latLng: object,
-    options: Record<string, unknown>,
-  ): AccuracyCircle;
-  circleMarker(
-    latLng: object,
-    options: Record<string, unknown>,
-  ): LocationMarker;
+  circle(latLng: object, options: Record<string, unknown>): AccuracyCircle;
+  circleMarker(latLng: object, options: Record<string, unknown>): LocationMarker;
   icon(options: Record<string, unknown>): object;
   layerGroup(): LocationLayer;
 }
@@ -122,9 +105,7 @@ export function initializeUserLocation(
     position?: string;
   } = {},
 ): LocationLayer | null {
-  const geolocation = (
-    navigator as Navigator & { geolocation?: Geolocation }
-  ).geolocation;
+  const geolocation = (navigator as Navigator & { geolocation?: Geolocation }).geolocation;
   if (!geolocation || map._userLocationInitialized) return null;
 
   map._userLocationInitialized = true;
@@ -229,15 +210,11 @@ export function initializeUserLocation(
 
   const startUserLocationWatch = (): void => {
     if (userLocationWatchId !== null) return;
-    userLocationWatchId = geolocation.watchPosition(
-      renderUserLocation,
-      handleUserLocationError,
-      {
-        enableHighAccuracy: true,
-        maximumAge: 5000,
-        timeout: 10000,
-      },
-    );
+    userLocationWatchId = geolocation.watchPosition(renderUserLocation, handleUserLocationError, {
+      enableHighAccuracy: true,
+      maximumAge: 5000,
+      timeout: 10000,
+    });
   };
 
   const geoFindMe = (): void => {
@@ -255,18 +232,11 @@ export function initializeUserLocation(
   const UserLocationControl = leaflet.Control.extend({
     options: { position: options.position ?? "topright" },
     onAdd() {
-      const container = leaflet.DomUtil.create(
-        "div",
-        "leaflet-bar leaflet-control",
-      );
+      const container = leaflet.DomUtil.create("div", "leaflet-bar leaflet-control");
       if (options.controlClassName) {
         container.classList.add(options.controlClassName);
       }
-      const button = leaflet.DomUtil.create(
-        "button",
-        "custom-control-button",
-        container,
-      );
+      const button = leaflet.DomUtil.create("button", "custom-control-button", container);
       button.textContent = "現在位置";
       leaflet.DomEvent.on(button, "click", (event) => {
         leaflet.DomEvent.stop(event);
@@ -293,10 +263,7 @@ export function markerOptionsForLayer(
   layerRecords: Record<string, MarkerLayerRecord> | null | undefined,
   extraOptions: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  const filename =
-    layerRecords && layerId
-      ? layerRecords[layerId]?.marker_icon_filename
-      : null;
+  const filename = layerRecords && layerId ? layerRecords[layerId]?.marker_icon_filename : null;
   if (!filename) return { ...extraOptions };
 
   return {
@@ -316,18 +283,14 @@ export function enableMarkerIconFallback<TMarker extends FallbackMarker>(
   layerId: string | null | undefined,
   layerRecords: Record<string, MarkerLayerRecord> | null | undefined,
 ): TMarker {
-  const layerRecord =
-    layerRecords && layerId ? layerRecords[layerId] : undefined;
+  const layerRecord = layerRecords && layerId ? layerRecords[layerId] : undefined;
   if (!layerRecord?.marker_icon_filename) return marker;
 
   let fallbackApplied = false;
   const bindFallback = (): void => {
     if (fallbackApplied) return;
     const iconElement = marker.getElement();
-    if (
-      !iconElement ||
-      iconElement.dataset.markerIconFallbackBound === "true"
-    ) {
+    if (!iconElement || iconElement.dataset.markerIconFallbackBound === "true") {
       return;
     }
 

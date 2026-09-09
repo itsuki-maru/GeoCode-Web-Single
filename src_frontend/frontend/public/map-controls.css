@@ -1,0 +1,158 @@
+/* Shared Leaflet controls. Keep normalization scoped to controls so standalone
+ * pages do not need map-compat.css's document-wide reset.
+ * 10px matches the existing maps' 1rem at a 62.5% root font size.
+ */
+.leaflet-control {
+    color: #333;
+    font-family: "Helvetica Neue", Arial, Helvetica, sans-serif;
+    font-size: 10px;
+    line-height: 1.5;
+}
+
+:where(.leaflet-control, .leaflet-control *) {
+    box-sizing: border-box;
+}
+
+:where(.leaflet-control) button,
+:where(.leaflet-control) input,
+:where(.leaflet-control) select,
+:where(.leaflet-control) textarea {
+    margin: 0;
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+}
+
+:where(.leaflet-control) label {
+    display: inline-block;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+:where(.leaflet-control) button {
+    border-radius: 0;
+}
+
+:where(.leaflet-control) input[type="checkbox"],
+:where(.leaflet-control) input[type="radio"] {
+    box-sizing: border-box;
+    margin: 4px 0 0;
+    line-height: normal;
+}
+
+:where(.leaflet-control) .radio-zone {
+    background-color: white;
+    padding: 5px 5px 5px 5px;
+}
+
+:where(.leaflet-control) .custom-radio {
+    width: 20px;
+    height: 20px;
+    background-color: white;
+}
+
+:where(.leaflet-control) .custom-radio-label {
+    font-size: 14px;
+    background-color: white;
+    padding-left: 5px;
+    line-height: 20px;
+    margin-top: 10px;
+}
+
+:where(.leaflet-control) .custom-radio:checked + .custom-radio-label {
+    font-weight: bold;
+}
+
+:where(.leaflet-control) .custom-radio,
+:where(.leaflet-control) .custom-radio-label {
+    vertical-align: middle;
+}
+
+:where(.leaflet-control) .tile-radio {
+    width: 20px;
+    height: 20px;
+    background-color: white;
+}
+
+:where(.leaflet-control) .tile-radio-label {
+    font-size: 14px;
+    background-color: white;
+    padding-left: 5px;
+    line-height: 20px;
+    margin-top: 10px;
+}
+
+:where(.leaflet-control) .tile-radio:checked + .tile-radio-label {
+    font-weight: bold;
+}
+
+:where(.leaflet-control) .tile-radio,
+:where(.leaflet-control) .tile-radio-label {
+    vertical-align: middle;
+}
+
+:where(.leaflet-control) .custom-control-button {
+    background-color: white;
+    border: none;
+    cursor: pointer;
+    padding: 5px 10px;
+    font-size: 14px;
+    font-weight: bold;
+    border-radius: 4px;
+}
+
+:where(.leaflet-control) .custom-control-button:hover {
+    background-color: rgb(238, 238, 238);
+}
+
+:where(.leaflet-control).measurement-control {
+    display: flex;
+    flex-direction: column;
+}
+
+:where(.leaflet-control).measurement-control .custom-control-button {
+    border-radius: 0;
+    text-align: left;
+}
+
+:where(.leaflet-control).measurement-control .custom-control-button:first-child {
+    border-radius: 4px 4px 0 0;
+}
+
+:where(.leaflet-control).measurement-control .custom-control-button:last-child {
+    border-radius: 0 0 4px 4px;
+    border-top: 1px solid #d0d7de;
+}
+
+:where(.leaflet-control).measurement-control .custom-control-button.is-active {
+    background-color: #e7f5ff;
+    color: #075985;
+}
+
+:where(.leaflet-control).measurement-control .custom-control-button.is-hidden {
+    display: none;
+}
+
+:where(.leaflet-control) .leaflet-control-layers-overlays {
+    font-size: 14px;
+}
+
+:where(.leaflet-control) .custom-control-button:disabled {
+    cursor: wait;
+    opacity: 0.65;
+}
+
+/* Mobile control variants retain the existing larger touch targets. */
+.map-mobile-controls .map-ui-visibility-toggle-control .custom-control-button,
+.temporary-map-mobile-controls .temporary-user-location-control .custom-control-button,
+.temporary-map-mobile-controls .map-ui-visibility-toggle-control .custom-control-button {
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+}
+
+.temporary-map-mobile-controls .temporary-user-location-control .custom-control-button,
+.temporary-map-mobile-controls .map-ui-visibility-toggle-control .custom-control-button {
+    font-size: 18px;
+    min-width: 116px;
+    padding: 8px 14px;
+}

@@ -41,19 +41,12 @@ export const SHAPE_ARROW_TYPE_OPTIONS = [
   { value: "end", label: "終点" },
   { value: "both", label: "両端" },
 ] as const;
-const ARROW_TYPES = new Set<ShapeArrowType>(
-  SHAPE_ARROW_TYPE_OPTIONS.map(({ value }) => value),
-);
+const ARROW_TYPES = new Set<ShapeArrowType>(SHAPE_ARROW_TYPE_OPTIONS.map(({ value }) => value));
 export const SHAPE_WEIGHT_MIN = 1;
 export const SHAPE_WEIGHT_MAX = 10;
 
-export function createShapeStyleCore(
-  getDefaultStyle: () => DefaultShapeStyle,
-) {
-  const normalizeShapeColor = (
-    color: unknown,
-    fallback = getDefaultStyle().color,
-  ): string => {
+export function createShapeStyleCore(getDefaultStyle: () => DefaultShapeStyle) {
+  const normalizeShapeColor = (color: unknown, fallback = getDefaultStyle().color): string => {
     if (typeof color !== "string") return fallback;
     const trimmedColor = color.trim();
     if (/^#[0-9a-fA-F]{6}$/.test(trimmedColor)) {
@@ -89,9 +82,7 @@ export function createShapeStyleCore(
     lineType: unknown,
     fallback: ShapeLineType = "solid",
   ): ShapeLineType => {
-    const normalizedFallback = SHAPE_LINE_TYPE_OPTIONS.some(
-      (option) => option.value === fallback,
-    )
+    const normalizedFallback = SHAPE_LINE_TYPE_OPTIONS.some((option) => option.value === fallback)
       ? fallback
       : "solid";
     if (typeof lineType !== "string") return normalizedFallback;
@@ -113,32 +104,28 @@ export function createShapeStyleCore(
 
   const normalizeDashArrayValue = (dashArray: unknown): string =>
     typeof dashArray === "string"
-      ? dashArray.trim().split(/[\s,]+/).filter(Boolean).join(",")
+      ? dashArray
+          .trim()
+          .split(/[\s,]+/)
+          .filter(Boolean)
+          .join(",")
       : "";
 
-  const getShapeLineTypeFromDashArray = (
-    dashArray: unknown,
-  ): ShapeLineType => {
+  const getShapeLineTypeFromDashArray = (dashArray: unknown): ShapeLineType => {
     const normalized = normalizeDashArrayValue(dashArray);
     return (
       SHAPE_LINE_TYPE_OPTIONS.find(
-        (option) =>
-          normalizeDashArrayValue(option.dashArray) === normalized,
+        (option) => normalizeDashArrayValue(option.dashArray) === normalized,
       )?.value ?? "solid"
     );
   };
 
   const getShapeDashArray = (lineType: unknown): string | null => {
     const normalized = normalizeShapeLineType(lineType);
-    return (
-      SHAPE_LINE_TYPE_OPTIONS.find((option) => option.value === normalized)?.dashArray ??
-      null
-    );
+    return SHAPE_LINE_TYPE_OPTIONS.find((option) => option.value === normalized)?.dashArray ?? null;
   };
 
-  const normalizeShapeDashArray = (
-    dashArray: unknown,
-  ): string | null =>
+  const normalizeShapeDashArray = (dashArray: unknown): string | null =>
     getShapeDashArray(getShapeLineTypeFromDashArray(dashArray));
 
   const getDefaultShapeStyle = (shapeType: string): ShapeStyle => {
@@ -161,19 +148,13 @@ export function createShapeStyleCore(
     };
   };
 
-  const getShapeStyleFromGeoJson = (
-    shapeType: string,
-    geojson: unknown,
-  ): ShapeStyle => {
+  const getShapeStyleFromGeoJson = (shapeType: string, geojson: unknown): ShapeStyle => {
     const defaultStyle = getDefaultShapeStyle(shapeType);
     const styleRecord = getStyleRecord(geojson);
     if (!styleRecord) return defaultStyle;
 
     const color = normalizeShapeColor(styleRecord.color, defaultStyle.color);
-    const weight = normalizeShapeWeight(
-      styleRecord.weight,
-      defaultStyle.weight,
-    );
+    const weight = normalizeShapeWeight(styleRecord.weight, defaultStyle.weight);
     const dashArray = normalizeShapeDashArray(styleRecord.dashArray);
     if (shapeType === "polyline") {
       return {
@@ -186,16 +167,13 @@ export function createShapeStyleCore(
     }
 
     const fillOpacity = Number(styleRecord.fillOpacity);
-    const fallbackOpacity =
-      "fillOpacity" in defaultStyle ? defaultStyle.fillOpacity : 0.2;
+    const fallbackOpacity = "fillOpacity" in defaultStyle ? defaultStyle.fillOpacity : 0.2;
     return {
       color,
       weight,
       dashArray,
       fillColor: color,
-      fillOpacity: Number.isFinite(fillOpacity)
-        ? fillOpacity
-        : fallbackOpacity,
+      fillOpacity: Number.isFinite(fillOpacity) ? fillOpacity : fallbackOpacity,
     };
   };
 

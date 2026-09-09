@@ -1,8 +1,4 @@
-export type MapControlPosition =
-  | "bottomleft"
-  | "bottomright"
-  | "topleft"
-  | "topright";
+export type MapControlPosition = "bottomleft" | "bottomright" | "topleft" | "topright";
 
 export interface LeafletActionControl {
   getContainer?: () => HTMLElement | null;
@@ -18,19 +14,11 @@ interface LeafletNamespace {
   };
   DomEvent: {
     disableClickPropagation(element: HTMLElement): void;
-    on(
-      element: HTMLElement,
-      eventName: string,
-      handler: (event: Event) => void,
-    ): void;
+    on(element: HTMLElement, eventName: string, handler: (event: Event) => void): void;
     stop(event: Event): void;
   };
   DomUtil: {
-    create(
-      tagName: string,
-      className: string,
-      container?: HTMLElement,
-    ): HTMLElement;
+    create(tagName: string, className: string, container?: HTMLElement): HTMLElement;
   };
 }
 
@@ -56,15 +44,8 @@ export function createTooltipVisibilityControl({
   const TooltipVisibilityControl = leaflet.Control.extend({
     options: { position },
     onAdd() {
-      const container = leaflet.DomUtil.create(
-        "div",
-        "leaflet-bar leaflet-control",
-      );
-      const button = leaflet.DomUtil.create(
-        "button",
-        "custom-control-button",
-        container,
-      );
+      const container = leaflet.DomUtil.create("div", "leaflet-bar leaflet-control");
+      const button = leaflet.DomUtil.create("button", "custom-control-button", container);
       button.innerHTML = "マーカー名表示";
 
       leaflet.DomEvent.on(button, "click", (event) => {
@@ -93,11 +74,7 @@ export function createMeasurementVisibilityControl({
         "div",
         "leaflet-bar leaflet-control measurement-control",
       );
-      const button = leaflet.DomUtil.create(
-        "button",
-        "custom-control-button",
-        container,
-      );
+      const button = leaflet.DomUtil.create("button", "custom-control-button", container);
       button.innerHTML = "図形の計測";
       const mergeButton = leaflet.DomUtil.create(
         "button",

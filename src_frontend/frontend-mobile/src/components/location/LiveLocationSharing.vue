@@ -157,7 +157,7 @@ defineExpose({ receivePosition, receiveError });
   bottom: 7%;
   position: fixed;
   right: 2%;
-  z-index: 3;
+  z-index: 2;
 }
 button {
   background: #fff;
