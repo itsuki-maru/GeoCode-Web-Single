@@ -1,7 +1,14 @@
 // @ts-nocheck -- Leaflet plugins expose incompatible structural types at this integration boundary.
 import { readMapBootstrap } from "./bootstrap";
 import { createLayerBulkToggleControl, extractYouTubeId } from "./common/base";
-import { createNestedTokenizer, isLocalhost, isPDF, isValidCoordinate, renderIframe, setupDetailsLazyImages } from "./common/content";
+import {
+  createNestedTokenizer,
+  isLocalhost,
+  isPDF,
+  isValidCoordinate,
+  renderIframe,
+  setupDetailsLazyImages,
+} from "./common/content";
 import { installMapContentActions } from "./common/content-actions";
 import { createReadOnlyLayerGroupRuntime } from "./common/layer-groups";
 import { installMapMarkdownExtensions } from "./common/markdown-extensions";
@@ -9,26 +16,45 @@ import { downloadMapContentFile, installMapMarkdownRenderer } from "./common/mar
 import { createReadOnlyMapRuntime } from "./common/map-runtime";
 import { createMapUiVisibilityRuntime } from "./common/map-ui-visibility";
 import { loadLastMapView, observeMapView } from "./common/map-view-persistence";
-import { enableMarkerIconFallback, escapeHtml, initializeUserLocation, markerOptionsForLayer } from "./common/marker";
+import {
+  enableMarkerIconFallback,
+  escapeHtml,
+  initializeUserLocation,
+  markerOptionsForLayer,
+} from "./common/marker";
 import { createReadOnlyMarkerLayerControl, hydrateReadOnlyMarkers } from "./common/marker-layers";
 import { installReadOnlyOverlayHandlers } from "./common/overlay-events";
-import { addReadOnlyMapVisibilityControls, addReadOnlySearchControls } from "./common/page-controls";
-import { createLayeredMarkerDisplayManager, createLayeredShapeDisplayManager, createMapObjectSearchCoordinator, createMapSearchRuntime, filterMeasurementMarkersForBounds, getShapeRecords } from "./common/search";
+import {
+  addReadOnlyMapVisibilityControls,
+  addReadOnlySearchControls,
+} from "./common/page-controls";
+import {
+  createLayeredMarkerDisplayManager,
+  createLayeredShapeDisplayManager,
+  createMapObjectSearchCoordinator,
+  createMapSearchRuntime,
+  filterMeasurementMarkersForBounds,
+  getShapeRecords,
+} from "./common/search";
 import { createShapeArrowRuntime } from "./common/shape-arrow";
 import { createShapeLayerRuntime } from "./common/shape-layer";
 import { createShapeMeasurementRuntime } from "./common/shape-measurement";
 import { createReadOnlyShapeMeasurementDisplayRuntime } from "./common/shape-measurement-display";
-import { createShapeMemoRuntime, getShapeMemoFromGeoJson, normalizeShapeName } from "./common/shape-memo";
+import {
+  createShapeMemoRuntime,
+  getShapeMemoFromGeoJson,
+  normalizeShapeName,
+} from "./common/shape-memo";
 import { createReadOnlyShapeRestorationRuntime } from "./common/shape-restoration";
 import { createShapeStyleCore } from "./common/shape-style";
 import { createShapeViewportRuntime } from "./common/shape-viewport";
 import { createMapStorage, createTileChangeHandler } from "./common/storage";
-import { createMeasurementVisibilityControl, createTooltipVisibilityControl } from "./common/visibility-controls";
+import {
+  createMeasurementVisibilityControl,
+  createTooltipVisibilityControl,
+} from "./common/visibility-controls";
 
-type ReadOnlyPageName =
-  | "map-anather"
-  | "temporary-map"
-  | "temporary-map-mobile";
+type ReadOnlyPageName = "map-anather" | "temporary-map" | "temporary-map-mobile";
 
 type DynamicRecord = Record<string, any>;
 
@@ -66,21 +92,15 @@ function initializeCollapsibleLayerControl({
 }: DynamicRecord): void {
   if (overlayCount < 4) return;
   const container = layersControl.getContainer();
-  const overlayContainer = container?.querySelector(
-    ".leaflet-control-layers-overlays",
-  );
+  const overlayContainer = container?.querySelector(".leaflet-control-layers-overlays");
   if (!container || !overlayContainer) return;
 
   const applyCollapsibleItems = (): number => {
-    const items = Array.from(
-      overlayContainer.querySelectorAll("label") as NodeListOf<HTMLElement>,
-    );
-    items.forEach((item) =>
-      item.classList.remove("temporary-layer-control-collapsible-item"),
-    );
-    items.slice(2).forEach((item) =>
-      item.classList.add("temporary-layer-control-collapsible-item"),
-    );
+    const items = Array.from(overlayContainer.querySelectorAll("label") as NodeListOf<HTMLElement>);
+    items.forEach((item) => item.classList.remove("temporary-layer-control-collapsible-item"));
+    items
+      .slice(2)
+      .forEach((item) => item.classList.add("temporary-layer-control-collapsible-item"));
     return items.length;
   };
   if (applyCollapsibleItems() < 4) return;
@@ -88,7 +108,7 @@ function initializeCollapsibleLayerControl({
   container.classList.add("temporary-layer-control");
   const toggleButton = L.DomUtil.create(
     "button",
-    "temporary-layer-control-toggle",
+    "custom-control-button temporary-layer-control-toggle",
     container,
   ) as HTMLButtonElement;
   toggleButton.type = "button";
@@ -122,7 +142,9 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
   const isAnother = expectedPage === "map-anather";
   const isMobile = expectedPage === "temporary-map-mobile";
   const isTemporary = !isAnother;
-  const temporaryBootstrap = isTemporary ? bootstrap as Extract<typeof bootstrap, { page: "temporary-map" | "temporary-map-mobile" }> : null;
+  const temporaryBootstrap = isTemporary
+    ? (bootstrap as Extract<typeof bootstrap, { page: "temporary-map" | "temporary-map-mobile" }>)
+    : null;
   const tileServers = bootstrap.tileServers;
   const layers = bootstrap.layers;
   const markerRecords = bootstrap.markers;
@@ -161,7 +183,9 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
     getMap: () => map,
     getTileLayer: () => tileLayer,
     saveSelectedTileServerId: storage.saveSelectedTileServerId,
-    setTileLayer: (nextLayer) => { tileLayer = nextLayer; },
+    setTileLayer: (nextLayer) => {
+      tileLayer = nextLayer;
+    },
     tileServers,
   });
 
@@ -206,9 +230,8 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
   const shapeLayers: DynamicRecord = {};
   const markers: DynamicRecord = {};
   const layerNames: Record<string, string> = {};
-  const visibleMarkerGroup = isAnother && !bootstrap.isCluster
-    ? L.featureGroup()
-    : L.markerClusterGroup();
+  const visibleMarkerGroup =
+    isAnother && !bootstrap.isCluster ? L.featureGroup() : L.markerClusterGroup();
   if (isTemporary || storage.getInitialMarkerVisibility()) visibleMarkerGroup.addTo(map);
   const drawnShapesGroup = isAnother ? L.featureGroup() : undefined;
   const suppressShapes = isAnother && viewport.shouldSuppressInitialShapeRendering(shapeRecords);
@@ -236,7 +259,9 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
     getLeaflet: () => L,
     getMap: () => map,
     getTooltipVisible: () => isTooltipVisible,
-    setTooltipVisible: (visible) => { isTooltipVisible = visible; },
+    setTooltipVisible: (visible) => {
+      isTooltipVisible = visible;
+    },
   });
   const memo = createShapeMemoRuntime({
     escapeHtml,
@@ -249,10 +274,8 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
   });
   installMapContentActions({
     downloadFile: isAnother ? downloadMapContentFile : undefined,
-    previewImage: (path) => window.parent.postMessage(
-      { message: path, type: "callParentFunction" },
-      "*",
-    ),
+    previewImage: (path) =>
+      window.parent.postMessage({ message: path, type: "callParentFunction" }, "*"),
   });
 
   const groups = createReadOnlyLayerGroupRuntime({
@@ -298,7 +321,9 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
     getMeasurementVisible: () => isMeasurementVisible,
     isValidCoordinate,
     refreshAllShapeMeasurementMarkers: () => measurementDisplay.refreshAllShapeMeasurementMarkers(),
-    setMeasurementSegmentMerged: (value) => { isMeasurementSegmentMerged = value; },
+    setMeasurementSegmentMerged: (value) => {
+      isMeasurementSegmentMerged = value;
+    },
   });
 
   hydrateReadOnlyMarkers({
@@ -467,15 +492,11 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
   if (isMobile) map.addControl(new MapUiVisibilityToggleControl!());
   addReadOnlyMapVisibilityControls({
     includeShapeOverlays: isAnother || hasSharedShapes,
-    initialUserLocationVisible: isAnother
-      ? storage.getInitialUserLocationVisibility()
-      : undefined,
+    initialUserLocationVisible: isAnother ? storage.getInitialUserLocationVisibility() : undefined,
     initializeUserLocation,
     leaflet: L,
     map,
-    onUserLocationVisibilityChange: isAnother
-      ? storage.saveUserLocationVisibility
-      : undefined,
+    onUserLocationVisibilityChange: isAnother ? storage.saveUserLocationVisibility : undefined,
     onVisibilityControlAdded: isMobile ? registerHideableMapControl : undefined,
     shapeNameVisibilityLayer,
     shapeVisibilityLayer,
@@ -488,5 +509,4 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
   });
 
   return { map, markers, shapeLayers, shapeNameLabelManager };
-
 }

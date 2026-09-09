@@ -47,19 +47,12 @@ interface RuntimeMap extends SearchMap {
 
 interface LeafletNamespace {
   Control: {
-    extend(definition: {
-      options: { position: string };
-      onAdd(): HTMLElement;
-    }): new () => object;
+    extend(definition: { options: { position: string }; onAdd(): HTMLElement }): new () => object;
   };
   DomEvent: {
     disableClickPropagation(element: HTMLElement): void;
     disableScrollPropagation(element: HTMLElement): void;
-    on(
-      element: Element | null,
-      eventName: string,
-      listener: (event: Event) => void,
-    ): void;
+    on(element: Element | null, eventName: string, listener: (event: Event) => void): void;
     stop(event: Event): void;
   };
   DomUtil: {
@@ -78,7 +71,9 @@ interface LeafletNamespace {
 }
 
 export function normalizeMarkerSearchText(value: unknown): string {
-  return String(value ?? "").trim().toLowerCase();
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
 }
 
 export function createMapObjectSearchCoordinator({
@@ -96,9 +91,7 @@ export function createMapObjectSearchCoordinator({
     syncShapeVisibility();
   };
 
-  const clearMapObjectSearch = (
-    options: { clearInput?: boolean } = {},
-  ): void => {
+  const clearMapObjectSearch = (options: { clearInput?: boolean } = {}): void => {
     markerDisplay.clearSearch(options);
     shapeDisplay.clearSearch();
     syncShapeVisibility();
@@ -114,12 +107,7 @@ export function matchesMarkerSearch(
   const normalizedQuery = normalizeMarkerSearchText(query);
   if (!normalizedQuery) return true;
 
-  return [
-    record?.marker_name,
-    record?.detail,
-    record?.latitude,
-    record?.longitude,
-  ]
+  return [record?.marker_name, record?.detail, record?.latitude, record?.longitude]
     .map(normalizeMarkerSearchText)
     .join(" ")
     .includes(normalizedQuery);
@@ -139,11 +127,7 @@ export function matchesShapeSearch(
 }
 
 export function getShapeRecords(
-  shapeRecords:
-    | SearchShapeRecord[]
-    | Record<string, SearchShapeRecord>
-    | null
-    | undefined,
+  shapeRecords: SearchShapeRecord[] | Record<string, SearchShapeRecord> | null | undefined,
 ): SearchShapeRecord[] {
   if (Array.isArray(shapeRecords)) return shapeRecords;
   if (shapeRecords && typeof shapeRecords === "object") {
@@ -152,9 +136,7 @@ export function getShapeRecords(
   return [];
 }
 
-export function filterMeasurementMarkersForBounds<
-  TMarker extends MeasurementMarker,
->(
+export function filterMeasurementMarkersForBounds<TMarker extends MeasurementMarker>(
   markers: TMarker[] | unknown,
   bounds: Bounds | null | undefined,
 ): TMarker[] {
@@ -200,10 +182,7 @@ export function createLayeredMarkerDisplayManager<TLayer extends object>({
   const rebuildVisibleMarkers = (): void => {
     visibleMarkerGroup.clearLayers();
     Object.values(markerRecords).forEach((record) => {
-      if (
-        !isLayerVisible(record.layer_id) ||
-        !matchesMarkerSearch(record, searchQuery)
-      ) {
+      if (!isLayerVisible(record.layer_id) || !matchesMarkerSearch(record, searchQuery)) {
         return;
       }
 
@@ -218,9 +197,7 @@ export function createLayeredMarkerDisplayManager<TLayer extends object>({
     rebuildVisibleMarkers();
   };
 
-  const clearSearch = (
-    { clearInput = true }: { clearInput?: boolean } = {},
-  ): void => {
+  const clearSearch = ({ clearInput = true }: { clearInput?: boolean } = {}): void => {
     searchQuery = "";
     if (clearInput) {
       const input = document.getElementById(inputId) as HTMLInputElement | null;
@@ -331,8 +308,7 @@ export function createMapSearchRuntime({
     Object.values(clusterGroups).forEach((group) => group.clearLayers());
     Object.values(markerRecords).forEach((record) => {
       const marker = markers["marker-" + record.id];
-      const targetGroup =
-        record.layer_id == null ? undefined : clusterGroups[record.layer_id];
+      const targetGroup = record.layer_id == null ? undefined : clusterGroups[record.layer_id];
       if (marker && targetGroup) targetGroup.addLayer(marker);
     });
   };
@@ -374,8 +350,7 @@ export function createMapSearchRuntime({
     Object.values(clusterGroups).forEach((group) => group.clearLayers());
     Object.values(markerRecords).forEach((record) => {
       const marker = markers["marker-" + record.id];
-      const targetGroup =
-        record.layer_id == null ? undefined : clusterGroups[record.layer_id];
+      const targetGroup = record.layer_id == null ? undefined : clusterGroups[record.layer_id];
       if (marker && targetGroup && matchesMarkerSearch(record, query)) {
         targetGroup.addLayer(marker);
       }
@@ -415,17 +390,12 @@ export function createMapSearchRuntime({
       .openPopup();
   };
 
-  const createCodeSearchControl = (
-    options: { position?: string } = {},
-  ): object => {
+  const createCodeSearchControl = (options: { position?: string } = {}): object => {
     const leaflet = getLeaflet();
     const Control = leaflet.Control.extend({
       options: { position: options.position ?? "topleft" },
       onAdd() {
-        const container = leaflet.DomUtil.create(
-          "div",
-          "leaflet-bar leaflet-control",
-        );
+        const container = leaflet.DomUtil.create("div", "leaflet-bar leaflet-control");
         container.innerHTML =
           '<div class="search-zone">' +
           '<input type="text" class="search-input" id="code-input" placeholder="緯度,経度" title="緯度経度を,区切りで入力してください。"><br>' +
@@ -458,10 +428,7 @@ export function createMapSearchRuntime({
     const Control = leaflet.Control.extend({
       options: { position: options.position ?? "topleft" },
       onAdd() {
-        const container = leaflet.DomUtil.create(
-          "div",
-          "leaflet-bar leaflet-control",
-        );
+        const container = leaflet.DomUtil.create("div", "leaflet-bar leaflet-control");
         const inputId = options.inputId ?? "marker-search-input";
         container.innerHTML =
           '<div class="search-zone"><input type="text" class="search-input marker-search-input" id="' +
@@ -593,10 +560,7 @@ export function createMapSearchRuntime({
     const Control = leaflet.Control.extend({
       options: { position: options.position ?? "topleft" },
       onAdd() {
-        const container = leaflet.DomUtil.create(
-          "div",
-          "leaflet-bar leaflet-control",
-        );
+        const container = leaflet.DomUtil.create("div", "leaflet-bar leaflet-control");
         const inputId = options.inputId ?? "marker-search-input";
         container.innerHTML =
           '<div class="search-zone"><input type="text" class="search-input marker-search-input" id="' +
@@ -649,10 +613,7 @@ export function createMapSearchRuntime({
     if (!mergeButton) return;
     mergeButton.classList.toggle("is-hidden", !getMeasurementVisible());
     mergeButton.classList.toggle("is-active", getMeasurementSegmentMerged());
-    mergeButton.setAttribute(
-      "aria-pressed",
-      getMeasurementSegmentMerged() ? "true" : "false",
-    );
+    mergeButton.setAttribute("aria-pressed", getMeasurementSegmentMerged() ? "true" : "false");
   };
 
   const toggleMeasurementSegmentMerge = (): void => {

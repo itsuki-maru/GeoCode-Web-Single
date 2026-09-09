@@ -7,10 +7,7 @@ interface OverlayEvent {
 
 interface ControlMap {
   addControl(control: MapControl): void;
-  on(
-    eventName: "overlayadd" | "overlayremove",
-    handler: (event: OverlayEvent) => void,
-  ): void;
+  on(eventName: "overlayadd" | "overlayremove", handler: (event: OverlayEvent) => void): void;
   removeLayer(layer: MapLayer): void;
 }
 
@@ -34,9 +31,7 @@ interface MarkerSearchControlOptions {
 
 interface AddSearchControlsOptions extends MarkerSearchControlOptions {
   createCodeSearchControl: () => MapControl;
-  createMarkerSearchControl: (
-    options: MarkerSearchControlOptions,
-  ) => MapControl;
+  createMarkerSearchControl: (options: MarkerSearchControlOptions) => MapControl;
   map: ControlMap;
   onCodeSearchControlAdded?: (control: MapControl) => void;
   onMarkerSearchControlAdded?: (control: MapControl) => void;
@@ -51,10 +46,7 @@ interface UserLocationOptions {
 interface AddMapVisibilityControlsOptions {
   includeShapeOverlays: boolean;
   initialUserLocationVisible?: boolean;
-  initializeUserLocation: (
-    map: ControlMap,
-    options?: UserLocationOptions,
-  ) => MapLayer | null;
+  initializeUserLocation: (map: ControlMap, options?: UserLocationOptions) => MapLayer | null;
   leaflet: LeafletNamespace;
   map: ControlMap;
   onUserLocationVisibilityChange?: (visible: boolean) => void;

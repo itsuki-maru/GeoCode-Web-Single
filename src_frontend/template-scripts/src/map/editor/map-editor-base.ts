@@ -154,10 +154,7 @@ renderer.link = (token) => {
       );
     }
     // リンクを別タブで起動
-    return html.replace(
-      /^<a /,
-      '<a target="_blank" rel="noopener noreferrer" title="外部リンク" ',
-    );
+    return html.replace(/^<a /, '<a target="_blank" rel="noopener noreferrer" title="外部リンク" ');
   } else {
     // 内部リンクかつPDFの場合
     if (isPDFHref) {
@@ -226,15 +223,11 @@ const lastMapView = loadLastMapView();
 const hasExplicitInitialFocus =
   new URLSearchParams(window.location.search).has("latitude") &&
   new URLSearchParams(window.location.search).has("longitude");
-const shouldCenterOnInitialUserLocation =
-  !lastMapView && !hasExplicitInitialFocus;
+const shouldCenterOnInitialUserLocation = !lastMapView && !hasExplicitInitialFocus;
 
 // 地図オブジェクトの初期化
 var map = L.map("map", {
-  center: [
-    lastMapView?.latitude ?? latitude,
-    lastMapView?.longitude ?? longitude,
-  ],
+  center: [lastMapView?.latitude ?? latitude, lastMapView?.longitude ?? longitude],
   crs: L.CRS.EPSG3857,
   zoom: lastMapView?.zoom ?? zoom,
   zoomControl: true,

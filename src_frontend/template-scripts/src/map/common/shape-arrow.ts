@@ -1,7 +1,4 @@
-import type {
-  DefaultShapeStyle,
-  ShapeArrowType,
-} from "./shape-style";
+import type { DefaultShapeStyle, ShapeArrowType } from "./shape-style";
 
 interface ArrowLayer {
   _path?: SVGElement | null;
@@ -36,18 +33,12 @@ export function createShapeArrowRuntime({
     window.matchMedia("(any-hover: hover) and (any-pointer: fine)").matches,
 }: ShapeArrowDependencies) {
   const getShapeArrowMarkerId = (color: unknown): string => {
-    const normalized = normalizeShapeColor(
-      color,
-      getDefaultStyle().color,
-    );
+    const normalized = normalizeShapeColor(color, getDefaultStyle().color);
     return ARROW_MARKER_ID_PREFIX + "-" + normalized.slice(1);
   };
 
   const ensureShapeArrowMarker = (color: unknown): string => {
-    const normalized = normalizeShapeColor(
-      color,
-      getDefaultStyle().color,
-    );
+    const normalized = normalizeShapeColor(color, getDefaultStyle().color);
     const markerId = getShapeArrowMarkerId(normalized);
     if (document.getElementById(markerId)) return markerId;
 
@@ -96,18 +87,10 @@ export function createShapeArrowRuntime({
     path.removeAttribute("marker-end");
     if (layer.shapeType !== "polyline") return;
 
-    const arrowType = normalizeShapeArrowType(
-      layer.shapeStyle?.arrowType,
-    );
+    const arrowType = normalizeShapeArrowType(layer.shapeStyle?.arrowType);
     if (arrowType === "none") return;
-    const fallbackColor = normalizeShapeColor(
-      layer.shapeStyle?.color,
-      getDefaultStyle().color,
-    );
-    const strokeColor = normalizeShapeColor(
-      path.getAttribute("stroke"),
-      fallbackColor,
-    );
+    const fallbackColor = normalizeShapeColor(layer.shapeStyle?.color, getDefaultStyle().color);
+    const strokeColor = normalizeShapeColor(path.getAttribute("stroke"), fallbackColor);
     const reference = "url(#" + ensureShapeArrowMarker(strokeColor) + ")";
     if (arrowType === "start" || arrowType === "both") {
       path.setAttribute("marker-start", reference);
@@ -117,9 +100,7 @@ export function createShapeArrowRuntime({
     }
   };
 
-  const bindShapeArrowStyle = (
-    layer: ArrowLayer | null | undefined,
-  ): void => {
+  const bindShapeArrowStyle = (layer: ArrowLayer | null | undefined): void => {
     if (!layer || layer.shapeArrowStyleBound === true) return;
     layer.shapeArrowStyleBound = true;
     layer.on("add", () => applyShapeArrowStyle(layer));
@@ -149,10 +130,7 @@ export function createShapeArrowRuntime({
         restoreStyle(layer);
       } else {
         layer.setStyle?.({
-          weight: normalizeShapeWeight(
-            layer.shapeStyle?.weight,
-            getDefaultStyle().weight,
-          ),
+          weight: normalizeShapeWeight(layer.shapeStyle?.weight, getDefaultStyle().weight),
         });
         applyShapeArrowStyle(layer);
       }
@@ -160,16 +138,10 @@ export function createShapeArrowRuntime({
 
     layer.on("mouseover", () => {
       if (isHighlighted || !supportsMouseHover()) return;
-      const currentWeight = normalizeShapeWeight(
-        layer.options?.weight,
-        layer.shapeStyle?.weight,
-      );
+      const currentWeight = normalizeShapeWeight(layer.options?.weight, layer.shapeStyle?.weight);
       isHighlighted = true;
       layer.setStyle?.({
-        weight: Math.max(
-          HOVER_MIN_WEIGHT,
-          currentWeight + HOVER_WEIGHT_INCREMENT,
-        ),
+        weight: Math.max(HOVER_MIN_WEIGHT, currentWeight + HOVER_WEIGHT_INCREMENT),
       });
       applyShapeArrowStyle(layer);
     });

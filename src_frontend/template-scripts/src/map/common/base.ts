@@ -3,36 +3,22 @@ const YOUTUBE_ID_PATTERN = /^[\w-]{11}$/;
 export interface LayerMap {
   addLayer(layer: object): void;
   hasLayer(layer: object): boolean;
-  on(
-    events: string,
-    listener: (event: { layer: object }) => void,
-  ): void;
+  on(events: string, listener: (event: { layer: object }) => void): void;
   removeLayer(layer: object): void;
 }
 
 interface LeafletNamespace {
   Control: {
-    extend(definition: {
-      options: { position: string };
-      onAdd(): HTMLElement;
-    }): new () => object;
+    extend(definition: { options: { position: string }; onAdd(): HTMLElement }): new () => object;
   };
   DomEvent: {
     disableClickPropagation(element: HTMLElement): void;
     disableScrollPropagation?: (element: HTMLElement) => void;
-    on(
-      element: HTMLElement,
-      eventName: string,
-      listener: (event: Event) => void,
-    ): void;
+    on(element: HTMLElement, eventName: string, listener: (event: Event) => void): void;
     stop(event: Event): void;
   };
   DomUtil: {
-    create(
-      tagName: string,
-      className: string,
-      container?: HTMLElement,
-    ): HTMLElement;
+    create(tagName: string, className: string, container?: HTMLElement): HTMLElement;
   };
 }
 
@@ -70,8 +56,7 @@ export function createLayerBulkToggleControl({
       ) as HTMLButtonElement;
       button.type = "button";
 
-      const hasVisibleLayer = () =>
-        targetLayers.some((layer) => map.hasLayer(layer));
+      const hasVisibleLayer = () => targetLayers.some((layer) => map.hasLayer(layer));
 
       const updateButtonState = () => {
         const shouldClear = hasVisibleLayer();

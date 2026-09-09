@@ -1,6 +1,4 @@
-export const editorCommonSources = [
-  "src/map/editor/map-editor-mode.ts",
-] as const;
+export const editorCommonSources = ["src/map/editor/map-editor-mode.ts"] as const;
 
 export const editorEntrySources = {
   map: [

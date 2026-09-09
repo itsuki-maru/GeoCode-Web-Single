@@ -26,10 +26,7 @@ const map = L.map("map").setView([39.2, 138.5], 6);
 const tileServers = bootstrap.tileServers as Record<string, any>;
 const tileServerEntries = Object.entries(tileServers);
 const defaultTileServerId = tileServers["1"] ? "1" : tileServerEntries[0]?.[0];
-const japanBounds = L.latLngBounds(
-  L.latLng(20.25, 122.56),
-  L.latLng(45.55, 153.59),
-);
+const japanBounds = L.latLngBounds(L.latLng(20.25, 122.56), L.latLng(45.55, 153.59));
 let tileLayer: any = null;
 
 function selectTileServer(tileServerId: string): void {
@@ -54,20 +51,19 @@ if (tileServerEntries.length) {
       const form = document.createElement("form");
       form.className = "radio-zone";
       for (const [tileServerId, tileServer] of tileServerEntries) {
-        const row = document.createElement("label");
-        row.className = "tile-option";
         const radio = document.createElement("input");
         radio.className = "tile-radio";
         radio.type = "radio";
         radio.name = "live-map-tile";
         radio.value = tileServerId;
+        radio.id = `live-map-tile-${tileServerId}`;
         radio.checked = tileServerId === defaultTileServerId;
         radio.addEventListener("change", () => selectTileServer(tileServerId));
-        const label = document.createElement("span");
+        const label = document.createElement("label");
         label.className = "tile-radio-label";
+        label.htmlFor = radio.id;
         label.textContent = tileServer.label;
-        row.append(radio, label);
-        form.appendChild(row);
+        form.append(radio, document.createTextNode(" "), label, document.createElement("br"));
       }
       container.appendChild(form);
       L.DomEvent.disableClickPropagation(container);
@@ -81,9 +77,11 @@ if (tileServerEntries.length) {
 const markers = new Map<string, any>();
 const memberLayers = new Map<string, { displayName: string; group: any }>();
 const isMobile = window.matchMedia("(max-width: 700px)").matches;
-const locationLayersControl = L.control.layers(null, null, {
-  collapsed: false,
-}).addTo(map);
+const locationLayersControl = L.control
+  .layers(null, null, {
+    collapsed: false,
+  })
+  .addTo(map);
 const collapsibleLocationLayers = isMobile
   ? createCollapsibleLayerControl({
       container: locationLayersControl.getContainer(),
@@ -107,16 +105,19 @@ const nameVisibility = createNameVisibilityControl({
   position: isMobile ? "topleft" : "topright",
 });
 map.addControl(nameVisibility.control);
-map.addControl(createCurrentLocationControl({
-  geolocation: navigator.geolocation,
-  leaflet: L,
-  map,
-  onError: () => {
-    errorBox.textContent = "現在位置を取得できませんでした。ブラウザの位置情報設定を確認してください。";
-    errorBox.style.display = "block";
-  },
-  position: isMobile ? "bottomleft" : "topright",
-}));
+map.addControl(
+  createCurrentLocationControl({
+    geolocation: navigator.geolocation,
+    leaflet: L,
+    map,
+    onError: () => {
+      errorBox.textContent =
+        "現在位置を取得できませんでした。ブラウザの位置情報設定を確認してください。";
+      errorBox.style.display = "block";
+    },
+    position: isMobile ? "bottomleft" : "topright",
+  }),
+);
 
 function escapeHtml(value: string): string {
   const element = document.createElement("div");
@@ -125,7 +126,7 @@ function escapeHtml(value: string): string {
 }
 
 function statusLabel(value: LivePosition["status"]): string {
-  return value === "live" ? "共有中" : value === "stale" ? "更新遅延" : "オフライン";
+  return value === "live" ? "アクティブ" : value === "stale" ? "更新遅延" : "オフライン";
 }
 
 function ensureMemberLayer(position: LivePosition): any {
@@ -173,10 +174,11 @@ function render(snapshot: any): void {
         ? `${position.display_name}の位置へ移動`
         : `${position.display_name}（位置情報なし）`,
     );
-    focusButton.innerHTML = `<span class="vehicle-dot" style="background:${position.marker_color}"></span>`
-      + `<span class="vehicle-name">${escapeHtml(position.display_name)}</span>`
-      + `<span class="status-${position.status}">${statusLabel(position.status)}</span>`
-      + `<span class="vehicle-time">最終受信: ${received}</span>`;
+    focusButton.innerHTML =
+      `<span class="vehicle-dot" style="background:${position.marker_color}"></span>` +
+      `<span class="vehicle-name">${escapeHtml(position.display_name)}</span>` +
+      `<span class="status-${position.status}">${statusLabel(position.status)}</span>` +
+      `<span class="vehicle-time">最終情報: ${received}</span>`;
     focusButton.addEventListener("click", () => {
       focusSharedLocation({
         map,
@@ -202,13 +204,15 @@ function render(snapshot: any): void {
       iconAnchor: [10, 10],
       iconSize: [20, 20],
     });
-    const popup = `<strong>${escapeHtml(position.display_name)}</strong><br>${statusLabel(position.status)}<br>最終受信: ${received}`;
+    const popup = `<strong>${escapeHtml(position.display_name)}</strong><br>${statusLabel(position.status)}<br>最終情報: ${received}`;
     const existing = markers.get(position.id);
     if (existing) {
       existing.setLatLng([position.latitude, position.longitude]);
       existing.setIcon(icon);
       existing.setPopupContent(popup);
-      existing.setTooltipContent(`<div class="custom-tooltip">${escapeHtml(position.display_name)}</div>`);
+      existing.setTooltipContent(
+        `<div class="custom-tooltip">${escapeHtml(position.display_name)}</div>`,
+      );
       nameVisibility.syncMarker(existing);
     } else {
       const marker = L.marker([position.latitude, position.longitude], { icon })
@@ -265,7 +269,12 @@ async function load(): Promise<void> {
       window.location.assign(`/live/${bootstrap.publicId}`);
       return;
     }
-    if (!response.ok) throw new Error(response.status === 404 ? "共有リンクは無効または期限切れです。" : "位置情報を取得できません。");
+    if (!response.ok)
+      throw new Error(
+        response.status === 404
+          ? "共有リンクは無効または期限切れです。"
+          : "位置情報を取得できません。",
+      );
     const snapshot = await response.json();
     failures = 0;
     render(snapshot);

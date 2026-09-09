@@ -161,10 +161,7 @@ renderer.link = (token) => {
       );
     }
     // リンクを別タブで起動
-    return html.replace(
-      /^<a /,
-      '<a target="_blank" rel="noopener noreferrer" title="外部リンク" ',
-    );
+    return html.replace(/^<a /, '<a target="_blank" rel="noopener noreferrer" title="外部リンク" ');
   } else {
     // 内部リンクかつPDFの場合
     if (isPDFHref) {
@@ -233,15 +230,11 @@ const lastMapView = loadLastMapView();
 const hasExplicitInitialFocus =
   new URLSearchParams(window.location.search).has("latitude") &&
   new URLSearchParams(window.location.search).has("longitude");
-const shouldCenterOnInitialUserLocation =
-  !lastMapView && !hasExplicitInitialFocus;
+const shouldCenterOnInitialUserLocation = !lastMapView && !hasExplicitInitialFocus;
 
 // 地図オブジェクトの初期化
 var map = L.map("map", {
-  center: [
-    lastMapView?.latitude ?? latitude,
-    lastMapView?.longitude ?? longitude,
-  ],
+  center: [lastMapView?.latitude ?? latitude, lastMapView?.longitude ?? longitude],
   crs: L.CRS.EPSG3857,
   zoom: lastMapView?.zoom ?? zoom,
   zoomControl: true,
@@ -286,10 +279,7 @@ function updateMapUiVisibilityToggleButton() {
   const buttonText = isMapUiHidden ? "機能を表示" : "機能を非表示";
   mapUiVisibilityToggleButton.textContent = buttonText;
   mapUiVisibilityToggleButton.setAttribute("aria-label", buttonText);
-  mapUiVisibilityToggleButton.setAttribute(
-    "aria-pressed",
-    String(isMapUiHidden),
-  );
+  mapUiVisibilityToggleButton.setAttribute("aria-pressed", String(isMapUiHidden));
 }
 
 // 登録済みの操作 UI を一括で表示・非表示にする
@@ -302,7 +292,7 @@ function setMapUiHidden(hidden) {
   saveMapMobileUiHidden(isMapUiHidden);
 }
 
-// 非表示対象の Leaflet コントロール DOM を登録する
+// 非表示対象の UI コンテナを登録する
 function registerHideableMapUiContainer(container) {
   if (!container) {
     return;
@@ -313,32 +303,15 @@ function registerHideableMapUiContainer(container) {
   hideableMapUiContainers.add(container);
 }
 
+// 説明の切り替え状態を保ったまま、右下の説明全体を隠す。
+registerHideableMapUiContainer(document.getElementById("map-status-container"));
+
 // Leaflet コントロールから非表示対象の DOM を取り出して登録する
 function registerHideableMapControl(control) {
   if (control && typeof control.getContainer === "function") {
     registerHideableMapUiContainer(control.getContainer());
   }
   return control;
-}
-
-// 共通ヘルパー内で追加されるコントロールを検出するため、追加前の状態を控える
-function getMapControlContainersSnapshot() {
-  return new Set(
-    Array.from(
-      document.querySelectorAll(".leaflet-control-container .leaflet-control"),
-    ),
-  );
-}
-
-// 追加前の状態と比較し、新しく増えたコントロールだけを非表示対象にする
-function registerNewHideableMapControlContainers(previousContainers) {
-  document
-    .querySelectorAll(".leaflet-control-container .leaflet-control")
-    .forEach((container) => {
-      if (!previousContainers.has(container)) {
-        registerHideableMapUiContainer(container);
-      }
-    });
 }
 
 // 操作 UI の表示・非表示を切り替えるボタン
@@ -351,11 +324,7 @@ const MapUiVisibilityToggleControl = L.Control.extend({
       "div",
       "leaflet-bar leaflet-control map-ui-visibility-toggle-control",
     );
-    const button = L.DomUtil.create(
-      "button",
-      "custom-control-button",
-      container,
-    );
+    const button = L.DomUtil.create("button", "custom-control-button", container);
     button.type = "button";
     mapUiVisibilityToggleButton = button;
 
@@ -561,9 +530,7 @@ function applyMarkerFilter(markerIds) {
 
 function applyMapObjectFilter(markerIds, shapeIds) {
   externalMarkerFilterIds = Array.isArray(markerIds) ? markerIds : null;
-  externalShapeFilterIdSet = Array.isArray(shapeIds)
-    ? new Set(shapeIds.map(String))
-    : null;
+  externalShapeFilterIdSet = Array.isArray(shapeIds) ? new Set(shapeIds.map(String)) : null;
   renderVisibleMarkers();
   renderVisibleShapes();
 }

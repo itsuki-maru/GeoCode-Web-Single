@@ -55,10 +55,7 @@ function createLabel(field: MarkerFormField, inputId: string): HTMLLabelElement 
   return label;
 }
 
-function commonInput(
-  field: MarkerFormField,
-  type: HTMLInputElement["type"],
-): HTMLInputElement {
+function commonInput(field: MarkerFormField, type: HTMLInputElement["type"]): HTMLInputElement {
   const input = document.createElement("input");
   input.id = `field-${field.id}`;
   input.name = field.id;
@@ -158,8 +155,7 @@ async function prepareImage(
     status.textContent = `準備完了: ${file.name}`;
   } catch (error) {
     input.value = "";
-    status.textContent =
-      error instanceof Error ? error.message : "画像を処理できませんでした。";
+    status.textContent = error instanceof Error ? error.message : "画像を処理できませんでした。";
   }
 }
 
@@ -181,7 +177,11 @@ function collectValues(schema: MarkerFormSchema): Record<string, string | boolea
     } else {
       values[field.id] = requireElement<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
         `#field-${CSS.escape(field.id)}`,
-        field.type === "textarea" ? HTMLTextAreaElement : field.type === "select" ? HTMLSelectElement : HTMLInputElement,
+        field.type === "textarea"
+          ? HTMLTextAreaElement
+          : field.type === "select"
+            ? HTMLSelectElement
+            : HTMLInputElement,
       ).value;
     }
   }
@@ -227,8 +227,7 @@ async function submitMarkerForm(
     imageFiles.clear();
     return;
   } catch (error) {
-    elements.message.textContent =
-      error instanceof Error ? error.message : "送信に失敗しました。";
+    elements.message.textContent = error instanceof Error ? error.message : "送信に失敗しました。";
     elements.message.className = "message error";
   }
 

@@ -24,10 +24,7 @@ type SharedLocationMap = {
   addLayer(layer: unknown): void;
   getZoom(): number;
   hasLayer(layer: unknown): boolean;
-  setView(
-    position: [number, number] | { lat: number; lng: number },
-    zoom: number,
-  ): void;
+  setView(position: [number, number] | { lat: number; lng: number }, zoom: number): void;
 };
 
 type LeafletControl = {
@@ -91,23 +88,18 @@ export function createCollapsibleLayerControl({
   container.classList.add("live-layer-control");
   const toggleButton = leaflet.DomUtil.create(
     "button",
-    "live-layer-control-toggle",
+    "custom-control-button live-layer-control-toggle",
     container,
   ) as HTMLButtonElement;
   toggleButton.type = "button";
 
   const sync = (): void => {
-    const overlayContainer = container.querySelector(
-      ".leaflet-control-layers-overlays",
-    );
+    const overlayContainer = container.querySelector(".leaflet-control-layers-overlays");
     const items = overlayContainer
       ? Array.from(overlayContainer.querySelectorAll<HTMLElement>("label"))
       : [];
     items.forEach((item, index) => {
-      item.classList.toggle(
-        "live-layer-control-collapsible-item",
-        index >= visibleItemCount,
-      );
+      item.classList.toggle("live-layer-control-collapsible-item", index >= visibleItemCount);
     });
     const canCollapse = items.length >= minimumItemCount;
     if (!canCollapse) collapsed = false;
@@ -145,10 +137,7 @@ export function createCurrentLocationControl({
   const CurrentLocationControl = leaflet.Control.extend({
     options: { position },
     onAdd() {
-      const container = leaflet.DomUtil.create(
-        "div",
-        "leaflet-bar leaflet-control",
-      );
+      const container = leaflet.DomUtil.create("div", "leaflet-bar leaflet-control");
       const button = leaflet.DomUtil.create(
         "button",
         "custom-control-button",
@@ -167,10 +156,7 @@ export function createCurrentLocationControl({
         button.disabled = true;
         geolocation.getCurrentPosition(
           ({ coords }) => {
-            map.setView(
-              [coords.latitude, coords.longitude],
-              Math.max(map.getZoom(), 16),
-            );
+            map.setView([coords.latitude, coords.longitude], Math.max(map.getZoom(), 16));
             button.disabled = false;
           },
           () => {
@@ -221,10 +207,7 @@ export function createNameVisibilityControl({
   const NameVisibilityControl = leaflet.Control.extend({
     options: { position },
     onAdd() {
-      const container = leaflet.DomUtil.create(
-        "div",
-        "leaflet-bar leaflet-control",
-      );
+      const container = leaflet.DomUtil.create("div", "leaflet-bar leaflet-control");
       button = leaflet.DomUtil.create(
         "button",
         "custom-control-button",

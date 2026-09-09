@@ -21,10 +21,7 @@ function getMarked(): MarkedNamespace {
   return marked;
 }
 
-export function isValidCoordinate(
-  latitude: number | string,
-  longitude: number | string,
-): boolean {
+export function isValidCoordinate(latitude: number | string, longitude: number | string): boolean {
   const numericLatitude = Number(latitude);
   const numericLongitude = Number(longitude);
   return (
@@ -65,10 +62,7 @@ export function createNestedTokenizer(typeName: string) {
       const pattern = new RegExp(`^:::${typeName}\\s`, "m");
       return source.match(pattern)?.index;
     },
-    tokenizer(
-      this: TokenizerContext,
-      source: string,
-    ): NestedToken | null {
+    tokenizer(this: TokenizerContext, source: string): NestedToken | null {
       if (!source.startsWith(`:::${typeName}`)) return null;
 
       const lines = source.split(/\r?\n/);
@@ -91,9 +85,7 @@ export function createNestedTokenizer(typeName: string) {
       if (endIndex === -1) return null;
 
       const raw = lines.slice(0, endIndex + 1).join("\n");
-      const titleMatch = lines[0]!.match(
-        new RegExp(`^:::${typeName}\\s+(.+)`),
-      );
+      const titleMatch = lines[0]!.match(new RegExp(`^:::${typeName}\\s+(.+)`));
       const title = titleMatch?.[1]?.trim() ?? typeName.toUpperCase();
       const content = lines.slice(1, endIndex).join("\n");
 
@@ -138,15 +130,13 @@ export function setupDetailsLazyImages(root: ParentNode = document): void {
     if (details.hasAttribute("data-lazy-img-initialized")) return;
     details.setAttribute("data-lazy-img-initialized", "true");
 
-    details
-      .querySelectorAll<HTMLElement>("img[src], video[src]")
-      .forEach((element) => {
-        const src = element.getAttribute("src");
-        if (src) {
-          element.setAttribute("data-src", src);
-          element.removeAttribute("src");
-        }
-      });
+    details.querySelectorAll<HTMLElement>("img[src], video[src]").forEach((element) => {
+      const src = element.getAttribute("src");
+      if (src) {
+        element.setAttribute("data-src", src);
+        element.removeAttribute("src");
+      }
+    });
 
     details.addEventListener("toggle", () => {
       if (!details.open) return;

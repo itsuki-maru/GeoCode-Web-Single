@@ -41,10 +41,7 @@ interface LayerGroupRuntimeOptions {
   layerVisibilityGroups: Record<string, LayerGroup>;
   leaflet: LeafletNamespace;
   map: LayerGroupMap;
-  setMeasurementMarkerVisibility: (
-    marker: ManagedLayer,
-    visible: boolean,
-  ) => void;
+  setMeasurementMarkerVisibility: (marker: ManagedLayer, visible: boolean) => void;
   shapeGroups: Record<string, MutableLayerGroup>;
   shapeVisibilityLayer: ManagedLayer;
 }
@@ -72,9 +69,7 @@ export function createReadOnlyLayerGroupRuntime({
     return clusterGroups[layerId];
   };
 
-  const ensureShapeGroup = (
-    layerId: string | null | undefined,
-  ): MutableLayerGroup | null => {
+  const ensureShapeGroup = (layerId: string | null | undefined): MutableLayerGroup | null => {
     if (!layerId) return null;
 
     shapeGroups[layerId] ??= leaflet.featureGroup();
@@ -94,17 +89,12 @@ export function createReadOnlyLayerGroupRuntime({
   const findLayerIdByMarkerGroup = (group: ManagedLayer): string | null =>
     getLayeredMarkerDisplay().findLayerIdByVisibilityGroup(group);
 
-  const syncShapeGroupVisibility = (
-    layerId: string | null | undefined,
-  ): void => {
+  const syncShapeGroupVisibility = (layerId: string | null | undefined): void => {
     if (!layerId) return;
     const shapeGroup = shapeGroups[layerId];
     if (!shapeGroup) return;
 
-    if (
-      map.hasLayer(shapeVisibilityLayer) &&
-      getLayeredMarkerDisplay().isLayerVisible(layerId)
-    ) {
+    if (map.hasLayer(shapeVisibilityLayer) && getLayeredMarkerDisplay().isLayerVisible(layerId)) {
       if (!map.hasLayer(shapeGroup)) shapeGroup.addTo(map);
       shapeGroup.eachLayer((layer) => {
         if (layer.isMeasurementLabel === true) {

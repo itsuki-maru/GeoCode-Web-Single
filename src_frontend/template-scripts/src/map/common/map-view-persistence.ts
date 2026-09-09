@@ -33,13 +33,9 @@ const isValidMapView = (value: unknown): value is StoredMapView => {
   );
 };
 
-export const loadLastMapView = (
-  storage?: MapViewStorage,
-): StoredMapView | null => {
+export const loadLastMapView = (storage?: MapViewStorage): StoredMapView | null => {
   try {
-    const serialized = (storage ?? window.localStorage).getItem(
-      LAST_MAP_VIEW_STORAGE_KEY,
-    );
+    const serialized = (storage ?? window.localStorage).getItem(LAST_MAP_VIEW_STORAGE_KEY);
     if (!serialized) return null;
     const value: unknown = JSON.parse(serialized);
     return isValidMapView(value) ? value : null;
@@ -49,30 +45,18 @@ export const loadLastMapView = (
   }
 };
 
-export const saveLastMapView = (
-  view: StoredMapView,
-  storage?: MapViewStorage,
-): void => {
+export const saveLastMapView = (view: StoredMapView, storage?: MapViewStorage): void => {
   if (!isValidMapView(view)) return;
   try {
-    (storage ?? window.localStorage).setItem(
-      LAST_MAP_VIEW_STORAGE_KEY,
-      JSON.stringify(view),
-    );
+    (storage ?? window.localStorage).setItem(LAST_MAP_VIEW_STORAGE_KEY, JSON.stringify(view));
   } catch (error) {
     console.warn("最後に表示した地図位置を保存できませんでした。", error);
   }
 };
 
-export const observeMapView = (
-  map: MapViewReader,
-  storage?: MapViewStorage,
-): void => {
+export const observeMapView = (map: MapViewReader, storage?: MapViewStorage): void => {
   map.on("moveend", () => {
     const center = map.getCenter();
-    saveLastMapView(
-      { latitude: center.lat, longitude: center.lng, zoom: map.getZoom() },
-      storage,
-    );
+    saveLastMapView({ latitude: center.lat, longitude: center.lng, zoom: map.getZoom() }, storage);
   });
 };

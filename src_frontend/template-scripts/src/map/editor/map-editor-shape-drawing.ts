@@ -1,17 +1,11 @@
 // @ts-nocheck -- Leaflet編集画面の共有スコープを保つ統合境界。
-async function saveShape(
-  shapeType,
-  layer,
-  shapeName = "",
-  forcedLayerId = null,
-) {
+async function saveShape(shapeType, layer, shapeName = "", forcedLayerId = null) {
   const targetLayerId = forcedLayerId || getCurrentShapeLayerId();
   if (!targetLayerId) {
     throw new Error("shape layer missing");
   }
   const nextShapeStyle =
-    layer.shapeStyle ||
-    buildShapeStyleFromColor(shapeType, getSelectedShapeColor());
+    layer.shapeStyle || buildShapeStyleFromColor(shapeType, getSelectedShapeColor());
   const nextGeoJson = buildShapeGeoJson(layer, shapeType, nextShapeStyle);
 
   const response = await fetchWithAuth("/shape", {
@@ -98,10 +92,7 @@ async function completeLineOrPolygon() {
       return;
     }
     const shapeLayer = L.polyline(drawPoints, SHAPE_STYLE);
-    shapeLayer.shapeStyle = buildShapeStyleFromColor(
-      "polyline",
-      getSelectedShapeColor(),
-    );
+    shapeLayer.shapeStyle = buildShapeStyleFromColor("polyline", getSelectedShapeColor());
     try {
       await saveShape("polyline", shapeLayer, shapeName);
       clearShapeNameInput();
@@ -118,10 +109,7 @@ async function completeLineOrPolygon() {
       return;
     }
     const shapeLayer = L.polygon(drawPoints, SHAPE_STYLE);
-    shapeLayer.shapeStyle = buildShapeStyleFromColor(
-      "polygon",
-      getSelectedShapeColor(),
-    );
+    shapeLayer.shapeStyle = buildShapeStyleFromColor("polygon", getSelectedShapeColor());
     try {
       await saveShape("polygon", shapeLayer, shapeName);
       clearShapeNameInput();
@@ -167,10 +155,7 @@ async function completeActiveDrawing() {
 // 円の描画を確定して保存する
 function completeCircleDrawing(targetLatLng) {
   if (!circleStartLatLng) {
-    setDrawStatus(
-      `図形描画: 円の中心を${editorEntryProfile.interactionVerb}してください。`,
-      true,
-    );
+    setDrawStatus(`図形描画: 円の中心を${editorEntryProfile.interactionVerb}してください。`, true);
     return;
   }
 
@@ -189,10 +174,7 @@ function completeCircleDrawing(targetLatLng) {
     ...SHAPE_STYLE,
     radius,
   });
-  circle.shapeStyle = buildShapeStyleFromColor(
-    "circle",
-    getSelectedShapeColor(),
-  );
+  circle.shapeStyle = buildShapeStyleFromColor("circle", getSelectedShapeColor());
 
   saveShape("circle", circle, getShapeNameInputValue())
     .then(() => {
@@ -234,10 +216,7 @@ function updateServer(id, lat, lng) {
       // 必要に応じて、サーバーからのレスポンスを処理する
     })
     .catch((error) => {
-      console.log(
-        "There was a problem with the fetch operation:",
-        error.message,
-      );
+      console.log("There was a problem with the fetch operation:", error.message);
     });
 }
 
@@ -245,22 +224,14 @@ function handleShapeDrawLatLng(latlng) {
   if (activeDrawMode === "rectangle") {
     if (!rectangleStartLatLng) {
       rectangleStartLatLng = latlng;
-      setDrawStatus(
-        `図形描画: 矩形の2点目を${editorEntryProfile.interactionVerb}してください。`,
-      );
+      setDrawStatus(`図形描画: 矩形の2点目を${editorEntryProfile.interactionVerb}してください。`);
       return true;
     }
 
     closeShapeNameEditor();
     clearDrawPreview();
-    const rectangle = L.rectangle(
-      L.latLngBounds(rectangleStartLatLng, latlng),
-      SHAPE_STYLE,
-    );
-    rectangle.shapeStyle = buildShapeStyleFromColor(
-      "rectangle",
-      getSelectedShapeColor(),
-    );
+    const rectangle = L.rectangle(L.latLngBounds(rectangleStartLatLng, latlng), SHAPE_STYLE);
+    rectangle.shapeStyle = buildShapeStyleFromColor("rectangle", getSelectedShapeColor());
 
     saveShape("rectangle", rectangle, getShapeNameInputValue())
       .then(() => {
@@ -276,9 +247,7 @@ function handleShapeDrawLatLng(latlng) {
   if (activeDrawMode === "circle") {
     if (!circleStartLatLng) {
       circleStartLatLng = latlng;
-      setDrawStatus(
-        `図形描画: 円周上の点を${editorEntryProfile.interactionVerb}してください。`,
-      );
+      setDrawStatus(`図形描画: 円周上の点を${editorEntryProfile.interactionVerb}してください。`);
       return true;
     }
 
@@ -377,9 +346,7 @@ map.on("click", async function (e) {
       callParentReload();
     })
     .catch((error) => {
-      const logError = editorEntryProfile.isMobile
-        ? console.log
-        : console.error;
+      const logError = editorEntryProfile.isMobile ? console.log : console.error;
       logError("There was a problem with the fetch operation:", error.message);
     });
 });
@@ -487,10 +454,7 @@ function installPenPointerDrawingHandlers() {
       if (!isPenPointerEvent(event) || !isPenOptimizedDrawMode()) {
         return;
       }
-      if (
-        activePenPointerId !== null &&
-        event.pointerId !== activePenPointerId
-      ) {
+      if (activePenPointerId !== null && event.pointerId !== activePenPointerId) {
         return;
       }
       const latlng = getLatLngFromPointerEvent(event);
@@ -512,10 +476,7 @@ function installPenPointerDrawingHandlers() {
         activePenPointerId = null;
         return;
       }
-      if (
-        activePenPointerId !== null &&
-        event.pointerId !== activePenPointerId
-      ) {
+      if (activePenPointerId !== null && event.pointerId !== activePenPointerId) {
         return;
       }
       const latlng = getLatLngFromPointerEvent(event);

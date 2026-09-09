@@ -76,7 +76,4 @@ export interface TemporaryMapBootstrap extends MapBootstrapBase {
   shapes: Record<string, ShapeRecord>;
 }
 
-export type MapBootstrap =
-  | AnotherMapBootstrap
-  | EditableMapBootstrap
-  | TemporaryMapBootstrap;
+export type MapBootstrap = AnotherMapBootstrap | EditableMapBootstrap | TemporaryMapBootstrap;

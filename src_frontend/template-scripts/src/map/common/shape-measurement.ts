@@ -35,16 +35,10 @@ interface MeasurementMap {
 }
 
 interface MeasurementLeaflet {
-  circleMarker(
-    latLng: LatLng,
-    options: Record<string, unknown>,
-  ): MeasurementMarker;
+  circleMarker(latLng: LatLng, options: Record<string, unknown>): MeasurementMarker;
   divIcon(options: { className: string; html: string }): unknown;
   latLng(latitude: number, longitude: number): LatLng;
-  marker(
-    latLng: LatLng,
-    options: Record<string, unknown>,
-  ): MeasurementMarker;
+  marker(latLng: LatLng, options: Record<string, unknown>): MeasurementMarker;
 }
 
 interface ShapeMeasurementDependencies {
@@ -82,9 +76,7 @@ export function createShapeMeasurementRuntime({
     return Number.isFinite(radius) && radius > 0 ? radius : null;
   };
 
-  const getPolylineCenterLatLng = (
-    layer: MeasurementLayer,
-  ): LatLng | null => {
+  const getPolylineCenterLatLng = (layer: MeasurementLayer): LatLng | null => {
     const latLngs = flattenShapeLatLngs(layer.getLatLngs?.());
     if (latLngs.length === 0) return null;
     if (latLngs.length === 1) return latLngs[0] ?? null;
@@ -165,9 +157,7 @@ export function createShapeMeasurementRuntime({
     let sum = 0;
     for (let index = 0; index < vertices.length; index += 1) {
       const current = map.options.crs.project(vertices[index]!);
-      const next = map.options.crs.project(
-        vertices[(index + 1) % vertices.length]!,
-      );
+      const next = map.options.crs.project(vertices[(index + 1) % vertices.length]!);
       sum += current.x * next.y - next.x * current.y;
     }
     return Math.abs(sum) / 2;
@@ -187,9 +177,7 @@ export function createShapeMeasurementRuntime({
       start.lng + (end.lng - start.lng) / 2,
     );
 
-  const getMeasurementVertexLatLngs = (
-    layer?: MeasurementLayer | null,
-  ): LatLng[] => {
+  const getMeasurementVertexLatLngs = (layer?: MeasurementLayer | null): LatLng[] => {
     if (!layer) return [];
     if (layer.shapeType === "polyline") {
       return flattenShapeLatLngs(layer.getLatLngs?.());
@@ -206,10 +194,7 @@ export function createShapeMeasurementRuntime({
     emphasized = false,
   ): MeasurementMarker | null => {
     if (!latLng) return null;
-    const shapeColor = normalizeShapeColor(
-      layer?.shapeStyle?.color,
-      getDefaultShapeColor(),
-    );
+    const shapeColor = normalizeShapeColor(layer?.shapeStyle?.color, getDefaultShapeColor());
     const marker = getLeaflet().circleMarker(latLng, {
       color: shapeColor,
       fillColor: emphasized ? shapeColor : "#ffffff",
@@ -224,13 +209,9 @@ export function createShapeMeasurementRuntime({
     return marker;
   };
 
-  const getSegmentGroupCenterLatLng = (
-    segments: unknown,
-  ): LatLng | null => {
+  const getSegmentGroupCenterLatLng = (segments: unknown): LatLng | null => {
     const validSegments = Array.isArray(segments)
-      ? (segments as MeasurementSegment[]).filter(
-          (segment) => segment?.start && segment?.end,
-        )
+      ? (segments as MeasurementSegment[]).filter((segment) => segment?.start && segment?.end)
       : [];
     if (validSegments.length === 0) return null;
 
@@ -240,10 +221,7 @@ export function createShapeMeasurementRuntime({
       totalDistance += map.distance(segment.start!, segment.end!);
     });
     if (totalDistance <= 0) {
-      return getSegmentMidpoint(
-        validSegments[0]!.start!,
-        validSegments[0]!.end!,
-      );
+      return getSegmentMidpoint(validSegments[0]!.start!, validSegments[0]!.end!);
     }
 
     const targetDistance = totalDistance / 2;
@@ -252,9 +230,7 @@ export function createShapeMeasurementRuntime({
       const segmentDistance = map.distance(segment.start!, segment.end!);
       if (accumulatedDistance + segmentDistance >= targetDistance) {
         const ratio =
-          segmentDistance > 0
-            ? (targetDistance - accumulatedDistance) / segmentDistance
-            : 0;
+          segmentDistance > 0 ? (targetDistance - accumulatedDistance) / segmentDistance : 0;
         return getLeaflet().latLng(
           segment.start!.lat + (segment.end!.lat - segment.start!.lat) * ratio,
           segment.start!.lng + (segment.end!.lng - segment.start!.lng) * ratio,
@@ -282,10 +258,7 @@ export function createShapeMeasurementRuntime({
     };
     const className = classNameMap[variant] || classNameMap.segment;
     const lineHtml = lines
-      .map(
-        (line) =>
-          `<div class="shape-measure-label-line">${escapeHtml(line)}</div>`,
-      )
+      .map((line) => `<div class="shape-measure-label-line">${escapeHtml(line)}</div>`)
       .join("");
     return `<div class="${className}">${lineHtml}</div>`;
   };
@@ -319,14 +292,12 @@ export function createShapeMeasurementRuntime({
     for (let index = 0; index < segments.length; index += groupSize) {
       const group = segments.slice(index, index + groupSize);
       const totalDistance = group.reduce(
-        (sum, segment) =>
-          sum + (Number.isFinite(segment.distance) ? segment.distance : 0),
+        (sum, segment) => sum + (Number.isFinite(segment.distance) ? segment.distance : 0),
         0,
       );
-      const marker = createMeasurementLabelMarker(
-        getSegmentGroupCenterLatLng(group),
-        [formatDistance(totalDistance)],
-      );
+      const marker = createMeasurementLabelMarker(getSegmentGroupCenterLatLng(group), [
+        formatDistance(totalDistance),
+      ]);
       if (marker) markers.push(marker);
     }
     return markers;

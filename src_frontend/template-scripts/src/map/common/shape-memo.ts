@@ -27,11 +27,7 @@ interface ShapeMemoPopup {
 
 interface ShapeMemoLeaflet {
   DomEvent: {
-    on(
-      element: HTMLElement,
-      eventName: string,
-      listener: (event: unknown) => void,
-    ): void;
+    on(element: HTMLElement, eventName: string, listener: (event: unknown) => void): void;
     stop(event: unknown): void;
   };
   popup(): ShapeMemoPopup;
@@ -73,10 +69,7 @@ export function createShapeMemoRuntime({
   schedule = (callback) => window.setTimeout(callback, 0),
   setupDetailsLazyImages,
 }: ShapeMemoDependencies) {
-  const renderShapeMemoPopupContent = (
-    shapeName: unknown,
-    memo: unknown,
-  ): string => {
+  const renderShapeMemoPopupContent = (shapeName: unknown, memo: unknown): string => {
     const normalizedMemo = normalizeShapeMemo(memo);
     if (!normalizedMemo.trim()) return "";
 
@@ -93,17 +86,10 @@ export function createShapeMemoRuntime({
   ): boolean => {
     if (!layer || !latLng) return false;
 
-    const popupContent = renderShapeMemoPopupContent(
-      layer.shapeName,
-      layer.shapeMemo,
-    );
+    const popupContent = renderShapeMemoPopupContent(layer.shapeName, layer.shapeMemo);
     if (!popupContent) return false;
 
-    const popup = getLeaflet()
-      .popup()
-      .setLatLng(latLng)
-      .setContent(popupContent)
-      .openOn(getMap());
+    const popup = getLeaflet().popup().setLatLng(latLng).setContent(popupContent).openOn(getMap());
     schedule(() => {
       const popupElement = popup.getElement?.() ?? null;
       setupDetailsLazyImages(popupElement || document);
@@ -111,9 +97,7 @@ export function createShapeMemoRuntime({
     return true;
   };
 
-  const attachShapeMemoPopup = (
-    layer: ShapeMemoLayer | null | undefined,
-  ): void => {
+  const attachShapeMemoPopup = (layer: ShapeMemoLayer | null | undefined): void => {
     if (!layer || layer.shapeMemoClickBound === true) return;
     layer.shapeMemoClickBound = true;
     layer.on("click", (event) => {
@@ -129,10 +113,7 @@ export function createShapeMemoRuntime({
 
     const tooltip = layer.getTooltip?.() ?? null;
     const tooltipElement = tooltip?.getElement?.() ?? null;
-    if (
-      !tooltipElement ||
-      tooltipElement.dataset.shapeMemoOpenBound === "true"
-    ) {
+    if (!tooltipElement || tooltipElement.dataset.shapeMemoOpenBound === "true") {
       return;
     }
 

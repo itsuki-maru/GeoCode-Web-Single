@@ -76,11 +76,7 @@ export function createMapObjectFocusController<TMarker extends object>({
     focusedShapeLayerIsTemporary = false;
   };
 
-  const focusMarker = (
-    markerId: string | number,
-    latitude: unknown,
-    longitude: unknown,
-  ): void => {
+  const focusMarker = (markerId: string | number, latitude: unknown, longitude: unknown): void => {
     clearFocusedShapeFocus();
     if (latitude === "" || longitude === "" || !isValidCoordinate(latitude, longitude)) {
       console.log("Not value.");

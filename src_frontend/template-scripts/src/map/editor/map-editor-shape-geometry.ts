@@ -115,9 +115,7 @@ async function persistShapeGeometryEdit(layer, snapshot, options = {}) {
   }
   const nextShapeType = options.shapeType || layer.shapeType;
   const targetLayerId =
-    layer.layerId ||
-    layer.options?.shapeRecord?.layer_id ||
-    getCurrentShapeLayerId();
+    layer.layerId || layer.options?.shapeRecord?.layer_id || getCurrentShapeLayerId();
   if (!targetLayerId) {
     restoreShapeGeometry(layer, snapshot);
     refreshShapeGeometryPresentation(layer);
@@ -193,8 +191,7 @@ function applyShapeVertexDrag(layer, vertexIndex, nextLatLng, activeHandle) {
 
   if (layer.shapeType === "rectangle" && vertices.length === 4) {
     const oppositeVertex =
-      activeHandle?.shapeRectangleOppositeLatLng ||
-      vertices[(vertexIndex + 2) % 4];
+      activeHandle?.shapeRectangleOppositeLatLng || vertices[(vertexIndex + 2) % 4];
     const nextBounds = L.latLngBounds(oppositeVertex, nextLatLng);
     layer.setLatLngs([
       nextBounds.getSouthWest(),
@@ -392,9 +389,7 @@ function rebuildShapeGeometryHandles(layer) {
       handle.on("dragstart", () => {
         handle.shapeGeometrySnapshot = captureShapeGeometry(layer);
         if (layer.shapeType === "rectangle" && vertices.length === 4) {
-          handle.shapeRectangleOppositeLatLng = cloneShapeLatLngs(
-            vertices[(vertexIndex + 2) % 4],
-          );
+          handle.shapeRectangleOppositeLatLng = cloneShapeLatLngs(vertices[(vertexIndex + 2) % 4]);
         }
         closeShapeNameEditor();
       });
@@ -472,20 +467,13 @@ function activateShapeForVertexAdd(layer) {
 
 // DOM のマウス・タッチイベントから地図上の緯度経度を取得する
 function getShapeDragEventLatLng(event) {
-  const sourceEvent =
-    event?.touches?.[0] || event?.changedTouches?.[0] || event;
-  if (
-    !Number.isFinite(sourceEvent?.clientX) ||
-    !Number.isFinite(sourceEvent?.clientY)
-  ) {
+  const sourceEvent = event?.touches?.[0] || event?.changedTouches?.[0] || event;
+  if (!Number.isFinite(sourceEvent?.clientX) || !Number.isFinite(sourceEvent?.clientY)) {
     return null;
   }
   const mapRect = map.getContainer().getBoundingClientRect();
   return map.containerPointToLatLng(
-    L.point(
-      sourceEvent.clientX - mapRect.left,
-      sourceEvent.clientY - mapRect.top,
-    ),
+    L.point(sourceEvent.clientX - mapRect.left, sourceEvent.clientY - mapRect.top),
   );
 }
 
@@ -547,13 +535,8 @@ function handleCircleShapeDragMove(event) {
     return;
   }
   event.preventDefault?.();
-  const currentPointerPoint = map.project(
-    pointerLatLng,
-    circleShapeDragState.zoom,
-  );
-  const pointerOffset = currentPointerPoint.subtract(
-    circleShapeDragState.startPointerPoint,
-  );
+  const currentPointerPoint = map.project(pointerLatLng, circleShapeDragState.zoom);
+  const pointerOffset = currentPointerPoint.subtract(circleShapeDragState.startPointerPoint);
   const nextCenter = map.unproject(
     circleShapeDragState.startCenterPoint.add(pointerOffset),
     circleShapeDragState.zoom,
@@ -596,15 +579,9 @@ function getClosestPointOnShapeSegment(targetPoint, startPoint, endPoint) {
   const targetY = targetPoint.y - startPoint.y;
   const ratio = Math.max(
     0,
-    Math.min(
-      1,
-      (targetX * segmentX + targetY * segmentY) / segmentLengthSquared,
-    ),
+    Math.min(1, (targetX * segmentX + targetY * segmentY) / segmentLengthSquared),
   );
-  return L.point(
-    startPoint.x + segmentX * ratio,
-    startPoint.y + segmentY * ratio,
-  );
+  return L.point(startPoint.x + segmentX * ratio, startPoint.y + segmentY * ratio);
 }
 
 // 図形の全辺からクリック位置に最も近い辺と挿入座標を取得する
@@ -618,8 +595,7 @@ function findShapeVertexInsertion(layer, targetLatLng) {
     return null;
   }
 
-  const isClosedShape =
-    layer.shapeType === "polygon" || layer.shapeType === "rectangle";
+  const isClosedShape = layer.shapeType === "polygon" || layer.shapeType === "rectangle";
   const segmentCount = isClosedShape ? vertices.length : vertices.length - 1;
   const targetPoint = map.latLngToLayerPoint(targetLatLng);
   let closestMatch = null;
@@ -628,11 +604,7 @@ function findShapeVertexInsertion(layer, targetLatLng) {
     const nextVertexIndex = (segmentIndex + 1) % vertices.length;
     const startPoint = map.latLngToLayerPoint(vertices[segmentIndex]);
     const endPoint = map.latLngToLayerPoint(vertices[nextVertexIndex]);
-    const closestPoint = getClosestPointOnShapeSegment(
-      targetPoint,
-      startPoint,
-      endPoint,
-    );
+    const closestPoint = getClosestPointOnShapeSegment(targetPoint, startPoint, endPoint);
     const distancePx = targetPoint.distanceTo(closestPoint);
     if (!closestMatch || distancePx < closestMatch.distancePx) {
       closestMatch = {
@@ -643,20 +615,14 @@ function findShapeVertexInsertion(layer, targetLatLng) {
     }
   }
 
-  if (
-    !closestMatch ||
-    closestMatch.distancePx > SHAPE_VERTEX_ADD_TOLERANCE_PX
-  ) {
+  if (!closestMatch || closestMatch.distancePx > SHAPE_VERTEX_ADD_TOLERANCE_PX) {
     return null;
   }
 
   const closestPoint = map.latLngToLayerPoint(closestMatch.latLng);
   closestMatch.existingVertexDistancePx = vertices.reduce(
     (minimumDistance, vertex) =>
-      Math.min(
-        minimumDistance,
-        closestPoint.distanceTo(map.latLngToLayerPoint(vertex)),
-      ),
+      Math.min(minimumDistance, closestPoint.distanceTo(map.latLngToLayerPoint(vertex))),
     Number.POSITIVE_INFINITY,
   );
   return closestMatch;
@@ -686,33 +652,23 @@ function activateShapeForVertexAddFromEvent(
   }
   consumeShapeVertexAddEvent(event);
   if (isShapeGeometrySaving) {
-    setDrawStatus(
-      "図形編集: 保存中です。少し待ってから図形を選択してください。",
-      true,
-    );
+    setDrawStatus("図形編集: 保存中です。少し待ってから図形を選択してください。", true);
     return true;
   }
   if (!activateShapeForVertexAdd(layer)) {
     return false;
   }
-  setDrawStatus(
-    "図形編集: 図形を選択しました。頂点を追加する辺をクリックしてください。",
-  );
+  setDrawStatus("図形編集: 図形を選択しました。頂点を追加する辺をクリックしてください。");
   return true;
 }
 
 // 入力モードで図形の辺をクリックした位置へ新しい頂点を追加する
 function tryAddShapeVertex(layer, event, knownInsertion = null) {
-  if (
-    currentMapMode !== "input" ||
-    activeDrawMode ||
-    !canAddVertexToShape(layer)
-  ) {
+  if (currentMapMode !== "input" || activeDrawMode || !canAddVertexToShape(layer)) {
     return false;
   }
 
-  const insertion =
-    knownInsertion || findShapeVertexInsertion(layer, event?.latlng);
+  const insertion = knownInsertion || findShapeVertexInsertion(layer, event?.latlng);
   if (!insertion) {
     return false;
   }
@@ -720,10 +676,7 @@ function tryAddShapeVertex(layer, event, knownInsertion = null) {
   consumeShapeVertexAddEvent(event);
 
   if (isShapeGeometrySaving) {
-    setDrawStatus(
-      "図形編集: 保存中です。少し待ってから追加してください。",
-      true,
-    );
+    setDrawStatus("図形編集: 保存中です。少し待ってから追加してください。", true);
     return true;
   }
 
@@ -755,11 +708,7 @@ function tryAddShapeVertex(layer, event, knownInsertion = null) {
 
 // 入力モードのクリック位置に最も近い図形の辺へ頂点を追加する
 function tryAddShapeVertexAtLatLng(event) {
-  if (
-    currentMapMode !== "input" ||
-    activeDrawMode ||
-    !map.hasLayer(drawnShapesGroup)
-  ) {
+  if (currentMapMode !== "input" || activeDrawMode || !map.hasLayer(drawnShapesGroup)) {
     return false;
   }
 
@@ -768,8 +717,7 @@ function tryAddShapeVertexAtLatLng(event) {
     const insertion = findShapeVertexInsertion(layer, event?.latlng);
     if (
       insertion &&
-      (!closestTarget ||
-        insertion.distancePx < closestTarget.insertion.distancePx)
+      (!closestTarget || insertion.distancePx < closestTarget.insertion.distancePx)
     ) {
       closestTarget = { layer, insertion };
     }
@@ -814,10 +762,7 @@ function attachShapeEvents(layer) {
     });
   }
 
-  const handleDeleteEvent = async function (
-    event,
-    shouldSuppressClick = false,
-  ) {
+  const handleDeleteEvent = async function (event, shouldSuppressClick = false) {
     if (activeDrawMode === "delete") {
       if (event.originalEvent) {
         L.DomEvent.stop(event.originalEvent);
@@ -850,10 +795,7 @@ function attachShapeEvents(layer) {
         activateShapeForVertexAddFromEvent(layer, event, true);
         return;
       }
-      if (
-        event.type === "click" &&
-        !findShapeVertexInsertion(layer, event?.latlng)
-      ) {
+      if (event.type === "click" && !findShapeVertexInsertion(layer, event?.latlng)) {
         consumeShapeVertexAddEvent(event);
         setDrawStatus(
           "図形編集: 頂点を追加する場合は選択中の図形の辺をクリックしてください。",

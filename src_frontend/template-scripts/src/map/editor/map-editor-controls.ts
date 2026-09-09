@@ -7,11 +7,7 @@ const TooltipVisibleControl = L.Control.extend({
     const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
 
     // ラジオボタンのHTMLを動的に生成
-    const button = L.DomUtil.create(
-      "button",
-      "custom-control-button",
-      container,
-    );
+    const button = L.DomUtil.create("button", "custom-control-button", container);
     button.innerHTML = "マーカー名表示";
 
     // ボタンのクリックイベント
@@ -61,16 +57,10 @@ if (editorEntryProfile.isMobile) {
   map.addControl(markerSearchControl);
 }
 
-// 現在位置コントロールは共通処理内で追加されるため、追加前後の差分から登録する
-const controlsBeforeUserLocation = editorEntryProfile.isMobile
-  ? getMapControlContainersSnapshot()
-  : null;
+// 現在位置コントロールは機能の表示切替にかかわらず常に表示する。
 const userLocationLayer = initializeUserLocation(map, {
   centerOnInitialPosition: shouldCenterOnInitialUserLocation,
 });
-if (editorEntryProfile.isMobile) {
-  registerNewHideableMapControlContainers(controlsBeforeUserLocation);
-}
 if (userLocationLayer && !getInitialUserLocationVisibility()) {
   map.removeLayer(userLocationLayer);
 }
@@ -117,11 +107,9 @@ const DrawShapeControl = L.Control.extend({
             </div>
         `;
 
-    container
-      .querySelector("#draw-toggle-btn")
-      .addEventListener("click", () => {
-        toggleDrawPanel();
-      });
+    container.querySelector("#draw-toggle-btn").addEventListener("click", () => {
+      toggleDrawPanel();
+    });
 
     container.querySelectorAll("[data-draw-mode]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -129,24 +117,18 @@ const DrawShapeControl = L.Control.extend({
       });
     });
 
-    container
-      .querySelector("#draw-complete-btn")
-      .addEventListener("click", async () => {
-        await completeActiveDrawing();
-      });
+    container.querySelector("#draw-complete-btn").addEventListener("click", async () => {
+      await completeActiveDrawing();
+    });
 
-    container
-      .querySelector("#draw-cancel-btn")
-      .addEventListener("click", () => {
-        closeShapeNameEditor();
-        resetDrawingState("図形描画: キャンセルしました。");
-      });
+    container.querySelector("#draw-cancel-btn").addEventListener("click", () => {
+      closeShapeNameEditor();
+      resetDrawingState("図形描画: キャンセルしました。");
+    });
 
-    container
-      .querySelector("#draw-undo-btn")
-      .addEventListener("click", async () => {
-        await undoDeletedShape();
-      });
+    container.querySelector("#draw-undo-btn").addEventListener("click", async () => {
+      await undoDeletedShape();
+    });
 
     updateUndoButtonState();
     toggleDrawPanel(false);
@@ -159,8 +141,7 @@ const DrawShapeControl = L.Control.extend({
 const drawShapeControl = new DrawShapeControl();
 map.addControl(drawShapeControl);
 if (editorEntryProfile.isMobile) registerHideableMapControl(drawShapeControl);
-const suppressInitialShapeRendering =
-  shouldSuppressInitialShapeRendering(shapesFromAxum);
+const suppressInitialShapeRendering = shouldSuppressInitialShapeRendering(shapesFromAxum);
 restoreSavedShapes();
 if (!suppressInitialShapeRendering && getInitialShapeLayerVisibility()) {
   drawnShapesGroup.addTo(map);
@@ -181,8 +162,7 @@ shapeNameLabelManager.refresh();
 shapeMeasurementManager = createViewportShapeMeasurementManager({
   map,
   getLayers: () => searchableShapeLayers,
-  attachMarkers: (layer, bounds) =>
-    attachShapeMeasurementMarkers(layer, bounds),
+  attachMarkers: (layer, bounds) => attachShapeMeasurementMarkers(layer, bounds),
   removeMarkers: removeShapeMeasurementMarkers,
 });
 const shapeLayerOverlays = {
@@ -252,21 +232,10 @@ const MeasurementVisibleControl = L.Control.extend({
     position: "topleft",
   },
   onAdd: function (map) {
-    const container = L.DomUtil.create(
-      "div",
-      "leaflet-bar leaflet-control measurement-control",
-    );
-    const button = L.DomUtil.create(
-      "button",
-      "custom-control-button",
-      container,
-    );
+    const container = L.DomUtil.create("div", "leaflet-bar leaflet-control measurement-control");
+    const button = L.DomUtil.create("button", "custom-control-button", container);
     button.innerHTML = "図形の計測";
-    const mergeButton = L.DomUtil.create(
-      "button",
-      "custom-control-button is-hidden",
-      container,
-    );
+    const mergeButton = L.DomUtil.create("button", "custom-control-button is-hidden", container);
     mergeButton.id = "measurement-merge-toggle-btn";
     mergeButton.type = "button";
     mergeButton.innerHTML = "辺を結合";
