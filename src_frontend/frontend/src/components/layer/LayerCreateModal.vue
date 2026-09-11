@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import TileOverlayChoices from "./TileOverlayChoices.vue";
 import BaseModal from "@/components/common/BaseModal.vue";
 import { useLayersStore } from "@/stores/layers";
 import { addLayerUrl } from "@/router/urls";
@@ -12,12 +13,15 @@ defineProps<{
 
 const emit = defineEmits<{
   close: [];
+  tilesChanged: [tiles: unknown[]];
   message: [text: string];
   loginRedirect: [];
 }>();
 
 const layersStore = useLayersStore();
 const newLayerName = ref("");
+const mode = ref("group");
+const tilesSaving = ref(false);
 
 const layerAdd = async (): Promise<void> => {
   if (newLayerName.value === "") {
@@ -57,10 +61,37 @@ const layerAdd = async (): Promise<void> => {
 </script>
 
 <template>
-  <BaseModal :isOpen="isOpen" @close="emit('close')">
+  <BaseModal :isOpen="isOpen" @close="!tilesSaving && emit('close')">
     <div class="layer-create-content">
       <h2 class="modal-h2">新規レイヤ作成</h2>
-      <div class="setting-contents">
+      <div class="layer-type" role="radiogroup" aria-label="レイヤの種類">
+        <label
+          ><input
+            type="radio"
+            :disabled="tilesSaving"
+            v-model="mode"
+            value="group"
+          />レイヤ（グループ）</label
+        >
+        <label
+          ><input
+            type="radio"
+            :disabled="tilesSaving"
+            v-model="mode"
+            value="tiles"
+          />重ね合わせタイル</label
+        >
+      </div>
+      <div v-if="mode === 'tiles'">
+        <TileOverlayChoices
+          v-if="isOpen"
+          @busy="tilesSaving = $event"
+          @changed="emit('tilesChanged', $event)"
+          @loginRedirect="emit('loginRedirect')"
+        />
+        <button class="tile-close-button" type="button" :disabled="tilesSaving" @click="emit('close')">閉じる</button>
+      </div>
+      <div v-else class="setting-contents">
         <div class="input-zone">
           <input
             type="text"
@@ -82,6 +113,22 @@ const layerAdd = async (): Promise<void> => {
 </template>
 
 <style scoped>
+.tile-close-button {
+  margin-top: 20px;
+}
+.layer-type {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 16px 0;
+}
+.layer-type label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .layer-create-content {
   width: 45vw;
 }

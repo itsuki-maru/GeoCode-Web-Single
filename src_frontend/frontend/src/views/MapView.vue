@@ -696,6 +696,10 @@ const onImageDeleteRequest = (id: string): void => {
   imagePreviewReadOnly.value = false;
   imagePreviewModal.value = true;
 };
+async function syncTileOverlays(tiles: unknown[]): Promise<void> {
+  const updated = await mapIframeRef.value?.updateTileOverlays(tiles);
+  if (!updated) mapIframeRef.value?.reloadMapFrame();
+}
 </script>
 
 <template>
@@ -780,6 +784,7 @@ const onImageDeleteRequest = (id: string): void => {
   />
 
   <LayerCreateModal
+    @tilesChanged="syncTileOverlays"
     :isOpen="isNewLayerModal"
     @close="isNewLayerModal = false"
     @message="showMessage"

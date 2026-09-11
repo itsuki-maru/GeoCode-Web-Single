@@ -54,6 +54,19 @@ const routeSettings: RouteRecordRaw[] = [
     },
   },
   {
+    path: "/tile-overlays",
+    name: "TileOverlays",
+    component: () => import("@/views/TileOverlays.vue"),
+    beforeEnter: async (_to, _from, next) => {
+      try {
+        await apiClient.get(getUserUrl);
+        next();
+      } catch {
+        next({ name: "login" });
+      }
+    },
+  },
+  {
     path: "/:pathMatch(.*)*",
     name: "NotFound",
     component: () => import("@/views/NotFoundAdmin.vue"),

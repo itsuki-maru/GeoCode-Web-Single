@@ -47,7 +47,7 @@ const reloadMapFrame = (): boolean => {
 };
 
 const requestMapObjectMutation = (
-  type: "mapObjectUpdate" | "mapObjectDelete",
+  type: "mapObjectUpdate" | "mapObjectDelete" | "tileOverlaysUpdate",
   messageData: Record<string, unknown>,
 ): Promise<boolean> => {
   const requestId = `map-object-${Date.now()}-${++mapObjectRequestSequence}`;
@@ -135,6 +135,7 @@ const handleMessage = async (event: MessageEvent): Promise<void> => {
   } else if (event.data.type === "callParentLoginRedirect") {
     emit("loginRedirect");
   } else if (
+    event.data.type === "tileOverlaysUpdateResult" ||
     event.data.type === "mapObjectUpdateResult" ||
     event.data.type === "mapObjectDeleteResult"
   ) {
@@ -163,7 +164,17 @@ onUnmounted(() => {
   pendingMapObjectRequests.clear();
 });
 
-defineExpose({ deleteMapObject, focusObject, filterMapObjects, reloadMapFrame, updateMapObject });
+const updateTileOverlays = (tiles: unknown[]): Promise<boolean> =>
+  requestMapObjectMutation("tileOverlaysUpdate", { tiles: JSON.parse(JSON.stringify(tiles)) });
+
+defineExpose({
+  updateTileOverlays,
+  deleteMapObject,
+  focusObject,
+  filterMapObjects,
+  reloadMapFrame,
+  updateMapObject,
+});
 </script>
 
 <template>

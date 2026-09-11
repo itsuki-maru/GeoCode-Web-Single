@@ -45,7 +45,7 @@ async fn migrations_create_schema_and_record_versions() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 10);
+    assert_eq!(migration_count, 11);
 
     let live_location_table_count: i64 = sqlx::query_scalar(
         r#"
@@ -164,7 +164,7 @@ async fn migrations_are_idempotent() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 10);
+    assert_eq!(migration_count, 11);
 }
 
 #[tokio::test]
@@ -247,7 +247,7 @@ async fn migrations_record_versions_for_existing_schema() {
     .await
     .expect("migration rows should be returned");
 
-    assert_eq!(rows.len(), 10);
+    assert_eq!(rows.len(), 11);
     assert_eq!(rows[0].get::<i64, _>("version"), 1);
     assert_eq!(rows[0].get::<String, _>("name"), "create_initial_schema");
     assert_eq!(rows[1].get::<i64, _>("version"), 2);

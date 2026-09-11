@@ -293,6 +293,7 @@
             window.__GEOCODE_LIVE_MAP_BOOTSTRAP__ = {
                 publicId: "{{ publicId }}",
                 tileServers: {{ tileServers | json_encode_for_html | safe }},
+            tileOverlays: {{ tileOverlays | json_encode_for_html | safe }},
             };
         </script>
         <script type="module" src="/assets/template-live-map.js"></script>

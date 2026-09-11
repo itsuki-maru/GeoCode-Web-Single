@@ -130,6 +130,17 @@ window.addEventListener("message", function (event) {
       applyMapObjectFilter(messageData["markerIds"], messageData["shapeIds"]);
     } else if (messageData["type"] === "markerFilter") {
       applyMarkerFilter(messageData["ids"]);
+    } else if (messageData["type"] === "tileOverlaysUpdate") {
+      let success = false;
+      try {
+        success = tileOverlayManager.sync(messageData.tiles);
+      } catch {
+        /* Parent reloads on failure. */
+      }
+      window.parent.postMessage(
+        { type: "tileOverlaysUpdateResult", requestId: messageData.requestId, success },
+        event.origin,
+      );
     } else if (messageData["type"] === "mapObjectUpdate") {
       let success = false;
       try {

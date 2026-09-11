@@ -15,3 +15,5 @@ pub mod onetime_url;
 pub mod shapes;
 pub mod tiles;
 pub mod totp;
+
+pub mod tile_overlays;

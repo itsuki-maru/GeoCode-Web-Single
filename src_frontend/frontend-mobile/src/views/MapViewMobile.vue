@@ -634,6 +634,10 @@ watch(
     }
   },
 );
+async function syncTileOverlays(tiles: unknown[]): Promise<void> {
+  const updated = await mapIframeRef.value?.updateTileOverlays(tiles);
+  if (!updated) mapIframeRef.value?.reloadMapFrame();
+}
 </script>
 
 <template>
@@ -807,6 +811,7 @@ watch(
 
   <!-- レイヤ作成モーダル -->
   <LayerCreateModal
+    @tilesChanged="syncTileOverlays"
     :isOpen="isNewLayerSetUpModal"
     @close="isNewLayerSetUpModal = false"
     @created="() => {}"
