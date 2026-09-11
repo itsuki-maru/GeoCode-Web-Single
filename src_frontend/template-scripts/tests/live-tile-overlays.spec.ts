@@ -64,10 +64,24 @@ function setup() {
     opacity: 0.7,
     sort_order: i,
   }));
-  return { leaflet, map, containers, records };
+  return { leaflet, map, containers, records, visible };
 }
 
 describe("live tile overlay control", () => {
+  it.each([false, true])("initial visibility follows the URL setting (%s)", (checked) => {
+    for (const mobile of [false, true]) {
+      const s = setup();
+      addLiveTileOverlayControl(s.leaflet, s.map, s.records, mobile, checked);
+      expect(s.visible.size).toBe(checked ? 4 : 0);
+      expect(s.containers[0].querySelectorAll("label")).toHaveLength(4);
+    }
+  });
+  it("defaults to unchecked while retaining the control entries", () => {
+    const s = setup();
+    addLiveTileOverlayControl(s.leaflet, s.map, s.records, false);
+    expect(s.visible.size).toBe(0);
+    expect(s.containers[0].querySelectorAll("label")).toHaveLength(4);
+  });
   it("does not create an empty control", () => {
     const s = setup();
     expect(addLiveTileOverlayControl(s.leaflet, s.map, [], true)).toBeNull();

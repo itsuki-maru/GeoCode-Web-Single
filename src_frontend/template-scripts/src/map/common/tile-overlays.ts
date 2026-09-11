@@ -13,7 +13,7 @@ export interface TileOverlayRecord {
 }
 
 // Leaflet is loaded by the page; keep this boundary independent of its global types.
-export function createTileOverlayManager(leaflet: any, map: any, control: any, accountId?: string) {
+export function createTileOverlayManager(leaflet: any, map: any, control: any, accountId?: string, initiallyVisible = true) {
   const paneName = "tileOverlays";
   const pane = map.getPane(paneName) || map.createPane(paneName);
   pane.style.zIndex = "250";
@@ -65,7 +65,7 @@ export function createTileOverlayManager(leaflet: any, map: any, control: any, a
         }
         const visible = previous
           ? map.hasLayer(previous.layer)
-          : (savedVisibility[record.id] ?? true);
+          : (savedVisibility[record.id] ?? initiallyVisible);
         if (previous) {
           active.delete(record.id);
           control.removeLayer(previous.layer);

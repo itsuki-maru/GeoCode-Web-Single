@@ -212,6 +212,7 @@ async fn shares_the_latest_position_without_redis_and_revokes_public_access() {
         Extension(geocode_web_single::build_tera_extension().unwrap()),
         Extension(pool),
         Path("invalid-public-id".to_string()),
+        axum::extract::Query(Default::default()),
     )
     .await
     .expect("invalid URL should render the not-found page");
@@ -256,11 +257,65 @@ async fn password_protects_live_map_when_redis_is_absent() {
     .into_response();
     assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
 
+    let tera = geocode_web_single::build_tera_extension().unwrap();
+    tera.lock()
+        .await
+        .add_raw_template(
+            "live-map-password.html",
+            &std::fs::read_to_string("src/templates/live-map-password.html").unwrap(),
+        )
+        .unwrap();
+    let query = || {
+        axum::extract::Query(geocode_web_single::handler::live_map::LiveMapViewParams {
+            is_check_overlay: Some("true".into()),
+        })
+    };
+    let password_page = live_map_page_handler(
+        HeaderMap::new(),
+        Extension(tera.clone()),
+        Extension(pool.clone()),
+        Path(public_id.clone()),
+        query(),
+    )
+    .await
+    .unwrap();
+    let body = String::from_utf8(
+        to_bytes(password_page.into_body(), 1_000_000)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(body.contains(&format!(
+        "/live/{public_id}/authenticate?is_check_overlay=true"
+    )));
+    let failed = authenticate_live_map_handler(
+        HeaderMap::new(),
+        Extension(pool.clone()),
+        Extension(tera.clone()),
+        Path(public_id.clone()),
+        query(),
+        Form(LiveMapPasswordForm {
+            password: "wrong-password".into(),
+        }),
+    )
+    .await
+    .unwrap();
+    let body = String::from_utf8(
+        to_bytes(failed.into_body(), 1_000_000)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(body.contains("authenticate?is_check_overlay=true"));
+
     let auth_response = authenticate_live_map_handler(
         HeaderMap::new(),
         Extension(pool.clone()),
         Extension(geocode_web_single::build_tera_extension().unwrap()),
         Path(public_id.clone()),
+        query(),
         Form(LiveMapPasswordForm {
             password: "test-password".into(),
         }),
@@ -268,6 +323,10 @@ async fn password_protects_live_map_when_redis_is_absent() {
     .await
     .expect("correct password should authenticate");
     assert_eq!(auth_response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        auth_response.headers()["location"],
+        format!("/live/{public_id}?is_check_overlay=true")
+    );
     let cookie = auth_response
         .headers()
         .get("set-cookie")

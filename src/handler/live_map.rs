@@ -1,7 +1,7 @@
 use axum::{
     Form, Json,
     body::Body,
-    extract::{Extension, Path},
+    extract::{Extension, Path, Query},
     http::{
         HeaderMap, HeaderValue, StatusCode,
         header::{CACHE_CONTROL, LOCATION, REFERRER_POLICY, SET_COOKIE},
@@ -589,13 +589,28 @@ fn no_store_html(rendered: String) -> Response {
         .into_response()
 }
 
+#[derive(Default, Deserialize)]
+pub struct LiveMapViewParams {
+    pub is_check_overlay: Option<String>,
+}
+
+impl LiveMapViewParams {
+    fn overlays_checked(&self) -> bool {
+        self.is_check_overlay
+            .as_deref()
+            .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+    }
+}
+
 async fn render_password_page(
     tera: &Arc<Mutex<Tera>>,
     public_id: &str,
     error_message: Option<&str>,
+    is_check_overlay: bool,
 ) -> Result<Response, AppError> {
     let mut context = Context::new();
     context.insert("publicId", &public_id);
+    context.insert("isCheckOverlay", &is_check_overlay);
     context.insert("errorMessage", &error_message.unwrap_or(""));
     let rendered = tera
         .lock()
@@ -612,6 +627,7 @@ async fn render_live_map(
     tera: &Arc<Mutex<Tera>>,
     pool: &SqlitePool,
     public_id: &str,
+    is_check_overlay: bool,
 ) -> Result<Response, AppError> {
     let tile_servers = sqlx::query_as::<_, TileServers>(
         r#"
@@ -635,6 +651,7 @@ async fn render_live_map(
     let tile_servers = vec_to_hashmap(tile_servers, |tile_server| tile_server.id);
     let mut context = Context::new();
     context.insert("publicId", &public_id);
+    context.insert("isCheckOverlay", &is_check_overlay);
     context.insert("tileServers", &tile_servers);
     let owner: String = sqlx::query_scalar("SELECT created_by FROM live_map WHERE public_id=$1")
         .bind(&public_id)
@@ -687,6 +704,7 @@ pub async fn live_map_page_handler(
     Extension(tera): Extension<Arc<Mutex<Tera>>>,
     Extension(pool): Extension<SqlitePool>,
     Path(public_id): Path<String>,
+    Query(params): Query<LiveMapViewParams>,
 ) -> Result<Response, AppError> {
     let public_id = match Uuid::parse_str(&public_id) {
         Ok(public_id) => public_id.to_string(),
@@ -698,9 +716,9 @@ pub async fn live_map_page_handler(
         Err(error) => return Err(error),
     };
     if map.password_hash.is_some() && !viewer_cookie_is_valid(&headers, &map) {
-        return render_password_page(&tera, &public_id, None).await;
+        return render_password_page(&tera, &public_id, None, params.overlays_checked()).await;
     }
-    render_live_map(&tera, &pool, &public_id).await
+    render_live_map(&tera, &pool, &public_id, params.overlays_checked()).await
 }
 
 fn client_rate_limit_key(headers: &HeaderMap) -> String {
@@ -769,6 +787,7 @@ pub async fn authenticate_live_map_handler(
     Extension(pool): Extension<SqlitePool>,
     Extension(tera): Extension<Arc<Mutex<Tera>>>,
     Path(public_id): Path<String>,
+    Query(params): Query<LiveMapViewParams>,
     Form(form): Form<LiveMapPasswordForm>,
 ) -> Result<Response, AppError> {
     let public_id = Uuid::parse_str(&public_id)
@@ -778,14 +797,25 @@ pub async fn authenticate_live_map_handler(
     let Some(password_hash) = map.password_hash.as_deref() else {
         return Ok(Response::builder()
             .status(StatusCode::SEE_OTHER)
-            .header(LOCATION, format!("/live/{public_id}"))
+            .header(
+                LOCATION,
+                format!(
+                    "/live/{public_id}?is_check_overlay={}",
+                    params.overlays_checked()
+                ),
+            )
             .body(Body::empty())
             .map_err(|_| AppError::InternalServerError)?);
     };
     check_password_rate_limit(&pool, &map.id, &headers).await?;
     if !verify(form.password.trim(), password_hash).unwrap_or(false) {
-        return render_password_page(&tera, &public_id, Some("パスワードが正しくありません。"))
-            .await;
+        return render_password_page(
+            &tera,
+            &public_id,
+            Some("パスワードが正しくありません。"),
+            params.overlays_checked(),
+        )
+        .await;
     }
     sqlx::query("DELETE FROM live_map_password_rate_limit WHERE map_id = $1 AND client_key = $2")
         .bind(&map.id)
@@ -794,7 +824,13 @@ pub async fn authenticate_live_map_handler(
         .await?;
     Ok(Response::builder()
         .status(StatusCode::SEE_OTHER)
-        .header(LOCATION, format!("/live/{public_id}"))
+        .header(
+            LOCATION,
+            format!(
+                "/live/{public_id}?is_check_overlay={}",
+                params.overlays_checked()
+            ),
+        )
         .header(SET_COOKIE, viewer_cookie(&map)?)
         .header(CACHE_CONTROL, "no-store")
         .body(Body::empty())
