@@ -421,7 +421,9 @@ CREATE TABLE IF NOT EXISTS live_map_password_rate_limit (
     Migration {
         version: 11,
         name: "create_tile_overlays",
-        statements: &[include_str!("../../migrations/20260911120000_create_tile_overlays.sql")],
+        statements: &[include_str!(
+            "../../migrations/20260911120000_create_tile_overlays.sql"
+        )],
     },
 ];
 

@@ -123,8 +123,14 @@ pub fn build_router(
     let mut secured_routes = Router::new()
         .route("/tile-overlays", get(tile_overlays::user_list))
         .route("/tile-overlays/{id}", put(tile_overlays::user_select))
-        .route("/admin/tile-overlays", get(tile_overlays::admin_list).post(tile_overlays::admin_create))
-        .route("/admin/tile-overlays/{id}", put(tile_overlays::admin_update).delete(tile_overlays::admin_delete))
+        .route(
+            "/admin/tile-overlays",
+            get(tile_overlays::admin_list).post(tile_overlays::admin_create),
+        )
+        .route(
+            "/admin/tile-overlays/{id}",
+            put(tile_overlays::admin_update).delete(tile_overlays::admin_delete),
+        )
         .route("/map", get(map_get_handler))
         .route("/map-another", get(map_another_get_handler))
         .route("/account/auth", get(auth_check_handler))
