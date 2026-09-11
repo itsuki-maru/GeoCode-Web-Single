@@ -409,7 +409,21 @@ async fn selection_waits_for_concurrent_disable() {
         .unwrap();
     assert_eq!(count, 0);
     pool.close().await;
-    std::fs::remove_file(path).unwrap();
+    // Windows can briefly retain a file handle after the pool closes. Retry
+    // only sharing/lock violations; never hide other errors or a lasting lock.
+    for attempt in 0..50 {
+        match std::fs::remove_file(&path) {
+            Ok(()) => break,
+            Err(error)
+                if cfg!(windows)
+                    && matches!(error.raw_os_error(), Some(32 | 33))
+                    && attempt < 49 =>
+            {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            },
+            Err(error) => panic!("failed to remove test database {}: {error}", path.display()),
+        }
+    }
 }
 
 #[tokio::test]
