@@ -177,6 +177,8 @@ const shapeLayersControl = L.control.layers(null, shapeLayerOverlays, {
   collapsed: false,
 });
 shapeLayersControl.addTo(map);
+const tileOverlayManager = createTileOverlayManager(L, map, shapeLayersControl, window.__GEOCODE_MAP_BOOTSTRAP__.tileVisibilityAccountId);
+tileOverlayManager.sync(window.__GEOCODE_MAP_BOOTSTRAP__.tileOverlays || []);
 if (editorEntryProfile.isMobile) registerHideableMapControl(shapeLayersControl);
 map.on("overlayadd", function (event) {
   if (event.layer === markersClusterGroup) {

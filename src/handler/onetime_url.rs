@@ -670,6 +670,10 @@ async fn render_temporary_map_page(
     context.insert("markersObj", &markers);
     context.insert("shapesObj", &shapes);
     context.insert("tileServers", &tile_servers_hash_map);
+    context.insert(
+        "tileOverlays",
+        &crate::handler::tile_overlays::selected_tiles(pool, &temp_url.user_id).await?,
+    );
     context.insert("isChecked", &is_checked);
     context.insert("latitude", &initial_view.latitude);
     context.insert("longitude", &initial_view.longitude);

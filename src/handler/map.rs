@@ -286,6 +286,11 @@ pub async fn map_get_handler(
     context.insert("longitude", &longitude);
     context.insert("zoom", &zoom);
     context.insert("tileServers", &tile_servers_hash_map);
+    context.insert("tileVisibilityAccountId", &user_id);
+    context.insert(
+        "tileOverlays",
+        &crate::handler::tile_overlays::selected_tiles(&pool, &user_id).await?,
+    );
     context.insert("layersFromAxum", &layers_hash_map);
     context.insert("markersFromAxum", &markers_hash_map);
     context.insert("shapesFromAxum", &shapes);
@@ -422,6 +427,11 @@ pub async fn map_another_get_handler(
     context.insert("longitude", &DEFAULT_ANOTHER_MAP_LONGITUDE);
     context.insert("zoom", &DEFAULT_ANOTHER_MAP_ZOOM);
     context.insert("tileServers", &tile_servers_hash_map);
+    context.insert("tileVisibilityAccountId", &user_id);
+    context.insert(
+        "tileOverlays",
+        &crate::handler::tile_overlays::selected_tiles(&pool, &user_id).await?,
+    );
     context.insert("is_cluster", &is_cluster);
     context.insert("layersFromAxum", &layers_hash_map);
     context.insert("markersFromAxum", &markers_hash_map);

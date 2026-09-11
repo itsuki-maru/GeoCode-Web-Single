@@ -418,6 +418,13 @@ CREATE TABLE IF NOT EXISTS live_map_password_rate_limit (
             "../../migrations/20260909120000_create_live_location_history.sql"
         )],
     },
+    Migration {
+        version: 11,
+        name: "create_tile_overlays",
+        statements: &[include_str!(
+            "../../migrations/20260911120000_create_tile_overlays.sql"
+        )],
+    },
 ];
 
 // データベース接続の確立

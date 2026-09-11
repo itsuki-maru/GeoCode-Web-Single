@@ -35,6 +35,7 @@ import * as shapeMemoModule from "../../../template-scripts/src/map/common/shape
 import * as shapeStyleModule from "../../../template-scripts/src/map/common/shape-style";
 import * as shapeViewportModule from "../../../template-scripts/src/map/common/shape-viewport";
 import * as storageModule from "../../../template-scripts/src/map/common/storage";
+import { createTileOverlayManager } from "../../../template-scripts/src/map/common/tile-overlays";
 import {
   createMeasurementVisibilityControl,
   createTooltipVisibilityControl,
@@ -332,7 +333,23 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
           shapes: page.globals.shapesObj,
           tileServers: page.globals.tileServers,
         }
-      : undefined;
+      : {
+          page: readOnlyPageName,
+          selectedLayer: page.globals.layer,
+          isMaster: page.globals.is_master,
+          markerId: page.globals.markerId,
+          initialView: {
+            latitude: page.globals.latitude,
+            longitude: page.globals.longitude,
+            zoom: page.globals.zoom,
+          },
+          tileServers: page.globals.tileServers,
+          tileOverlays: [],
+          tileVisibilityAccountId: "smoke-test-account",
+          layers: page.globals.layersFromAxum,
+          markers: page.globals.markersFromAxum,
+          shapes: page.globals.shapesFromAxum,
+        };
   Object.assign(dom.window, page.globals, {
     __GEOCODE_MAP_BOOTSTRAP__: bootstrap,
     addReadOnlyMapVisibilityControls,
@@ -346,6 +363,7 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
     createReadOnlyMarkerLayerControl,
     createReadOnlyMapRuntime,
     createTooltipVisibilityControl,
+    createTileOverlayManager,
     hydrateReadOnlyMarkers,
     installReadOnlyOverlayHandlers,
     ...baseModule,

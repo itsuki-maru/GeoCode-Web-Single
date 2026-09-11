@@ -636,6 +636,14 @@ async fn render_live_map(
     let mut context = Context::new();
     context.insert("publicId", &public_id);
     context.insert("tileServers", &tile_servers);
+    let owner: String = sqlx::query_scalar("SELECT created_by FROM live_map WHERE public_id=$1")
+        .bind(&public_id)
+        .fetch_one(pool)
+        .await?;
+    context.insert(
+        "tileOverlays",
+        &crate::handler::tile_overlays::selected_tiles(pool, &owner).await?,
+    );
     let rendered = tera
         .lock()
         .await

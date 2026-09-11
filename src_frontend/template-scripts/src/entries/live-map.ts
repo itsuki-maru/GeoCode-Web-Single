@@ -1,4 +1,5 @@
 // @ts-nocheck -- Leaflet is provided as a browser global by the server template.
+import { addLiveTileOverlayControl } from "../live-map/tile-overlays";
 import {
   createCollapsibleLayerControl,
   createCurrentLocationControl,
@@ -82,6 +83,7 @@ const locationLayersControl = L.control
     collapsed: false,
   })
   .addTo(map);
+addLiveTileOverlayControl(L, map, bootstrap.tileOverlays || [], isMobile);
 const collapsibleLocationLayers = isMobile
   ? createCollapsibleLayerControl({
       container: locationLayersControl.getContainer(),

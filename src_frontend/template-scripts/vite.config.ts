@@ -13,6 +13,7 @@ const editorVirtualPrefix = "virtual:geocode-editor:";
 const templateScriptsDirectory = fileURLToPath(new URL("./", import.meta.url));
 
 export const editorCommonPrelude = `
+import { createTileOverlayManager } from "/src/map/common/tile-overlays.ts";
 import { createLayerBulkToggleControl, extractYouTubeId } from "/src/map/common/base.ts";
 import { installMapContentActions, resolveSameOriginContentUrl } from "/src/map/common/content-actions.ts";
 import { createNestedTokenizer, isLocalhost, isPDF, isValidCoordinate, renderIframe, setupDetailsLazyImages } from "/src/map/common/content.ts";

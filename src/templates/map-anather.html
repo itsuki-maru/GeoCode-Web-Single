@@ -307,6 +307,8 @@
                 zoom: {{ zoom }},
             },
             tileServers: {{ tileServers | json_encode_for_html | safe }},
+            tileOverlays: {{ tileOverlays | json_encode_for_html | safe }},
+            tileVisibilityAccountId: {{ tileVisibilityAccountId | json_encode_for_html | safe }},
             layers: {{ layersFromAxum | json_encode_for_html | safe }},
             markers: {{ markersFromAxum | json_encode_for_html | safe }},
             shapes: {{ shapesFromAxum | json_encode_for_html | safe }},

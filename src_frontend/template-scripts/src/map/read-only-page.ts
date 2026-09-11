@@ -1,4 +1,5 @@
 // @ts-nocheck -- Leaflet plugins expose incompatible structural types at this integration boundary.
+import { createTileOverlayManager } from "./common/tile-overlays";
 import { readMapBootstrap } from "./bootstrap";
 import { createLayerBulkToggleControl, extractYouTubeId } from "./common/base";
 import {
@@ -490,7 +491,7 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
     onSearch: searchCoordinator.setMapObjectSearchQuery,
   });
   if (isMobile) map.addControl(new MapUiVisibilityToggleControl!());
-  addReadOnlyMapVisibilityControls({
+  const { visibilityControl } = addReadOnlyMapVisibilityControls({
     includeShapeOverlays: isAnother || hasSharedShapes,
     initialUserLocationVisible: isAnother ? storage.getInitialUserLocationVisibility() : undefined,
     initializeUserLocation,
@@ -507,6 +508,8 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
         : undefined,
     visibleMarkerGroup,
   });
+
+  createTileOverlayManager(L, map, visibilityControl, isAnother ? bootstrap.tileVisibilityAccountId : undefined).sync(bootstrap.tileOverlays || []);
 
   return { map, markers, shapeLayers, shapeNameLabelManager };
 }

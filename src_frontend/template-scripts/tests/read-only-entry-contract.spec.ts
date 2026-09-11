@@ -63,6 +63,13 @@ describe("read-only TypeScript entry contract", () => {
     ].forEach((name) => expect(source).toContain(name));
   });
 
+  it("registers tile overlays with map visibility rather than the group list", () => {
+    const source = readFileSync(resolve(packageDirectory, "src/map/read-only-page.ts"), "utf8");
+    expect(source).toContain("const { visibilityControl } = addReadOnlyMapVisibilityControls(");
+    expect(source).toContain("isAnother ? bootstrap.tileVisibilityAccountId : undefined");
+    expect(source).not.toContain("createTileOverlayManager(L, map, markerLayerControl.layersControl)");
+  });
+
   it.each(pages)("%s template loads only its generated module", (page) => {
     const template = readFileSync(
       resolve(repositoryRoot, `src/templates/${page}.html`),

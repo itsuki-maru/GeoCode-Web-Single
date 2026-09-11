@@ -46,12 +46,14 @@ export interface InitialMapView {
 }
 
 interface MapBootstrapBase {
+  tileOverlays?: import("./common/tile-overlays").TileOverlayRecord[];
   layers: Record<string, LayerRecord>;
   markers: Record<string, MarkerRecord>;
   tileServers: Record<string, TileServerRecord>;
 }
 
 export interface EditableMapBootstrap extends MapBootstrapBase {
+  tileVisibilityAccountId?: string;
   initialView: InitialMapView;
   isMaster: boolean;
   markerId: string;
@@ -61,6 +63,7 @@ export interface EditableMapBootstrap extends MapBootstrapBase {
 }
 
 export interface AnotherMapBootstrap extends MapBootstrapBase {
+  tileVisibilityAccountId?: string;
   initialView: InitialMapView;
   isCluster: boolean;
   page: "map-anather";
