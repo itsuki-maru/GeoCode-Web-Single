@@ -7,6 +7,7 @@ export function addLiveTileOverlayControl(
   map: any,
   records: TileOverlayRecord[],
   isMobile: boolean,
+  initiallyVisible = false,
 ) {
   if (!records.length) return null;
   const control = leaflet.control
@@ -19,7 +20,7 @@ export function addLiveTileOverlayControl(
   container.classList.add("live-tile-overlay-control");
   container.setAttribute("role", "group");
   container.setAttribute("aria-label", "重ね合わせタイル");
-  createTileOverlayManager(leaflet, map, control).sync(records);
+  createTileOverlayManager(leaflet, map, control, undefined, initiallyVisible).sync(records);
   const collapsible = isMobile ? createCollapsibleLayerControl({ container, leaflet, map }) : null;
   return { control, collapsible };
 }

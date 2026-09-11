@@ -146,7 +146,23 @@
                 display: none;
                 padding: 8px 16px;
             }
+            #map .map-ui-visibility-toggle-control {
+                display: none;
+            }
             @media (max-width: 700px) {
+                #map .map-ui-visibility-toggle-control {
+                    display: block;
+                }
+                #map .temporary-map-hideable-ui.is-hidden {
+                    display: none;
+                }
+                #map .leaflet-bottom.leaflet-left {
+                    display: flex;
+                    align-items: flex-end;
+                    max-width: 100%;
+                    bottom: calc(8px + env(safe-area-inset-bottom));
+                }
+
                 body {
                     display: block;
                     height: 100vh;
@@ -293,6 +309,7 @@
             window.__GEOCODE_LIVE_MAP_BOOTSTRAP__ = {
                 publicId: "{{ publicId }}",
                 tileServers: {{ tileServers | json_encode_for_html | safe }},
+            isCheckOverlay: {{ isCheckOverlay }},
             tileOverlays: {{ tileOverlays | json_encode_for_html | safe }},
             };
         </script>

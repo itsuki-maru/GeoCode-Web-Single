@@ -1,4 +1,5 @@
 // @ts-nocheck -- Leaflet is provided as a browser global by the server template.
+import { createLiveMapUiVisibilityControl } from "../live-map/ui-visibility";
 import { addLiveTileOverlayControl } from "../live-map/tile-overlays";
 import {
   createCollapsibleLayerControl,
@@ -44,6 +45,7 @@ function selectTileServer(tileServerId: string): void {
 
 if (defaultTileServerId) selectTileServer(defaultTileServerId);
 
+let tileServerControl: any = null;
 if (tileServerEntries.length) {
   const TileControl = L.Control.extend({
     options: { position: "topright" },
@@ -72,7 +74,8 @@ if (tileServerEntries.length) {
       return container;
     },
   });
-  map.addControl(new TileControl());
+  tileServerControl = new TileControl();
+  map.addControl(tileServerControl);
 }
 
 const markers = new Map<string, any>();
@@ -83,7 +86,7 @@ const locationLayersControl = L.control
     collapsed: false,
   })
   .addTo(map);
-addLiveTileOverlayControl(L, map, bootstrap.tileOverlays || [], isMobile);
+const tileOverlayControl = addLiveTileOverlayControl(L, map, bootstrap.tileOverlays || [], isMobile, bootstrap.isCheckOverlay === true);
 const collapsibleLocationLayers = isMobile
   ? createCollapsibleLayerControl({
       container: locationLayersControl.getContainer(),
@@ -120,6 +123,12 @@ map.addControl(
     position: isMobile ? "bottomleft" : "topright",
   }),
 );
+
+map.addControl(createLiveMapUiVisibilityControl(L, {
+  tileServer: tileServerControl,
+  members: locationLayersControl,
+  tileOverlays: tileOverlayControl?.control,
+}));
 
 function escapeHtml(value: string): string {
   const element = document.createElement("div");
@@ -268,7 +277,7 @@ async function load(): Promise<void> {
       cache: "no-store",
     });
     if (response.status === 401) {
-      window.location.assign(`/live/${bootstrap.publicId}`);
+      window.location.assign(`/live/${bootstrap.publicId}?is_check_overlay=${bootstrap.isCheckOverlay === true}`);
       return;
     }
     if (!response.ok)

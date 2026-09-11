@@ -82,6 +82,27 @@ describe("現在位置共有マップ管理画面", () => {
       wrapper.get<HTMLInputElement>('input[aria-label="現在の共有URL"]').element.value,
     ).toContain("/live/public-map-1");
 
+    const urlField = wrapper.get<HTMLInputElement>('input[aria-label="現在の共有URL"]');
+    expect(new URL(urlField.element.value).searchParams.get("is_check_overlay")).toBe("false");
+    await wrapper.get(".overlay-toggle input").setValue(true);
+    expect(new URL(urlField.element.value).searchParams.get("is_check_overlay")).toBe("true");
+    const originalNavigator = navigator;
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    try {
+      await wrapper.findAll("button").find((button) => button.text() === "コピー")!.trigger("click");
+      await flushPromises();
+      expect(writeText).toHaveBeenCalledWith(urlField.element.value);
+    } finally {
+      vi.stubGlobal("navigator", originalNavigator);
+    }
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    await wrapper.findAll("button").find((button) => button.text() === "開く")!.trigger("click");
+    expect(open).toHaveBeenCalledWith(urlField.element.value, "_blank", "noopener,noreferrer");
+    open.mockRestore();
+    await wrapper.get(".overlay-toggle input").setValue(false);
+    expect(new URL(urlField.element.value).searchParams.get("is_check_overlay")).toBe("false");
+
     const update = wrapper.findAll("button").find((button) => button.text() === "設定を更新");
     await update?.trigger("click");
     await flushPromises();

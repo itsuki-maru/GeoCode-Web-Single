@@ -34,7 +34,14 @@ const displayNames = ref<Record<string, string>>({});
 const markerColors = ref<Record<string, string>>({});
 const mapName = ref("現在位置共有マップ");
 const expiresAt = ref("");
-const generatedUrl = ref("");
+const baseShareUrl = ref("");
+const isCheckOverlay = ref(false);
+const generatedUrl = computed(() => {
+  if (!baseShareUrl.value) return "";
+  const url = new URL(baseShareUrl.value, window.location.origin);
+  url.searchParams.set("is_check_overlay", String(isCheckOverlay.value));
+  return url.href;
+});
 const passwordProtected = ref(false);
 const sharePassword = ref("");
 const message = ref("");
@@ -111,7 +118,7 @@ async function load() {
         displayNames.value[member.user_id] = member.display_name;
         markerColors.value[member.user_id] = member.marker_color;
       });
-      generatedUrl.value = new URL(currentMap.value.share_url, window.location.origin).href;
+      baseShareUrl.value = new URL(currentMap.value.share_url, window.location.origin).href;
       passwordProtected.value = currentMap.value.is_password_protected;
       sharePassword.value = "";
     } else {
@@ -120,7 +127,7 @@ async function load() {
       selected.value = new Set(
         accounts.value.slice(0, MAX_LIVE_MAP_MEMBERS).map((account) => account.user_id),
       );
-      generatedUrl.value = "";
+      baseShareUrl.value = "";
       passwordProtected.value = false;
       sharePassword.value = "";
     }
@@ -143,7 +150,7 @@ function toggleMember(userId: string, checked: boolean) {
 
 async function saveMap() {
   message.value = "";
-  if (!currentMap.value) generatedUrl.value = "";
+  if (!currentMap.value) baseShareUrl.value = "";
   const members = accounts.value
     .filter((account) => selected.value.has(account.user_id))
     .map((account, index) => ({
@@ -189,7 +196,7 @@ async function saveMap() {
       setMessage("共有マップを更新しました。現在の共有URLは引き続き利用できます。");
     } else {
       const response = await apiClient.post(adminLiveMapsUrl, payload);
-      generatedUrl.value = new URL(response.data.share_url, window.location.origin).href;
+      baseShareUrl.value = new URL(response.data.share_url, window.location.origin).href;
       setMessage("共有マップを作成しました。共有URLはこの画面でいつでも確認できます。");
     }
     sharePassword.value = "";
@@ -209,7 +216,7 @@ async function revokeMap() {
   if (!currentMap.value) return;
   try {
     await apiClient.delete(`${adminLiveMapsUrl}/${currentMap.value.id}`);
-    generatedUrl.value = "";
+    baseShareUrl.value = "";
     setMessage("共有リンクを失効しました。");
     await load();
   } catch {
@@ -221,7 +228,7 @@ async function rotateUrl() {
   if (!currentMap.value) return;
   try {
     const response = await apiClient.post(`${adminLiveMapsUrl}/${currentMap.value.id}/rotate-url`);
-    generatedUrl.value = new URL(response.data.share_url, window.location.origin).href;
+    baseShareUrl.value = new URL(response.data.share_url, window.location.origin).href;
     setMessage("新しい共有リンクを発行しました。");
   } catch {
     setMessage("共有リンクを再発行できませんでした。");
@@ -386,6 +393,10 @@ onMounted(load);
         </div>
 
         <div v-if="generatedUrl" class="generated">
+          <label class="overlay-toggle">
+            <input v-model="isCheckOverlay" type="checkbox" />
+            重ね合わせタイルを初期表示する
+          </label>
           <label class="field generated-field">
             <span class="field-label">現在の共有URL</span>
             <input :value="generatedUrl" aria-label="現在の共有URL" readonly />
@@ -611,6 +622,15 @@ input[type="color"] {
   padding: 16px;
   border-radius: 10px;
   background: #eef3fc;
+}
+.overlay-toggle {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.overlay-toggle input {
+  width: auto;
 }
 .generated-field {
   min-width: 0;

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createLiveMapUiVisibilityControl } from "../src/live-map/ui-visibility";
 
 import {
   createCollapsibleLayerControl,
@@ -14,6 +15,7 @@ function createLeafletMock() {
         class {
           options = definition.options;
           onAdd = definition.onAdd;
+          getContainer() { return null; }
         },
     },
     DomEvent: {
@@ -34,6 +36,31 @@ function createLeafletMock() {
 }
 
 describe("live map controls", () => {
+  it.each([true, false])("hides only the chosen controls, keeping state and dynamic members (tiles: %s)", (withTiles) => {
+    const containers = Array.from({ length: 6 }, () => document.createElement("div"));
+    const [tileServer, members, tiles, location, names, cards] = containers;
+    members.innerHTML = '<input type="checkbox" checked>';
+    members.classList.add("is-collapsed");
+    const control = createLiveMapUiVisibilityControl(createLeafletMock(), {
+      tileServer: withTiles ? { getContainer: () => tileServer } : null,
+      members: { getContainer: () => members },
+      tileOverlays: withTiles ? { getContainer: () => tiles } : null,
+    }) as { onAdd(): HTMLElement };
+    const button = control.onAdd().querySelector("button")!;
+    expect(button.textContent).toBe("地図だけを表示");
+    button.click();
+    expect(members.classList.contains("is-hidden")).toBe(true);
+    expect(tileServer.classList.contains("is-hidden")).toBe(withTiles);
+    expect(tiles.classList.contains("is-hidden")).toBe(withTiles);
+    for (const retained of [location, names, cards]) expect(retained.classList.contains("is-hidden")).toBe(false);
+    members.append(document.createElement("label"));
+    expect(members.classList.contains("is-hidden")).toBe(true);
+    expect(button.textContent).toBe("機能を表示");
+    button.click();
+    expect(members.classList.contains("is-hidden")).toBe(false);
+    expect(members.classList.contains("is-collapsed")).toBe(true);
+    expect(members.querySelector("input")!.checked).toBe(true);
+  });
   it("collapses dynamic mobile layer choices behind a text button", () => {
     const leaflet = createLeafletMock();
     const container = document.createElement("div");

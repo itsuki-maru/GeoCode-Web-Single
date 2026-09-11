@@ -151,6 +151,7 @@ async fn all_map_pages_load_their_owners_latest_tiles() {
                 Extension(tera.clone()),
                 Extension(pool.clone()),
                 Path(public_id.to_string()),
+                axum::extract::Query(Default::default()),
             )
             .await
             .unwrap(),
@@ -178,6 +179,7 @@ async fn all_map_pages_load_their_owners_latest_tiles() {
             Extension(tera),
             Extension(pool),
             Path(public_id.to_string()),
+            axum::extract::Query(Default::default()),
         )
         .await
         .unwrap(),
@@ -407,5 +409,59 @@ async fn selection_waits_for_concurrent_disable() {
         .unwrap();
     assert_eq!(count, 0);
     pool.close().await;
-    std::fs::remove_file(path).unwrap();
+    // Windows can briefly retain a file handle after the pool closes. Retry
+    // only sharing/lock violations; never hide other errors or a lasting lock.
+    for attempt in 0..50 {
+        match std::fs::remove_file(&path) {
+            Ok(()) => break,
+            Err(error)
+                if cfg!(windows)
+                    && matches!(error.raw_os_error(), Some(32 | 33))
+                    && attempt < 49 =>
+            {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            },
+            Err(error) => panic!("failed to remove test database {}: {error}", path.display()),
+        }
+    }
+}
+
+#[tokio::test]
+async fn live_map_query_controls_initial_overlay_visibility() {
+    use axum::extract::Query;
+    use geocode_web_single::handler::live_map::live_map_page_handler;
+    let pool = common::test_pool().await;
+    let owner = common::create_test_admin(&pool, "query-owner").await;
+    let public_id = uuid::Uuid::new_v4().to_string();
+    sqlx::query("INSERT INTO live_map(id,public_id,name,created_by,expires_at) VALUES($1,$2,'query-test',$3,datetime('now','+1 hour'))")
+        .bind(uuid::Uuid::new_v4().to_string()).bind(&public_id).bind(owner).execute(&pool).await.unwrap();
+    let tera = geocode_web_single::build_tera_extension().unwrap();
+    tera.lock()
+        .await
+        .add_raw_template(
+            "live-map.html",
+            &std::fs::read_to_string("src/templates/live-map.html").unwrap(),
+        )
+        .unwrap();
+    for (query, expected) in [
+        ("", false),
+        ("?is_check_overlay=true", true),
+        ("?is_check_overlay=false", false),
+        ("?is_check_overlay=invalid", false),
+    ] {
+        let uri = format!("/live/{public_id}{query}").parse().unwrap();
+        let page = html(
+            live_map_page_handler(
+                axum::http::HeaderMap::new(),
+                Extension(tera.clone()),
+                Extension(pool.clone()),
+                Path(public_id.clone()),
+                Query::try_from_uri(&uri).unwrap(),
+            )
+            .await
+            .unwrap(),
+        )
+        .await;
+        assert!(page.contains(&format!("isCheckOverlay: {expected}")));
+    }
 }
