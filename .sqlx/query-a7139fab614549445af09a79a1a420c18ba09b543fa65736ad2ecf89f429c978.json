@@ -21,7 +21,7 @@
       {
         "name": "is_password_protected!: bool",
         "ordinal": 3,
-        "type_info": "Integer"
+        "type_info": "Null"
       }
     ],
     "parameters": {
@@ -31,7 +31,7 @@
       false,
       false,
       false,
-      false
+      null
     ]
   },
   "hash": "a7139fab614549445af09a79a1a420c18ba09b543fa65736ad2ecf89f429c978"

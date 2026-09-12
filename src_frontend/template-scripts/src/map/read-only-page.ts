@@ -509,7 +509,13 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
     visibleMarkerGroup,
   });
 
-  createTileOverlayManager(L, map, visibilityControl, isAnother ? bootstrap.tileVisibilityAccountId : undefined).sync(bootstrap.tileOverlays || []);
+  createTileOverlayManager(
+    L,
+    map,
+    visibilityControl,
+    isAnother ? bootstrap.tileVisibilityAccountId : undefined,
+    temporaryBootstrap?.isOverlayTile ?? true,
+  ).sync(bootstrap.tileOverlays || []);
 
   return { map, markers, shapeLayers, shapeNameLabelManager };
 }

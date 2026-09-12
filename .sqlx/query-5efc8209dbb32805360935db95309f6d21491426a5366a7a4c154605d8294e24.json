@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT\n                        id,\n                        layer_id,\n                        marker_name,\n                        latitude,\n                        longitude,\n                        detail\n                    FROM marker_info_model\n                    WHERE user_id = $1\n                    AND (marker_name LIKE $2 ESCAPE '\\' OR detail LIKE $2 ESCAPE '\\')\n                    AND (marker_name LIKE $3 ESCAPE '\\' OR detail LIKE $3 ESCAPE '\\')",
+  "query": "SELECT\n                        id,\n                        layer_id,\n                        marker_name,\n                        latitude,\n                        longitude,\n                        detail,\n                        update_at\n                    FROM marker_info_model\n                    WHERE user_id = $1\n                    AND (marker_name LIKE $2 ESCAPE '\\' OR detail LIKE $2 ESCAPE '\\')\n                    AND (marker_name LIKE $3 ESCAPE '\\' OR detail LIKE $3 ESCAPE '\\')",
   "describe": {
     "columns": [
       {
@@ -32,6 +32,11 @@
         "name": "detail",
         "ordinal": 5,
         "type_info": "Text"
+      },
+      {
+        "name": "update_at",
+        "ordinal": 6,
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -43,8 +48,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "642742d7d4ef0ebaafa3c2e7592135d8666bfc57820616a9040fe204dffd2a74"
+  "hash": "5efc8209dbb32805360935db95309f6d21491426a5366a7a4c154605d8294e24"
 }

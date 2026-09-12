@@ -93,7 +93,7 @@ async fn all_map_pages_load_their_owners_latest_tiles() {
         }
     }
     let temp_id = Uuid::new_v4().to_string();
-    sqlx::query("INSERT INTO temporary_urls(id,user_id,url,expiration,layers,markers,shapes,create_at) VALUES($1,$2,'/test',datetime('now', '+1 hour'),'{}','{}','{}',CURRENT_TIMESTAMP)")
+    sqlx::query("INSERT INTO temporary_urls(id,user_id,url,expiration,layers,markers,shapes,include_tile_overlays,create_at) VALUES($1,$2,'/test',datetime('now', '+1 hour'),'{}','{}','{}',1,CURRENT_TIMESTAMP)")
         .bind(&temp_id).bind(&owner).execute(&pool).await.unwrap();
     let public_id = Uuid::new_v4().to_string();
     sqlx::query("INSERT INTO live_map(id,public_id,name,created_by,expires_at) VALUES($1,$2,'test',$3,datetime('now', '+1 hour'))")
@@ -463,5 +463,162 @@ async fn live_map_query_controls_initial_overlay_visibility() {
         )
         .await;
         assert!(page.contains(&format!("isCheckOverlay: {expected}")));
+    }
+}
+
+#[tokio::test]
+async fn temporary_overlay_sharing_is_opt_in_and_query_only_controls_visibility() {
+    let pool = common::test_pool().await;
+    use axum::{Form, extract::Query, http::HeaderMap};
+    use geocode_web_single::handler::onetime_url::{
+        generate_url_handler, temporary_map_auth_handler, temporary_map_get_handler,
+    };
+    use geocode_web_single::model::OnetimePasswordForm;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+    let owner = common::create_test_admin(&pool, "temporary-overlay-owner").await;
+    let layer = common::master_layer_id(&pool, &owner).await;
+    let Json(tile) = admin_create(
+        Extension(owner.clone()),
+        Extension(pool.clone()),
+        Json(definition(true)),
+    )
+    .await
+    .unwrap();
+    let _ = user_select(
+        Extension(owner.clone()),
+        Extension(pool.clone()),
+        Path(tile.id.clone()),
+        selection(true),
+    )
+    .await
+    .unwrap();
+    let mut tera = tera::Tera::default();
+    for name in ["temporary-map.html", "temporary-map-mobile.html"] {
+        tera.add_raw_template(
+            name,
+            "{{ tileOverlays | length }}|{{ isOverlayTile }}|{{ isChecked }}",
+        )
+        .unwrap();
+    }
+    tera.add_raw_template("temporary-password.html", "{{ mapStateQuery }}")
+        .unwrap();
+    let tera = Arc::new(Mutex::new(tera));
+    let mut previous_id: Option<String> = None;
+    for enabled in [false, true, false] {
+        let Json(created) = generate_url_handler(
+            Extension(owner.clone()),
+            Extension(pool.clone()),
+            Json(
+                serde_json::from_value(json!({
+                    "minutes": 60, "layers": [layer], "update_url": previous_id.is_some(),
+                    "include_tile_overlays": enabled
+                }))
+                .unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
+        if let Some(ref id) = previous_id {
+            assert_eq!(&created.id, id);
+        }
+        previous_id = Some(created.id.clone());
+        let saved: bool =
+            sqlx::query_scalar("SELECT include_tile_overlays FROM temporary_urls WHERE id=$1")
+                .bind(&created.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(saved, enabled);
+        for agent in ["Desktop", "Mobile"] {
+            for (query, visible) in [
+                (None, true),
+                (Some("true"), true),
+                (Some("false"), false),
+                (Some("FALSE"), false),
+                (Some("invalid"), true),
+            ] {
+                let mut headers = HeaderMap::new();
+                headers.insert("user-agent", agent.parse().unwrap());
+                let params = || {
+                    Query(
+                        serde_json::from_value(
+                            json!({"is_overlay_tile": query, "is_checked":"false"}),
+                        )
+                        .unwrap(),
+                    )
+                };
+                let body = html(
+                    temporary_map_get_handler(
+                        headers.clone(),
+                        Extension(pool.clone()),
+                        Extension(tera.clone()),
+                        params(),
+                        Ok(Path(created.id.clone())),
+                    )
+                    .await
+                    .unwrap(),
+                )
+                .await;
+                assert_eq!(body, format!("{}|{}|false", usize::from(enabled), visible));
+                // The same selection survives password prompts, failed retries and successful authentication.
+                sqlx::query("UPDATE temporary_urls SET password_hash=$1 WHERE id=$2")
+                    .bind(bcrypt::hash("pass1234", 4).unwrap())
+                    .bind(&created.id)
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                let prompt = html(
+                    temporary_map_get_handler(
+                        headers.clone(),
+                        Extension(pool.clone()),
+                        Extension(tera.clone()),
+                        params(),
+                        Ok(Path(created.id.clone())),
+                    )
+                    .await
+                    .unwrap(),
+                )
+                .await;
+                assert!(prompt.contains(&format!("is_overlay_tile={visible}")));
+                let failed = html(
+                    temporary_map_auth_handler(
+                        headers.clone(),
+                        Extension(pool.clone()),
+                        Extension(tera.clone()),
+                        params(),
+                        Path(created.id.clone()),
+                        Form(OnetimePasswordForm {
+                            password: "wrong".into(),
+                        }),
+                    )
+                    .await
+                    .unwrap(),
+                )
+                .await;
+                assert_eq!(failed, prompt);
+                let authenticated = html(
+                    temporary_map_auth_handler(
+                        headers,
+                        Extension(pool.clone()),
+                        Extension(tera.clone()),
+                        params(),
+                        Path(created.id.clone()),
+                        Form(OnetimePasswordForm {
+                            password: "pass1234".into(),
+                        }),
+                    )
+                    .await
+                    .unwrap(),
+                )
+                .await;
+                assert_eq!(authenticated, body);
+                sqlx::query("UPDATE temporary_urls SET password_hash=NULL WHERE id=$1")
+                    .bind(&created.id)
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+            }
+        }
     }
 }

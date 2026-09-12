@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT\n            is_private,\n            totp_secret <> '' AS \"is_totp_enabled!: bool\"\n        FROM user_model WHERE id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "is_private",
+        "ordinal": 0,
+        "type_info": "Bool"
+      },
+      {
+        "name": "is_totp_enabled!: bool",
+        "ordinal": 1,
+        "type_info": "Null"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "ddd38e1ec6090032a44db11a91aed04d37df44f74c2c08e3f7cb31966cbbf52b"
+}

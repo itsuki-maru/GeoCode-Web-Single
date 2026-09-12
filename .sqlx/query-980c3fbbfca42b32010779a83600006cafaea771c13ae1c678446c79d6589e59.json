@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        UPDATE user_model\n        SET is_locked = $1\n        WHERE id = $2\n        RETURNING id\n        ",
+  "query": "\n        UPDATE user_model\n        SET password = $1, auth_version = auth_version + 1\n        WHERE id = $2\n        RETURNING id\n        ",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "3d21ab73b626cdf69e9b44c791f15b0ad793482422b756b5ed139961a1f7fa5b"
+  "hash": "980c3fbbfca42b32010779a83600006cafaea771c13ae1c678446c79d6589e59"
 }

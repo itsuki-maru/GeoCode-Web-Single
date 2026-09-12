@@ -73,6 +73,7 @@ export interface AnotherMapBootstrap extends MapBootstrapBase {
 export interface TemporaryMapBootstrap extends MapBootstrapBase {
   initialView: InitialMapView;
   isChecked: boolean;
+  isOverlayTile?: boolean;
   isMapUiHidden: boolean;
   isMaster: false;
   page: "temporary-map" | "temporary-map-mobile";

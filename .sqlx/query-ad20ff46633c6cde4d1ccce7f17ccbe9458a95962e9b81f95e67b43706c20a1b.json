@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE user_model\n            SET totp_challenge_attempts = totp_challenge_attempts + 1,\n                totp_challenge_id = CASE\n                    WHEN totp_challenge_attempts + 1 >= 5 THEN NULL\n                    ELSE totp_challenge_id\n                END,\n                totp_challenge_expires_at = CASE\n                    WHEN totp_challenge_attempts + 1 >= 5 THEN NULL\n                    ELSE totp_challenge_expires_at\n                END\n            WHERE id = $1 AND totp_challenge_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "ad20ff46633c6cde4d1ccce7f17ccbe9458a95962e9b81f95e67b43706c20a1b"
+}

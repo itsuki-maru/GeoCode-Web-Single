@@ -1098,6 +1098,7 @@ async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
                 update_url: false,
                 share_password: None,
                 include_shapes: false,
+                include_tile_overlays: false,
             }),
         )
         .await
@@ -1114,6 +1115,7 @@ async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
             update_url: false,
             share_password: Some("pass1234".to_string()),
             include_shapes: true,
+            include_tile_overlays: true,
         }),
     )
     .await
@@ -1130,6 +1132,7 @@ async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
         Extension(pool.clone()),
         Extension(onetime_url_test_tera()),
         Query(MapStateParams {
+            is_overlay_tile: Some("false".into()),
             is_checked: Some("false".to_string()),
             lat: Some(35.681236),
             lng: Some(139.767125),
@@ -1153,6 +1156,7 @@ async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
         Extension(pool.clone()),
         Extension(onetime_url_test_tera()),
         Query(MapStateParams {
+            is_overlay_tile: Some("false".into()),
             is_checked: Some("false".to_string()),
             lat: None,
             lng: None,
