@@ -15,7 +15,9 @@ function createLeafletMock() {
         class {
           options = definition.options;
           onAdd = definition.onAdd;
-          getContainer() { return null; }
+          getContainer() {
+            return null;
+          }
         },
     },
     DomEvent: {
@@ -36,31 +38,38 @@ function createLeafletMock() {
 }
 
 describe("live map controls", () => {
-  it.each([true, false])("hides only the chosen controls, keeping state and dynamic members (tiles: %s)", (withTiles) => {
-    const containers = Array.from({ length: 6 }, () => document.createElement("div"));
-    const [tileServer, members, tiles, location, names, cards] = containers;
-    members.innerHTML = '<input type="checkbox" checked>';
-    members.classList.add("is-collapsed");
-    const control = createLiveMapUiVisibilityControl(createLeafletMock(), {
-      tileServer: withTiles ? { getContainer: () => tileServer } : null,
-      members: { getContainer: () => members },
-      tileOverlays: withTiles ? { getContainer: () => tiles } : null,
-    }) as { onAdd(): HTMLElement };
-    const button = control.onAdd().querySelector("button")!;
-    expect(button.textContent).toBe("地図だけを表示");
-    button.click();
-    expect(members.classList.contains("is-hidden")).toBe(true);
-    expect(tileServer.classList.contains("is-hidden")).toBe(withTiles);
-    expect(tiles.classList.contains("is-hidden")).toBe(withTiles);
-    for (const retained of [location, names, cards]) expect(retained.classList.contains("is-hidden")).toBe(false);
-    members.append(document.createElement("label"));
-    expect(members.classList.contains("is-hidden")).toBe(true);
-    expect(button.textContent).toBe("機能を表示");
-    button.click();
-    expect(members.classList.contains("is-hidden")).toBe(false);
-    expect(members.classList.contains("is-collapsed")).toBe(true);
-    expect(members.querySelector("input")!.checked).toBe(true);
-  });
+  it.each([true, false])(
+    "hides only the chosen controls, keeping state and dynamic members (tiles: %s)",
+    (withTiles) => {
+      const containers = Array.from({ length: 7 }, () => document.createElement("div"));
+      const [tileServer, members, tiles, location, names, cards, published] = containers;
+      members.innerHTML = '<input type="checkbox" checked>';
+      members.classList.add("is-collapsed");
+      const control = createLiveMapUiVisibilityControl(createLeafletMock(), {
+        tileServer: withTiles ? { getContainer: () => tileServer } : null,
+        members: { getContainer: () => members },
+        tileOverlays: withTiles ? { getContainer: () => tiles } : null,
+        publishedLayers: { getContainer: () => published },
+      }) as { onAdd(): HTMLElement };
+      const button = control.onAdd().querySelector("button")!;
+      expect(button.textContent).toBe("地図だけを表示");
+      button.click();
+      expect(members.classList.contains("is-hidden")).toBe(true);
+      expect(tileServer.classList.contains("is-hidden")).toBe(withTiles);
+      expect(tiles.classList.contains("is-hidden")).toBe(withTiles);
+      for (const retained of [location, names, cards])
+        expect(retained.classList.contains("is-hidden")).toBe(false);
+      members.append(document.createElement("label"));
+      expect(members.classList.contains("is-hidden")).toBe(true);
+      expect(button.textContent).toBe("機能を表示");
+      expect(published.classList.contains("is-hidden")).toBe(true);
+      button.click();
+      expect(members.classList.contains("is-hidden")).toBe(false);
+      expect(published.classList.contains("is-hidden")).toBe(false);
+      expect(members.classList.contains("is-collapsed")).toBe(true);
+      expect(members.querySelector("input")!.checked).toBe(true);
+    },
+  );
   it("collapses dynamic mobile layer choices behind a text button", () => {
     const leaflet = createLeafletMock();
     const container = document.createElement("div");
@@ -72,9 +81,7 @@ describe("live map controls", () => {
     container.appendChild(overlays);
     const map = { on: vi.fn() };
     const control = createCollapsibleLayerControl({ container, leaflet, map });
-    const button = container.querySelector<HTMLButtonElement>(
-      ".live-layer-control-toggle",
-    )!;
+    const button = container.querySelector<HTMLButtonElement>(".live-layer-control-toggle")!;
 
     expect(button.hidden).toBe(false);
     expect(button.textContent).toBe("折り畳む");
@@ -82,8 +89,7 @@ describe("live map controls", () => {
     expect(button.textContent).toBe("すべて表示");
     expect(button.getAttribute("aria-expanded")).toBe("false");
     expect(container.classList.contains("is-collapsed")).toBe(true);
-    expect(overlays.querySelectorAll(".live-layer-control-collapsible-item"))
-      .toHaveLength(2);
+    expect(overlays.querySelectorAll(".live-layer-control-collapsible-item")).toHaveLength(2);
 
     overlays.querySelector("label:last-child")?.remove();
     control.sync();
@@ -125,9 +131,11 @@ describe("live map controls", () => {
   it("requests the viewer location only after clicking and centers the map", () => {
     const leaflet = createLeafletMock();
     const map = { getZoom: vi.fn(() => 12), setView: vi.fn() };
-    const getCurrentPosition = vi.fn((success: PositionCallback) => success({
-      coords: { latitude: 35.68, longitude: 139.76 },
-    } as GeolocationPosition));
+    const getCurrentPosition = vi.fn((success: PositionCallback) =>
+      success({
+        coords: { latitude: 35.68, longitude: 139.76 },
+      } as GeolocationPosition),
+    );
     const control = createCurrentLocationControl({
       geolocation: { getCurrentPosition } as unknown as Geolocation,
       leaflet,
@@ -152,7 +160,9 @@ describe("live map controls", () => {
     let overlayHandler: (() => void) | undefined;
     const map = {
       hasLayer: (layer: typeof visibleMarker) => visibleLayers.has(layer),
-      on: vi.fn((_events: string, handler: () => void) => { overlayHandler = handler; }),
+      on: vi.fn((_events: string, handler: () => void) => {
+        overlayHandler = handler;
+      }),
     };
     const names = createNameVisibilityControl({
       getMarkers: () => [visibleMarker, hiddenMarker],

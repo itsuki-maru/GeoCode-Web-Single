@@ -433,6 +433,20 @@ CREATE TABLE IF NOT EXISTS live_map_password_rate_limit (
             "UPDATE temporary_urls SET include_tile_overlays = 1;",
         ],
     },
+    Migration {
+        version: 13,
+        name: "add_use_tile_overlays_to_live_map",
+        statements: &[include_str!(
+            "../../migrations/20260912120000_add_use_tile_overlays_to_live_map.sql"
+        )],
+    },
+    Migration {
+        version: 14,
+        name: "add_live_map_layers",
+        statements: &[include_str!(
+            "../../migrations/20260913000000_add_live_map_layers.sql"
+        )],
+    },
 ];
 
 // データベース接続の確立

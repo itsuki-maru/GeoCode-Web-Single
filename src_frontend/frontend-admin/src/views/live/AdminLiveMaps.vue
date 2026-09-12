@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import apiClient from "@/axiosClient";
-import { adminLiveLocationsUrl, adminLiveMapsUrl } from "@/router/urls";
+import { adminLiveLocationsUrl, adminLiveMapsUrl, adminLiveMapLayersUrl } from "@/router/urls";
+import BaseModal from "@/components/common/BaseModal.vue";
 import ConfirmModal from "@/components/common/ConfirmModal.vue";
 import MessageModal from "@/components/common/MessageModal.vue";
 
@@ -20,6 +21,9 @@ type LiveMap = {
   member_count: number;
   share_url: string;
   is_password_protected: boolean;
+  use_tile_overlays: boolean;
+  layer_ids: string[];
+  layers_configured_by_other: boolean;
   members: Array<{ user_id: string; display_name: string; marker_color: string }>;
 };
 
@@ -28,6 +32,33 @@ type ConfirmAction = "rotate" | "revoke" | null;
 const palette = ["#1a73e8", "#cf222e", "#1a7f37", "#9a6700", "#8250df", "#bf3989"];
 const MAX_LIVE_MAP_MEMBERS = 20;
 const accounts = ref<LiveAccount[]>([]);
+const layerCandidates = ref<Array<{ id: string; layer_name: string }>>([]);
+const layerDraft = ref<string[] | null>(null);
+const modalLayers = ref<string[]>([]);
+const layerModalOpen = ref(false);
+const layerLoading = ref(false);
+const layerError = ref("");
+async function openLayerModal() {
+  layerModalOpen.value = true;
+  layerLoading.value = true;
+  layerError.value = "";
+  try {
+    const response = await apiClient.get(adminLiveMapLayersUrl);
+    layerCandidates.value = response.data;
+    const available = new Set(layerCandidates.value.map((layer) => layer.id));
+    modalLayers.value = (layerDraft.value ?? currentMap.value?.layer_ids ?? []).filter((id) =>
+      available.has(id),
+    );
+  } catch {
+    layerError.value = "レイヤ一覧を取得できませんでした。一度閉じて再度お試しください。";
+  } finally {
+    layerLoading.value = false;
+  }
+}
+function applyLayers() {
+  layerDraft.value = [...modalLayers.value];
+  layerModalOpen.value = false;
+}
 const currentMap = ref<LiveMap | null>(null);
 const selected = ref(new Set<string>());
 const displayNames = ref<Record<string, string>>({});
@@ -36,10 +67,15 @@ const mapName = ref("現在位置共有マップ");
 const expiresAt = ref("");
 const baseShareUrl = ref("");
 const isCheckOverlay = ref(false);
+const useTileOverlays = ref(true);
+const savedUsesTileOverlays = computed(() => currentMap.value?.use_tile_overlays !== false);
 const generatedUrl = computed(() => {
   if (!baseShareUrl.value) return "";
   const url = new URL(baseShareUrl.value, window.location.origin);
-  url.searchParams.set("is_check_overlay", String(isCheckOverlay.value));
+  url.searchParams.set(
+    "is_check_overlay",
+    String(savedUsesTileOverlays.value && isCheckOverlay.value),
+  );
   return url.href;
 });
 const passwordProtected = ref(false);
@@ -103,6 +139,7 @@ async function load() {
     ]);
     accounts.value = locationResponse.data;
     currentMap.value = mapResponse.data[0] ?? null;
+    layerDraft.value = null;
     displayNames.value = {};
     markerColors.value = {};
     accounts.value.forEach((account, index) => {
@@ -111,6 +148,7 @@ async function load() {
     });
 
     if (currentMap.value) {
+      useTileOverlays.value = currentMap.value.use_tile_overlays ?? true;
       mapName.value = currentMap.value.name;
       expiresAt.value = localDateTime(currentMap.value.expires_at);
       selected.value = new Set(currentMap.value.members.map((member) => member.user_id));
@@ -122,6 +160,7 @@ async function load() {
       passwordProtected.value = currentMap.value.is_password_protected;
       sharePassword.value = "";
     } else {
+      useTileOverlays.value = true;
       mapName.value = "現在位置共有マップ";
       expiresAt.value = defaultExpiration();
       selected.value = new Set(
@@ -182,7 +221,9 @@ async function saveMap() {
       ? "set"
       : "keep";
   const payload = {
+    ...(layerDraft.value !== null ? { layer_ids: layerDraft.value } : {}),
     name: mapName.value,
+    use_tile_overlays: useTileOverlays.value,
     expires_at: new Date(expiresAt.value).toISOString(),
     members,
     password_action: passwordAction,
@@ -366,6 +407,30 @@ onMounted(load);
           </label>
         </div>
 
+        <div class="layer-publication">
+          <button
+            type="button"
+            class="button-secondary"
+            :disabled="isSaving || isLoading"
+            @click="openLayerModal"
+          >
+            レイヤ（マーカー・図形）を追加
+          </button>
+          <p v-if="layerDraft !== null">
+            {{
+              layerDraft.length
+            }}件を選択しています。「設定を更新」（新規作成時は「共有リンクを発行」）で保存します。
+          </p>
+          <p v-else-if="currentMap?.layers_configured_by_other">
+            別の管理者がレイヤを設定しています。選択を適用して保存すると、自分の選択に置き換わります。
+          </p>
+          <p v-else>{{ currentMap?.layer_ids?.length ?? 0 }}件のレイヤを公開しています。</p>
+        </div>
+        <label class="tile-usage-toggle">
+          <input v-model="useTileOverlays" type="checkbox" :disabled="isSaving" />
+          重ねるタイルレイヤを使用する
+        </label>
+
         <div class="security-panel">
           <label class="password-toggle">
             <input v-model="passwordProtected" type="checkbox" />
@@ -394,7 +459,7 @@ onMounted(load);
 
         <div v-if="generatedUrl" class="generated">
           <label class="overlay-toggle">
-            <input v-model="isCheckOverlay" type="checkbox" />
+            <input v-model="isCheckOverlay" type="checkbox" :disabled="!savedUsesTileOverlays" />
             重ね合わせタイルを初期表示する
           </label>
           <label class="field generated-field">
@@ -436,6 +501,61 @@ onMounted(load);
       </div>
     </section>
 
+    <BaseModal
+      :is-open="layerModalOpen"
+      title-id="live-layer-title"
+      @close="layerModalOpen = false"
+    >
+      <h2 id="live-layer-title">公開するレイヤ（マーカー・図形）</h2>
+      <p>
+        自分のレイヤのみ選択できます。master
+        は使用できません。選択したレイヤの最新のマーカー・図形が公開されます。
+      </p>
+      <p v-if="currentMap?.layers_configured_by_other">
+        保存すると、別の管理者によるレイヤ設定を置き換えます。
+      </p>
+      <p v-if="layerLoading" role="status">レイヤを読み込んでいます…</p>
+      <p v-else-if="layerError" role="alert">{{ layerError }}</p>
+      <div v-else class="table-scroll live-layer-table">
+        <table>
+          <thead>
+            <tr>
+              <th>レイヤ名</th>
+              <th>追加</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="layer in layerCandidates" :key="layer.id">
+              <td>{{ layer.layer_name }}</td>
+              <td>
+                <input
+                  v-model="modalLayers"
+                  type="checkbox"
+                  :value="layer.id"
+                  :aria-label="`${layer.layer_name}を追加`"
+                />
+              </td>
+            </tr>
+            <tr v-if="layerCandidates.length === 0">
+              <td colspan="2">追加できるレイヤはありません。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="live-layer-actions">
+        <button type="button" class="button-secondary" @click="layerModalOpen = false">
+          キャンセル
+        </button>
+        <button
+          type="button"
+          class="button-primary"
+          :disabled="layerLoading || !!layerError"
+          @click="applyLayers"
+        >
+          選択を適用
+        </button>
+      </div>
+    </BaseModal>
     <ConfirmModal
       :is-open="confirmAction !== null"
       :title="confirmTitle"
@@ -450,6 +570,21 @@ onMounted(load);
 </template>
 
 <style scoped>
+.live-layer-table {
+  max-height: 50vh;
+  overflow: auto;
+  margin-top: 1rem;
+}
+.live-layer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+.layer-publication p {
+  margin: 0.75rem 0;
+}
+
 .map-state {
   display: inline-flex;
   align-items: center;
@@ -623,13 +758,15 @@ input[type="color"] {
   border-radius: 10px;
   background: #eef3fc;
 }
-.overlay-toggle {
+.overlay-toggle,
+.tile-usage-toggle {
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.overlay-toggle input {
+.overlay-toggle input,
+.tile-usage-toggle input {
   width: auto;
 }
 .generated-field {
