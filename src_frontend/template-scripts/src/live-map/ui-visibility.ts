@@ -9,10 +9,16 @@ export function createLiveMapUiVisibilityControl(
     tileServer?: HideableControl | null;
     members: HideableControl;
     tileOverlays?: HideableControl | null;
+    publishedLayers?: HideableControl | null;
   },
 ) {
   const runtime = createMapUiVisibilityRuntime({ leaflet, initialHidden: false });
-  for (const control of [controls.tileServer, controls.members, controls.tileOverlays]) {
+  for (const control of [
+    controls.tileServer,
+    controls.members,
+    controls.tileOverlays,
+    controls.publishedLayers,
+  ]) {
     if (control) runtime.registerHideableMapControl(control);
   }
   return new runtime.MapUiVisibilityToggleControl();

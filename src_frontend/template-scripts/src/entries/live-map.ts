@@ -1,4 +1,5 @@
 // @ts-nocheck -- Leaflet is provided as a browser global by the server template.
+import { addPublishedLayerControl } from "../live-map/published-layers";
 import { createLiveMapUiVisibilityControl } from "../live-map/ui-visibility";
 import { addLiveTileOverlayControl } from "../live-map/tile-overlays";
 import {
@@ -87,6 +88,7 @@ const locationLayersControl = L.control
   })
   .addTo(map);
 const tileOverlayControl = addLiveTileOverlayControl(L, map, bootstrap.tileOverlays || [], isMobile, bootstrap.isCheckOverlay === true);
+const publishedLayerControl = addPublishedLayerControl(L, map, bootstrap.publishedLayers, isMobile);
 const collapsibleLocationLayers = isMobile
   ? createCollapsibleLayerControl({
       container: locationLayersControl.getContainer(),
@@ -128,6 +130,7 @@ map.addControl(createLiveMapUiVisibilityControl(L, {
   tileServer: tileServerControl,
   members: locationLayersControl,
   tileOverlays: tileOverlayControl?.control,
+  publishedLayers: publishedLayerControl?.control,
 }));
 
 function escapeHtml(value: string): string {

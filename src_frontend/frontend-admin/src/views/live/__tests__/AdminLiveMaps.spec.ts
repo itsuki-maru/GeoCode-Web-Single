@@ -45,10 +45,11 @@ describe("現在位置共有マップ管理画面", () => {
     expect(wrapper.text()).toContain("共有リンクを発行");
     expect(wrapper.text()).not.toContain("路線バス");
 
-    await wrapper.get(".form button").trigger("click");
+    await wrapper.get(".save-button").trigger("click");
     await flushPromises();
     expect(api.post).toHaveBeenCalledOnce();
     expect(api.post.mock.calls[0][1].name).toBe("現在位置共有マップ");
+    expect(api.post.mock.calls[0][1].use_tile_overlays).toBe(true);
   });
 
   it("発行済みの場合は同じ1件の設定を編集する", async () => {
@@ -90,14 +91,20 @@ describe("現在位置共有マップ管理画面", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     try {
-      await wrapper.findAll("button").find((button) => button.text() === "コピー")!.trigger("click");
+      await wrapper
+        .findAll("button")
+        .find((button) => button.text() === "コピー")!
+        .trigger("click");
       await flushPromises();
       expect(writeText).toHaveBeenCalledWith(urlField.element.value);
     } finally {
       vi.stubGlobal("navigator", originalNavigator);
     }
     const open = vi.spyOn(window, "open").mockImplementation(() => null);
-    await wrapper.findAll("button").find((button) => button.text() === "開く")!.trigger("click");
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "開く")!
+      .trigger("click");
     expect(open).toHaveBeenCalledWith(urlField.element.value, "_blank", "noopener,noreferrer");
     open.mockRestore();
     await wrapper.get(".overlay-toggle input").setValue(false);
@@ -129,7 +136,7 @@ describe("現在位置共有マップ管理画面", () => {
 
     await wrapper.get<HTMLInputElement>(".password-toggle input").setValue(true);
     await wrapper.get<HTMLInputElement>('input[type="password"]').setValue("share-pass");
-    await wrapper.get(".form button").trigger("click");
+    await wrapper.get(".save-button").trigger("click");
     await flushPromises();
 
     expect(api.post).toHaveBeenCalledWith(
@@ -161,5 +168,145 @@ describe("現在位置共有マップ管理画面", () => {
 
     await checkboxes[0]!.setValue(false);
     expect(checkboxes[20]!.element.disabled).toBe(false);
+  });
+});
+
+it("タイル使用設定を復元・保存し、初期表示の操作は保存済み設定に従う", async () => {
+  const saved = {
+    id: "map-1",
+    name: "map",
+    expires_at: "2099-01-01T00:00:00Z",
+    revoked_at: null,
+    share_url: "/live/map-1",
+    is_password_protected: false,
+    use_tile_overlays: false,
+    member_count: 1,
+    members: [{ user_id: "user-1", display_name: "user", marker_color: "#1a73e8" }],
+  };
+  mockLoad([saved]);
+  api.put.mockImplementation(async (_url, payload) => {
+    saved.use_tile_overlays = payload.use_tile_overlays;
+    mockLoad([{ ...saved }]);
+    return {};
+  });
+  const wrapper = mount(AdminLiveMaps);
+  await flushPromises();
+  const usage = wrapper.get<HTMLInputElement>(".tile-usage-toggle input");
+  const initial = wrapper.get<HTMLInputElement>(".overlay-toggle input");
+  expect(usage.element.checked).toBe(false);
+  expect(initial.element.disabled).toBe(true);
+  await usage.setValue(true);
+  expect(initial.element.disabled).toBe(true);
+  const save = () =>
+    wrapper
+      .findAll("button")
+      .find((b) => b.text() === "設定を更新")!
+      .trigger("click");
+  await save();
+  await flushPromises();
+  expect(api.put).toHaveBeenLastCalledWith(
+    expect.any(String),
+    expect.objectContaining({ use_tile_overlays: true }),
+  );
+  expect(initial.element.disabled).toBe(false);
+  await initial.setValue(true);
+  await usage.setValue(false);
+  await save();
+  await flushPromises();
+  expect(initial.element.disabled).toBe(true);
+  expect(
+    new URL(
+      wrapper.get<HTMLInputElement>('input[aria-label="現在の共有URL"]').element.value,
+    ).searchParams.get("is_check_overlay"),
+  ).toBe("false");
+  wrapper.unmount();
+  const restored = mount(AdminLiveMaps);
+  await flushPromises();
+  expect(restored.get<HTMLInputElement>(".tile-usage-toggle input").element.checked).toBe(false);
+  restored.unmount();
+});
+
+describe("ライブマップの公開レイヤ選択", () => {
+  function setup(other = false) {
+    const saved = {
+      id: "map-1",
+      name: "共有",
+      expires_at: "2026-09-13T12:00:00Z",
+      share_url: "/live/public",
+      is_password_protected: false,
+      use_tile_overlays: true,
+      members: [{ user_id: account.user_id, display_name: "共有者", marker_color: "#123456" }],
+      layer_ids: other ? [] : ["a"],
+      layers_configured_by_other: other,
+    };
+    api.get.mockImplementation((url: string) =>
+      Promise.resolve({
+        data: url.endsWith("live-map-layers")
+          ? [
+              { id: "a", layer_name: "自分のレイヤ" },
+              { id: "b", layer_name: "追加レイヤ" },
+            ]
+          : url.endsWith("live-locations")
+            ? [account]
+            : [saved],
+      }),
+    );
+    return mount(AdminLiveMaps);
+  }
+  const click = async (wrapper: ReturnType<typeof mount>, text: string) => {
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === text)!
+      .trigger("click");
+    await flushPromises();
+  };
+  it("他の管理者の設定は未操作・キャンセル時に維持し、適用時だけ置き換える", async () => {
+    const wrapper = setup(true);
+    await flushPromises();
+    expect(wrapper.text()).toContain("別の管理者がレイヤを設定");
+    await click(wrapper, "設定を更新");
+    expect(api.put.mock.lastCall![1]).not.toHaveProperty("layer_ids");
+    await click(wrapper, "レイヤ（マーカー・図形）を追加");
+    expect(wrapper.get<HTMLInputElement>('input[value="a"]').element.checked).toBe(false);
+    await wrapper.get('input[value="a"]').setValue(true);
+    await click(wrapper, "キャンセル");
+    await click(wrapper, "設定を更新");
+    expect(api.put.mock.lastCall![1]).not.toHaveProperty("layer_ids");
+    await click(wrapper, "レイヤ（マーカー・図形）を追加");
+    expect(wrapper.get<HTMLInputElement>('input[value="a"]').element.checked).toBe(false);
+    await wrapper.get('input[value="b"]').setValue(true);
+    const count = api.put.mock.calls.length;
+    await click(wrapper, "選択を適用");
+    expect(api.put.mock.calls).toHaveLength(count);
+    await click(wrapper, "設定を更新");
+    expect(api.put.mock.lastCall![1].layer_ids).toEqual(["b"]);
+    wrapper.unmount();
+  });
+  it("保存した選択を復元し、全解除を空配列で送信する", async () => {
+    const wrapper = setup();
+    await flushPromises();
+    await click(wrapper, "レイヤ（マーカー・図形）を追加");
+    expect(wrapper.get<HTMLInputElement>('input[value="a"]').element.checked).toBe(true);
+    await wrapper.get('input[value="a"]').setValue(false);
+    await click(wrapper, "選択を適用");
+    await click(wrapper, "設定を更新");
+    expect(api.put.mock.lastCall![1].layer_ids).toEqual([]);
+    wrapper.unmount();
+  });
+  it("取得失敗時は選択を適用できない", async () => {
+    const wrapper = setup();
+    await flushPromises();
+    api.get.mockRejectedValueOnce(new Error("network"));
+    await click(wrapper, "レイヤ（マーカー・図形）を追加");
+    expect(
+      wrapper
+        .findAll("button")
+        .find((button) => button.text() === "選択を適用")!
+        .attributes("disabled"),
+    ).toBeDefined();
+    await click(wrapper, "キャンセル");
+    await click(wrapper, "設定を更新");
+    expect(api.put.mock.lastCall![1]).not.toHaveProperty("layer_ids");
+    wrapper.unmount();
   });
 });

@@ -11,3 +11,5 @@ export const getAppIniturl = baseUrl + "/app-init";
 export const liveLocationPermissionUrl = baseUrl + "/admin/users/";
 export const adminLiveLocationsUrl = baseUrl + "/admin/live-locations";
 export const adminLiveMapsUrl = baseUrl + "/admin/live-maps";
+
+export const adminLiveMapLayersUrl = baseUrl + "/admin/live-map-layers";
