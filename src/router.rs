@@ -236,6 +236,10 @@ pub fn build_router(
             put(update_live_location_permission_handler),
         )
         .route(
+            "/admin/live-map-layers",
+            get(crate::handler::live_map_layers::candidates),
+        )
+        .route(
             "/admin/live-maps",
             get(list_live_maps_handler).post(create_live_map_handler),
         )

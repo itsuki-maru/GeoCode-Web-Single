@@ -6,6 +6,12 @@
         <meta name="referrer" content="no-referrer" />
         <title>現在位置共有マップ</title>
         <script src="/assets/leaflet.js"></script>
+        <script src="/assets/leaflet.markercluster.js"></script>
+        <link rel="stylesheet" href="/assets/MarkerCluster.css" />
+        <link rel="stylesheet" href="/assets/MarkerCluster.Default.css" />
+        <script src="/assets/marked.min.js"></script>
+        <script src="/assets/xss.min.js"></script>
+        <link rel="stylesheet" href="/assets/github.css" />
         <link rel="stylesheet" href="/assets/leaflet.css" />
         <link rel="stylesheet" href="/assets/map-controls.css" />
         <style>
@@ -13,6 +19,7 @@
             body {
                 height: 100%;
                 margin: 0;
+                padding: 0;
                 font-family: sans-serif;
             }
             body {
@@ -149,7 +156,50 @@
             #map .map-ui-visibility-toggle-control {
                 display: none;
             }
+            /* Match the map detail layout without changing live account popups. */
+            .live-published-popup.leaflet-popup {
+                min-width: 500px;
+                max-width: 750px;
+                font-size: 10px;
+            }
+            .live-published-popup,
+            .live-published-popup *,
+            .live-published-popup *::before,
+            .live-published-popup *::after {
+                box-sizing: border-box;
+            }
+            .live-published-popup .md-detail-contents {
+                box-sizing: border-box;
+                width: 476px;
+                min-width: 450px;
+                max-width: 700px;
+                max-height: min(500px, 60dvh);
+                overflow: auto;
+                overflow-wrap: anywhere;
+                margin-top: 8%;
+                padding-top: 3%;
+                padding-right: 6%;
+            }
+            .live-published-popup .md-detail-contents img,
+            .live-published-popup .md-detail-contents video {
+                max-width: 100%;
+                height: auto;
+            }
+            .live-published-popup .md-detail-contents video {
+                width: 100%;
+            }
             @media (max-width: 700px) {
+                .live-published-popup.leaflet-popup {
+                    width: min(400px, calc(100vw - 32px));
+                    min-width: 0;
+                }
+                .live-published-popup .md-detail-contents {
+                    width: min(390px, calc(100vw - 56px));
+                    min-width: 0;
+                    max-width: 380px;
+                    max-height: min(600px, 60dvh);
+                }
+
                 #map .map-ui-visibility-toggle-control {
                     display: block;
                 }
@@ -311,6 +361,7 @@
                 tileServers: {{ tileServers | json_encode_for_html | safe }},
             isCheckOverlay: {{ isCheckOverlay }},
             tileOverlays: {{ tileOverlays | json_encode_for_html | safe }},
+            publishedLayers: {{ publishedLayers | json_encode_for_html | safe }},
             };
         </script>
         <script type="module" src="/assets/template-live-map.js"></script>

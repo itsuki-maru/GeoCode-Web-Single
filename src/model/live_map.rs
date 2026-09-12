@@ -16,8 +16,16 @@ pub struct CreateLiveMapPayload {
     pub members: Vec<CreateLiveMapMemberPayload>,
     #[serde(default)]
     pub password_action: LiveMapPasswordAction,
+    #[serde(default = "default_use_tile_overlays")]
+    pub use_tile_overlays: bool,
     #[serde(default)]
     pub share_password: Option<String>,
+    #[serde(default)]
+    pub layer_ids: Option<Vec<String>>,
+}
+
+fn default_use_tile_overlays() -> bool {
+    true
 }
 
 #[derive(Debug, Default, Deserialize, PartialEq)]
@@ -53,7 +61,10 @@ pub struct AdminLiveMapSummary {
     pub member_count: i64,
     pub share_url: String,
     pub is_password_protected: bool,
+    pub use_tile_overlays: bool,
     pub members: Vec<AdminLiveMapMember>,
+    pub layer_ids: Vec<String>,
+    pub layers_configured_by_other: bool,
 }
 
 #[derive(Debug, Serialize, FromRow)]

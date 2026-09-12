@@ -58,6 +58,8 @@ struct AdminLiveMapRow {
     revoked_at: Option<DateTime<Utc>>,
     member_count: i64,
     is_password_protected: bool,
+    use_tile_overlays: bool,
+    layers_configured_by: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -312,12 +314,12 @@ pub async fn create_live_map_handler(
     let (_, password_hash) = password_change(&payload)?;
     let map_id = Uuid::now_v7().to_string();
     let public_id = Uuid::new_v4().to_string();
-    let mut transaction = pool.begin().await?;
+    let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
     sqlx::query(
         r#"
         UPDATE live_map
         SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-        WHERE revoked_at IS NULL AND expires_at <= CURRENT_TIMESTAMP
+        WHERE revoked_at IS NULL AND julianday(expires_at) <= julianday('now')
         "#,
     )
     .execute(&mut *transaction)
@@ -330,8 +332,8 @@ pub async fn create_live_map_handler(
             name,
             created_by,
             password_hash,
-            expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6)
+            expires_at, use_tile_overlays
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
     )
     .bind(&map_id)
@@ -340,6 +342,7 @@ pub async fn create_live_map_handler(
     .bind(&admin_id)
     .bind(password_hash)
     .bind(payload.expires_at)
+    .bind(payload.use_tile_overlays)
     .execute(&mut *transaction)
     .await;
     if let Err(error) = insert_result {
@@ -349,6 +352,13 @@ pub async fn create_live_map_handler(
         return Err(error.into());
     }
     sync_members(&mut transaction, &map_id, &payload).await?;
+    super::live_map_layers::sync(
+        &mut transaction,
+        &map_id,
+        &admin_id,
+        payload.layer_ids.as_deref(),
+    )
+    .await?;
     transaction.commit().await?;
 
     Ok(Json(CreateLiveMapResponse {
@@ -375,10 +385,11 @@ pub async fn list_live_maps_handler(
             m.expires_at,
             m.revoked_at,
             COUNT(mm.id) AS member_count,
+            m.use_tile_overlays, m.layers_configured_by,
             (m.password_hash IS NOT NULL) AS is_password_protected
         FROM live_map m
         LEFT JOIN live_map_member mm ON mm.map_id = m.id
-        WHERE m.revoked_at IS NULL AND m.expires_at > CURRENT_TIMESTAMP
+        WHERE m.revoked_at IS NULL AND julianday(m.expires_at) > julianday('now')
         GROUP BY m.id
         "#,
     )
@@ -401,6 +412,7 @@ pub async fn list_live_maps_handler(
     .bind(&map.id)
     .fetch_all(&pool)
     .await?;
+    let layer_ids = super::live_map_layers::own_selection(&pool, &map.id, &admin_id).await?;
     Ok(Json(vec![AdminLiveMapSummary {
         id: map.id,
         name: map.name,
@@ -411,6 +423,12 @@ pub async fn list_live_maps_handler(
         member_count: map.member_count,
         share_url: format!("/live/{}", map.public_id),
         is_password_protected: map.is_password_protected,
+        use_tile_overlays: map.use_tile_overlays,
+        layer_ids,
+        layers_configured_by_other: map
+            .layers_configured_by
+            .as_ref()
+            .is_some_and(|id| id != &admin_id),
         members,
     }]))
 }
@@ -427,11 +445,11 @@ pub async fn update_live_map_handler(
     validate_members(&pool, &payload).await?;
     let old_access_version = get_map_access_version(&pool, &map_id).await?;
     let (change_password, password_hash) = password_change(&payload)?;
-    let mut transaction = pool.begin().await?;
+    let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
     let result = sqlx::query(
         r#"
         UPDATE live_map
-        SET name = $1, expires_at = $2,
+        SET name = $1, expires_at = $2, use_tile_overlays = $6,
             password_hash = CASE WHEN $3 THEN $4 ELSE password_hash END,
             access_version = CASE WHEN $3 THEN access_version + 1 ELSE access_version END,
             updated_at = CURRENT_TIMESTAMP
@@ -443,12 +461,20 @@ pub async fn update_live_map_handler(
     .bind(change_password)
     .bind(password_hash)
     .bind(&map_id)
+    .bind(payload.use_tile_overlays)
     .execute(&mut *transaction)
     .await?;
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound);
     }
     sync_members(&mut transaction, &map_id, &payload).await?;
+    super::live_map_layers::sync(
+        &mut transaction,
+        &map_id,
+        &admin_id,
+        payload.layer_ids.as_deref(),
+    )
+    .await?;
     transaction.commit().await?;
     delete_cached_snapshot(cache.as_ref(), &map_id, old_access_version).await;
     Ok(StatusCode::NO_CONTENT)
@@ -476,7 +502,7 @@ pub async fn rotate_live_map_url_handler(
         UPDATE live_map
         SET public_id = $1, access_version = access_version + 1,
             updated_at = CURRENT_TIMESTAMP
-        WHERE id = $2 AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+        WHERE id = $2 AND revoked_at IS NULL AND julianday(expires_at) > julianday('now')
         RETURNING id, public_id, name, password_hash, access_version, expires_at
         "#,
     )
@@ -526,7 +552,7 @@ async fn find_active_map(pool: &SqlitePool, public_id: &str) -> Result<LiveMapAc
             access_version,
             expires_at
         FROM live_map
-        WHERE public_id = $1 AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+        WHERE public_id = $1 AND revoked_at IS NULL AND julianday(expires_at) > julianday('now')
         "#,
     )
     .bind(public_id)
@@ -653,13 +679,20 @@ async fn render_live_map(
     context.insert("publicId", &public_id);
     context.insert("isCheckOverlay", &is_check_overlay);
     context.insert("tileServers", &tile_servers);
-    let owner: String = sqlx::query_scalar("SELECT created_by FROM live_map WHERE public_id=$1")
-        .bind(&public_id)
-        .fetch_one(pool)
-        .await?;
+    let (owner, use_tile_overlays): (String, bool) =
+        sqlx::query_as("SELECT created_by, use_tile_overlays FROM live_map WHERE public_id=$1")
+            .bind(&public_id)
+            .fetch_one(pool)
+            .await?;
+    let tiles = if use_tile_overlays {
+        super::tile_overlays::selected_tiles(pool, &owner).await?
+    } else {
+        Vec::new()
+    };
+    context.insert("tileOverlays", &tiles);
     context.insert(
-        "tileOverlays",
-        &crate::handler::tile_overlays::selected_tiles(pool, &owner).await?,
+        "publishedLayers",
+        &super::live_map_layers::published(pool, &public_id).await?,
     );
     let rendered = tera
         .lock()
@@ -987,6 +1020,8 @@ mod tests {
                     marker_color: "#1a73e8".into(),
                 })
                 .collect(),
+            use_tile_overlays: true,
+            layer_ids: None,
             password_action: LiveMapPasswordAction::Remove,
             share_password: None,
         }
