@@ -234,6 +234,7 @@
         window.__GEOCODE_MAP_BOOTSTRAP__ = {
             page: "temporary-map",
             isMaster: false,
+            isOverlayTile: {{ isOverlayTile | json_encode_for_html | safe }},
             isChecked: {{ isChecked | json_encode_for_html | safe }},
             isMapUiHidden: false,
             initialView: {

@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT id, username, totp_secret, auth_version\n        FROM user_model\n        WHERE totp_challenge_id = $1\n          AND totp_challenge_expires_at > $2\n          AND totp_challenge_attempts < 5\n          AND is_locked = false\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "username",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "totp_secret",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "auth_version",
+        "ordinal": 3,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f57fcfbc0b594808f528bfb5525a6d194ad45f83e65991508fc563f20062e860"
+}

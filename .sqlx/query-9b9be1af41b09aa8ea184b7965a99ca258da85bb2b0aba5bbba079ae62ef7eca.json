@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT\n            id,\n            username,\n            password,\n            create_at,\n            is_superuser,\n            failed_count,\n            next_challenge_time,\n            is_locked,\n            is_private,\n            is_basic_authed,\n            is_basic_authed_at,\n            totp_secret,\n            totp_temp_secret\n        FROM user_model\n        WHERE username = $1\n        ",
+  "query": "\n        SELECT\n            id,\n            username,\n            password,\n            create_at,\n            is_superuser,\n            failed_count,\n            next_challenge_time,\n            is_locked,\n            is_private,\n            is_basic_authed,\n            is_basic_authed_at,\n            totp_secret,\n            totp_temp_secret,\n            auth_version\n        FROM user_model\n        WHERE username = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -67,6 +67,11 @@
         "name": "totp_temp_secret",
         "ordinal": 12,
         "type_info": "Text"
+      },
+      {
+        "name": "auth_version",
+        "ordinal": 13,
+        "type_info": "Integer"
       }
     ],
     "parameters": {
@@ -85,8 +90,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "8a313a4d9aaa51700a5ecc6e1f70973d890a420d625a4bacfc870ef024d47bdb"
+  "hash": "9b9be1af41b09aa8ea184b7965a99ca258da85bb2b0aba5bbba079ae62ef7eca"
 }

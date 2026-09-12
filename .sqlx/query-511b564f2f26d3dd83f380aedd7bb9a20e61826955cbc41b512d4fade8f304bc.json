@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE user_model\n            SET totp_challenge_id = $1,\n                totp_challenge_expires_at = $2,\n                totp_challenge_attempts = 0,\n                is_basic_authed = false\n            WHERE id = $3\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "511b564f2f26d3dd83f380aedd7bb9a20e61826955cbc41b512d4fade8f304bc"
+}

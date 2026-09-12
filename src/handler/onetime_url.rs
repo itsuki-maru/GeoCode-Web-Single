@@ -77,6 +77,7 @@ pub async fn generate_url_handler(
         layers_hash_map,
         markers_hash_map,
         shapes_hash_map,
+        payload.include_tile_overlays,
     )
     .map_err(|_e| {
         return AppError::InternalServerError;
@@ -166,9 +167,10 @@ async fn create_temporary_url(
             layers,
             markers,
             shapes,
+            include_tile_overlays,
             create_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING id, url, expiration
         "#,
         temporary_url.id,
@@ -179,6 +181,7 @@ async fn create_temporary_url(
         json_layers_data,
         json_markers_data,
         json_shapes_data,
+        temporary_url.include_tile_overlays,
         now,
     )
     .fetch_one(pool)
@@ -205,8 +208,8 @@ async fn update_temporary_url(
         CreateUpdatedTemporaryUrlResponse,
         r#"
         UPDATE temporary_urls
-        SET expiration = $1, password_hash = $2, layers = $3, markers = $4, shapes = $5
-        WHERE user_id = $6
+        SET expiration = $1, password_hash = $2, layers = $3, markers = $4, shapes = $5, include_tile_overlays = $6
+        WHERE user_id = $7
         RETURNING id, url, expiration
         "#,
         temporary_url.expiration,
@@ -214,6 +217,7 @@ async fn update_temporary_url(
         json_layers_data,
         json_markers_data,
         json_shapes_data,
+        temporary_url.include_tile_overlays,
         temporary_url.user_id,
     )
     .fetch_one(pool)
@@ -377,9 +381,11 @@ pub async fn temporary_map_get_handler(
 
     // レイヤのチェック有無
     let is_checked = resolve_is_checked(params.is_checked.as_deref());
+    let is_overlay_tile = resolve_is_checked(params.is_overlay_tile.as_deref());
     let initial_view = resolve_initial_view(&params);
     let is_map_ui_hidden = resolve_is_map_ui_hidden(params.is_map_ui_hidden.as_deref());
-    let map_state_query = build_map_state_query(is_checked, initial_view, is_map_ui_hidden);
+    let map_state_query =
+        build_map_state_query(is_checked, initial_view, is_map_ui_hidden, is_overlay_tile);
 
     match url_id {
         // 正常な UUID が渡された場合
@@ -392,7 +398,7 @@ pub async fn temporary_map_get_handler(
 
             let temp_url = sqlx::query_as!(
                 TemporaryUrlFromDB,
-                "SELECT * FROM temporary_urls WHERE id = $1",
+                r#"SELECT id, user_id, url, expiration, password_hash, layers, markers, shapes, create_at, include_tile_overlays as "include_tile_overlays!: bool" FROM temporary_urls WHERE id = $1"#,
                 url_id
             )
             .fetch_one(&pool)
@@ -428,6 +434,7 @@ pub async fn temporary_map_get_handler(
                             is_checked,
                             initial_view,
                             is_map_ui_hidden,
+                            is_overlay_tile,
                         )
                         .await;
                     }
@@ -464,13 +471,15 @@ pub async fn temporary_map_auth_handler(
     };
 
     let is_checked = resolve_is_checked(params.is_checked.as_deref());
+    let is_overlay_tile = resolve_is_checked(params.is_overlay_tile.as_deref());
     let initial_view = resolve_initial_view(&params);
     let is_map_ui_hidden = resolve_is_map_ui_hidden(params.is_map_ui_hidden.as_deref());
-    let map_state_query = build_map_state_query(is_checked, initial_view, is_map_ui_hidden);
+    let map_state_query =
+        build_map_state_query(is_checked, initial_view, is_map_ui_hidden, is_overlay_tile);
 
     let temp_url = query_as!(
         TemporaryUrlFromDB,
-        "SELECT * FROM temporary_urls WHERE id = $1",
+        r#"SELECT id, user_id, url, expiration, password_hash, layers, markers, shapes, create_at, include_tile_overlays as "include_tile_overlays!: bool" FROM temporary_urls WHERE id = $1"#,
         url_id
     )
     .fetch_optional(&pool)
@@ -505,6 +514,7 @@ pub async fn temporary_map_auth_handler(
             is_checked,
             initial_view,
             is_map_ui_hidden,
+            is_overlay_tile,
         )
         .await;
     };
@@ -533,6 +543,7 @@ pub async fn temporary_map_auth_handler(
         is_checked,
         initial_view,
         is_map_ui_hidden,
+        is_overlay_tile,
     )
     .await
 }
@@ -579,14 +590,16 @@ fn build_map_state_query(
     is_checked: bool,
     initial_view: TemporaryMapInitialView,
     is_map_ui_hidden: bool,
+    is_overlay_tile: bool,
 ) -> String {
     format!(
-        "is_checked={}&lat={}&lng={}&zoom={}&isMapUiHidden={}",
+        "is_checked={}&lat={}&lng={}&zoom={}&isMapUiHidden={}&is_overlay_tile={}",
         is_checked,
         initial_view.latitude,
         initial_view.longitude,
         initial_view.zoom,
-        is_map_ui_hidden
+        is_map_ui_hidden,
+        is_overlay_tile
     )
 }
 
@@ -635,6 +648,7 @@ async fn render_temporary_map_page(
     is_checked: bool,
     initial_view: TemporaryMapInitialView,
     is_map_ui_hidden: bool,
+    is_overlay_tile: bool,
 ) -> Result<axum::response::Response, AppError> {
     let tile_servers = query_as!(
         TileServers,
@@ -670,10 +684,13 @@ async fn render_temporary_map_page(
     context.insert("markersObj", &markers);
     context.insert("shapesObj", &shapes);
     context.insert("tileServers", &tile_servers_hash_map);
-    context.insert(
-        "tileOverlays",
-        &crate::handler::tile_overlays::selected_tiles(pool, &temp_url.user_id).await?,
-    );
+    let tile_overlays = if temp_url.include_tile_overlays {
+        crate::handler::tile_overlays::selected_tiles(pool, &temp_url.user_id).await?
+    } else {
+        Vec::new()
+    };
+    context.insert("tileOverlays", &tile_overlays);
+    context.insert("isOverlayTile", &is_overlay_tile);
     context.insert("isChecked", &is_checked);
     context.insert("latitude", &initial_view.latitude);
     context.insert("longitude", &initial_view.longitude);

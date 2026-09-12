@@ -425,6 +425,14 @@ CREATE TABLE IF NOT EXISTS live_map_password_rate_limit (
             "../../migrations/20260911120000_create_tile_overlays.sql"
         )],
     },
+    Migration {
+        version: 12,
+        name: "add_include_tile_overlays_to_temporary_urls",
+        statements: &[
+            "ALTER TABLE temporary_urls ADD COLUMN include_tile_overlays BOOLEAN NOT NULL DEFAULT 0;",
+            "UPDATE temporary_urls SET include_tile_overlays = 1;",
+        ],
+    },
 ];
 
 // データベース接続の確立

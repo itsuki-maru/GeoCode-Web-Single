@@ -45,7 +45,7 @@ async fn migrations_create_schema_and_record_versions() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 11);
+    assert_eq!(migration_count, 12);
 
     let live_location_table_count: i64 = sqlx::query_scalar(
         r#"
@@ -164,7 +164,7 @@ async fn migrations_are_idempotent() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 11);
+    assert_eq!(migration_count, 12);
 }
 
 #[tokio::test]
@@ -247,7 +247,7 @@ async fn migrations_record_versions_for_existing_schema() {
     .await
     .expect("migration rows should be returned");
 
-    assert_eq!(rows.len(), 11);
+    assert_eq!(rows.len(), 12);
     assert_eq!(rows[0].get::<i64, _>("version"), 1);
     assert_eq!(rows[0].get::<String, _>("name"), "create_initial_schema");
     assert_eq!(rows[1].get::<i64, _>("version"), 2);
@@ -386,4 +386,39 @@ async fn live_map_constraints_allow_only_one_unrevoked_map_and_unique_public_ids
         duplicate_public_id.is_err(),
         "public IDs must remain unique after revocation"
     );
+}
+
+#[tokio::test]
+async fn overlay_sharing_migration_preserves_existing_links_and_runs_once() {
+    let pool = memory_pool().await;
+    run_migrations(&pool).await.unwrap();
+    // Recreate the pre-v12 column layout with two representative legacy links.
+    sqlx::query("ALTER TABLE temporary_urls DROP COLUMN include_tile_overlays")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM schema_migrations WHERE version=12")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("PRAGMA foreign_keys=OFF")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO temporary_urls(id,user_id,url,expiration,layers,markers,shapes,create_at) VALUES('legacy','owner','/legacy','2099-01-01','{}','{}','{}',CURRENT_TIMESTAMP)").execute(&pool).await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    let enabled: bool =
+        sqlx::query_scalar("SELECT include_tile_overlays FROM temporary_urls WHERE id='legacy'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(enabled);
+    sqlx::query("INSERT INTO temporary_urls(id,user_id,url,expiration,layers,markers,shapes,create_at) VALUES('new','other','/new','2099-01-01','{}','{}','{}',CURRENT_TIMESTAMP)").execute(&pool).await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    let enabled: bool =
+        sqlx::query_scalar("SELECT include_tile_overlays FROM temporary_urls WHERE id='new'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!enabled);
 }

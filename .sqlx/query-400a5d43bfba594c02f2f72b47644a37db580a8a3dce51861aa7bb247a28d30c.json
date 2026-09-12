@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        UPDATE temporary_urls\n        SET expiration = $1, password_hash = $2, layers = $3, markers = $4, shapes = $5\n        WHERE user_id = $6\n        RETURNING id, url, expiration\n        ",
+  "query": "\n        UPDATE temporary_urls\n        SET expiration = $1, password_hash = $2, layers = $3, markers = $4, shapes = $5, include_tile_overlays = $6\n        WHERE user_id = $7\n        RETURNING id, url, expiration\n        ",
   "describe": {
     "columns": [
       {
@@ -20,7 +20,7 @@
       }
     ],
     "parameters": {
-      "Right": 6
+      "Right": 7
     },
     "nullable": [
       false,
@@ -28,5 +28,5 @@
       false
     ]
   },
-  "hash": "ab70cda92b9ce335b63248cdcf351b9025f61e2afd69b18d5f2db816f3703682"
+  "hash": "400a5d43bfba594c02f2f72b47644a37db580a8a3dce51861aa7bb247a28d30c"
 }

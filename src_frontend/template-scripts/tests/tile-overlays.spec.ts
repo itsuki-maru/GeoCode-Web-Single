@@ -11,7 +11,7 @@ const tile = (id: string): TileOverlayRecord => ({
   opacity: 0.7,
   sort_order: 0,
 });
-function setup(accountId?: string) {
+function setup(accountId?: string, initiallyVisible = true) {
   const handlers = new Map<string, (event: { layer: unknown }) => void>();
   const visible = new Set();
   const pane = { style: {} };
@@ -45,7 +45,7 @@ function setup(accountId?: string) {
   };
   const control = { addOverlay: vi.fn(), removeLayer: vi.fn() };
   return {
-    manager: createTileOverlayManager(leaflet, map, control, accountId),
+    manager: createTileOverlayManager(leaflet, map, control, accountId, initiallyVisible),
     handlers,
     leaflet,
     layers,
@@ -58,6 +58,21 @@ function setup(accountId?: string) {
 beforeEach(() => localStorage.clear());
 
 describe("tile overlays", () => {
+  it("adds unchecked shared tiles without persisting viewer choices", () => {
+    const page = setup(undefined, false);
+    page.manager.sync([tile("a")]);
+    expect(page.control.addOverlay).toHaveBeenCalledTimes(1);
+    expect(page.visible.size).toBe(0);
+    page.layers[0].addTo(page.map);
+    expect(page.visible.size).toBe(1);
+    expect(localStorage.length).toBe(0);
+    const reload = setup(undefined, false);
+    reload.manager.sync([tile("a")]);
+    expect(reload.visible.size).toBe(0);
+    const excluded = setup();
+    excluded.manager.sync([]);
+    expect(excluded.control.addOverlay).not.toHaveBeenCalled();
+  });
   it("restores per-account checks and removes obsolete selections without overwriting hidden state", () => {
     const first = setup("account-a");
     first.manager.sync([tile("a"), tile("b")]);

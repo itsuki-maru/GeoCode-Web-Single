@@ -28,6 +28,7 @@ pub struct TemporaryUrl {
     pub layers: HashMap<String, LayerObjectFromRow>,
     pub markers: HashMap<String, MarkerObjectFromRow>,
     pub shapes: HashMap<String, ShapeObject>,
+    pub include_tile_overlays: bool,
 }
 
 impl TemporaryUrl {
@@ -40,6 +41,7 @@ impl TemporaryUrl {
         layers: HashMap<String, LayerObjectFromRow>,
         markers: HashMap<String, MarkerObjectFromRow>,
         shapes: HashMap<String, ShapeObject>,
+        include_tile_overlays: bool,
     ) -> Result<Self, TempUrlError> {
         let expiration = Utc::now()
             .naive_utc()
@@ -56,6 +58,7 @@ impl TemporaryUrl {
             layers,
             markers,
             shapes,
+            include_tile_overlays,
         })
     }
 }
@@ -70,6 +73,7 @@ pub struct TemporaryUrlFromDB {
     pub layers: String,
     pub markers: String,
     pub shapes: String,
+    pub include_tile_overlays: bool,
     pub create_at: String,
 }
 
@@ -92,6 +96,8 @@ pub struct GenarateUrlPayload {
     pub share_password: Option<String>,
     #[serde(default)]
     pub include_shapes: bool,
+    #[serde(default)]
+    pub include_tile_overlays: bool,
 }
 
 // 一時URL作成・更新後のレスポンス構造体
@@ -118,6 +124,7 @@ pub struct OnetimePasswordForm {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct MapStateParams {
     pub is_checked: Option<String>,
+    pub is_overlay_tile: Option<String>,
     pub lat: Option<f64>,
     pub lng: Option<f64>,
     pub zoom: Option<i32>,

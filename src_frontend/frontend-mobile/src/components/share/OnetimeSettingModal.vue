@@ -26,6 +26,7 @@ const existingSharedExpiration = ref("");
 const existingSharedProtected = ref(false);
 const sharePassword = ref("");
 const includeShapes = ref(false);
+const includeTileOverlays = ref(false);
 
 const isDropdownOpen = ref(false);
 
@@ -131,6 +132,7 @@ const genOnetimeMapUrl = async (updateUrl: boolean = true): Promise<void> => {
       update_url: updateUrl,
       share_password: sharePassword.value,
       include_shapes: includeShapes.value,
+      include_tile_overlays: includeTileOverlays.value,
     };
 
     const response = await apiClient.post(generateOnetimeMapUrl, payload);
@@ -195,6 +197,10 @@ defineExpose({ copiedLayer, fetchCurrentSharedUrl });
       <div class="share-option-row">
         <label for="include-shapes" style="font-size: 16px">図形も共有する</label>
         <input v-model="includeShapes" type="checkbox" id="include-shapes" />
+      </div>
+      <div class="share-option-row">
+        <label for="include-tile-overlays" style="font-size: 16px">重ねるタイルレイヤも共有する</label>
+        <input v-model="includeTileOverlays" type="checkbox" id="include-tile-overlays" />
       </div>
       <div v-if="existingSharedUrl" class="existing-share-box">
         <div class="existing-share-title">現在有効な共有リンクがあります</div>

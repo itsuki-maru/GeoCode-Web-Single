@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, user_id, url, expiration, password_hash, layers, markers, shapes, create_at, include_tile_overlays as \"include_tile_overlays!: bool\" FROM temporary_urls WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "user_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "url",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "expiration",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "password_hash",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "layers",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "markers",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "shapes",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "create_at",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "include_tile_overlays!: bool",
+        "ordinal": 9,
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "72c37949eeedff8e1631ba11779f4b28f244aa0116048d3fb9b18df58a4888b0"
+}
