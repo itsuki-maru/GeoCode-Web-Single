@@ -48,6 +48,8 @@ fn map_payload(user_id: &str, name: &str) -> CreateLiveMapPayload {
             display_name: "共有者A".into(),
             marker_color: "#1a73e8".into(),
         }],
+        use_tile_overlays: true,
+        layer_ids: None,
         password_action: LiveMapPasswordAction::Remove,
         share_password: None,
     }

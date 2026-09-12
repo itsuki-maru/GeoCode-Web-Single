@@ -45,7 +45,7 @@ async fn migrations_create_schema_and_record_versions() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 12);
+    assert_eq!(migration_count, 14);
 
     let live_location_table_count: i64 = sqlx::query_scalar(
         r#"
@@ -164,7 +164,7 @@ async fn migrations_are_idempotent() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 12);
+    assert_eq!(migration_count, 14);
 }
 
 #[tokio::test]
@@ -247,7 +247,7 @@ async fn migrations_record_versions_for_existing_schema() {
     .await
     .expect("migration rows should be returned");
 
-    assert_eq!(rows.len(), 12);
+    assert_eq!(rows.len(), 14);
     assert_eq!(rows[0].get::<i64, _>("version"), 1);
     assert_eq!(rows[0].get::<String, _>("name"), "create_initial_schema");
     assert_eq!(rows[1].get::<i64, _>("version"), 2);
@@ -417,6 +417,42 @@ async fn overlay_sharing_migration_preserves_existing_links_and_runs_once() {
     run_migrations(&pool).await.unwrap();
     let enabled: bool =
         sqlx::query_scalar("SELECT include_tile_overlays FROM temporary_urls WHERE id='new'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!enabled);
+}
+
+#[tokio::test]
+async fn live_map_settings_upgrade_preserves_existing_maps_and_runs_once() {
+    let pool = memory_pool().await;
+    run_migrations(&pool).await.unwrap();
+    sqlx::query("PRAGMA foreign_keys=OFF")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql("DROP TABLE live_map_layer; ALTER TABLE live_map DROP COLUMN layers_configured_by; ALTER TABLE live_map DROP COLUMN use_tile_overlays; DELETE FROM schema_migrations WHERE version >= 13;").execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO live_map(id,public_id,name,created_by,expires_at) VALUES('legacy','public','existing','owner','2099-01-01')").execute(&pool).await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    let settings: (bool, Option<String>, String) = sqlx::query_as(
+        "SELECT use_tile_overlays,layers_configured_by,name FROM live_map WHERE id='legacy'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(settings, (true, None, "existing".into()));
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM live_map_layer")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+    sqlx::query("UPDATE live_map SET use_tile_overlays=false WHERE id='legacy'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    run_migrations(&pool).await.unwrap();
+    let enabled: bool =
+        sqlx::query_scalar("SELECT use_tile_overlays FROM live_map WHERE id='legacy'")
             .fetch_one(&pool)
             .await
             .unwrap();
