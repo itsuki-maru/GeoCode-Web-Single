@@ -1,0 +1,1 @@
+ALTER TABLE live_map ADD COLUMN use_tile_overlays BOOLEAN NOT NULL DEFAULT 1;
