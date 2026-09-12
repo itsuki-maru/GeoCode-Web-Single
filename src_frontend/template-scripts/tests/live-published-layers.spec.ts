@@ -1,15 +1,23 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { addPublishedLayerControl, type PublishedLayers } from "../src/live-map/published-layers";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 function setup() {
   const objects: any[] = [];
   const groups: any[] = [];
   const visible = new Set();
   const makeObject = () => {
+    let tooltip: any = null;
     const obj = {
-      bindTooltip: vi.fn(),
+      bindTooltip: vi.fn((_content, _options) => { tooltip = { setLatLng: vi.fn(), getElement: () => null }; }),
+      getTooltip: () => tooltip,
+      unbindTooltip: vi.fn(() => { tooltip = null; }),
+      openTooltip: vi.fn(),
+      closeTooltip: vi.fn(),
+      getLatLng: () => ({ lat: 35, lng: 139 }),
+      getLatLngs: () => [{ lat: 35, lng: 139 }, { lat: 36, lng: 140 }],
+      getBounds: () => ({ getCenter: () => ({ lat: 35, lng: 139 }) }),
       bindPopup: vi.fn(),
       on: vi.fn(),
       addTo: vi.fn((group: any) => {
@@ -82,11 +90,54 @@ function setup() {
   const filterXSS = vi.fn(() => "<p>sanitized memo</p>");
   vi.stubGlobal("marked", marked);
   vi.stubGlobal("filterXSS", filterXSS);
-  const map = { on: vi.fn(), hasLayer: (layer: unknown) => visible.has(layer) };
+  const map = {
+    on: vi.fn(), off: vi.fn(),
+    getZoom: vi.fn(() => 12),
+    getBounds: () => ({ contains: () => true }),
+    distance: () => 100,
+    hasLayer: (layer: unknown) => visible.has(layer) || groups.some(g => visible.has(g) && g.items.includes(layer)),
+  };
   return { leaflet, map, groups, visible, objects, control, container, marked, filterXSS, cluster, clusterItems };
 }
 
 describe("live published layers", () => {
+  it("shows permanent shape labels and follows group visibility and zoom without changing popups", () => {
+    vi.useFakeTimers();
+    const runtime = setup();
+    const data: PublishedLayers = {
+      layers: [{ id: "a", layer_name: "shapes" }], markers: [],
+      shapes: ["circle", "polygon", "rectangle", "polyline"].map((shape_type, i) => ({
+        id: String(i), layer_id: "a", shape_type, name: i === 2 ? " " : "<b>name</b>",
+        geojson: { geometry: { coordinates: [139, 35] }, properties: { radius: 100 } },
+      })),
+    };
+    addPublishedLayerControl(runtime.leaflet, runtime.map, data, false);
+    for (const index of [0, 1, 3]) {
+      const obj = runtime.objects[index];
+      expect(obj.bindTooltip).toHaveBeenCalledWith(expect.stringContaining("&lt;b&gt;name&lt;/b&gt;"),
+        expect.objectContaining({ permanent: true, direction: "center" }));
+      expect(obj.getTooltip()).not.toBeNull();
+      expect(obj.bindPopup).toHaveBeenCalledOnce();
+    }
+    expect(runtime.objects[2].bindTooltip).not.toHaveBeenCalled();
+    const changeGroup = runtime.map.on.mock.calls.find(([events]) => events === "layeradd layerremove")![1];
+    runtime.visible.delete(runtime.groups[0]);
+    changeGroup({ layer: runtime.groups[0] });
+    vi.runAllTimers();
+    expect(runtime.objects.every(obj => obj.getTooltip() === null)).toBe(true);
+    runtime.visible.add(runtime.groups[0]);
+    changeGroup({ layer: runtime.groups[0] });
+    vi.runAllTimers();
+    expect(runtime.objects[0].getTooltip()).not.toBeNull();
+    runtime.map.getZoom.mockReturnValue(5);
+    runtime.map.on.mock.calls.find(([events]) => events === "zoomend")![1]();
+    vi.runAllTimers();
+    expect(runtime.objects[0].getTooltip()).toBeNull();
+    runtime.map.getZoom.mockReturnValue(12);
+    runtime.map.on.mock.calls.find(([events]) => events === "moveend resize overlayadd overlayremove")![1]();
+    vi.runAllTimers();
+    expect(runtime.objects[0].getTooltip()).not.toBeNull();
+  });
   it("does not install a control when no groups are published", () => {
     const { leaflet, map } = setup();
     expect(addPublishedLayerControl(leaflet, map, undefined, false)).toBeNull();

@@ -2,7 +2,11 @@ import { escapeHtml, markerOptionsForLayer, enableMarkerIconFallback } from "../
 import { createShapeStyleCore } from "../map/common/shape-style";
 import { createShapeArrowRuntime } from "../map/common/shape-arrow";
 import { createShapeLayerRuntime } from "../map/common/shape-layer";
-import { getShapeMemoFromGeoJson } from "../map/common/shape-memo";
+import { createShapeNameLabelBinder } from "../map/common/shape-restoration";
+import { createShapeViewportRuntime } from "../map/common/shape-viewport";
+import { createShapeMeasurementRuntime } from "../map/common/shape-measurement";
+import { flattenShapeLatLngs } from "../map/common/shape-measurement-display";
+import { normalizeShapeName, getShapeMemoFromGeoJson } from "../map/common/shape-memo";
 import {
   createNestedTokenizer,
   isLocalhost,
@@ -57,8 +61,8 @@ export function addPublishedLayerControl(
   });
   const popupContent = (name: string, memo: string) =>
     `<div class="md-detail-contents"><h1>${escapeHtml(name)}</h1>${renderIframe(filterXSS(marked.parse(memo), xssOptions))}</div>`;
-  const bindContent = (layer: any, name: string, memo: string) => {
-    if (name) layer.bindTooltip(escapeHtml(name));
+  const bindContent = (layer: any, name: string, memo: string, showHoverName = true) => {
+    if (showHoverName && name) layer.bindTooltip(escapeHtml(name));
     layer.bindPopup(popupContent(name, memo), { className: "live-published-popup" });
     layer.on("popupopen", (event: any) => {
       const element = event.popup.getElement();
@@ -108,6 +112,7 @@ export function addPublishedLayerControl(
     bindContent(marker, record.marker_name, record.detail);
     publishedMarkers.push({ group: target.group, marker });
   }
+  const publishedShapes: any[] = [];
   for (const record of data.shapes) {
     const target = groups.get(record.layer_id);
     if (!target) continue;
@@ -116,12 +121,47 @@ export function addPublishedLayerControl(
         ...style.getShapeStyleFromGeoJson(record.shape_type, record.geojson),
       });
       if (!layer) continue;
-      bindContent(layer, record.name ?? "", getShapeMemoFromGeoJson(record.geojson));
+      bindContent(layer, record.name ?? "", getShapeMemoFromGeoJson(record.geojson), false);
+      layer.shapeName = normalizeShapeName(record.name);
+      layer.shapeType = record.shape_type;
+      layer.shapeStyle = style.getShapeStyleFromGeoJson(record.shape_type, record.geojson);
+      publishedShapes.push(layer);
       layer.addTo(target.group);
     } catch (error) {
       console.warn("公開レイヤの図形を読み込めませんでした。", record.id, error);
     }
   }
+  const measurement = createShapeMeasurementRuntime({
+    escapeHtml, flattenShapeLatLngs,
+    getDefaultShapeColor: () => defaults.color,
+    getLeaflet: () => leaflet, getMap: () => map,
+    getSegmentLabelGroupSize: () => 1,
+    normalizeShapeColor: style.normalizeShapeColor,
+  });
+  const bindLabel = createShapeNameLabelBinder({
+    escapeHtml, normalizeShapeName,
+    normalizeShapeColor: style.normalizeShapeColor,
+    getDefaultShapeColor: () => defaults.color,
+    attachShapeMemoTooltipOpen: (layer: any, latLng) => {
+      const element = layer.getTooltip()?.getElement();
+      if (!element || element.dataset.liveShapePopupBound) return;
+      element.dataset.liveShapePopupBound = "true";
+      leaflet.DomEvent.on(element, "click", (event: Event) => {
+        leaflet.DomEvent.stop(event);
+        layer.openPopup(latLng);
+      });
+    },
+  });
+  const shapeLabels = createShapeViewportRuntime({ getShapeRecords: () => data.shapes })
+    .createViewportShapeLabelManager({
+      map, getLayers: () => publishedShapes, bindLabel,
+      shouldBind: (layer) => Boolean(normalizeShapeName(layer.shapeName)),
+      getLabelLatLng: (layer: any) => layer.shapeType === "polyline"
+        ? measurement.getPolylineCenterLatLng(layer)
+        : layer.shapeType === "circle" ? layer.getLatLng() : layer.getBounds().getCenter(),
+    });
+  shapeLabels.refresh();
+  map.on("unload", () => shapeLabels.destroy());
   const syncMarkers = () => {
     markerCluster.clearLayers();
     markerCluster.addLayers(
@@ -130,7 +170,10 @@ export function addPublishedLayerControl(
   };
   const visibilityGroups = new Set([...groups.values()].map(({ group }) => group));
   map.on("layeradd layerremove", (event: { layer: any }) => {
-    if (visibilityGroups.has(event.layer)) syncMarkers();
+    if (visibilityGroups.has(event.layer)) {
+      syncMarkers();
+      shapeLabels.scheduleRefresh();
+    }
   });
   syncMarkers();
   const collapsible = isMobile ? createCollapsibleLayerControl({ container, leaflet, map }) : null;
