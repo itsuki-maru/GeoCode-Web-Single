@@ -67,42 +67,15 @@ interface RestoreSavedShapesOptions {
   shapeLayers: Record<string, RestoredShapeLayer>;
 }
 
-export function createReadOnlyShapeRestorationRuntime({
-  attachShapeMemoPopup,
+export function createShapeNameLabelBinder({
   attachShapeMemoTooltipOpen,
-  bindPolylineHoverHighlight,
-  createLeafletShapeLayer,
   escapeHtml,
   getDefaultShapeColor,
-  getShapeMemoFromGeoJson,
-  getShapeNameLabelManager,
-  getShapeRecords,
-  getShapeStyleFromGeoJson,
-  labelAppearance = "plain",
   normalizeShapeColor,
   normalizeShapeName,
-  scheduleTask = (callback) => {
-    setTimeout(callback, 0);
-  },
-}: ShapeRestorationDependencies) {
-  const applyShapeStyle = (layer: RestoredShapeLayer): void => {
-    if (typeof layer?.setStyle !== "function") return;
-    layer.setStyle({ ...(layer.shapeStyle ?? {}) });
-  };
-
-  const updateShapeNameLabel = (
-    layer: RestoredShapeLayer | null | undefined,
-    name: unknown,
-  ): void => {
-    if (!layer) return;
-    layer.shapeName = normalizeShapeName(name);
-    layer.isShapeNameLayer = true;
-
-    const manager = getShapeNameLabelManager();
-    if (manager) manager.invalidate(layer);
-    else layer.unbindTooltip?.();
-  };
-
+  labelAppearance = "plain",
+  scheduleTask = (callback) => { setTimeout(callback, 0); }
+}: Pick<ShapeRestorationDependencies, "attachShapeMemoTooltipOpen" | "escapeHtml" | "getDefaultShapeColor" | "normalizeShapeColor" | "normalizeShapeName" | "labelAppearance" | "scheduleTask">) {
   const bindShapeNameLabelTooltip = (layer: RestoredShapeLayer, labelLatLng: unknown): void => {
     if (typeof layer?.bindTooltip !== "function") return;
 
@@ -145,6 +118,47 @@ export function createReadOnlyShapeRestorationRuntime({
       applyTooltipStyle();
     });
   };
+
+  return bindShapeNameLabelTooltip;
+}
+
+export function createReadOnlyShapeRestorationRuntime({
+  attachShapeMemoPopup,
+  attachShapeMemoTooltipOpen,
+  bindPolylineHoverHighlight,
+  createLeafletShapeLayer,
+  escapeHtml,
+  getDefaultShapeColor,
+  getShapeMemoFromGeoJson,
+  getShapeNameLabelManager,
+  getShapeRecords,
+  getShapeStyleFromGeoJson,
+  labelAppearance = "plain",
+  normalizeShapeColor,
+  normalizeShapeName,
+  scheduleTask = (callback) => {
+    setTimeout(callback, 0);
+  },
+}: ShapeRestorationDependencies) {
+  const applyShapeStyle = (layer: RestoredShapeLayer): void => {
+    if (typeof layer?.setStyle !== "function") return;
+    layer.setStyle({ ...(layer.shapeStyle ?? {}) });
+  };
+
+  const updateShapeNameLabel = (
+    layer: RestoredShapeLayer | null | undefined,
+    name: unknown,
+  ): void => {
+    if (!layer) return;
+    layer.shapeName = normalizeShapeName(name);
+    layer.isShapeNameLayer = true;
+
+    const manager = getShapeNameLabelManager();
+    if (manager) manager.invalidate(layer);
+    else layer.unbindTooltip?.();
+  };
+
+  const bindShapeNameLabelTooltip = createShapeNameLabelBinder({ attachShapeMemoTooltipOpen, escapeHtml, getDefaultShapeColor, normalizeShapeColor, normalizeShapeName, labelAppearance, scheduleTask });
 
   const restoreSavedShapes = ({
     addLayer,

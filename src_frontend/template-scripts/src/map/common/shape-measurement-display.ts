@@ -88,6 +88,13 @@ interface ShapeMeasurementDisplayDependencies {
   trimClosedLatLngs(latLngs: unknown): LatLng[];
 }
 
+export const flattenShapeLatLngs = (latLngs: unknown): LatLng[] => {
+    if (!Array.isArray(latLngs) || latLngs.length === 0) return [];
+    if (Array.isArray(latLngs[0])) return flattenShapeLatLngs(latLngs[0]);
+    return latLngs as LatLng[];
+  };
+
+
 export function createReadOnlyShapeMeasurementDisplayRuntime({
   calculateProjectedPolygonArea,
   createGroupedSegmentEndpointMarkers,
@@ -110,11 +117,6 @@ export function createReadOnlyShapeMeasurementDisplayRuntime({
   setMeasurementMarkerVisibility,
   trimClosedLatLngs,
 }: ShapeMeasurementDisplayDependencies) {
-  const flattenShapeLatLngs = (latLngs: unknown): LatLng[] => {
-    if (!Array.isArray(latLngs) || latLngs.length === 0) return [];
-    if (Array.isArray(latLngs[0])) return flattenShapeLatLngs(latLngs[0]);
-    return latLngs as LatLng[];
-  };
 
   const getShapeLabelLatLng = (
     layer: MeasurementLayer | null | undefined,
