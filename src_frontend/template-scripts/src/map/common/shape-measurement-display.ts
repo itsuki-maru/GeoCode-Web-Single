@@ -89,11 +89,10 @@ interface ShapeMeasurementDisplayDependencies {
 }
 
 export const flattenShapeLatLngs = (latLngs: unknown): LatLng[] => {
-    if (!Array.isArray(latLngs) || latLngs.length === 0) return [];
-    if (Array.isArray(latLngs[0])) return flattenShapeLatLngs(latLngs[0]);
-    return latLngs as LatLng[];
-  };
-
+  if (!Array.isArray(latLngs) || latLngs.length === 0) return [];
+  if (Array.isArray(latLngs[0])) return flattenShapeLatLngs(latLngs[0]);
+  return latLngs as LatLng[];
+};
 
 export function createReadOnlyShapeMeasurementDisplayRuntime({
   calculateProjectedPolygonArea,
@@ -117,7 +116,6 @@ export function createReadOnlyShapeMeasurementDisplayRuntime({
   setMeasurementMarkerVisibility,
   trimClosedLatLngs,
 }: ShapeMeasurementDisplayDependencies) {
-
   const getShapeLabelLatLng = (
     layer: MeasurementLayer | null | undefined,
     shapeType = layer?.shapeType,

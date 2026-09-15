@@ -1,0 +1,208 @@
+// Render the real map template with local test tiles, including its shared CSS.
+// Prerequisite: npm run build in frontend. Playwright is an optional QA dependency.
+// Example: node scripts/check-print-preview.mjs --browser=chrome --playwright-path=/path/to/playwright/index.mjs
+// Verify page counts/content with: python scripts/check-print-preview-pdfs.py ../../dist/print-check/chrome
+import assert from "node:assert/strict";
+import { readFile, mkdir } from "node:fs/promises";
+import { basename, extname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createServer } from "vite";
+
+const args = Object.fromEntries(
+  process.argv.slice(2).map((arg) => {
+    const index = arg.indexOf("=");
+    return [arg.slice(2, index), arg.slice(index + 1)];
+  }),
+);
+const { chromium } = await import(
+  args["playwright-path"] ? pathToFileURL(resolve(args["playwright-path"])).href : "playwright"
+);
+const root = fileURLToPath(new URL("../../../", import.meta.url));
+const channel = args.browser || "chrome";
+const output = resolve(root, args.output || `dist/print-check/${channel}`);
+await mkdir(output, { recursive: true });
+const baselineCss = args["baseline-css"]
+  ? await readFile(resolve(args["baseline-css"]), "utf8")
+  : null;
+const state = {
+  view: { latitude: 35.68, longitude: 139.76, zoom: 13 },
+  tileServerId: "1",
+  overlays: {},
+  markersVisible: true,
+  shapesVisible: true,
+  shapeNamesVisible: true,
+  layerIds: null,
+};
+const bootstrap = {
+  page: "map-anather",
+  isCluster: false,
+  initialView: state.view,
+  tileServers: {
+    1: {
+      url: "/print-test-tile.svg",
+      attribution: "PRINT TEST SOURCE",
+      label: "標準地図",
+      layer_name: "標準地図",
+      include_foreign_tiles: true,
+      min_zoom: 0,
+      max_zoom: 18,
+    },
+  },
+  tileOverlays: [],
+  layers: { a: { id: "a", layer_name: "避難所" } },
+  markers: {
+    a: {
+      id: "a",
+      layer_id: "a",
+      marker_name: "避難所A",
+      detail: "",
+      latitude: 35.68,
+      longitude: 139.76,
+    },
+  },
+  shapes: [
+    {
+      id: "area",
+      layer_id: "a",
+      name: "避難対象区域",
+      shape_type: "polygon",
+      geojson: {
+        type: "Feature",
+        properties: {},
+        geometry: {
+          type: "Polygon",
+          coordinates: [
+            [
+              [139.75, 35.67],
+              [139.77, 35.67],
+              [139.76, 35.69],
+              [139.75, 35.67],
+            ],
+          ],
+        },
+      },
+    },
+  ],
+};
+let template = await readFile(resolve(root, "src/templates/map-anather.html"), "utf8");
+template = template.replace(
+  /window\.__GEOCODE_MAP_BOOTSTRAP__ = \{[\s\S]*?\n        \};/,
+  `window.__GEOCODE_MAP_BOOTSTRAP__ = ${JSON.stringify(bootstrap)};`,
+);
+template = template.replace(
+  '<script type="module" src="/assets/template-map-anather.js"></script>',
+  `<script type="module">
+  import { createPrintPreview } from "/src/map/print/print-preview.ts";
+  createPrintPreview(${JSON.stringify(state)}, () => {});
+  if (new URLSearchParams(location.search).has("baseline")) {
+    [...document.head.querySelectorAll("style")].find(style => style.textContent.includes("#print-layout")).textContent = ${JSON.stringify(baselineCss)};
+  }
+  document.documentElement.dataset.printFixtureReady = "true";
+</script>`,
+);
+const server = await createServer({
+  root: resolve(root, "src_frontend/template-scripts"),
+  configFile: false,
+  publicDir: false,
+  logLevel: "error",
+  server: { host: "127.0.0.1", port: 0 },
+  plugins: [
+    {
+      name: "print-fixture",
+      configureServer(server) {
+        server.middlewares.use(async (req, res, next) => {
+          const path = new URL(req.url, "http://localhost").pathname;
+          if (path === "/print-check.html") {
+            res.setHeader("Content-Type", "text/html; charset=utf-8");
+            res.end(template);
+            return;
+          }
+          if (path === "/print-test-tile.svg") {
+            res.setHeader("Content-Type", "image/svg+xml");
+            res.end(
+              '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256"><rect width="256" height="256" fill="#e8eedf"/><path d="M0 70H256M80 0V256M0 200H256M210 0V256" stroke="white" stroke-width="10"/><rect x="100" y="95" width="70" height="65" rx="8" fill="#bcd6ae"/></svg>',
+            );
+            return;
+          }
+          if (path.startsWith("/assets/")) {
+            const name = basename(path);
+            try {
+              const body = await readFile(resolve(root, "src_frontend/frontend/dist", name));
+              res.setHeader(
+                "Content-Type",
+                { ".js": "text/javascript", ".css": "text/css", ".png": "image/png" }[
+                  extname(name)
+                ] || "application/octet-stream",
+              );
+              res.end(body);
+            } catch {
+              res.statusCode = 404;
+              res.end();
+            }
+            return;
+          }
+          next();
+        });
+      },
+    },
+  ],
+});
+await server.listen();
+let browser;
+try {
+  browser = await chromium.launch({ channel, headless: true });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const url = `http://127.0.0.1:${server.httpServer.address().port}/print-check.html`;
+  if (baselineCss) {
+    await page.goto(`${url}?baseline=1`);
+    await page.waitForSelector('[data-print-fixture-ready="true"]');
+    await page.waitForFunction(() => !document.querySelector("#print-submit").disabled);
+    await page.pdf({
+      path: resolve(output, "baseline-a4-landscape.pdf"),
+      preferCSSPageSize: true,
+      printBackground: true,
+    });
+  }
+  await page.goto(url);
+  await page.waitForSelector('[data-print-fixture-ready="true"]');
+  for (const paper of ["a4-portrait", "a4-landscape", "a3-portrait", "a3-landscape"]) {
+    for (const titled of [false, true]) {
+      await page.emulateMedia({ media: "screen" });
+      await page.locator("#print-size").selectOption(paper);
+      await page
+        .locator("#print-title-input")
+        .fill(
+          titled
+            ? "避難場所の案内図：タイトルの折り返しと印刷範囲を確認するためのサンプルです"
+            : "",
+        );
+      await page.waitForFunction(() => !document.querySelector("#print-submit").disabled);
+      const dimensions = () => {
+        const map = document.querySelector("#map");
+        return { width: map.clientWidth, height: map.clientHeight };
+      };
+      const previewSize = await page.evaluate(dimensions);
+      await page.emulateMedia({ media: "print" });
+      assert.deepEqual(
+        await page.evaluate(dimensions),
+        previewSize,
+        "Map dimensions must not change for print",
+      );
+      const name = `${paper}-${titled ? "title" : "blank"}`;
+      await page.pdf({
+        path: resolve(output, `${name}.pdf`),
+        preferCSSPageSize: true,
+        printBackground: true,
+        displayHeaderFooter: false,
+      });
+      await page.screenshot({ path: resolve(output, `${name}.png`), fullPage: true });
+      console.log(`${channel}: ${name} rendered`);
+    }
+  }
+  assert.deepEqual(errors, [], "No browser runtime errors");
+} finally {
+  await browser?.close();
+  await server.close();
+}

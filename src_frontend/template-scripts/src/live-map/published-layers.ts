@@ -132,14 +132,17 @@ export function addPublishedLayerControl(
     }
   }
   const measurement = createShapeMeasurementRuntime({
-    escapeHtml, flattenShapeLatLngs,
+    escapeHtml,
+    flattenShapeLatLngs,
     getDefaultShapeColor: () => defaults.color,
-    getLeaflet: () => leaflet, getMap: () => map,
+    getLeaflet: () => leaflet,
+    getMap: () => map,
     getSegmentLabelGroupSize: () => 1,
     normalizeShapeColor: style.normalizeShapeColor,
   });
   const bindLabel = createShapeNameLabelBinder({
-    escapeHtml, normalizeShapeName,
+    escapeHtml,
+    normalizeShapeName,
     normalizeShapeColor: style.normalizeShapeColor,
     getDefaultShapeColor: () => defaults.color,
     attachShapeMemoTooltipOpen: (layer: any, latLng) => {
@@ -152,14 +155,20 @@ export function addPublishedLayerControl(
       });
     },
   });
-  const shapeLabels = createShapeViewportRuntime({ getShapeRecords: () => data.shapes })
-    .createViewportShapeLabelManager({
-      map, getLayers: () => publishedShapes, bindLabel,
-      shouldBind: (layer) => Boolean(normalizeShapeName(layer.shapeName)),
-      getLabelLatLng: (layer: any) => layer.shapeType === "polyline"
+  const shapeLabels = createShapeViewportRuntime({
+    getShapeRecords: () => data.shapes,
+  }).createViewportShapeLabelManager({
+    map,
+    getLayers: () => publishedShapes,
+    bindLabel,
+    shouldBind: (layer) => Boolean(normalizeShapeName(layer.shapeName)),
+    getLabelLatLng: (layer: any) =>
+      layer.shapeType === "polyline"
         ? measurement.getPolylineCenterLatLng(layer)
-        : layer.shapeType === "circle" ? layer.getLatLng() : layer.getBounds().getCenter(),
-    });
+        : layer.shapeType === "circle"
+          ? layer.getLatLng()
+          : layer.getBounds().getCenter(),
+  });
   shapeLabels.refresh();
   map.on("unload", () => shapeLabels.destroy());
   const syncMarkers = () => {

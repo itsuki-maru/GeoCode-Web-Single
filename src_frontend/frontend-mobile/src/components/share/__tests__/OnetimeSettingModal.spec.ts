@@ -4,16 +4,12 @@ import OnetimeSettingModal from "../OnetimeSettingModal.vue";
 import apiClient from "@/axiosClient";
 vi.mock("@/axiosClient", () => ({
   default: {
-    post: vi
-      .fn()
-      .mockResolvedValue({
-        data: { id: "share", url: "/onetime/share", expiration: "2026-09-12T00:00:00" },
-      }),
-    get: vi
-      .fn()
-      .mockResolvedValue({
-        data: { id: "share", url: "/onetime/share", expiration: "2026-09-12T00:00:00" },
-      }),
+    post: vi.fn().mockResolvedValue({
+      data: { id: "share", url: "/onetime/share", expiration: "2026-09-12T00:00:00" },
+    }),
+    get: vi.fn().mockResolvedValue({
+      data: { id: "share", url: "/onetime/share", expiration: "2026-09-12T00:00:00" },
+    }),
   },
 }));
 describe("共有リンクのタイル共有設定", () => {

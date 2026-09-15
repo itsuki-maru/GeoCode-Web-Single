@@ -1,5 +1,6 @@
 // @ts-nocheck -- Leaflet plugins expose incompatible structural types at this integration boundary.
 import { createTileOverlayManager } from "./common/tile-overlays";
+import type { PrintMapState } from "./common/print-state";
 import { readMapBootstrap } from "./bootstrap";
 import { createLayerBulkToggleControl, extractYouTubeId } from "./common/base";
 import {
@@ -130,7 +131,10 @@ function initializeCollapsibleLayerControl({
   updateToggleState();
 }
 
-export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
+export function initializeReadOnlyMapPage(
+  expectedPage: ReadOnlyPageName,
+  printState?: PrintMapState,
+) {
   const bootstrap = readMapBootstrap();
   if (bootstrap.page !== expectedPage) {
     throw new Error(`Unexpected map bootstrap page: ${bootstrap.page}`);
@@ -141,6 +145,8 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
 
   const { L, filterXSS, marked } = getBrowserLibraries();
   const isAnother = expectedPage === "map-anather";
+  const isPrint = isAnother && Boolean(printState);
+  const persistSettings = isAnother && !isPrint;
   const isMobile = expectedPage === "temporary-map-mobile";
   const isTemporary = !isAnother;
   const temporaryBootstrap = isTemporary
@@ -202,9 +208,9 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
   }
 
   const lastMapView = isAnother ? loadLastMapView() : null;
-  const initialView = isAnother
-    ? (lastMapView ?? bootstrap.initialView)
-    : temporaryBootstrap!.initialView;
+  const initialView =
+    printState?.view ??
+    (isAnother ? (lastMapView ?? bootstrap.initialView) : temporaryBootstrap!.initialView);
   const mapRuntime = createReadOnlyMapRuntime({
     center: [initialView.latitude, initialView.longitude],
     escapeHtml,
@@ -215,9 +221,21 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
     zoom: initialView.zoom,
   });
   map = mapRuntime.map as DynamicRecord;
-  if (isAnother) observeMapView(map);
+  if (persistSettings) observeMapView(map);
   bounds = mapRuntime.bounds;
   tileLayer = mapRuntime.tileLayer as DynamicRecord;
+  if (isPrint && tileServers[printState.tileServerId]) {
+    const radio = Array.from(document.querySelectorAll<HTMLInputElement>(".tile-radio")).find(
+      (input) => input.value === printState.tileServerId,
+    );
+    if (radio) {
+      radio.checked = true;
+      radio.dispatchEvent(new Event("change"));
+    }
+    map.setView([initialView.latitude, initialView.longitude], initialView.zoom, {
+      animate: false,
+    });
+  }
 
   let isTooltipVisible = false;
   let isMeasurementVisible = false;
@@ -233,15 +251,22 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
   const layerNames: Record<string, string> = {};
   const visibleMarkerGroup =
     isAnother && !bootstrap.isCluster ? L.featureGroup() : L.markerClusterGroup();
-  if (isTemporary || storage.getInitialMarkerVisibility()) visibleMarkerGroup.addTo(map);
+  if (isTemporary || (printState?.markersVisible ?? storage.getInitialMarkerVisibility()))
+    visibleMarkerGroup.addTo(map);
   const drawnShapesGroup = isAnother ? L.featureGroup() : undefined;
   const suppressShapes = isAnother && viewport.shouldSuppressInitialShapeRendering(shapeRecords);
   const shapeVisibilityLayer = L.layerGroup();
-  if (isTemporary || (!suppressShapes && storage.getInitialShapeLayerVisibility())) {
+  if (
+    isTemporary ||
+    (printState?.shapesVisible ?? (!suppressShapes && storage.getInitialShapeLayerVisibility()))
+  ) {
     shapeVisibilityLayer.addTo(map);
   }
   const shapeNameVisibilityLayer = L.layerGroup();
-  if (isAnother && !suppressShapes && storage.getInitialShapeNameVisibility()) {
+  if (
+    isAnother &&
+    (printState?.shapeNamesVisible ?? (!suppressShapes && storage.getInitialShapeNameVisibility()))
+  ) {
     shapeNameVisibilityLayer.addTo(map);
   }
 
@@ -348,6 +373,12 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
     shapeRecords,
   });
 
+  if (isPrint) {
+    for (const [id, group] of Object.entries(layerVisibilityGroups)) {
+      if (printState.layerIds === null || printState.layerIds.includes(id)) group.addTo(map);
+    }
+  }
+
   const hasSharedShapes = restoration.restoreSavedShapes({
     addLayer: isAnother
       ? (layer, layerId) => groups.addShapeLayerToManagedGroups(layer, layerId)
@@ -443,9 +474,9 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
     findLayerIdByMarkerGroup: groups.findLayerIdByMarkerGroup,
     map,
     markerDisplay: layeredMarkerDisplay,
-    onMarkerVisibilityChange: isAnother ? storage.saveMarkerVisibility : undefined,
-    onShapeNameVisibilityChange: isAnother ? storage.saveShapeNameVisibility : undefined,
-    onShapeVisibilityChange: isAnother ? storage.saveShapeLayerVisibility : undefined,
+    onMarkerVisibilityChange: persistSettings ? storage.saveMarkerVisibility : undefined,
+    onShapeNameVisibilityChange: persistSettings ? storage.saveShapeNameVisibility : undefined,
+    onShapeVisibilityChange: persistSettings ? storage.saveShapeLayerVisibility : undefined,
     shapeDisplay: layeredShapeDisplay,
     shapeNameLabelManager,
     shapeNameVisibilityLayer,
@@ -479,25 +510,28 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
     if (isMobile) registerHideableMapControl!(control);
   }
 
-  addReadOnlySearchControls({
-    clusterGroups,
-    createCodeSearchControl: searchRuntime.createCodeSearchControl,
-    createMarkerSearchControl: searchRuntime.createMarkerSearchControl,
-    map,
-    markerRecords,
-    markers,
-    onClear: searchCoordinator.clearMapObjectSearch,
-    onCodeSearchControlAdded: isMobile ? registerHideableMapControl : undefined,
-    onSearch: searchCoordinator.setMapObjectSearchQuery,
-  });
+  if (!isPrint)
+    addReadOnlySearchControls({
+      clusterGroups,
+      createCodeSearchControl: searchRuntime.createCodeSearchControl,
+      createMarkerSearchControl: searchRuntime.createMarkerSearchControl,
+      map,
+      markerRecords,
+      markers,
+      onClear: searchCoordinator.clearMapObjectSearch,
+      onCodeSearchControlAdded: isMobile ? registerHideableMapControl : undefined,
+      onSearch: searchCoordinator.setMapObjectSearchQuery,
+    });
   if (isMobile) map.addControl(new MapUiVisibilityToggleControl!());
   const { visibilityControl } = addReadOnlyMapVisibilityControls({
     includeShapeOverlays: isAnother || hasSharedShapes,
     initialUserLocationVisible: isAnother ? storage.getInitialUserLocationVisibility() : undefined,
-    initializeUserLocation,
+    initializeUserLocation: isPrint ? () => null : initializeUserLocation,
     leaflet: L,
     map,
-    onUserLocationVisibilityChange: isAnother ? storage.saveUserLocationVisibility : undefined,
+    onUserLocationVisibilityChange: persistSettings
+      ? storage.saveUserLocationVisibility
+      : undefined,
     onVisibilityControlAdded: isMobile ? registerHideableMapControl : undefined,
     shapeNameVisibilityLayer,
     shapeVisibilityLayer,
@@ -509,14 +543,30 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
     visibleMarkerGroup,
   });
 
-  createTileOverlayManager(
+  const tileOverlayManager = createTileOverlayManager(
     L,
     map,
     visibilityControl,
-    isAnother ? bootstrap.tileVisibilityAccountId : undefined,
+    persistSettings ? bootstrap.tileVisibilityAccountId : undefined,
     temporaryBootstrap?.isOverlayTile ?? true,
     isMobile ? { onControlAdded: registerHideableMapControl } : undefined,
-  ).sync(bootstrap.tileOverlays || []);
+  );
+  tileOverlayManager.sync(bootstrap.tileOverlays || []);
+  if (isPrint) tileOverlayManager.setVisibility(printState.overlays);
 
-  return { map, markers, shapeLayers, shapeNameLabelManager };
+  return {
+    map,
+    markers,
+    shapeLayers,
+    shapeNameLabelManager,
+    tileControl: mapRuntime.tileControl,
+    layerControl: markerLayerControl.layersControl,
+    visibilityControl,
+    printVisibilityLayers: [
+      visibleMarkerGroup,
+      shapeVisibilityLayer,
+      shapeNameVisibilityLayer,
+      ...tileOverlayManager.getLayers(),
+    ],
+  };
 }

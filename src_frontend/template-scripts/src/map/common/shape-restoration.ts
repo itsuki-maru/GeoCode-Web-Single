@@ -74,8 +74,19 @@ export function createShapeNameLabelBinder({
   normalizeShapeColor,
   normalizeShapeName,
   labelAppearance = "plain",
-  scheduleTask = (callback) => { setTimeout(callback, 0); }
-}: Pick<ShapeRestorationDependencies, "attachShapeMemoTooltipOpen" | "escapeHtml" | "getDefaultShapeColor" | "normalizeShapeColor" | "normalizeShapeName" | "labelAppearance" | "scheduleTask">) {
+  scheduleTask = (callback) => {
+    setTimeout(callback, 0);
+  },
+}: Pick<
+  ShapeRestorationDependencies,
+  | "attachShapeMemoTooltipOpen"
+  | "escapeHtml"
+  | "getDefaultShapeColor"
+  | "normalizeShapeColor"
+  | "normalizeShapeName"
+  | "labelAppearance"
+  | "scheduleTask"
+>) {
   const bindShapeNameLabelTooltip = (layer: RestoredShapeLayer, labelLatLng: unknown): void => {
     if (typeof layer?.bindTooltip !== "function") return;
 
@@ -158,7 +169,15 @@ export function createReadOnlyShapeRestorationRuntime({
     else layer.unbindTooltip?.();
   };
 
-  const bindShapeNameLabelTooltip = createShapeNameLabelBinder({ attachShapeMemoTooltipOpen, escapeHtml, getDefaultShapeColor, normalizeShapeColor, normalizeShapeName, labelAppearance, scheduleTask });
+  const bindShapeNameLabelTooltip = createShapeNameLabelBinder({
+    attachShapeMemoTooltipOpen,
+    escapeHtml,
+    getDefaultShapeColor,
+    normalizeShapeColor,
+    normalizeShapeName,
+    labelAppearance,
+    scheduleTask,
+  });
 
   const restoreSavedShapes = ({
     addLayer,

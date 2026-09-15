@@ -20,6 +20,7 @@ const emit = defineEmits<{
   qrCode: [];
   onetimeSetting: [];
   fullScreenMap: [];
+  printMap: [];
   exportJson: [];
   importJson: [];
   userSetting: [];
@@ -157,6 +158,16 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
         title="インポート&#10;マーカーやレイヤ情報をインポートします。"
       >
         <img :src="`${assetsUrl}upload_24.png`" class="btn-img" alt="upload_24.png" />
+      </button>
+      <button
+        type="button"
+        @click="emit('printMap')"
+        class="btn-head-image"
+        title="地図を印刷（Ctrl+P / ⌘P）"
+        aria-keyshortcuts="Control+p Meta+p"
+        aria-label="地図を印刷"
+      >
+        <img :src="`${assetsUrl}print_24.png`" class="btn-img" alt="" />
       </button>
       <button
         @click="emit('userSetting')"

@@ -1,4 +1,8 @@
-# vite-vue-router
+# GeoCode-Web 管理 UI
+
+アプリ固有の画面・権限・設定項目・テストは [管理 UI仕様](SPECIFICATION.md)、環境変数と統合ビルドは [フロントエンド全体仕様](../SPECIFICATION.md) を参照してください。
+
+以下はプロジェクト作成時のVue/Vite開発案内です。
 
 This template should help get you started developing with Vue 3 in Vite.
 

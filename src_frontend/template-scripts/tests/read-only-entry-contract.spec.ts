@@ -66,7 +66,7 @@ describe("read-only TypeScript entry contract", () => {
   it("registers tile overlays with map visibility rather than the group list", () => {
     const source = readFileSync(resolve(packageDirectory, "src/map/read-only-page.ts"), "utf8");
     expect(source).toContain("const { visibilityControl } = addReadOnlyMapVisibilityControls(");
-    expect(source).toContain("isAnother ? bootstrap.tileVisibilityAccountId : undefined");
+    expect(source).toContain("persistSettings ? bootstrap.tileVisibilityAccountId : undefined");
     expect(source).not.toContain("createTileOverlayManager(L, map, markerLayerControl.layersControl)");
   });
 
