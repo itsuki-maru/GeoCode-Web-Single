@@ -90,7 +90,14 @@ const layerAdd = async (): Promise<void> => {
         @changed="emit('tilesChanged', $event)"
         @loginRedirect="emit('loginRedirect')"
       />
-      <button class="tile-close-button" type="button" :disabled="tilesSaving" @click="emit('close')">閉じる</button>
+      <button
+        class="tile-close-button"
+        type="button"
+        :disabled="tilesSaving"
+        @click="emit('close')"
+      >
+        閉じる
+      </button>
     </div>
     <div v-else class="setting-contents">
       <div class="init-latlng-zone">

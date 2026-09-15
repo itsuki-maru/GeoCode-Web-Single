@@ -515,6 +515,7 @@ export function initializeReadOnlyMapPage(expectedPage: ReadOnlyPageName) {
     visibilityControl,
     isAnother ? bootstrap.tileVisibilityAccountId : undefined,
     temporaryBootstrap?.isOverlayTile ?? true,
+    isMobile ? { onControlAdded: registerHideableMapControl } : undefined,
   ).sync(bootstrap.tileOverlays || []);
 
   return { map, markers, shapeLayers, shapeNameLabelManager };

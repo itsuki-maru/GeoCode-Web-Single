@@ -199,7 +199,9 @@ defineExpose({ copiedLayer, fetchCurrentSharedUrl });
         <input v-model="includeShapes" type="checkbox" id="include-shapes" />
       </div>
       <div class="share-option-row">
-        <label for="include-tile-overlays" style="font-size: 16px">重ねるタイルレイヤも共有する</label>
+        <label for="include-tile-overlays" style="font-size: 16px"
+          >重ねるタイルレイヤも共有する</label
+        >
         <input v-model="includeTileOverlays" type="checkbox" id="include-tile-overlays" />
       </div>
       <div v-if="existingSharedUrl" class="existing-share-box">

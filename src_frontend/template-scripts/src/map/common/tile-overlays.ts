@@ -1,5 +1,7 @@
 import { formatTileAttribution } from "./tile-attribution";
 import { createTileVisibilityStorage } from "./tile-visibility-storage";
+import { isNowcastUrl } from "./nowcast-time";
+import { createNowcastLayer, type NowcastStatusOptions } from "./nowcast-layer";
 
 export interface TileOverlayRecord {
   id: string;
@@ -13,12 +15,23 @@ export interface TileOverlayRecord {
 }
 
 // Leaflet is loaded by the page; keep this boundary independent of its global types.
-export function createTileOverlayManager(leaflet: any, map: any, control: any, accountId?: string, initiallyVisible = true) {
+export function createTileOverlayManager(
+  leaflet: any,
+  map: any,
+  control: any,
+  accountId?: string,
+  initiallyVisible = true,
+  statusOptions?: NowcastStatusOptions,
+) {
   const paneName = "tileOverlays";
   const pane = map.getPane(paneName) || map.createPane(paneName);
   pane.style.zIndex = "250";
   pane.style.pointerEvents = "none";
-  const active = new Map<string, { layer: any; signature: string }>();
+  const active = new Map<string, { layer: any; signature: string; dispose?: () => void }>();
+  map.on("unload", () => {
+    for (const entry of active.values()) entry.dispose?.();
+    active.clear();
+  });
   const storage = accountId ? createTileVisibilityStorage(accountId) : null;
   if (storage) {
     const saveVisibility = (event: { layer: unknown }, visible: boolean): void => {
@@ -46,6 +59,7 @@ export function createTileOverlayManager(leaflet: any, map: any, control: any, a
       for (const [id, entry] of active) {
         if (!wanted.has(id)) {
           active.delete(id);
+          entry.dispose?.();
           control.removeLayer(entry.layer);
           map.removeLayer(entry.layer);
           entry.layer.off();
@@ -68,20 +82,27 @@ export function createTileOverlayManager(leaflet: any, map: any, control: any, a
           : (savedVisibility[record.id] ?? initiallyVisible);
         if (previous) {
           active.delete(record.id);
+          previous.dispose?.();
           control.removeLayer(previous.layer);
           map.removeLayer(previous.layer);
           previous.layer.off();
         }
         let layer: any;
+        let dispose: (() => void) | undefined;
         try {
-          layer = leaflet.tileLayer(record.url, {
+          const options = {
             pane: paneName,
             attribution: formatTileAttribution(record.attribution),
             minZoom: record.min_zoom,
             maxZoom: record.max_zoom,
             opacity: record.opacity,
             zIndex: index + 1,
-          });
+          };
+          if (isNowcastUrl(record.url)) {
+            ({ layer, dispose } = createNowcastLayer(leaflet, map, options, record.name, statusOptions));
+          } else {
+            layer = leaflet.tileLayer(record.url, options);
+          }
           let lastError: number | undefined;
           layer.on("tileerror", (event: any) => {
             const now = Date.now();
@@ -100,8 +121,9 @@ export function createTileOverlayManager(leaflet: any, map: any, control: any, a
           });
           control.addOverlay(layer, escape(record.name));
           if (visible) layer.addTo(map);
-          active.set(record.id, { layer, signature });
+          active.set(record.id, { layer, signature, dispose });
         } catch {
+          dispose?.();
           if (layer) {
             control.removeLayer(layer);
             map.removeLayer(layer);
