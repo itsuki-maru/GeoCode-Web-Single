@@ -1,4 +1,8 @@
-# vite-vue-router
+# GeoCode-Web モバイル UI
+
+アプリ固有の構成・画面・PC版との差異・テストは [モバイル UI仕様](SPECIFICATION.md)、環境変数と統合ビルドは [フロントエンド全体仕様](../SPECIFICATION.md) を参照してください。
+
+以下はプロジェクト作成時のVue/Vite開発案内です。
 
 This template should help get you started developing with Vue 3 in Vite.
 

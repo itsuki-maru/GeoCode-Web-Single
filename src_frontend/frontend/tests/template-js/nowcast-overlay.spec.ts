@@ -53,6 +53,17 @@ function setup(visible = true) {
   return { manager, layer, control };
 }
 describe("nowcast overlay with the shipped Leaflet", () => {
+  it("keeps the displayed timestamp stable during printing and resumes updates afterward", async () => {
+    const { layer } = setup();
+    await flush();
+    const previousUrl = layer._url;
+    map.fire("printpause");
+    fetcher.mockResolvedValue(response("20260915030500"));
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(layer._url).toBe(previousUrl);
+    map.fire("printresume");
+    expect(layer._url).toContain("/20260915030500/none/20260915030500/");
+  });
   it("follows shared mobile UI visibility including re-enabling while hidden", async () => {
     const ui = createMapUiVisibilityRuntime({ initialHidden: true, leaflet: L });
     const toggle = new ui.MapUiVisibilityToggleControl();

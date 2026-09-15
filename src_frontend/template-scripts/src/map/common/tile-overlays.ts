@@ -52,6 +52,19 @@ export function createTileOverlayManager(
     );
 
   return {
+    getLayers(): object[] {
+      return [...active.values()].map((entry) => entry.layer);
+    },
+    getVisibility(): Record<string, boolean> {
+      return Object.fromEntries([...active].map(([id, entry]) => [id, map.hasLayer(entry.layer)]));
+    },
+    setVisibility(visibility: Record<string, boolean>): void {
+      for (const [id, entry] of active) {
+        if (typeof visibility[id] !== "boolean") continue;
+        if (visibility[id]) entry.layer.addTo(map);
+        else map.removeLayer(entry.layer);
+      }
+    },
     sync(records: TileOverlayRecord[]): boolean {
       if (!Array.isArray(records)) return false;
       const wanted = new Set(records.map((r) => r.id));
@@ -99,7 +112,13 @@ export function createTileOverlayManager(
             zIndex: index + 1,
           };
           if (isNowcastUrl(record.url)) {
-            ({ layer, dispose } = createNowcastLayer(leaflet, map, options, record.name, statusOptions));
+            ({ layer, dispose } = createNowcastLayer(
+              leaflet,
+              map,
+              options,
+              record.name,
+              statusOptions,
+            ));
           } else {
             layer = leaflet.tileLayer(record.url, options);
           }

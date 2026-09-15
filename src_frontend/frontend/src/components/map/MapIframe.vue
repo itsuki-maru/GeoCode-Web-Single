@@ -11,6 +11,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   mapReloadRequested: [layerId?: string | null];
   loginRedirect: [];
+  printMap: [];
   previewImage: [filename: string];
   userLocation: [position: Record<string, number | null>];
   userLocationError: [code: number];
@@ -128,7 +129,9 @@ const handleMessage = async (event: MessageEvent): Promise<void> => {
   const iframe = getMapIframe();
   if (!iframe?.contentWindow || event.source !== iframe.contentWindow) return;
   if (!event.data || typeof event.data !== "object") return;
-  if (event.data.type === "callParentFunction") {
+  if (event.data.type === "printOpen") {
+    emit("printMap");
+  } else if (event.data.type === "callParentFunction") {
     emit("previewImage", event.data.message);
   } else if (event.data.type === "callParentReload") {
     emit("mapReloadRequested", event.data.layerId ?? null);

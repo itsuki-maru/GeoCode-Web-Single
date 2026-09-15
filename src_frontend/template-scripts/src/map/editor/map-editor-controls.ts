@@ -178,9 +178,16 @@ const shapeLayersControl = L.control.layers(null, shapeLayerOverlays, {
 });
 shapeLayersControl.addTo(map);
 const tileOverlayManager = createTileOverlayManager(
-  L, map, shapeLayersControl, window.__GEOCODE_MAP_BOOTSTRAP__.tileVisibilityAccountId, true,
+  L,
+  map,
+  shapeLayersControl,
+  window.__GEOCODE_MAP_BOOTSTRAP__.tileVisibilityAccountId,
+  true,
   editorEntryProfile.isMobile
-    ? { afterControl: shapeLayersControl.getContainer(), onControlAdded: registerHideableMapControl }
+    ? {
+        afterControl: shapeLayersControl.getContainer(),
+        onControlAdded: registerHideableMapControl,
+      }
     : undefined,
 );
 tileOverlayManager.sync(window.__GEOCODE_MAP_BOOTSTRAP__.tileOverlays || []);

@@ -87,7 +87,13 @@ const locationLayersControl = L.control
     collapsed: false,
   })
   .addTo(map);
-const tileOverlayControl = addLiveTileOverlayControl(L, map, bootstrap.tileOverlays || [], isMobile, bootstrap.isCheckOverlay === true);
+const tileOverlayControl = addLiveTileOverlayControl(
+  L,
+  map,
+  bootstrap.tileOverlays || [],
+  isMobile,
+  bootstrap.isCheckOverlay === true,
+);
 const publishedLayerControl = addPublishedLayerControl(L, map, bootstrap.publishedLayers, isMobile);
 const collapsibleLocationLayers = isMobile
   ? createCollapsibleLayerControl({
@@ -126,12 +132,14 @@ map.addControl(
   }),
 );
 
-map.addControl(createLiveMapUiVisibilityControl(L, {
-  tileServer: tileServerControl,
-  members: locationLayersControl,
-  tileOverlays: tileOverlayControl?.control,
-  publishedLayers: publishedLayerControl?.control,
-}));
+map.addControl(
+  createLiveMapUiVisibilityControl(L, {
+    tileServer: tileServerControl,
+    members: locationLayersControl,
+    tileOverlays: tileOverlayControl?.control,
+    publishedLayers: publishedLayerControl?.control,
+  }),
+);
 
 function escapeHtml(value: string): string {
   const element = document.createElement("div");
@@ -280,7 +288,9 @@ async function load(): Promise<void> {
       cache: "no-store",
     });
     if (response.status === 401) {
-      window.location.assign(`/live/${bootstrap.publicId}?is_check_overlay=${bootstrap.isCheckOverlay === true}`);
+      window.location.assign(
+        `/live/${bootstrap.publicId}?is_check_overlay=${bootstrap.isCheckOverlay === true}`,
+      );
       return;
     }
     if (!response.ok)

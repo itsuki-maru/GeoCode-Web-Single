@@ -13,7 +13,13 @@ export interface NowcastStatusOptions {
   onControlAdded?: (control: { getContainer: () => HTMLElement }) => void;
 }
 
-export function createNowcastLayer(leaflet: any, map: any, options: any, name: string, statusOptions?: NowcastStatusOptions) {
+export function createNowcastLayer(
+  leaflet: any,
+  map: any,
+  options: any,
+  name: string,
+  statusOptions?: NowcastStatusOptions,
+) {
   const NowcastLayer = leaflet.TileLayer.extend({
     _clampZoom: nowcastNativeZoom,
   });
@@ -24,7 +30,9 @@ export function createNowcastLayer(leaflet: any, map: any, options: any, name: s
     minZoom: Math.max(4, options.minZoom),
     errorTileUrl: EMPTY_TILE,
   });
-  const panel = leaflet.control({ position: statusOptions?.afterControl ? "topright" : "bottomleft" });
+  const panel = leaflet.control({
+    position: statusOptions?.afterControl ? "topright" : "bottomleft",
+  });
   const container = document.createElement("div");
   container.className = "nowcast-status";
   Object.assign(container.style, {
@@ -56,7 +64,31 @@ export function createNowcastLayer(leaflet: any, map: any, options: any, name: s
   let imageFailed = false;
   let unsubscribe: (() => void) | undefined;
   let disposed = false;
+  let printPaused = false;
+  layer.getPrintStatus = () => ({
+    loading: !state.time && !state.failed,
+    failed:
+      state.failed ||
+      imageFailed ||
+      Boolean(state.time && Date.now() - state.time.milliseconds >= NOWCAST_MAX_AGE),
+  });
+  const pausePrint = () => {
+    printPaused = true;
+  };
+  const resumePrint = () => {
+    printPaused = false;
+    render();
+  };
+  layer.retryPrint = () => {
+    stop();
+    imageFailed = false;
+    start();
+    layer.redraw();
+  };
+  map.on("printpause", pausePrint);
+  map.on("printresume", resumePrint);
   function render() {
+    if (printPaused) return;
     const time = state.time;
     const stale = time && Date.now() - time.milliseconds >= NOWCAST_MAX_AGE;
     const nextUrl =
@@ -116,6 +148,8 @@ export function createNowcastLayer(leaflet: any, map: any, options: any, name: s
     layer,
     dispose() {
       disposed = true;
+      map.off("printpause", pausePrint);
+      map.off("printresume", resumePrint);
       stop();
       layer.off("add", start);
       layer.off("remove", stop);

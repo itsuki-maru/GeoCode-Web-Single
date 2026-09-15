@@ -39,6 +39,7 @@ import MapToolbar from "@/components/map/MapToolbar.vue";
 import MapIframe from "@/components/map/MapIframe.vue";
 import LiveLocationSharing from "@/components/location/LiveLocationSharing.vue";
 import FullScreenMapModal from "@/components/map/FullScreenMapModal.vue";
+import PrintMapModal from "@/components/map/PrintMapModal.vue";
 import MapObjectTable from "@/components/map-object/MapObjectTable.vue";
 import MapObjectEditModal from "@/components/map-object/MapObjectEditModal.vue";
 import LayerCreateModal from "@/components/layer/LayerCreateModal.vue";
@@ -353,6 +354,7 @@ const isQRCodeGenModal = ref(false);
 const isOnetimeSettingModal = ref(false);
 const isOnetimeUrlModal = ref(false);
 const isOpenFullScreenMapModal = ref(false);
+const isOpenPrintMapModal = ref(false);
 const isLayerListModal = ref(false);
 const isLayerRenameModal = ref(false);
 const renameLayerId = ref("");
@@ -624,6 +626,18 @@ const mapObjectQueryFormData = ref<QueryForm>({ query1: "", query2: "" });
 
 // --- Keyboard shortcuts ---
 const handleKeyDown = (event: KeyboardEvent) => {
+  if (isOpenPrintMapModal.value) return;
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    !event.altKey &&
+    !event.shiftKey &&
+    !event.isComposing &&
+    event.key.toLowerCase() === "p"
+  ) {
+    event.preventDefault();
+    if (!event.repeat) isOpenPrintMapModal.value = true;
+    return;
+  }
   if (event.ctrlKey && event.key === "1") {
     event.preventDefault();
     isNewLayerModal.value = !isNewLayerModal.value;
@@ -717,6 +731,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
     @qrCode="isQRCodeGenModal = true"
     @onetimeSetting="openOnetimeSetting()"
     @fullScreenMap="isOpenFullScreenMapModal = true"
+    @printMap="isOpenPrintMapModal = true"
     @exportJson="exportJsonData()"
     @importJson="showJsonUploadModal = true"
     @userSetting="userPrivacySettingFunction()"
@@ -737,6 +752,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
           :height="divHeight"
           :allowedOrigins="allowedOriginsRef"
           @mapReloadRequested="onMapReloadRequested"
+          @printMap="isOpenPrintMapModal = true"
           @loginRedirect="loginRedirect()"
           @previewImage="openReadOnlyPreview"
           @userLocation="liveLocationSharingRef?.receivePosition($event)"
@@ -870,6 +886,12 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
       </div>
     </div>
   </div>
+
+  <PrintMapModal
+    v-if="isOpenPrintMapModal"
+    :layerIds="isMasterLayer ? null : [activeLayer]"
+    @close="isOpenPrintMapModal = false"
+  />
 
   <FullScreenMapModal
     :isOpen="isOpenFullScreenMapModal"

@@ -234,6 +234,7 @@ const pages: readonly SmokePage[] = [
 const openWindows: JSDOM[] = [];
 
 interface SmokeLoadOptions {
+  parentWindow?: { postMessage: ReturnType<typeof vi.fn> };
   currentPosition?: { latitude: number; longitude: number };
   lastMapView?: { latitude: number; longitude: number; zoom: number };
 }
@@ -252,6 +253,9 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
     },
   );
   openWindows.push(dom);
+  if (options.parentWindow) {
+    Object.defineProperty(dom.window, "parent", { value: options.parentWindow });
+  }
   if (options.lastMapView) {
     dom.window.localStorage.setItem(
       mapViewPersistenceModule.LAST_MAP_VIEW_STORAGE_KEY,
@@ -421,7 +425,42 @@ afterEach(() => {
 });
 
 describe("各地図テンプレートJavaScriptのランタイム初期化", () => {
+  it("埋め込みPC地図のCtrl+Pを親に通知し、長押しとモバイルでは通知しない", () => {
+    for (const templateName of ["map.html", "map-mobile.html"]) {
+      const parentWindow = { postMessage: vi.fn() };
+      const dom = smokeLoadPage(pages.find((page) => page.templateName === templateName)!, { parentWindow });
+      const press = (extra = {}) => {
+        const event = new dom.window.KeyboardEvent("keydown", { key: "p", ctrlKey: true, cancelable: true, ...extra });
+        dom.window.dispatchEvent(event);
+        return event;
+      };
+      const desktop = templateName === "map.html";
+      expect(press({ repeat: true }).defaultPrevented).toBe(desktop);
+      expect(parentWindow.postMessage).not.toHaveBeenCalled();
+      expect(press().defaultPrevented).toBe(desktop);
+      press({ ctrlKey: false, metaKey: true });
+      expect(parentWindow.postMessage).toHaveBeenCalledTimes(desktop ? 2 : 0);
+      if (desktop) expect(parentWindow.postMessage).toHaveBeenLastCalledWith({ type: "printOpen" }, "https://example.test");
+    }
+  });
   const anotherMapPage = pages.find((page) => page.templateName === "map-anather.html")!;
+
+  it("PC地図は親画面からの要求に現在の印刷用状態を返す", () => {
+    const dom = smokeLoadPage(pages.find((page) => page.templateName === "map.html")!);
+    const post = vi.spyOn(dom.window, "postMessage").mockImplementation(() => {});
+    const request = (origin: string) => dom.window.dispatchEvent(new dom.window.MessageEvent("message", {
+      origin, source: dom.window, data: { type: "printStateRequest", requestId: "print-test" },
+    }));
+    request("https://invalid.test");
+    expect(post).not.toHaveBeenCalled();
+    request("https://example.test");
+    expect(post).toHaveBeenCalledWith({
+      type: "printStateResult", requestId: "print-test", state: {
+        view: { latitude: 35.6812, longitude: 139.7671, zoom: 8 },
+        tileServerId: "1", overlays: {}, markersVisible: true, shapesVisible: true, shapeNamesVisible: true,
+      },
+    }, "https://example.test");
+  });
 
   it("map-anatherは保存された表示位置を復元する", () => {
     const dom = smokeLoadPage(anotherMapPage, {

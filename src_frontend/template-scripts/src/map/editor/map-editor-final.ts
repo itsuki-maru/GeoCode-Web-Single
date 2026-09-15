@@ -110,6 +110,31 @@ function applyMapObjectUpdateFromParent(payload) {
   return false;
 }
 
+// Only the embedded desktop editor delegates printing to the application.
+if (!editorEntryProfile.isMobile && window.parent !== window) {
+  const printParentOrigin = document.referrer
+    ? new URL(document.referrer).origin
+    : window.location.origin;
+  if (
+    [window.location.origin, "http://localhost:5173", "http://localhost:3000"].includes(
+      printParentOrigin,
+    )
+  ) {
+    window.addEventListener("keydown", (event) => {
+      if (
+        !(event.ctrlKey || event.metaKey) ||
+        event.altKey ||
+        event.shiftKey ||
+        event.isComposing ||
+        event.key.toLowerCase() !== "p"
+      )
+        return;
+      event.preventDefault();
+      if (!event.repeat) window.parent.postMessage({ type: "printOpen" }, printParentOrigin);
+    });
+  }
+}
+
 // iframe内でマーカーIDと座標を受け取る
 window.addEventListener("message", function (event) {
   const allowOrigins = ["http://localhost:5173", "http://localhost:3000"];
@@ -119,7 +144,24 @@ window.addEventListener("message", function (event) {
   if (event.source === window.parent && (allowOrigins.includes(event.origin) || isSameOrigin)) {
     const messageData = event.data;
     if (!messageData || typeof messageData !== "object") return;
-    if (messageData["type"] === "focus") {
+    if (messageData.type === "printStateRequest" && !editorEntryProfile.isMobile) {
+      const center = map.getCenter();
+      window.parent.postMessage(
+        {
+          type: "printStateResult",
+          requestId: messageData.requestId,
+          state: {
+            view: { latitude: center.lat, longitude: center.lng, zoom: map.getZoom() },
+            tileServerId: document.querySelector(".tile-radio:checked")?.value || "1",
+            overlays: tileOverlayManager.getVisibility(),
+            markersVisible: map.hasLayer(markersClusterGroup),
+            shapesVisible: map.hasLayer(drawnShapesGroup),
+            shapeNamesVisible: map.hasLayer(shapeNameVisibilityLayer),
+          },
+        },
+        event.origin,
+      );
+    } else if (messageData["type"] === "focus") {
       focusMapObject(
         messageData["objectType"],
         messageData["id"],

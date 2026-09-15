@@ -8,6 +8,27 @@ afterEach(() => {
 });
 
 describe("MapIframe", () => {
+  it("表示中の地図からの印刷要求だけを受け付ける", () => {
+    const wrapper = mount(MapIframe, {
+      attachTo: document.body,
+      props: {
+        srcUrl: "/map",
+        height: 80,
+        allowedOrigins: window.location.origin,
+      },
+    });
+    const frame = wrapper.get("iframe").element as HTMLIFrameElement;
+    const send = (source: Window | null, origin = window.location.origin) =>
+      window.dispatchEvent(
+        new MessageEvent("message", { source, origin, data: { type: "printOpen" } }),
+      );
+    send(window);
+    send(frame.contentWindow, "https://invalid.test");
+    expect(wrapper.emitted("printMap")).toBeUndefined();
+    send(frame.contentWindow);
+    expect(wrapper.emitted("printMap")).toHaveLength(1);
+    wrapper.unmount();
+  });
   it("iframeに位置情報の利用を許可する", () => {
     const wrapper = mount(MapIframe, {
       props: {
