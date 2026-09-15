@@ -114,9 +114,17 @@ onMounted(load);
             placeholder="https://example.com/{z}/{x}/{y}.png"
         /></label>
         <p class="hint">HTTPSのURLに {z}・{x}・{y} を含めてください。</p>
-        <label>出典（テキスト・リンクHTML）<input v-model="form.attribution" maxlength="1000" aria-describedby="tile-attribution-help" /></label>
+        <label
+          >出典（テキスト・リンクHTML）<input
+            v-model="form.attribution"
+            maxlength="1000"
+            aria-describedby="tile-attribution-help"
+        /></label>
         <p id="tile-attribution-help" class="hint">
-          例：<code>&lt;a href="https://disaportal.gsi.go.jp/"&gt;ハザードマップポータルサイト&lt;/a&gt;</code><br />
+          例：<code
+            >&lt;a
+            href="https://disaportal.gsi.go.jp/"&gt;ハザードマップポータルサイト&lt;/a&gt;</code
+          ><br />
           HTTP・HTTPSのリンクは別タブで開きます。通常のテキストも入力できます。
         </p>
         <div class="number-fields">

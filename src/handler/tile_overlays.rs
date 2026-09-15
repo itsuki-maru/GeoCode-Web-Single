@@ -282,6 +282,9 @@ mod tests {
     #[test]
     fn validates_template_and_options() {
         assert!(input().validate().is_ok());
+        let mut nowcast = input();
+        nowcast.url = "https://www.jma.go.jp/bosai/jmatile/data/nowc/latest/none/latest/surf/hrpns/{z}/{x}/{y}.png".into();
+        assert!(nowcast.validate().is_ok());
         for url in [
             "http://example.com/{z}/{x}/{y}.png",
             "https://example.com/map",

@@ -20,6 +20,7 @@ Rust/Axum 製 API サーバーと Vue 3 製フロントエンドを Tauri 2 で�
 
 - ユーザーガイド: [USER-GUIDE.md](https://project.geocode-web.com/USER-GUIDE.md)
 - 仕様書: [SPECIFICATION.md](SPECIFICATION.md)
+- 気象庁ナウキャストの登録: [仕様書 9.10](SPECIFICATION.md#910-気象庁ナウキャスト)
 - 変更履歴: [CHANGELOG.md](CHANGELOG.md), [release_notes.md](release_notes.md)
 - コントリビューションガイド: [CONTRIBUTING.md](CONTRIBUTING.md)
 - セキュリティポリシー: [SECURITY_POLICY.md](SECURITY_POLICY.md)

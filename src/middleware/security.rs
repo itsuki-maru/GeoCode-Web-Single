@@ -6,7 +6,7 @@ use axum::{
     middleware::Next,
 };
 
-const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://cloudflareinsights.com; manifest-src 'self' https://geocode-web-mobile-app.pages.dev; frame-src 'self' https://www.youtube-nocookie.com; font-src 'self' data: https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'";
+const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://cloudflareinsights.com https://www.jma.go.jp; manifest-src 'self' https://geocode-web-mobile-app.pages.dev; frame-src 'self' https://www.youtube-nocookie.com; font-src 'self' data: https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'";
 
 pub async fn security_headers_and_origin(req: Request, next: Next) -> Response<Body> {
     if is_state_changing(req.method()) {
@@ -86,6 +86,17 @@ mod tests {
     #[test]
     fn csp_allows_same_origin_map_frames() {
         assert!(CONTENT_SECURITY_POLICY.contains("frame-src 'self'"));
+    }
+
+    #[test]
+    fn csp_allows_nowcast_times_without_widening_other_connections() {
+        assert_eq!(
+            CONTENT_SECURITY_POLICY
+                .split(';')
+                .map(str::trim)
+                .find(|part| part.starts_with("connect-src")),
+            Some("connect-src 'self' https://cloudflareinsights.com https://www.jma.go.jp")
+        );
     }
 
     #[test]
