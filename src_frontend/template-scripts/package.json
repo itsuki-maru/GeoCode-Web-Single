@@ -10,7 +10,9 @@
     "format": "prettier --write src/"
   },
   "dependencies": {
-    "@panzoom/panzoom": "4.6.2"
+    "@panzoom/panzoom": "4.6.2",
+    "html2canvas": "1.4.1",
+    "jspdf": "4.2.1"
   },
   "devDependencies": {
     "@types/node": "^22.18.11",

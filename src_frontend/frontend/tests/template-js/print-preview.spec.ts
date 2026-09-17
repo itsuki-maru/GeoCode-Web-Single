@@ -82,7 +82,7 @@ beforeEach(() => {
         id: "a",
         layer_id: "group-a",
         marker_name: "避難所A",
-        detail: "",
+        detail: "マーカーの詳細",
         latitude: 35.68,
         longitude: 139.76,
       },
@@ -103,7 +103,7 @@ beforeEach(() => {
         shape_type: "polygon",
         geojson: {
           type: "Feature",
-          properties: {},
+          properties: { memo: "図形の詳細" },
           geometry: {
             type: "Polygon",
             coordinates: [
@@ -146,6 +146,58 @@ function finishImages() {
   });
 }
 describe("印刷プレビューと実際のLeaflet", () => {
+  it.each(["marker", "shape"])("%sのポップアップを印刷中・キャンセル後も保持する", async (kind) => {
+    preview = createPrintPreview(state, vi.fn());
+    let target: any;
+    preview.map.eachLayer((layer: any) => {
+      if (kind === "marker" ? layer instanceof L.Marker : layer.shapeMemo === "図形の詳細")
+        target = layer;
+    });
+    expect(target).toBeDefined();
+    if (kind === "marker") target.openPopup();
+    else target.fire("click", { latlng: L.latLng(35.68, 139.76) });
+    const content = kind === "marker" ? "マーカーの詳細" : "図形の詳細";
+    const print = vi.spyOn(window, "print").mockImplementation(() => {
+      window.dispatchEvent(new Event("beforeprint"));
+      expect(document.querySelector(".leaflet-popup-content")?.textContent).toContain(content);
+      window.dispatchEvent(new Event("afterprint"));
+    });
+    finishImages();
+    await vi.advanceTimersByTimeAsync(1000);
+    document.getElementById("print-submit")!.click();
+    expect(print).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(".leaflet-popup-content")?.textContent).toContain(content);
+    expect(document.body.classList.contains("print-preparing")).toBe(false);
+  });
+
+  it("ポップアップ画像の読み込み・失敗を反映し、閉じた詳細の画像は待たない", async () => {
+    preview = createPrintPreview(state, vi.fn());
+    L.popup({ autoPan: false }).setLatLng([35.68, 139.76]).setContent(
+      '<img id="popup-image" src="/popup.png"><details><img src="/hidden.png"></details>',
+    ).openOn(preview.map);
+    finishImages();
+    const img = document.getElementById("popup-image") as HTMLImageElement;
+    const hidden = document.querySelector(".leaflet-popup-content details img")!;
+    Object.defineProperty(hidden, "complete", { configurable: true, value: false });
+    Object.defineProperty(img, "complete", { configurable: true, value: false });
+    await vi.advanceTimersByTimeAsync(1000);
+    const button = document.getElementById("print-submit") as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    Object.defineProperty(img, "complete", { configurable: true, value: true });
+    img.dispatchEvent(new Event("load"));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(button.disabled).toBe(false);
+    Object.defineProperty(img, "naturalWidth", { configurable: true, value: 0 });
+    img.dispatchEvent(new Event("error"));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(button.textContent).toBe("現在の表示で印刷");
+    expect((document.getElementById("pdf-export") as HTMLButtonElement).disabled).toBe(true);
+    preview.map.closePopup();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(button.textContent).toBe("印刷");
+    expect((document.getElementById("pdf-export") as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("現在の位置・背景・選択レイヤを引き継ぎ、印刷操作で保存設定を変更しない", () => {
     const before = { ...localStorage };
     const watchPosition = vi.fn();
@@ -179,6 +231,8 @@ describe("印刷プレビューと実際のLeaflet", () => {
       ["a4-landscape", "297mm", "210mm"],
       ["a3-portrait", "297mm", "420mm"],
       ["a3-landscape", "420mm", "297mm"],
+      ["b5-portrait", "182mm", "257mm"],
+      ["b5-landscape", "257mm", "182mm"],
     ]) {
       select.value = value!;
       select.dispatchEvent(new Event("change"));
@@ -195,6 +249,20 @@ describe("印刷プレビューと実際のLeaflet", () => {
       "Test attribution",
     );
     expect(document.querySelector("#map .leaflet-control-layers")).toBeNull();
+  });
+
+  it("タイトル確定時のchangeイベントで出力待機をやり直さない", async () => {
+    const print = vi.spyOn(window, "print").mockImplementation(() => {});
+    preview = createPrintPreview(state, vi.fn());
+    const title = document.getElementById("print-title-input") as HTMLInputElement;
+    title.value = "避難所案内";
+    title.dispatchEvent(new Event("input", { bubbles: true }));
+    finishImages();
+    await vi.advanceTimersByTimeAsync(1000);
+    title.dispatchEvent(new Event("change", { bubbles: true }));
+    expect((document.getElementById("pdf-export") as HTMLButtonElement).disabled).toBe(false);
+    document.getElementById("print-submit")!.click();
+    expect(print).toHaveBeenCalledTimes(1);
   });
 
   it("印刷キーと親からの要求で同じ印刷処理を使い、長押しや不正な送信元を無視する", async () => {

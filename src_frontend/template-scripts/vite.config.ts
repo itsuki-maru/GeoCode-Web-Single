@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { defineConfig, type Plugin } from "vite";
@@ -223,7 +223,32 @@ function editorEntryPlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [editorEntryPlugin()],
+  plugins: [editorEntryPlugin(), {
+    name: "bundled-third-party-licenses",
+    generateBundle() {
+      const notices = new Map<string, string>();
+      for (const id of this.getModuleIds()) {
+        if (!id.includes("node_modules") || id.startsWith("\0")) continue;
+        let directory = dirname(id.split("?")[0]!);
+        while (directory.includes("node_modules")) {
+          const manifest = resolve(directory, "package.json");
+          if (existsSync(manifest)) {
+            const pkg = JSON.parse(readFileSync(manifest, "utf8"));
+            if (pkg.name) {
+              if (!notices.has(pkg.name)) {
+                const files = readdirSync(directory).filter(name => /(^|[-_])(licen[cs]e|copying|notice)([._-]|$)/i.test(name));
+                if (!files.length) this.error(`License file missing for ${pkg.name}`);
+                notices.set(pkg.name, `${pkg.name} ${pkg.version}\n${files.map(name => readFileSync(resolve(directory, name), "utf8")).join("\n")}`);
+              }
+              break;
+            }
+          }
+          directory = dirname(directory);
+        }
+      }
+      this.emitFile({ type: "asset", fileName: "template-third-party-licenses.txt", source: [...notices.entries()].sort().map(([, text]) => text).join("\n\n--------------------\n\n") });
+    },
+  }],
   build: {
     emptyOutDir: true,
     manifest: "template-manifest.json",

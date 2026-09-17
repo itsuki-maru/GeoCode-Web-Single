@@ -121,6 +121,7 @@ onBeforeUnmount(() => {
         ref="frame"
         :src="printUrl"
         title="地図の印刷プレビュー"
+        allow="web-share"
         :class="{ 'is-loading': !initialized || error }"
       ></iframe>
       <div v-if="!initialized || error" class="print-loading" role="status">

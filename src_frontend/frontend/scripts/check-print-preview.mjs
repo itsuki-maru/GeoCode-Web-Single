@@ -1,8 +1,10 @@
 // Render the real map template with local test tiles, including its shared CSS.
 // Prerequisite: npm run build in frontend. Playwright is an optional QA dependency.
 // Example: node scripts/check-print-preview.mjs --browser=chrome --playwright-path=/path/to/playwright/index.mjs
+// Add --popup=marker or --popup=shape to check popup content, and --pdf=client for PDF export.
 // Verify page counts/content with: python scripts/check-print-preview-pdfs.py ../../dist/print-check/chrome
 import assert from "node:assert/strict";
+import { createServer as createHttpServer } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -55,7 +57,7 @@ const bootstrap = {
       id: "a",
       layer_id: "a",
       marker_name: "避難所A",
-      detail: "",
+      detail: "MARKER POPUP CONTENT\n\n![確認画像](/print-test-tile.svg)",
       latitude: 35.68,
       longitude: 139.76,
     },
@@ -68,7 +70,7 @@ const bootstrap = {
       shape_type: "polygon",
       geojson: {
         type: "Feature",
-        properties: {},
+        properties: { memo: "SHAPE POPUP CONTENT\n\n![確認画像](/print-test-tile.svg)" },
         geometry: {
           type: "Polygon",
           coordinates: [
@@ -93,7 +95,7 @@ template = template.replace(
   '<script type="module" src="/assets/template-map-anather.js"></script>',
   `<script type="module">
   import { createPrintPreview } from "/src/map/print/print-preview.ts";
-  createPrintPreview(${JSON.stringify(state)}, () => {});
+  window.printTestMap = createPrintPreview(${JSON.stringify(state)}, () => {}).map;
   if (new URLSearchParams(location.search).has("baseline")) {
     [...document.head.querySelectorAll("style")].find(style => style.textContent.includes("#print-layout")).textContent = ${JSON.stringify(baselineCss)};
   }
@@ -148,6 +150,13 @@ const server = await createServer({
   ],
 });
 await server.listen();
+const corsServer = createHttpServer((_req, res) => {
+  res.setHeader("Content-Type", "image/svg+xml");
+  res.end(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="blue"/></svg>',
+  );
+});
+await new Promise((resolve) => corsServer.listen(0, "127.0.0.1", resolve));
 let browser;
 try {
   browser = await chromium.launch({ channel, headless: true });
@@ -167,7 +176,7 @@ try {
   }
   await page.goto(url);
   await page.waitForSelector('[data-print-fixture-ready="true"]');
-  for (const paper of ["a4-portrait", "a4-landscape", "a3-portrait", "a3-landscape"]) {
+  for (const paper of ["a4-portrait", "a4-landscape", "a3-portrait", "a3-landscape", "b5-portrait", "b5-landscape"]) {
     for (const titled of [false, true]) {
       await page.emulateMedia({ media: "screen" });
       await page.locator("#print-size").selectOption(paper);
@@ -178,13 +187,54 @@ try {
             ? "避難場所の案内図：タイトルの折り返しと印刷範囲を確認するためのサンプルです"
             : "",
         );
+      if (args.popup) {
+        await page.evaluate((kind) => {
+          const map = window.printTestMap;
+          map.closePopup();
+          map.eachLayer((layer) => {
+            if (kind === "marker" && layer instanceof L.Marker) layer.openPopup();
+            if (kind === "shape" && layer.shapeMemo)
+              layer.fire("click", { latlng: map.getCenter() });
+          });
+        }, args.popup);
+        await page.locator(".leaflet-popup-content img").last().waitFor({ state: "visible" });
+      }
       await page.waitForFunction(() => !document.querySelector("#print-submit").disabled);
+      if (args.pdf === "client") {
+        if (args.popup) assert.equal(await page.locator(".pdf-output [data-save]").isVisible(), false);
+        await page.locator("#pdf-export").click();
+        try {
+          await page
+            .locator(".pdf-output [data-save]")
+            .waitFor({ state: "visible", timeout: 30000 });
+        } catch (error) {
+          console.error(await page.locator(".pdf-output").innerText());
+          await page.screenshot({ path: resolve(output, "client-error.png"), fullPage: true });
+          throw error;
+        }
+        const downloadEvent = page.waitForEvent("download");
+        assert.equal(await page.locator("iframe.html2canvas-container").count(), 0);
+        await page.locator(".pdf-output [data-save]").click();
+        const download = await downloadEvent;
+        await download.saveAs(resolve(output, `client-${paper}-${titled ? "title" : "blank"}.pdf`));
+        if (args.popup) assert.equal(await page.locator(".leaflet-popup-content").isVisible(), true);
+        await page.screenshot({
+          path: resolve(output, `client-${paper}-${titled ? "title" : "blank"}-preview.png`),
+          fullPage: true,
+        });
+        console.log(`${channel}: client PDF ${paper} ${titled}`);
+        continue;
+      }
       const dimensions = () => {
         const map = document.querySelector("#map");
         return { width: map.clientWidth, height: map.clientHeight };
       };
       const previewSize = await page.evaluate(dimensions);
       await page.emulateMedia({ media: "print" });
+      if (args.popup) {
+        assert.equal(await page.locator(".leaflet-popup-content").isVisible(), true);
+        assert.equal(await page.locator(".leaflet-popup-close-button").isVisible(), false);
+      }
       assert.deepEqual(
         await page.evaluate(dimensions),
         previewSize,
@@ -201,8 +251,33 @@ try {
       console.log(`${channel}: ${name} rendered`);
     }
   }
+  if (args.pdf === "client") {
+    // A displayed cross-origin image without CORS must fail explicitly, never
+    // produce a seemingly successful PDF with a missing map image.
+    await page.evaluate(async (src) => {
+      const img = document.createElement("img");
+      img.id = "cors-test-image";
+      img.style.cssText = "position:absolute;left:100px;top:100px;width:32px;height:32px";
+      img.src = src;
+      document.querySelector("#print-paper").append(img);
+      await img.decode();
+    }, `http://127.0.0.1:${corsServer.address().port}/image.svg`);
+    await page.locator("#pdf-export").click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector(".pdf-output [data-status]")
+        .textContent.includes("PDFを作成できませんでした"),
+    );
+    assert.equal(await page.locator(".pdf-output [data-save]").isVisible(), false);
+    assert.equal(await page.locator("#print-viewport").getAttribute("inert"), null);
+    await page.locator("#cors-test-image").evaluate((node) => node.remove());
+    await page.locator("#pdf-export").click();
+    await page.locator(".pdf-output [data-save]").waitFor({ state: "visible" });
+    console.log(`${channel}: CORS failure is explicit; retry succeeds`);
+  }
   assert.deepEqual(errors, [], "No browser runtime errors");
 } finally {
   await browser?.close();
   await server.close();
+  await new Promise((resolve) => corsServer.close(resolve));
 }

@@ -41,6 +41,8 @@ export const PRINT_PAPERS = {
   "a4-landscape": { label: "A4 横", width: 297, height: 210, page: "A4 landscape" },
   "a3-portrait": { label: "A3 縦", width: 297, height: 420, page: "A3 portrait" },
   "a3-landscape": { label: "A3 横", width: 420, height: 297, page: "A3 landscape" },
+  "b5-portrait": { label: "B5 縦", width: 182, height: 257, page: "182mm 257mm" },
+  "b5-landscape": { label: "B5 横", width: 257, height: 182, page: "257mm 182mm" },
 } as const;
 
 export type PrintPaper = keyof typeof PRINT_PAPERS;

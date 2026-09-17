@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import css from "./print-preview.css?inline";
+import { createPdfControls } from "./pdf-controls";
 import { initializeReadOnlyMapPage } from "../read-only-page";
 import { createLayerBulkToggleControl } from "../common/base";
 import {
@@ -28,10 +29,8 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
         )
         .join("")}</select></label>
       <label class="print-field">タイトル（任意・40文字まで）<input id="print-title-input" type="text" maxlength="40" placeholder="例：避難場所の案内図"></label>
-      <p class="print-help">地図をドラッグ・拡大縮小して印刷範囲を調整できます。余白は四辺10mmです。</p>
       <div class="print-actions"><button id="print-submit" type="button" disabled>印刷</button><button id="print-retry" type="button" hidden>再読み込み</button></div>
       <div id="print-status" role="status" aria-live="polite">地図を読み込んでいます…</div>
-      <p class="print-help">印刷画面でも用紙と向きを確認してください。倍率は100%、ヘッダーとフッターはオフにしてください。</p>
       <h2>背景地図</h2><div id="print-base"></div>
       <h2>レイヤ（グループ）</h2><div id="print-layers" role="group" aria-label="レイヤ（グループ）"></div>
       <h2>表示対象・重ね合わせタイル</h2><div id="print-overlays" role="group" aria-label="表示対象・重ね合わせタイル"></div>
@@ -77,11 +76,13 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
   let disposed = false;
   let printing = false;
   let moving = false;
+  let pdfControls: ReturnType<typeof createPdfControls> | undefined;
   let lastChange = Date.now();
   let lastPending = Date.now();
   let failedTiles = new WeakSet<HTMLImageElement>();
   const watchedLayers = new Set<any>();
   const markChanged = () => {
+    pdfControls?.invalidate();
     lastChange = Date.now();
     submit.disabled = true;
   };
@@ -89,6 +90,22 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
     lastPending = Date.now();
     markChanged();
   };
+  const popupImages = () =>
+    [...mapElement.querySelectorAll<HTMLImageElement>(".leaflet-popup-pane img[src]")].filter(
+      (img) => {
+        // Collapsed details deliberately defer their media until expanded.
+        for (let parent = img.parentElement; parent; parent = parent.parentElement) {
+          if (parent instanceof HTMLDetailsElement && !parent.open) return false;
+        }
+        return true;
+      },
+    );
+  const popupChanged = (event: Event) => {
+    if (event.target instanceof Element && event.target.closest(".leaflet-popup-pane")) resetWait();
+  };
+  map.on("popupopen popupclose", resetWait);
+  for (const event of ["load", "error", "toggle", "scroll"])
+    mapElement.addEventListener(event, popupChanged, true);
   const watchLayer = ({ layer }: { layer: any }) => {
     markChanged();
     if (!layer.on || watchedLayers.has(layer)) return;
@@ -149,7 +166,11 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
   };
   size.addEventListener("change", updatePaper);
   titleInput.addEventListener("input", updatePaper);
-  element("print-settings").addEventListener("change", resetWait);
+  element("print-settings").addEventListener("change", (event) => {
+    // Title input already updates readiness on every keystroke. Its blur-time
+    // change event must not restart the wait just as an output button is clicked.
+    if (event.target !== titleInput) resetWait();
+  });
   const resize = new ResizeObserver(fitPaper);
   resize.observe(viewport);
   updatePaper();
@@ -171,6 +192,10 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
         if (!img.complete) loading = true;
         else if (img.naturalWidth === 0 || failedTiles.has(img)) failed = true;
       });
+    for (const img of popupImages()) {
+      if (!img.complete) loading = true;
+      else if (img.naturalWidth === 0) failed = true;
+    }
     return { loading, failed };
   };
   const refreshStatus = () => {
@@ -190,7 +215,8 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
         ? "地図を読み込んでいます…"
         : failed
           ? "地図画像の一部を表示できません。表示されている内容で印刷できます。必要に応じて再読み込みしてください。"
-          : "印刷できます。";
+          : "印刷準備完了";
+    pdfControls?.refresh();
   };
   const timer = window.setInterval(refreshStatus, 200);
   const resume = () => {
@@ -203,10 +229,10 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
   const pause = () => {
     printing = true;
     document.body.classList.add("print-preparing");
-    map.closePopup();
     map.fire("printpause");
   };
   submit.addEventListener("click", () => {
+    if (pdfControls?.busy()) return;
     refreshStatus();
     if (submit.disabled) return;
     pause();
@@ -218,6 +244,30 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
       resume();
     }
   });
+  pdfControls = createPdfControls({
+    host: element("print-settings"),
+    paper,
+    getSettings: () => ({ paperId: size.value as PrintPaper, title: titleInput.value }),
+    isReady: () => {
+      const { loading, failed } = readiness();
+      return !disposed && !printing && !loading && !failed && Date.now() - lastChange >= 700;
+    },
+    setBusy: (busy) => {
+      if (busy) pause();
+      else resume();
+      // Inert blocks pointer and keyboard changes; cancel/save controls remain usable.
+      viewport.inert = busy;
+      for (const child of [...element("print-settings").children]) {
+        if (child instanceof HTMLElement && !child.classList.contains("pdf-output"))
+          child.inert = busy;
+      }
+      document.body.classList.toggle("pdf-preparing", busy);
+    },
+  });
+  element("print-settings").addEventListener("input", () => pdfControls?.invalidate());
+  element("print-settings").addEventListener("change", () => pdfControls?.invalidate());
+  // Label/measurement buttons can change content without Leaflet layer events.
+  element("print-extra").addEventListener("click", () => pdfControls?.invalidate());
   retry.addEventListener("click", () => {
     lastPending = Date.now();
     failedTiles = new WeakSet<HTMLImageElement>();
@@ -227,6 +277,9 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
       .forEach((img) => {
         if (img.complete && img.naturalWidth === 0) img.src = img.src;
       });
+    for (const img of popupImages()) {
+      if (img.complete && img.naturalWidth === 0) img.src = img.src;
+    }
     markChanged();
     refreshStatus();
   });
@@ -265,12 +318,17 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
   const dispose = () => {
     if (disposed) return;
     disposed = true;
+    pdfControls?.dispose();
+    document.body.classList.remove("pdf-preparing", "print-preparing");
     window.clearInterval(timer);
     resize.disconnect();
     window.removeEventListener("keydown", keydown);
     window.removeEventListener("message", receivePrint);
     window.removeEventListener("beforeprint", pause);
     window.removeEventListener("afterprint", resume);
+    map.off("popupopen popupclose", resetWait);
+    for (const event of ["load", "error", "toggle", "scroll"])
+      mapElement.removeEventListener(event, popupChanged, true);
     for (const layer of watchedLayers) {
       layer.off("loading load tileloadstart tileload tileerror", markChanged);
       layer.off("tileerror", tileError);
