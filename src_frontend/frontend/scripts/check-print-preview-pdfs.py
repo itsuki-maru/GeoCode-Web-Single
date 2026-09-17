@@ -4,20 +4,31 @@ import sys
 from pypdf import PdfReader
 
 output = Path(sys.argv[1])
+client = "--client" in sys.argv[2:]
 papers = {
     "a4-portrait": (210, 297),
     "a4-landscape": (297, 210),
     "a3-portrait": (297, 420),
     "a3-landscape": (420, 297),
+    "b5-portrait": (182, 257),
+    "b5-landscape": (257, 182),
 }
 for name, (width, height) in papers.items():
     for suffix in ("blank", "title"):
-        file = output / f"{name}-{suffix}.pdf"
+        file = output / f"{'client-' if client else ''}{name}-{suffix}.pdf"
         reader = PdfReader(file)
         assert len(reader.pages) == 1, f"{file.name}: {len(reader.pages)} pages"
         page = reader.pages[0]
         assert abs(float(page.mediabox.width) - width * 72 / 25.4) < 1, file.name
         assert abs(float(page.mediabox.height) - height * 72 / 25.4) < 1, file.name
+        if client:
+            images = list(page.images)
+            assert len(images) == 1, f"{file.name}: expected one rasterized page"
+            image = images[0].image
+            assert image.width * image.height <= 4_000_000, file.name
+            assert bool(page.get("/Annots")), f"{file.name}: missing attribution links"
+            print(f"PASS {file.name}: one page, correct size, raster limit and attribution link")
+            continue
         text = page.extract_text()
         assert "PRINT TEST SOURCE" in text, f"{file.name}: missing attribution"
         assert "印刷設定" not in text and "再読み込み" not in text, file.name
