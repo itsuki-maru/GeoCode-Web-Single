@@ -538,7 +538,7 @@ describe("map common search", () => {
     expect(dropdown.open).toBe(false);
   });
 
-  it("allows a candidate click after Safari-style blur and does not select during a scroll gesture", async () => {
+  it.each(["null", "body", "input", "outside-focusin"])("allows a candidate click after %s and does not select during scroll", async (blurTarget) => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -556,21 +556,42 @@ describe("map common search", () => {
     const candidate = list.querySelector("button")!;
     summary.click();
     summary.focus();
-    candidate.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    const touchDown = () => {
+      const event = new Event("pointerdown", { bubbles: true });
+      Object.defineProperty(event, "pointerType", { value: "touch" });
+      candidate.dispatchEvent(event);
+    };
+    touchDown();
     summary.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: null }));
     candidate.dispatchEvent(new Event("pointermove", { bubbles: true }));
     candidate.dispatchEvent(new Event("pointercancel", { bubbles: true }));
     expect(dropdown.open).toBe(true);
     expect(setView).not.toHaveBeenCalled();
-    candidate.dispatchEvent(new Event("pointerdown", { bubbles: true }));
-    summary.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: null }));
+    touchDown();
     candidate.dispatchEvent(new Event("pointerup", { bubbles: true }));
+    candidate.dispatchEvent(new Event("touchend", { bubbles: true }));
+    summary.dispatchEvent(new FocusEvent("focusout", {
+      bubbles: true,
+      relatedTarget: blurTarget === "null" ? null : blurTarget === "body" ? document.body : input,
+    }));
+    if (blurTarget === "outside-focusin") {
+      input.dispatchEvent(new FocusEvent("focusin", { bubbles: true, relatedTarget: summary }));
+    }
+    // iOS can move focus outside between touchend and the synthesized click.
+    expect(dropdown.open).toBe(true);
+    expect(setView).not.toHaveBeenCalled();
     candidate.click();
     expect(setView).toHaveBeenCalledOnce();
     expect(dropdown.open).toBe(false);
     expect(summary.textContent).toBe("東京都新宿区");
     expect(document.activeElement).toBe(summary);
     summary.click();
+    touchDown();
+    document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(dropdown.open).toBe(false);
+    summary.click();
+    touchDown();
+    summary.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
     summary.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: null }));
     input.focus();
     expect(dropdown.open).toBe(false);

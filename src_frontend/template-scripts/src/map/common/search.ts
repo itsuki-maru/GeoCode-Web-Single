@@ -589,35 +589,53 @@ export function createMapSearchRuntime({
             buttons[next]?.focus();
           }
         });
-        resultDropdown.addEventListener("focusout", (event) => {
-          // Safari may blur the summary without focusing the tapped candidate.
-          // A missing relatedTarget must not close the list before its click.
-          if (event.relatedTarget && !resultDropdown?.contains(event.relatedTarget as Node)) {
+        // iOS can focus an outside element while synthesizing a candidate click.
+        // Keep that touch's focus changes from hiding its target before click.
+        let candidateTouchPending = false;
+        const resetCandidateTouch = (): void => { candidateTouchPending = false; };
+        const dismissOutside = (event: Event): void => {
+          if (event.type === "focusin" && candidateTouchPending) {
+            return;
+          }
+          if (!resultDropdown?.contains(event.target as Node)) {
             closeResults();
           }
-        });
-        const dismissOutside = (event: Event): void => {
-          if (!resultDropdown?.contains(event.target as Node)) closeResults();
         };
-        document.addEventListener("pointerdown", dismissOutside);
+        const onPointerDown = (event: PointerEvent): void => {
+          candidateTouchPending = event.pointerType === "touch" &&
+            !!resultDropdown?.open && !!resultList?.contains(event.target as Node);
+          dismissOutside(event);
+        };
+        // Capture also observes outside controls which stop event propagation.
+        document.addEventListener("pointerdown", onPointerDown, true);
+        document.addEventListener("pointercancel", resetCandidateTouch, true);
+        document.addEventListener("keydown", resetCandidateTouch, true);
+        document.addEventListener("click", resetCandidateTouch, true);
         document.addEventListener("focusin", dismissOutside);
         window.addEventListener("resize", fitResults);
         window.visualViewport?.addEventListener("resize", fitResults);
         window.visualViewport?.addEventListener("scroll", fitResults);
         // Leaflet invokes onRemove when disposing this control.
         (container as HTMLElement & { cleanupSearch?: () => void }).cleanupSearch = () => {
-          document.removeEventListener("pointerdown", dismissOutside);
+          document.removeEventListener("pointerdown", onPointerDown, true);
+          document.removeEventListener("pointercancel", resetCandidateTouch, true);
+          document.removeEventListener("keydown", resetCandidateTouch, true);
+          document.removeEventListener("click", resetCandidateTouch, true);
           document.removeEventListener("focusin", dismissOutside);
           window.removeEventListener("resize", fitResults);
           window.visualViewport?.removeEventListener("resize", fitResults);
           window.visualViewport?.removeEventListener("scroll", fitResults);
         };
         leaflet.DomEvent.on(resultList, "click", (event) => {
-          if (!resultList || resultList.hidden || !resultDropdown?.open) return;
+          if (!resultList || resultList.hidden || !resultDropdown?.open) {
+            return;
+          }
           const button = (event.target as Element).closest<HTMLButtonElement>(
             "button[data-result-index]",
           );
-          if (!button || !resultList.contains(button)) return;
+          if (!button || !resultList.contains(button)) {
+            return;
+          }
           const result = addressResults[Number(button.dataset.resultIndex)];
           if (result) {
             resultList.querySelectorAll("button").forEach((candidate) => {
