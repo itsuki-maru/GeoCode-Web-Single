@@ -89,6 +89,16 @@ unsafe fn apply_env_vars(env: &ApplicationInitSetup, server_addr: &str) {
             "TILE_SERVER_API_KEY",
             &env.tile_server_api_key.as_deref().unwrap_or(""),
         );
+        for (name, value) in [
+            ("GEOCODER_PROVIDER", &env.geocoder_provider),
+            ("GEOCODER_URL", &env.geocoder_url),
+            ("GEOCODER_API_KEY", &env.geocoder_api_key),
+        ] {
+            match value {
+                Some(value) => env::set_var(name, value),
+                None => env::remove_var(name),
+            }
+        }
         match &env.redis_url.as_deref() {
             Some(url) => env::set_var("REDIS_URL", url),
             None => env::remove_var("REDIS_URL"),

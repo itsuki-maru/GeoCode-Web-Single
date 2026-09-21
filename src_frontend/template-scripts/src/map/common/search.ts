@@ -1,3 +1,6 @@
+import { resetMapSearchStatus, showMapSearchStatus } from "./search-status";
+export { resetMapSearchStatus } from "./search-status";
+
 export interface SearchMarkerRecord {
   detail?: unknown;
   id?: string | number;
@@ -42,12 +45,20 @@ interface SearchShapeLayer<TMarker> {
 }
 
 interface RuntimeMap extends SearchMap {
+  attributionControl?: {
+    addAttribution(text: string): unknown;
+    removeAttribution(text: string): unknown;
+  };
   setView(latLng: object, zoom: number): void;
 }
 
 interface LeafletNamespace {
   Control: {
-    extend(definition: { options: { position: string }; onAdd(): HTMLElement }): new () => object;
+    extend(definition: {
+      options: { position: string };
+      onAdd(): HTMLElement;
+      onRemove?(): void;
+    }): new () => object;
   };
   DomEvent: {
     disableClickPropagation(element: HTMLElement): void;
@@ -65,6 +76,7 @@ interface LeafletNamespace {
     options: { icon: object },
   ): {
     addTo(map: RuntimeMap): {
+      remove(): void;
       bindPopup(content: string): { openPopup(): void };
     };
   };
@@ -358,20 +370,13 @@ export function createMapSearchRuntime({
     getMap().closePopup?.();
   };
 
-  const onSearchCode = (): void => {
-    const input = document.getElementById("code-input") as HTMLInputElement | null;
-    const parts = input?.value.replace(/[()\s]/g, "").split(",") ?? [];
-    if (parts.length !== 2) {
-      console.log("Value error.");
-      return;
-    }
-
-    const [latitude = "", longitude = ""] = parts;
-    if (!latitude || !longitude || !isValidCoordinate(latitude, longitude)) {
-      console.log("Not value.");
-      return;
-    }
-
+  let addressSearchMarker: { remove(): void } | undefined;
+  const moveToSearchResult = (
+    latitude: string,
+    longitude: string,
+    source: "coordinate" | "address" = "coordinate",
+  ): void => {
+    resetMapSearchStatus();
     const leaflet = getLeaflet();
     const map = getMap();
     const latLng = new leaflet.LatLng(latitude, longitude);
@@ -383,31 +388,243 @@ export function createMapSearchRuntime({
       popupAnchor: [1, -34],
       shadowUrl: null,
     });
-    leaflet
-      .marker([latitude, longitude], { icon })
-      .addTo(map)
-      .bindPopup("緯度：" + latitude + "<br>経度：" + longitude)
-      .openPopup();
+    const marker = leaflet.marker([latitude, longitude], { icon }).addTo(map);
+    const popup = marker.bindPopup("緯度：" + latitude + "<br>経度：" + longitude);
+    if (source === "address") {
+      addressSearchMarker?.remove();
+      addressSearchMarker = marker;
+    } else {
+      popup.openPopup();
+    }
+  };
+
+  let searchSequence = 0;
+  let pendingSearch: AbortController | undefined;
+  let addressResults: Array<{ address: string; latitude: number; longitude: number }> = [];
+  let resultSelect: HTMLSelectElement | undefined;
+  let resultDropdown: HTMLDetailsElement | undefined;
+  let resultSummary: HTMLElement | undefined;
+  const clearAddressResults = (): void => {
+    addressResults = [];
+    if (resultDropdown) {
+      resultDropdown.open = false;
+      resultDropdown.hidden = true;
+    }
+    if (resultSelect) {
+      resultSelect.replaceChildren();
+      resultSelect.hidden = true;
+    }
+  };
+  const invalidateSearch = (): void => {
+    ++searchSequence;
+    pendingSearch?.abort();
+    pendingSearch = undefined;
+    clearAddressResults();
+    resetMapSearchStatus();
+  };
+  const onSearchCode = async (): Promise<void> => {
+    invalidateSearch();
+    const sequence = searchSequence;
+    const input = document.getElementById("code-input") as HTMLInputElement | null;
+    const value = input?.value.trim() ?? "";
+    if (!value) return;
+    const normalized = value.normalize("NFKC").replace(/[()\s]/g, "");
+    if (/^[+\-\d.eE,]+$/.test(normalized)) {
+      const parts = normalized.split(",");
+      const [latitude = "", longitude = ""] = parts;
+      if (
+        parts.length !== 2 ||
+        !latitude ||
+        !longitude ||
+        !Number.isFinite(Number(latitude)) ||
+        !Number.isFinite(Number(longitude)) ||
+        !isValidCoordinate(latitude, longitude)
+      ) {
+        showMapSearchStatus("緯度・経度を正しく入力してください。", true);
+        return;
+      }
+      moveToSearchResult(latitude, longitude);
+      return;
+    }
+    if ([...value].length > 100) {
+      showMapSearchStatus("住所は100文字以内で入力してください。", true);
+      return;
+    }
+    const controller = new AbortController();
+    pendingSearch = controller;
+    showMapSearchStatus("住所を検索しています…");
+    const timeout = window.setTimeout(() => controller.abort(), 15000);
+    try {
+      const shareToken = document.querySelector<HTMLMetaElement>(
+        'meta[name="geocoder-share-token"]',
+      )?.content;
+      const response = await fetch("/geocode", {
+        method: "POST",
+        credentials: "same-origin",
+        signal: controller.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: value, share_token: shareToken || undefined }),
+      });
+      if (!response.ok) throw new Error("Address search failed");
+      const data = await response.json();
+      if (sequence !== searchSequence) return;
+      if (!Array.isArray(data.results)) throw new Error("Invalid search results");
+      addressResults = data.results.filter(
+        (result: unknown): result is (typeof addressResults)[number] => {
+          if (!result || typeof result !== "object") return false;
+          const { address, latitude, longitude } = result as (typeof addressResults)[number];
+          return (
+            typeof address === "string" &&
+            typeof latitude === "number" &&
+            typeof longitude === "number" &&
+            Number.isFinite(latitude) &&
+            Number.isFinite(longitude) &&
+            Math.abs(latitude) <= 90 &&
+            Math.abs(longitude) <= 180
+          );
+        },
+      );
+      if (addressResults.length === 0) {
+        showMapSearchStatus("検索結果に一致する座標はありません。", true);
+        return;
+      }
+      if (resultSelect) {
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "検索結果を選択してください";
+        placeholder.disabled = true;
+        resultSelect.replaceChildren(placeholder);
+        addressResults.forEach((result, index) => {
+          const option = document.createElement("option");
+          option.value = String(index);
+          option.textContent = result.address || `${result.latitude}, ${result.longitude}`;
+          resultSelect!.append(option);
+        });
+        resultSelect.value = "";
+        resultSelect.size = Math.min(6, addressResults.length + 1);
+        resultSelect.hidden = false;
+        if (resultDropdown) resultDropdown.hidden = false;
+        if (resultSummary) resultSummary.textContent = "検索結果を選択してください";
+      }
+      resetMapSearchStatus();
+    } catch {
+      if (sequence === searchSequence)
+        showMapSearchStatus("住所検索に失敗しました。時間をおいて再度お試しください。", true);
+    } finally {
+      window.clearTimeout(timeout);
+      if (sequence === searchSequence) pendingSearch = undefined;
+    }
   };
 
   const createCodeSearchControl = (options: { position?: string } = {}): object => {
     const leaflet = getLeaflet();
+    const csisAttribution =
+      '<a href="https://geocode.csis.u-tokyo.ac.jp/" target="_blank" rel="noopener noreferrer">CSISシンプルジオコーディング実験を利用</a>';
+    let attributedControl: RuntimeMap["attributionControl"];
     const Control = leaflet.Control.extend({
       options: { position: options.position ?? "topleft" },
       onAdd() {
-        const container = leaflet.DomUtil.create("div", "leaflet-bar leaflet-control");
+        if (
+          document.querySelector<HTMLMetaElement>('meta[name="geocoder-csis"]')?.content === "true"
+        ) {
+          attributedControl = getMap().attributionControl;
+          attributedControl?.addAttribution(csisAttribution);
+        }
+        const container = leaflet.DomUtil.create(
+          "div",
+          "leaflet-bar leaflet-control address-search-control",
+        );
         container.innerHTML =
           '<div class="search-zone">' +
-          '<input type="text" class="search-input" id="code-input" placeholder="緯度,経度" title="緯度経度を,区切りで入力してください。"><br>' +
-          '<button id="code-search-btn" class="custom-search">座標検索</button>' +
+          '<input type="text" class="search-input" id="code-input" placeholder="住所・緯度経度" aria-label="住所・緯度経度" title="住所、または緯度,経度を入力してください。">' +
+          '<button type="button" id="code-search-btn" class="custom-search">検索</button>' +
+          '<details class="address-results-dropdown" hidden><summary aria-label="住所検索結果を開閉">検索結果を選択してください</summary>' +
+          '<select id="address-search-results" aria-label="住所検索結果" size="6" hidden></select></details>' +
           "</div>";
         const button = container.querySelector(".custom-search");
         leaflet.DomEvent.on(button, "click", (event) => {
           leaflet.DomEvent.stop(event);
           onSearchCode();
         });
+        const input = container.querySelector<HTMLInputElement>("#code-input");
+        resultSelect = container.querySelector<HTMLSelectElement>("#address-search-results")!;
+        resultDropdown = container.querySelector<HTMLDetailsElement>(".address-results-dropdown")!;
+        resultSummary = resultDropdown.querySelector("summary")!;
+        const closeResults = (): void => {
+          if (resultDropdown) resultDropdown.open = false;
+        };
+        const fitResults = (): void => {
+          if (!resultDropdown?.open || !resultSelect || !resultSummary) return;
+          const rect = resultSummary.getBoundingClientRect();
+          const viewport = window.visualViewport;
+          const top = viewport?.offsetTop ?? 0;
+          const bottom = top + (viewport?.height ?? window.innerHeight);
+          const below = Math.max(0, bottom - rect.bottom - 12);
+          const above = Math.max(0, rect.top - top - 12);
+          const opensAbove = below < 180 && above > below;
+          resultDropdown.classList.toggle("opens-above", opensAbove);
+          resultSelect.style.maxHeight = `${Math.min(180, opensAbove ? above : below)}px`;
+        };
+        resultDropdown.addEventListener("toggle", fitResults);
+        resultDropdown.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            closeResults();
+            resultSummary?.focus();
+          }
+        });
+        resultDropdown.addEventListener("focusout", (event) => {
+          if (!resultDropdown?.contains(event.relatedTarget as Node | null)) closeResults();
+        });
+        const dismissOutside = (event: PointerEvent): void => {
+          if (!resultDropdown?.contains(event.target as Node)) closeResults();
+        };
+        document.addEventListener("pointerdown", dismissOutside);
+        window.addEventListener("resize", fitResults);
+        window.visualViewport?.addEventListener("resize", fitResults);
+        window.visualViewport?.addEventListener("scroll", fitResults);
+        // Leaflet invokes onRemove when disposing this control.
+        (container as HTMLElement & { cleanupSearch?: () => void }).cleanupSearch = () => {
+          document.removeEventListener("pointerdown", dismissOutside);
+          window.removeEventListener("resize", fitResults);
+          window.visualViewport?.removeEventListener("resize", fitResults);
+          window.visualViewport?.removeEventListener("scroll", fitResults);
+        };
+        leaflet.DomEvent.on(resultSelect, "change", () => {
+          if (!resultSelect || resultSelect.hidden || resultSelect.value === "") return;
+          const result = addressResults[Number(resultSelect.value)];
+          if (result) {
+            moveToSearchResult(String(result.latitude), String(result.longitude), "address");
+            if (resultSummary)
+              resultSummary.textContent =
+                result.address || `${result.latitude}, ${result.longitude}`;
+            closeResults();
+            resultSummary?.focus();
+          }
+        });
+        leaflet.DomEvent.on(input, "input", invalidateSearch);
+        let composing = false;
+        leaflet.DomEvent.on(input, "compositionstart", () => {
+          composing = true;
+        });
+        leaflet.DomEvent.on(input, "compositionend", () => {
+          composing = false;
+        });
+        leaflet.DomEvent.on(input, "keydown", (event) => {
+          const key = event as KeyboardEvent;
+          if (key.key === "Enter" && !composing && !key.isComposing && key.keyCode !== 229) {
+            leaflet.DomEvent.stop(event);
+            void onSearchCode();
+          }
+        });
         leaflet.DomEvent.disableClickPropagation(container);
+        leaflet.DomEvent.disableScrollPropagation(container);
         return container;
+      },
+      onRemove(this: { _container?: HTMLElement & { cleanupSearch?: () => void } }) {
+        attributedControl?.removeAttribution(csisAttribution);
+        attributedControl = undefined;
+        this._container?.cleanupSearch?.();
       },
     });
     return new Control();

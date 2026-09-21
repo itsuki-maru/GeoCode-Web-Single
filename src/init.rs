@@ -75,6 +75,9 @@ struct ApplicationInitSetupPartial {
     allow_origins: Option<String>,
     tile_server_base_url: Option<String>,
     tile_server_api_key: Option<String>,
+    geocoder_provider: Option<String>,
+    geocoder_url: Option<String>,
+    geocoder_api_key: Option<String>,
     redis_url: Option<String>,
     redis_connect_timeout_seconds: Option<String>,
     tile_cache_ttl_seconds: Option<String>,
@@ -230,6 +233,9 @@ pub fn build_env_from_form(
         allow_origins: defaults.allow_origins,
         tile_server_base_url: None,
         tile_server_api_key: None,
+        geocoder_provider: None,
+        geocoder_url: None,
+        geocoder_api_key: None,
         redis_url: None,
         redis_connect_timeout_seconds: defaults.redis_connect_timeout_seconds,
         tile_cache_ttl_seconds: defaults.tile_cache_ttl_seconds,
@@ -271,6 +277,9 @@ fn env_json_requires_migration(value: &serde_json::Value) -> bool {
         "allow_origins",
         "tile_server_base_url",
         "tile_server_api_key",
+        "geocoder_provider",
+        "geocoder_url",
+        "geocoder_api_key",
         "redis_url",
         "redis_connect_timeout_seconds",
         "tile_cache_ttl_seconds",
@@ -355,6 +364,9 @@ fn complete_env(
         allow_origins: partial.allow_origins.unwrap_or(defaults.allow_origins),
         tile_server_base_url: partial.tile_server_base_url,
         tile_server_api_key: partial.tile_server_api_key,
+        geocoder_provider: partial.geocoder_provider,
+        geocoder_url: partial.geocoder_url,
+        geocoder_api_key: partial.geocoder_api_key,
         redis_url: partial.redis_url,
         redis_connect_timeout_seconds: partial
             .redis_connect_timeout_seconds
@@ -492,6 +504,18 @@ mod tests {
         assert_eq!(env.live_map_password_attempt_limit, "5");
         assert_eq!(env.live_map_password_window_minutes, "10");
         assert_eq!(env.tile_server_base_url, None);
+        assert_eq!(env.geocoder_provider, None);
+        assert_eq!(env.geocoder_url, None);
+        assert_eq!(env.geocoder_api_key, None);
+        assert!(
+            crate::geocoding::GeocoderConfig::from_values(
+                env.geocoder_provider.as_deref(),
+                env.geocoder_url.as_deref(),
+                env.geocoder_api_key.as_deref()
+            )
+            .unwrap()
+            .uses_csis()
+        );
         assert_eq!(
             env.sqlite_database_path,
             setup_dir.join("geocode-web.sqlite")
@@ -510,6 +534,9 @@ mod tests {
                 .is_some()
         );
         assert_eq!(migrated_value["live_location_history_enabled"], "false");
+        assert!(migrated_value.get("geocoder_provider").unwrap().is_null());
+        assert!(migrated_value.get("geocoder_url").unwrap().is_null());
+        assert!(migrated_value.get("geocoder_api_key").unwrap().is_null());
         assert_eq!(
             read_env_json(&setup_dir)
                 .unwrap()
@@ -547,6 +574,12 @@ mod tests {
         object.insert("secure_cookie".to_string(), json!("false"));
         object.insert("service_name".to_string(), json!("Custom Service"));
         object.insert("redis_url".to_string(), json!("redis://localhost:6379"));
+        object.insert("geocoder_provider".to_string(), json!("abr"));
+        object.insert(
+            "geocoder_url".to_string(),
+            json!("http://localhost:3000/geocode"),
+        );
+        object.insert("geocoder_api_key".to_string(), json!("test-key"));
         object.insert("tile_cache_namespace".to_string(), json!("custom"));
         object.insert(
             "marker_form_storage_quota_bytes".to_string(),
@@ -572,6 +605,13 @@ mod tests {
         assert_eq!(env.secure_cookie, "false");
         assert_eq!(env.service_name, "Custom Service");
         assert_eq!(env.redis_url.as_deref(), Some("redis://localhost:6379"));
+        let reloaded = read_env_json(&setup_dir).unwrap();
+        assert_eq!(reloaded.geocoder_provider.as_deref(), Some("abr"));
+        assert_eq!(
+            reloaded.geocoder_url.as_deref(),
+            Some("http://localhost:3000/geocode")
+        );
+        assert_eq!(reloaded.geocoder_api_key.as_deref(), Some("test-key"));
         assert_eq!(env.tile_cache_namespace, "custom");
         assert_eq!(env.marker_form_storage_quota_bytes, "536870912");
         assert_eq!(env.live_location_upload_interval_seconds, "8");

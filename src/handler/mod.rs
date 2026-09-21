@@ -17,4 +17,5 @@ pub mod shapes;
 pub mod tiles;
 pub mod totp;
 
+pub mod geocoding;
 pub mod tile_overlays;

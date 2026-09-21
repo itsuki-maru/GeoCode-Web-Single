@@ -2,6 +2,7 @@
 // モードの説明を切り替える関数
 // 閲覧・入力・移動モードに応じて UI とドラッグ可否を切り替える
 function handleRadioChange(event) {
+  resetMapSearchStatus();
   const mode = event.target.value;
   setShapeGeometryEditingMode(mode);
   // 左下のコンテナを取得または作成

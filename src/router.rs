@@ -281,6 +281,7 @@ pub fn build_router(
         .route("/", get(crate::root_handler))
         .route("/index", get(crate::index_handler))
         .route("/health-check", get(crate::health_check_handler))
+        .route("/geocode", post(crate::handler::geocoding::search_handler))
         .route("/app-init", get(crate::get_app_init_handler))
         .route("/favicon.ico", get(crate::serve_favicon))
         .route("/assets/{uri}", get(serve_static_file))
@@ -349,6 +350,9 @@ pub fn build_router(
         .merge(flex_secured_routes)
         .layer(cors)
         .layer(Extension(pool))
+        .layer(Extension(
+            crate::handler::geocoding::GeocoderClient::default(),
+        ))
         .layer(Extension(tile_proxy_client))
         .layer(Extension(tile_cache))
         .layer(Extension(tera))

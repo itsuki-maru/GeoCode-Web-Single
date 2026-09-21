@@ -472,3 +472,54 @@ docker run --name proxy-nginx --network=host -p 80:80 \
 このリポジトリのアプリケーション本体は [MIT License](LICENSE) で公開しています。
 
 同梱または依存している第三者コンポーネントは、それぞれのライセンス条件に従います。主要な第三者コンポーネントについては [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。
+
+### 住所・緯度経度検索
+
+通常のデスクトップ起動では `~/.geocode-web-single/geocode-web-single.env.json` の次の項目を設定し、再起動する。JSON設定が環境変数より優先される。古いJSONには各項目を `null` として補完し、既定のCSISを使用する。初回セットアップ画面への入力項目追加はない。
+
+```json
+{
+  "geocoder_provider": "csis",
+  "geocoder_url": null,
+  "geocoder_api_key": null
+}
+```
+
+上記は既存JSONへ設定する項目の抜粋。ABRを使用する場合は `geocoder_provider` を `abr`、`geocoder_url` を自前のエンドポイントに変更する。サーバー単体モード（`-s`）も同じJSONを使用する。以下の環境変数はJSONから内部設定へ渡す際の名前で、JSONの値が優先される。住所検索には外部サービス（または自前のABR）への接続が必要。
+
+地図の検索欄に住所、または `緯度,経度` を入力して検索ボタン・Enterで移動できる。座標検索は外部通信を行わない。住所検索はアプリのサーバーを経由し、検索欄の下に候補のプルダウンを表示する。1件の場合も選択後に移動し、その地点にマーカーを表示する。住所検索のマーカーは1つだけ表示し、候補を選び直すと置き換える。ポップアップは自動では開かず、マーカーのクリックで確認できる。候補は入力の変更・再検索時にクリアするが、表示済みのマーカーは次の候補を選択するまで残る。住所検索のマーカーはデータベースには保存しない。座標検索では従来どおりマーカーを表示し、ポップアップを開く。該当する座標がない場合はモード説明欄に赤字で「検索結果に一致する座標はありません。」と表示する。通信失敗は別のメッセージで通知する。
+
+環境変数を設定しなければ、CSISシンプルジオコーディングをキーなしで使用する。接続先を変更した場合はアプリを再起動する。Redisは住所検索の必須条件ではない。
+
+| 環境変数 | 内容 | 未設定・空の場合 |
+| --- | --- | --- |
+| `GEOCODER_PROVIDER` | `gsi`（国土地理院形式）、`abr`（ABR形式）、`csis`（CSIS形式） | `csis` |
+| `GEOCODER_URL` | 検索エンドポイントの完全なHTTP(S) URL | `gsi` は `https://msearch.gsi.go.jp/address-search/AddressSearch`、`csis` は `https://geocode.csis.u-tokyo.ac.jp/cgi-bin/simple_geocode.cgi`、`abr` は必須 |
+| `GEOCODER_API_KEY` | 上流へ `X-API-Key` ヘッダーで送るキー | 認証なし |
+
+自前のABRサーバーを指定する内部環境変数の対応例（通常起動では前述のJSONに設定）:
+
+```dotenv
+GEOCODER_PROVIDER=abr
+GEOCODER_URL=http://abr:3000/geocode
+# 認証プロキシ等がX-API-Keyを要求する場合のみ指定
+# GEOCODER_API_KEY=YOUR_SERVER_SIDE_KEY
+```
+
+ABRは[公式OpenAPI 3.0.22仕様](https://github.com/digital-go-jp/abr-geocoder/blob/main/abrg/openapi/openapi.yml)の `/geocode` に対応する。`address` と `limit=5` を送り、`features[].geometry.coordinates`（経度・緯度）、`properties.matched_address`、`properties.match_level` を使用する。V2形式やGoogle APIは未対応。ABR自体のAPIキー認証を前提とせず、必要に応じて前段の認証プロキシで `X-API-Key` を検証する。
+
+CSISを明示的に指定する例（未設定時もCSISを使用。公式サービスではURLとAPIキーの設定は不要）:
+
+```dotenv
+GEOCODER_PROVIDER=csis
+```
+
+国土地理院を使用する場合は `GEOCODER_PROVIDER=gsi` を指定する。提供元を切り替える際、以前の `GEOCODER_URL` が残っている場合は削除するか、新しい提供元のURLに変更する。
+
+CSISは[シンプルジオコーディング](https://geocode.csis.u-tokyo.ac.jp/home/simple-geocoding/)のXML形式に対応する。`addr`、`charset=UTF8`、`series=ADDRESS` を送り、候補の住所と世界測地系の代表点を取得する。[参加規約](https://geocode.csis.u-tokyo.ac.jp/home/simple-geocoding/simple-geocoding-tems-of-use/)に従い、CSIS設定時はPC・モバイル・共有地図の右下の出典欄に「CSISシンプルジオコーディング実験を利用」を公式サイトへのリンク付きで表示する。タイル切り替え後も表記を維持する。実験サービスのため予告なく停止・終了する場合がある。
+
+アプリの `/geocode` は `results` 配列（各要素に `address`・`latitude`・`longitude`）を返す。国土地理院・CSISは取得した候補、ABRは最大5件から座標が有効な候補を提供元の順序で返す。0件の場合は空配列となる。
+
+国土地理院形式は `q` パラメーターとGeoJSON Featureの配列を使用する。APIの候補順を維持し、独自のランドマーク検索は行わない（提供元から施設候補が含まれる場合がある）。町字などの代表点へ移動する場合があり、建物単位の精度は保証しない。[国土地理院の公式案内](https://github.com/gsi-cyberjapan/gsimaps/issues/29)では、継続提供や仕様の保証がないことが説明されている。
+
+APIキーはブラウザーに渡さず、接続先は管理者の環境変数のみで指定する。上流リダイレクトには追従せず、失敗時に別の提供元へ自動転送しない。住所は最大100文字、上流通信の待機時間は10秒。ログイン画面と共有地図の閲覧権限に応じて検索を許可する。提供元の追加は `src/geocoding/` 配下に接続処理を追加して行う。

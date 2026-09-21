@@ -286,6 +286,7 @@ pub async fn map_get_handler(
     context.insert("longitude", &longitude);
     context.insert("zoom", &zoom);
     context.insert("tileServers", &tile_servers_hash_map);
+    context.insert("geocoderCsis", &crate::config::CONFIG.geocoder.uses_csis());
     context.insert("tileVisibilityAccountId", &user_id);
     context.insert(
         "tileOverlays",
@@ -427,6 +428,7 @@ pub async fn map_another_get_handler(
     context.insert("longitude", &DEFAULT_ANOTHER_MAP_LONGITUDE);
     context.insert("zoom", &DEFAULT_ANOTHER_MAP_ZOOM);
     context.insert("tileServers", &tile_servers_hash_map);
+    context.insert("geocoderCsis", &crate::config::CONFIG.geocoder.uses_csis());
     context.insert("tileVisibilityAccountId", &user_id);
     context.insert(
         "tileOverlays",

@@ -14,6 +14,7 @@ pub mod auth;
 pub mod config;
 pub mod db;
 pub mod error;
+pub mod geocoding;
 pub mod handler;
 pub mod image;
 pub mod init;
