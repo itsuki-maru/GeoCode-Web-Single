@@ -538,6 +538,44 @@ describe("map common search", () => {
     expect(dropdown.open).toBe(false);
   });
 
+  it("allows a candidate click after Safari-style blur and does not select during a scroll gesture", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          results: [{ address: "東京都新宿区", latitude: 35.69, longitude: 139.7 }],
+        }),
+      }),
+    );
+    const { search, list, setView, input } = searchFixture();
+    search("東京都新宿区");
+    await vi.waitFor(() => expect(list.hidden).toBe(false));
+    const dropdown = list.closest("details")!;
+    const summary = dropdown.querySelector("summary")!;
+    const candidate = list.querySelector("button")!;
+    summary.click();
+    summary.focus();
+    candidate.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    summary.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: null }));
+    candidate.dispatchEvent(new Event("pointermove", { bubbles: true }));
+    candidate.dispatchEvent(new Event("pointercancel", { bubbles: true }));
+    expect(dropdown.open).toBe(true);
+    expect(setView).not.toHaveBeenCalled();
+    candidate.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    summary.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: null }));
+    candidate.dispatchEvent(new Event("pointerup", { bubbles: true }));
+    candidate.click();
+    expect(setView).toHaveBeenCalledOnce();
+    expect(dropdown.open).toBe(false);
+    expect(summary.textContent).toBe("東京都新宿区");
+    expect(document.activeElement).toBe(summary);
+    summary.click();
+    summary.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: null }));
+    input.focus();
+    expect(dropdown.open).toBe(false);
+  });
+
   it("shows no match in red, separately from a service error, and resets on mode change", async () => {
     const fetchMock = vi
       .fn()

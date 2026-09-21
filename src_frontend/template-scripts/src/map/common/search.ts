@@ -590,18 +590,24 @@ export function createMapSearchRuntime({
           }
         });
         resultDropdown.addEventListener("focusout", (event) => {
-          if (!resultDropdown?.contains(event.relatedTarget as Node | null)) closeResults();
+          // Safari may blur the summary without focusing the tapped candidate.
+          // A missing relatedTarget must not close the list before its click.
+          if (event.relatedTarget && !resultDropdown?.contains(event.relatedTarget as Node)) {
+            closeResults();
+          }
         });
-        const dismissOutside = (event: PointerEvent): void => {
+        const dismissOutside = (event: Event): void => {
           if (!resultDropdown?.contains(event.target as Node)) closeResults();
         };
         document.addEventListener("pointerdown", dismissOutside);
+        document.addEventListener("focusin", dismissOutside);
         window.addEventListener("resize", fitResults);
         window.visualViewport?.addEventListener("resize", fitResults);
         window.visualViewport?.addEventListener("scroll", fitResults);
         // Leaflet invokes onRemove when disposing this control.
         (container as HTMLElement & { cleanupSearch?: () => void }).cleanupSearch = () => {
           document.removeEventListener("pointerdown", dismissOutside);
+          document.removeEventListener("focusin", dismissOutside);
           window.removeEventListener("resize", fitResults);
           window.visualViewport?.removeEventListener("resize", fitResults);
           window.visualViewport?.removeEventListener("scroll", fitResults);
