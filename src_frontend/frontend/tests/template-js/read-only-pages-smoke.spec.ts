@@ -234,6 +234,7 @@ const pages: readonly SmokePage[] = [
 const openWindows: JSDOM[] = [];
 
 interface SmokeLoadOptions {
+  csis?: boolean;
   parentWindow?: { postMessage: ReturnType<typeof vi.fn> };
   currentPosition?: { latitude: number; longitude: number };
   lastMapView?: { latitude: number; longitude: number; zoom: number };
@@ -253,6 +254,10 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
     },
   );
   openWindows.push(dom);
+  const geocoderMeta = dom.window.document.createElement("meta");
+  geocoderMeta.name = "geocoder-csis";
+  geocoderMeta.content = String(options.csis ?? false);
+  dom.window.document.head.append(geocoderMeta);
   if (options.parentWindow) {
     Object.defineProperty(dom.window, "parent", { value: options.parentWindow });
   }
@@ -425,6 +430,22 @@ afterEach(() => {
 });
 
 describe("各地図テンプレートJavaScriptのランタイム初期化", () => {
+  it.each(pages)("$fileNameはCSIS利用表記をタイル切り替え後も維持する", (page) => {
+    const dom = smokeLoadPage(page, { csis: true });
+    const attribution = dom.window.document.querySelector(".leaflet-control-attribution")!;
+    const link = attribution.querySelector<HTMLAnchorElement>('a[href="https://geocode.csis.u-tokyo.ac.jp/"]');
+    expect(link?.textContent).toBe("CSISシンプルジオコーディング実験を利用");
+    expect(attribution.textContent).toContain("Test tiles");
+    dom.window.eval(`
+      const replacementTile = L.tileLayer('https://example.test/{z}/{x}/{y}.png', { attribution: 'Replacement tiles' });
+      __templateSmokeMap.eachLayer(layer => { if (layer instanceof L.TileLayer) __templateSmokeMap.removeLayer(layer); });
+      replacementTile.addTo(__templateSmokeMap);
+    `);
+    expect(attribution.textContent).toContain("Replacement tiles");
+    expect(attribution.textContent).not.toContain("Test tiles");
+    expect(attribution.querySelectorAll('a[href="https://geocode.csis.u-tokyo.ac.jp/"]')).toHaveLength(1);
+  });
+
   it("埋め込みPC地図のCtrl+Pを親に通知し、長押しとモバイルでは通知しない", () => {
     for (const templateName of ["map.html", "map-mobile.html"]) {
       const parentWindow = { postMessage: vi.fn() };
@@ -515,6 +536,7 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
 
     expect(runtimeWindow.__templateSmokeMap).toBeInstanceOf(runtimeWindow.L.Map);
     expect(dom.window.document.querySelector(".leaflet-container")).not.toBeNull();
+    expect(dom.window.document.querySelector(".leaflet-control-attribution")?.textContent).not.toContain("CSIS");
     expect(runtimeWindow.__templateSmokeMarkerCount).toBe(1);
     page.expectedControls.forEach((selector) => {
       expect(dom.window.document.querySelector(selector), selector).not.toBeNull();

@@ -684,6 +684,11 @@ async fn render_temporary_map_page(
     context.insert("markersObj", &markers);
     context.insert("shapesObj", &shapes);
     context.insert("tileServers", &tile_servers_hash_map);
+    context.insert("geocoderCsis", &crate::config::CONFIG.geocoder.uses_csis());
+    context.insert(
+        "geocoderShareToken",
+        &crate::handler::geocoding::share_token(&temp_url)?,
+    );
     let tile_overlays = if temp_url.include_tile_overlays {
         crate::handler::tile_overlays::selected_tiles(pool, &temp_url.user_id).await?
     } else {

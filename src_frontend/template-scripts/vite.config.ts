@@ -20,7 +20,7 @@ import { createNestedTokenizer, isLocalhost, isPDF, isValidCoordinate, renderIfr
 import { createMapObjectFocusController } from "/src/map/common/map-object-focus.ts";
 import { loadLastMapView, observeMapView } from "/src/map/common/map-view-persistence.ts";
 import { createMarkerPopupRuntime, enableMarkerIconFallback, escapeHtml, initializeUserLocation, markerOptionsForLayer } from "/src/map/common/marker.ts";
-import { createLayeredMarkerDisplayManager, createLayeredShapeDisplayManager, createMapSearchRuntime, filterMeasurementMarkersForBounds, getShapeRecords, matchesMarkerSearch, matchesShapeSearch, normalizeMarkerSearchText } from "/src/map/common/search.ts";
+import { createLayeredMarkerDisplayManager, createLayeredShapeDisplayManager, createMapSearchRuntime, filterMeasurementMarkersForBounds, getShapeRecords, matchesMarkerSearch, matchesShapeSearch, normalizeMarkerSearchText, resetMapSearchStatus } from "/src/map/common/search.ts";
 import { createShapeArrowRuntime } from "/src/map/common/shape-arrow.ts";
 import { createShapeLayerRuntime } from "/src/map/common/shape-layer.ts";
 import { createShapeMeasurementRuntime } from "/src/map/common/shape-measurement.ts";

@@ -3,6 +3,7 @@ use std::env;
 use std::str::FromStr;
 
 pub struct Config {
+    pub geocoder: crate::geocoding::GeocoderConfig,
     pub app_title: String,
     pub database_path: String,
     pub database_url: String,
@@ -40,6 +41,12 @@ pub struct Config {
 }
 
 pub static CONFIG: Lazy<Config> = Lazy::new(|| Config {
+    geocoder: crate::geocoding::GeocoderConfig::from_values(
+        env::var("GEOCODER_PROVIDER").ok().as_deref(),
+        env::var("GEOCODER_URL").ok().as_deref(),
+        env::var("GEOCODER_API_KEY").ok().as_deref(),
+    )
+    .unwrap_or_else(|message| panic!("Invalid geocoder configuration: {message}")),
     app_title: env::var("APP_TITLE").expect("APP_TITLE must be set"),
     database_path: env::var("CREATEDATABASE_PATH").expect("CREATEDATABASE_PATH must be set."),
     database_url: env::var("DATABASE_URL").expect("DATABASE_URL must be set."),
