@@ -314,15 +314,16 @@ describe("map common search", () => {
       input.value = value;
       container.querySelector("button")!.click();
     };
-    const select = container.querySelector<HTMLSelectElement>("select")!;
+    const list = container.querySelector<HTMLDivElement>("#address-search-results")!;
     const choose = (index: number) => {
-      select.value = String(index);
-      select.dispatchEvent(new Event("change"));
+      const dropdown = list.closest("details")!;
+      if (!dropdown.open) dropdown.querySelector("summary")!.click();
+      list.querySelectorAll("button")[index].click();
     };
     return {
       setView,
       leaflet,
-      select,
+      list,
       choose,
       input,
       search,
@@ -338,12 +339,13 @@ describe("map common search", () => {
       }),
     });
     vi.stubGlobal("fetch", fetchMock);
-    const { search, setView, status, select, choose, leaflet } = searchFixture();
+    const { search, setView, status, list, choose, leaflet } = searchFixture();
     search("東京都千代田区");
-    await vi.waitFor(() => expect(select.hidden).toBe(false));
-    expect(select.value).toBe("");
-    expect(select.options[0].textContent).toBe("検索結果を選択してください");
-    expect(select.options[1].textContent).toBe("東京都千代田区");
+    await vi.waitFor(() => expect(list.hidden).toBe(false));
+    expect(list.closest("details")!.open).toBe(false);
+    expect(list.querySelector("select")).toBeNull();
+    expect(list.children).toHaveLength(1);
+    expect(list.children[0].textContent).toBe("東京都千代田区");
     expect(setView).not.toHaveBeenCalled();
     expect(leaflet.marker).not.toHaveBeenCalled();
     choose(0);
@@ -368,14 +370,12 @@ describe("map common search", () => {
       "fetch",
       vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results }) }),
     );
-    const { search, select, choose, setView, input, leaflet } = searchFixture();
+    const { search, list, choose, setView, input, leaflet } = searchFixture();
     search("府中市");
-    await vi.waitFor(() => expect(select.options.length).toBe(3));
-    expect(
-      Array.from(select.options)
-        .slice(1)
-        .map((option) => option.textContent),
-    ).toEqual(results.map((result) => result.address));
+    await vi.waitFor(() => expect(list.children.length).toBe(2));
+    expect(Array.from(list.children).map((option) => option.textContent)).toEqual(
+      results.map((result) => result.address),
+    );
     choose(1);
     expect(setView).toHaveBeenLastCalledWith(
       expect.objectContaining({ latitude: "34", longitude: "133" }),
@@ -394,12 +394,12 @@ describe("map common search", () => {
     expect(currentMarker.openPopup).not.toHaveBeenCalled();
     input.value = "東京都";
     input.dispatchEvent(new Event("input"));
-    expect(select.hidden).toBe(true);
-    expect(select.options.length).toBe(0);
+    expect(list.hidden).toBe(true);
+    expect(list.children.length).toBe(0);
     search("東京都");
-    await vi.waitFor(() => expect(select.hidden).toBe(false));
+    await vi.waitFor(() => expect(list.hidden).toBe(false));
     search("35,139");
-    expect(select.hidden).toBe(true);
+    expect(list.hidden).toBe(true);
     expect(leaflet.marker).toHaveBeenCalledTimes(3);
     expect(currentMarker.remove).not.toHaveBeenCalled();
     expect(leaflet.marker.mock.results[2].value.openPopup).toHaveBeenCalledOnce();
@@ -416,9 +416,9 @@ describe("map common search", () => {
         })
         .mockResolvedValueOnce({ ok: true, json: async () => ({ results: [] }) }),
     );
-    const { search, select, choose, leaflet, setView, status } = searchFixture();
+    const { search, list, choose, leaflet, setView, status } = searchFixture();
     search("東京都");
-    await vi.waitFor(() => expect(select.hidden).toBe(false));
+    await vi.waitFor(() => expect(list.hidden).toBe(false));
     choose(0);
     search("該当なし");
     await vi.waitFor(() => expect(status.textContent).toBe("検索結果に一致する座標はありません。"));
@@ -438,7 +438,7 @@ describe("map common search", () => {
           }),
       ),
     );
-    const { input, search, select, setView } = searchFixture();
+    const { input, search, list, setView } = searchFixture();
     search("東京都");
     input.value = "広島県";
     input.dispatchEvent(new Event("input"));
@@ -447,8 +447,8 @@ describe("map common search", () => {
       json: async () => ({ results: [{ address: "東京都", latitude: 35, longitude: 139 }] }),
     });
     await new Promise((done) => setTimeout(done, 0));
-    expect(select.hidden).toBe(true);
-    expect(select.options.length).toBe(0);
+    expect(list.hidden).toBe(true);
+    expect(list.children.length).toBe(0);
     expect(setView).not.toHaveBeenCalled();
   });
 
@@ -460,10 +460,10 @@ describe("map common search", () => {
         json: async () => ({ results: [{ address: "東京都", latitude: 35, longitude: 139 }] }),
       }),
     );
-    const { search, select, choose } = searchFixture();
+    const { search, list, choose } = searchFixture();
     search("東京都");
-    await vi.waitFor(() => expect(select.hidden).toBe(false));
-    const dropdown = select.closest("details")!;
+    await vi.waitFor(() => expect(list.hidden).toBe(false));
+    const dropdown = list.closest("details")!;
     const summary = dropdown.querySelector("summary")!;
     vi.spyOn(summary, "getBoundingClientRect").mockReturnValue({
       top: window.innerHeight - 80,
@@ -472,12 +472,69 @@ describe("map common search", () => {
     dropdown.open = true;
     dropdown.dispatchEvent(new Event("toggle"));
     expect(dropdown.classList.contains("opens-above")).toBe(true);
-    expect(Number.parseFloat(select.style.maxHeight)).toBeLessThanOrEqual(180);
+    expect(Number.parseFloat(list.style.maxHeight)).toBeLessThanOrEqual(180);
     choose(0);
     expect(dropdown.open).toBe(false);
     expect(summary.textContent).toBe("東京都");
     dropdown.open = true;
     dropdown.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(dropdown.open).toBe(false);
+  });
+
+  it("opens candidates with one click and supports keyboard navigation and outside dismissal", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          results: [
+            { address: "<b>東京都</b>", latitude: 35, longitude: 139 },
+            { address: "広島県", latitude: 34, longitude: 133 },
+          ],
+        }),
+      }),
+    );
+    const { search, list, setView } = searchFixture();
+    search("住所");
+    await vi.waitFor(() => expect(list.hidden).toBe(false));
+    const dropdown = list.closest("details")!;
+    const summary = dropdown.querySelector("summary")!;
+    const buttons = list.querySelectorAll("button");
+    summary.click();
+    expect(dropdown.open).toBe(true);
+    expect(list.querySelector("select")).toBeNull();
+    expect(list.querySelector("b")).toBeNull();
+    expect(buttons[0].textContent).toBe("<b>東京都</b>");
+    expect(setView).not.toHaveBeenCalled();
+    const key = (element: HTMLElement, value: string) =>
+      element.dispatchEvent(
+        new KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true }),
+      );
+    summary.focus();
+    key(summary, "ArrowDown");
+    expect(document.activeElement).toBe(buttons[0]);
+    key(buttons[0], "End");
+    expect(document.activeElement).toBe(buttons[1]);
+    key(buttons[1], "ArrowUp");
+    expect(document.activeElement).toBe(buttons[0]);
+    key(buttons[0], "ArrowDown");
+    buttons[1].click();
+    expect(dropdown.open).toBe(false);
+    expect(document.activeElement).toBe(summary);
+    expect(buttons[1].getAttribute("aria-pressed")).toBe("true");
+    expect(buttons[0].getAttribute("aria-pressed")).toBe("false");
+    key(summary, "ArrowUp");
+    expect(dropdown.open).toBe(true);
+    expect(document.activeElement).toBe(buttons[1]);
+    key(buttons[1], "Escape");
+    expect(dropdown.open).toBe(false);
+    expect(document.activeElement).toBe(summary);
+    summary.click();
+    document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(dropdown.open).toBe(false);
+    summary.click();
+    buttons[0].focus();
+    document.querySelector<HTMLInputElement>("#code-input")!.focus();
     expect(dropdown.open).toBe(false);
   });
 
