@@ -430,6 +430,32 @@ afterEach(() => {
 });
 
 describe("各地図テンプレートJavaScriptのランタイム初期化", () => {
+  it.each(pages)("$fileNameは1回の展開操作で住所候補を直接選択できる", async (page) => {
+    const dom = smokeLoadPage(page);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ results: [{ address: "東京都新宿区", latitude: 35.69, longitude: 139.7 }] }),
+    }));
+    const document = dom.window.document;
+    document.querySelector<HTMLInputElement>("#code-input")!.value = "東京都新宿区";
+    document.querySelector<HTMLButtonElement>("#code-search-btn")!.click();
+    const dropdown = document.querySelector<HTMLDetailsElement>(".address-results-dropdown")!;
+    await vi.waitFor(() => expect(dropdown.hidden).toBe(false));
+    const summary = dropdown.querySelector("summary")!;
+    summary.click();
+    expect(dropdown.open).toBe(true);
+    expect(dropdown.querySelector("select")).toBeNull();
+    const candidate = dropdown.querySelector<HTMLButtonElement>("#address-search-results button")!;
+    expect(candidate.textContent).toBe("東京都新宿区");
+    candidate.click();
+    expect(dropdown.open).toBe(false);
+    expect(summary.textContent).toBe("東京都新宿区");
+    const map = (dom.window as unknown as { __templateSmokeMap: L.Map }).__templateSmokeMap;
+    expect(map.getCenter().lat).toBeCloseTo(35.69);
+    expect(map.getCenter().lng).toBeCloseTo(139.7);
+    expect(document.querySelector(".leaflet-popup")).toBeNull();
+  });
+
   it.each(pages)("$fileNameはCSIS利用表記をタイル切り替え後も維持する", (page) => {
     const dom = smokeLoadPage(page, { csis: true });
     const attribution = dom.window.document.querySelector(".leaflet-control-attribution")!;

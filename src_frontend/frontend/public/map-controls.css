@@ -126,8 +126,36 @@
     box-shadow: 0 3px 10px #0002;
 }
 
-.address-search-control #address-search-results option {
-    padding: 4px 6px;
+.address-search-control #address-search-results button {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    min-height: 32px;
+    padding: 5px 8px;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+.address-search-control #address-search-results button:hover,
+.address-search-control #address-search-results button[aria-pressed="true"] {
+    background: #e8f0f5;
+}
+
+.address-search-control #address-search-results button:focus-visible {
+    outline: 2px solid #075985;
+    outline-offset: -2px;
+}
+
+.address-search-control #address-search-results {
+    touch-action: pan-y;
 }
 
 .address-search-control .opens-above #address-search-results {
@@ -148,6 +176,9 @@
 }
 
 @media (pointer: coarse) {
+    .address-search-control #address-search-results button {
+        min-height: 44px;
+    }
     .address-search-control #address-search-results,
     .address-search-control .address-results-dropdown > summary {
         font-size: 16px;

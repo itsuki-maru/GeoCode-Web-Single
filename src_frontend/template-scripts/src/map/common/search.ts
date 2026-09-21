@@ -401,7 +401,7 @@ export function createMapSearchRuntime({
   let searchSequence = 0;
   let pendingSearch: AbortController | undefined;
   let addressResults: Array<{ address: string; latitude: number; longitude: number }> = [];
-  let resultSelect: HTMLSelectElement | undefined;
+  let resultList: HTMLDivElement | undefined;
   let resultDropdown: HTMLDetailsElement | undefined;
   let resultSummary: HTMLElement | undefined;
   const clearAddressResults = (): void => {
@@ -410,9 +410,9 @@ export function createMapSearchRuntime({
       resultDropdown.open = false;
       resultDropdown.hidden = true;
     }
-    if (resultSelect) {
-      resultSelect.replaceChildren();
-      resultSelect.hidden = true;
+    if (resultList) {
+      resultList.replaceChildren();
+      resultList.hidden = true;
     }
   };
   const invalidateSearch = (): void => {
@@ -488,21 +488,18 @@ export function createMapSearchRuntime({
         showMapSearchStatus("検索結果に一致する座標はありません。", true);
         return;
       }
-      if (resultSelect) {
-        const placeholder = document.createElement("option");
-        placeholder.value = "";
-        placeholder.textContent = "検索結果を選択してください";
-        placeholder.disabled = true;
-        resultSelect.replaceChildren(placeholder);
+      if (resultList) {
+        resultList.replaceChildren();
         addressResults.forEach((result, index) => {
-          const option = document.createElement("option");
-          option.value = String(index);
+          const option = document.createElement("button");
+          option.type = "button";
+          option.dataset.resultIndex = String(index);
+          option.setAttribute("aria-pressed", "false");
           option.textContent = result.address || `${result.latitude}, ${result.longitude}`;
-          resultSelect!.append(option);
+          option.title = option.textContent;
+          resultList!.append(option);
         });
-        resultSelect.value = "";
-        resultSelect.size = Math.min(6, addressResults.length + 1);
-        resultSelect.hidden = false;
+        resultList.hidden = false;
         if (resultDropdown) resultDropdown.hidden = false;
         if (resultSummary) resultSummary.textContent = "検索結果を選択してください";
       }
@@ -539,7 +536,7 @@ export function createMapSearchRuntime({
           '<input type="text" class="search-input" id="code-input" placeholder="住所・緯度経度" aria-label="住所・緯度経度" title="住所、または緯度,経度を入力してください。">' +
           '<button type="button" id="code-search-btn" class="custom-search">検索</button>' +
           '<details class="address-results-dropdown" hidden><summary aria-label="住所検索結果を開閉">検索結果を選択してください</summary>' +
-          '<select id="address-search-results" aria-label="住所検索結果" size="6" hidden></select></details>' +
+          '<div id="address-search-results" role="group" aria-label="住所検索結果" hidden></div></details>' +
           "</div>";
         const button = container.querySelector(".custom-search");
         leaflet.DomEvent.on(button, "click", (event) => {
@@ -547,14 +544,14 @@ export function createMapSearchRuntime({
           onSearchCode();
         });
         const input = container.querySelector<HTMLInputElement>("#code-input");
-        resultSelect = container.querySelector<HTMLSelectElement>("#address-search-results")!;
+        resultList = container.querySelector<HTMLDivElement>("#address-search-results")!;
         resultDropdown = container.querySelector<HTMLDetailsElement>(".address-results-dropdown")!;
         resultSummary = resultDropdown.querySelector("summary")!;
         const closeResults = (): void => {
           if (resultDropdown) resultDropdown.open = false;
         };
         const fitResults = (): void => {
-          if (!resultDropdown?.open || !resultSelect || !resultSummary) return;
+          if (!resultDropdown?.open || !resultList || !resultSummary) return;
           const rect = resultSummary.getBoundingClientRect();
           const viewport = window.visualViewport;
           const top = viewport?.offsetTop ?? 0;
@@ -563,7 +560,7 @@ export function createMapSearchRuntime({
           const above = Math.max(0, rect.top - top - 12);
           const opensAbove = below < 180 && above > below;
           resultDropdown.classList.toggle("opens-above", opensAbove);
-          resultSelect.style.maxHeight = `${Math.min(180, opensAbove ? above : below)}px`;
+          resultList.style.maxHeight = `${Math.min(180, opensAbove ? above : below)}px`;
         };
         resultDropdown.addEventListener("toggle", fitResults);
         resultDropdown.addEventListener("keydown", (event) => {
@@ -571,29 +568,79 @@ export function createMapSearchRuntime({
             event.preventDefault();
             closeResults();
             resultSummary?.focus();
+          } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+            const buttons = Array.from(
+              resultList?.querySelectorAll<HTMLButtonElement>("button") ?? [],
+            );
+            if (!buttons.length) return;
+            event.preventDefault();
+            resultDropdown!.open = true;
+            const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+            const next =
+              event.key === "Home"
+                ? 0
+                : event.key === "End"
+                  ? buttons.length - 1
+                  : event.key === "ArrowDown"
+                    ? Math.min(current + 1, buttons.length - 1)
+                    : current < 0
+                      ? buttons.length - 1
+                      : Math.max(current - 1, 0);
+            buttons[next]?.focus();
           }
         });
-        resultDropdown.addEventListener("focusout", (event) => {
-          if (!resultDropdown?.contains(event.relatedTarget as Node | null)) closeResults();
-        });
-        const dismissOutside = (event: PointerEvent): void => {
-          if (!resultDropdown?.contains(event.target as Node)) closeResults();
+        // iOS can focus an outside element while synthesizing a candidate click.
+        // Keep that touch's focus changes from hiding its target before click.
+        let candidateTouchPending = false;
+        const resetCandidateTouch = (): void => { candidateTouchPending = false; };
+        const dismissOutside = (event: Event): void => {
+          if (event.type === "focusin" && candidateTouchPending) {
+            return;
+          }
+          if (!resultDropdown?.contains(event.target as Node)) {
+            closeResults();
+          }
         };
-        document.addEventListener("pointerdown", dismissOutside);
+        const onPointerDown = (event: PointerEvent): void => {
+          candidateTouchPending = event.pointerType === "touch" &&
+            !!resultDropdown?.open && !!resultList?.contains(event.target as Node);
+          dismissOutside(event);
+        };
+        // Capture also observes outside controls which stop event propagation.
+        document.addEventListener("pointerdown", onPointerDown, true);
+        document.addEventListener("pointercancel", resetCandidateTouch, true);
+        document.addEventListener("keydown", resetCandidateTouch, true);
+        document.addEventListener("click", resetCandidateTouch, true);
+        document.addEventListener("focusin", dismissOutside);
         window.addEventListener("resize", fitResults);
         window.visualViewport?.addEventListener("resize", fitResults);
         window.visualViewport?.addEventListener("scroll", fitResults);
         // Leaflet invokes onRemove when disposing this control.
         (container as HTMLElement & { cleanupSearch?: () => void }).cleanupSearch = () => {
-          document.removeEventListener("pointerdown", dismissOutside);
+          document.removeEventListener("pointerdown", onPointerDown, true);
+          document.removeEventListener("pointercancel", resetCandidateTouch, true);
+          document.removeEventListener("keydown", resetCandidateTouch, true);
+          document.removeEventListener("click", resetCandidateTouch, true);
+          document.removeEventListener("focusin", dismissOutside);
           window.removeEventListener("resize", fitResults);
           window.visualViewport?.removeEventListener("resize", fitResults);
           window.visualViewport?.removeEventListener("scroll", fitResults);
         };
-        leaflet.DomEvent.on(resultSelect, "change", () => {
-          if (!resultSelect || resultSelect.hidden || resultSelect.value === "") return;
-          const result = addressResults[Number(resultSelect.value)];
+        leaflet.DomEvent.on(resultList, "click", (event) => {
+          if (!resultList || resultList.hidden || !resultDropdown?.open) {
+            return;
+          }
+          const button = (event.target as Element).closest<HTMLButtonElement>(
+            "button[data-result-index]",
+          );
+          if (!button || !resultList.contains(button)) {
+            return;
+          }
+          const result = addressResults[Number(button.dataset.resultIndex)];
           if (result) {
+            resultList.querySelectorAll("button").forEach((candidate) => {
+              candidate.setAttribute("aria-pressed", String(candidate === button));
+            });
             moveToSearchResult(String(result.latitude), String(result.longitude), "address");
             if (resultSummary)
               resultSummary.textContent =
