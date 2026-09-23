@@ -213,7 +213,7 @@ onMounted(() => {
   text-align: center;
   font-size: 40px;
   margin: -8px -8px 10px -8px;
-  padding: 5px;
+  padding: 12px 5px 8px 5px;
 }
 
 a {
@@ -240,7 +240,7 @@ a {
   gap: 18px;
   z-index: 5;
   position: fixed;
-  top: 1%;
+  top: 2.3%;
   right: 1%;
 }
 

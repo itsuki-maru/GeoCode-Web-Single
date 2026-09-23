@@ -1,7 +1,10 @@
 <!doctype html>
 <html lang="ja">
     <head>
-        <meta name="geocoder-csis" content="{{ geocoderCsis | default(value=false) }}" />
+        <meta
+            name="geocoder-csis"
+            content="{{ geocoderCsis | default(value=false) }}"
+        />
         <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
 
         <script>
@@ -55,6 +58,10 @@
 
             .leaflet-container {
                 font-size: 1rem;
+            }
+            /* 上端のぼやけを避けるため、左右のコントロール群を少し下げる。 */
+            #map .leaflet-top {
+                top: 28px;
             }
             .leaflet-popup {
                 width: 400px;
@@ -615,7 +622,9 @@
             <div id="mode-description" class="mode-desc-container">
                 閲覧モード: 現在のモードは閲覧のみ可能です。
             </div>
-            <div id="draw-status" class="draw-status is-hidden">図形描画: オフ</div>
+            <div id="draw-status" class="draw-status is-hidden">
+                図形描画: オフ
+            </div>
         </div>
     </body>
     <script>
