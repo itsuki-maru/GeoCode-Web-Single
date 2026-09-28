@@ -38,12 +38,12 @@ const VIEWER_TOKEN_PURPOSE: &str = "live_map_access";
 const MAX_LIVE_MAP_MEMBERS: usize = 20;
 
 #[derive(FromRow)]
-struct LiveMapAccessRow {
-    id: String,
+pub(crate) struct LiveMapAccessRow {
+    pub(crate) id: String,
     public_id: String,
     name: String,
     password_hash: Option<String>,
-    access_version: i64,
+    pub(crate) access_version: i64,
     expires_at: DateTime<Utc>,
 }
 
@@ -561,6 +561,18 @@ async fn find_active_map(pool: &SqlitePool, public_id: &str) -> Result<LiveMapAc
     .ok_or(AppError::NotFound)
 }
 
+pub(crate) async fn authorize_camera_viewer(
+    pool: &SqlitePool,
+    public_id: &str,
+    headers: &HeaderMap,
+) -> Result<LiveMapAccessRow, AppError> {
+    let map = find_active_map(pool, public_id).await?;
+    if map.password_hash.is_some() && !viewer_cookie_is_valid(headers, &map) {
+        return Err(AppError::Unauthorized("live_map_password_required".into()));
+    }
+    Ok(map)
+}
+
 fn viewer_cookie_is_valid(headers: &HeaderMap, map: &LiveMapAccessRow) -> bool {
     let Some(token) = extract_cookie_value(headers, VIEWER_COOKIE_NAME) else {
         return false;
@@ -678,6 +690,10 @@ async fn render_live_map(
     let mut context = Context::new();
     context.insert("publicId", &public_id);
     context.insert("isCheckOverlay", &is_check_overlay);
+    context.insert(
+        "cameraEnabled",
+        &super::live_camera::CameraConfig::from_env().available(),
+    );
     context.insert("tileServers", &tile_servers);
     let (owner, use_tile_overlays): (String, bool) =
         sqlx::query_as("SELECT created_by, use_tile_overlays FROM live_map WHERE public_id=$1")

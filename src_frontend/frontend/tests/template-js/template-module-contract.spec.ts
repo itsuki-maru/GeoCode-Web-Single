@@ -126,8 +126,10 @@ describe("地図テンプレートのES Modules配信契約", () => {
 
   it("UnixビルドがVite成果物の階層を保って統合する", () => {
     const builder = readRepositoryFile("src_frontend/scripts/frontends-builder.sh");
-    expect(builder).toContain('cp -r "$templateScriptsDistDir/." "$mainDistAssetsDir/"');
-    expect(builder).not.toContain('find "$templateScriptsDistDir" -maxdepth 1 -type f');
+    const assembler = readRepositoryFile("src_frontend/scripts/assemble-frontends.sh");
+    expect(builder).toContain('bash "$script_dir/assemble-frontends.sh"');
+    expect(assembler).toContain('cp -r "$frontend_root/template-scripts/dist/." "$output/assets/"');
+    expect(assembler).not.toContain('find "$frontend_root/template-scripts/dist" -maxdepth 1 -type f');
   });
 
   it("折れ線ホバー強調をPC版だけで有効にする", () => {

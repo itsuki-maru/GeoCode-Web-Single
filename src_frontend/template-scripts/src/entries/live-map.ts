@@ -1,5 +1,6 @@
 // @ts-nocheck -- Leaflet is provided as a browser global by the server template.
 import { addPublishedLayerControl } from "../live-map/published-layers";
+import { CameraViewer } from "../live-map/camera";
 import { createLiveMapUiVisibilityControl } from "../live-map/ui-visibility";
 import { addLiveTileOverlayControl } from "../live-map/tile-overlays";
 import {
@@ -80,6 +81,7 @@ if (tileServerEntries.length) {
 }
 
 const markers = new Map<string, any>();
+const cameraPopups = new Map<string, { info: HTMLElement; camera: CameraViewer | null }>();
 const memberLayers = new Map<string, { displayName: string; group: any }>();
 const isMobile = window.matchMedia("(max-width: 700px)").matches;
 const locationLayersControl = L.control
@@ -214,6 +216,8 @@ function render(snapshot: any): void {
     if (!hasPosition) {
       const existing = markers.get(position.id);
       if (existing) {
+        cameraPopups.get(position.id)?.camera?.close();
+        cameraPopups.delete(position.id);
         memberLayer.removeLayer(existing);
         markers.delete(position.id);
       }
@@ -231,14 +235,25 @@ function render(snapshot: any): void {
     if (existing) {
       existing.setLatLng([position.latitude, position.longitude]);
       existing.setIcon(icon);
-      existing.setPopupContent(popup);
+      const content = cameraPopups.get(position.id);
+      if (content) content.info.innerHTML = popup;
       existing.setTooltipContent(
         `<div class="custom-tooltip">${escapeHtml(position.display_name)}</div>`,
       );
       nameVisibility.syncMarker(existing);
     } else {
+      const root = document.createElement("div");
+      const info = document.createElement("div");
+      info.innerHTML = popup;
+      const camera =
+        bootstrap.cameraEnabled === true
+          ? new CameraViewer(bootstrap.publicId, position.id, position.display_name)
+          : null;
+      root.append(info);
+      if (camera) root.append(camera.element);
+      cameraPopups.set(position.id, { info, camera });
       const marker = L.marker([position.latitude, position.longitude], { icon })
-        .bindPopup(popup)
+        .bindPopup(root, { className: "live-account-popup" })
         .bindTooltip(`<div class="custom-tooltip">${escapeHtml(position.display_name)}</div>`, {
           permanent: false,
           direction: "top",
@@ -246,11 +261,28 @@ function render(snapshot: any): void {
         })
         .addTo(memberLayer);
       markers.set(position.id, marker);
+      // 幅が変わったら、マーカーに対する中央位置と画面内への収まりを再計算する。
+      root.addEventListener("camera-layoutchange", () => {
+        const popup = marker.getPopup();
+        popup
+          ?.getElement()
+          ?.classList.toggle(
+            "has-camera-video",
+            camera?.element.classList.contains("has-video") === true,
+          );
+        if (marker.isPopupOpen()) popup?.update();
+      });
+      if (camera) {
+        marker.on("popupopen", () => camera.open());
+        marker.on("popupclose", () => camera.close());
+      }
       nameVisibility.syncMarker(marker);
     }
   }
   for (const [id, layer] of memberLayers) {
     if (!memberIds.has(id)) {
+      cameraPopups.get(id)?.camera?.close();
+      cameraPopups.delete(id);
       const marker = markers.get(id);
       if (marker) {
         layer.group.removeLayer(marker);
@@ -313,6 +345,7 @@ async function load(): Promise<void> {
 }
 
 window.addEventListener("pagehide", () => {
+  for (const popup of cameraPopups.values()) popup.camera?.close();
   if (timer !== null) window.clearTimeout(timer);
   if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame);
 });

@@ -447,6 +447,13 @@ CREATE TABLE IF NOT EXISTS live_map_password_rate_limit (
             "../../migrations/20260913000000_add_live_map_layers.sql"
         )],
     },
+    Migration {
+        version: 15,
+        name: "camera_sharing",
+        statements: &[include_str!(
+            "../../migrations/20260929000000_camera_sharing.sql"
+        )],
+    },
 ];
 
 // データベース接続の確立

@@ -216,6 +216,22 @@ pub fn build_router(
 
     secured_routes = secured_routes
         .route(
+            "/live-camera/capabilities",
+            get(crate::handler::live_camera::capabilities),
+        )
+        .route(
+            "/live-location/session/{id}/camera",
+            post(crate::handler::live_camera::start),
+        )
+        .route(
+            "/live-camera/sessions/{id}",
+            delete(crate::handler::live_camera::stop),
+        )
+        .route(
+            "/live-camera/sessions/{id}/exchange",
+            post(crate::handler::live_camera::publisher_exchange),
+        )
+        .route(
             "/live-location/session",
             post(create_live_location_session_handler),
         )
@@ -288,6 +304,19 @@ pub fn build_router(
         .route("/account/token", post(token_handler))
         .route("/account/totp/token", post(token_totp_handler))
         .route("/licanses", get(crate::licenses_get_handler))
+        .route(
+            "/live-api/maps/{public}/members/{member}/camera/viewers",
+            post(crate::handler::live_camera::join).layer(DefaultBodyLimit::max(262_144)),
+        )
+        .route(
+            "/live-api/maps/{public}/camera/viewers/{id}/exchange",
+            post(crate::handler::live_camera::viewer_exchange)
+                .layer(DefaultBodyLimit::max(262_144)),
+        )
+        .route(
+            "/live-api/maps/{public}/camera/viewers/{id}",
+            delete(crate::handler::live_camera::leave).layer(DefaultBodyLimit::max(4096)),
+        )
         .route("/live/{public_id}", get(live_map_page_handler))
         .route(
             "/live/{public_id}/authenticate",
@@ -349,6 +378,9 @@ pub fn build_router(
         .merge(token_refresh_routes)
         .merge(flex_secured_routes)
         .layer(cors)
+        .layer(Extension(
+            crate::handler::live_camera::CameraConfig::from_env(),
+        ))
         .layer(Extension(pool))
         .layer(Extension(
             crate::handler::geocoding::GeocoderClient::default(),
