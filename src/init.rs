@@ -75,6 +75,14 @@ struct ApplicationInitSetupPartial {
     allow_origins: Option<String>,
     tile_server_base_url: Option<String>,
     tile_server_api_key: Option<String>,
+    camera_sharing_enabled: Option<String>,
+    camera_turn_provider: Option<String>,
+    camera_stun_urls: Option<String>,
+    camera_turn_urls: Option<String>,
+    camera_turn_secret: Option<String>,
+    camera_relay_only: Option<String>,
+    camera_cloudflare_turn_key_id: Option<String>,
+    camera_cloudflare_turn_api_token: Option<String>,
     geocoder_provider: Option<String>,
     geocoder_url: Option<String>,
     geocoder_api_key: Option<String>,
@@ -233,6 +241,14 @@ pub fn build_env_from_form(
         allow_origins: defaults.allow_origins,
         tile_server_base_url: None,
         tile_server_api_key: None,
+        camera_sharing_enabled: None,
+        camera_turn_provider: None,
+        camera_stun_urls: None,
+        camera_turn_urls: None,
+        camera_turn_secret: None,
+        camera_relay_only: None,
+        camera_cloudflare_turn_key_id: None,
+        camera_cloudflare_turn_api_token: None,
         geocoder_provider: None,
         geocoder_url: None,
         geocoder_api_key: None,
@@ -277,6 +293,14 @@ fn env_json_requires_migration(value: &serde_json::Value) -> bool {
         "allow_origins",
         "tile_server_base_url",
         "tile_server_api_key",
+        "camera_sharing_enabled",
+        "camera_turn_provider",
+        "camera_stun_urls",
+        "camera_turn_urls",
+        "camera_turn_secret",
+        "camera_relay_only",
+        "camera_cloudflare_turn_key_id",
+        "camera_cloudflare_turn_api_token",
         "geocoder_provider",
         "geocoder_url",
         "geocoder_api_key",
@@ -364,6 +388,14 @@ fn complete_env(
         allow_origins: partial.allow_origins.unwrap_or(defaults.allow_origins),
         tile_server_base_url: partial.tile_server_base_url,
         tile_server_api_key: partial.tile_server_api_key,
+        camera_sharing_enabled: partial.camera_sharing_enabled,
+        camera_turn_provider: partial.camera_turn_provider,
+        camera_stun_urls: partial.camera_stun_urls,
+        camera_turn_urls: partial.camera_turn_urls,
+        camera_turn_secret: partial.camera_turn_secret,
+        camera_relay_only: partial.camera_relay_only,
+        camera_cloudflare_turn_key_id: partial.camera_cloudflare_turn_key_id,
+        camera_cloudflare_turn_api_token: partial.camera_cloudflare_turn_api_token,
         geocoder_provider: partial.geocoder_provider,
         geocoder_url: partial.geocoder_url,
         geocoder_api_key: partial.geocoder_api_key,
@@ -474,6 +506,19 @@ mod tests {
         let saved: ApplicationInitSetup = serde_json::from_str(&saved_text).unwrap();
         assert_eq!(saved.admin_username, "geocodeweb");
         assert_eq!(saved.admin_passwotd, "geocodeweb");
+        let saved_json: serde_json::Value = serde_json::from_str(&saved_text).unwrap();
+        for key in [
+            "camera_sharing_enabled",
+            "camera_turn_provider",
+            "camera_stun_urls",
+            "camera_turn_urls",
+            "camera_turn_secret",
+            "camera_relay_only",
+            "camera_cloudflare_turn_key_id",
+            "camera_cloudflare_turn_api_token",
+        ] {
+            assert_eq!(saved_json.get(key), Some(&serde_json::Value::Null), "{key}");
+        }
 
         fs::remove_dir_all(setup_dir).unwrap();
     }
@@ -505,6 +550,8 @@ mod tests {
         assert_eq!(env.live_map_password_window_minutes, "10");
         assert_eq!(env.tile_server_base_url, None);
         assert_eq!(env.geocoder_provider, None);
+        assert_eq!(env.camera_sharing_enabled, None);
+        assert_eq!(env.camera_cloudflare_turn_api_token, None);
         assert_eq!(env.geocoder_url, None);
         assert_eq!(env.geocoder_api_key, None);
         assert!(
@@ -580,6 +627,12 @@ mod tests {
             json!("http://localhost:3000/geocode"),
         );
         object.insert("geocoder_api_key".to_string(), json!("test-key"));
+        object.insert("camera_sharing_enabled".to_string(), json!("true"));
+        object.insert("camera_turn_provider".to_string(), json!("cloudflare"));
+        object.insert(
+            "camera_cloudflare_turn_api_token".to_string(),
+            json!("test-token"),
+        );
         object.insert("tile_cache_namespace".to_string(), json!("custom"));
         object.insert(
             "marker_form_storage_quota_bytes".to_string(),
@@ -606,6 +659,12 @@ mod tests {
         assert_eq!(env.service_name, "Custom Service");
         assert_eq!(env.redis_url.as_deref(), Some("redis://localhost:6379"));
         let reloaded = read_env_json(&setup_dir).unwrap();
+        assert_eq!(reloaded.camera_sharing_enabled.as_deref(), Some("true"));
+        assert_eq!(reloaded.camera_turn_provider.as_deref(), Some("cloudflare"));
+        assert_eq!(
+            reloaded.camera_cloudflare_turn_api_token.as_deref(),
+            Some("test-token")
+        );
         assert_eq!(reloaded.geocoder_provider.as_deref(), Some("abr"));
         assert_eq!(
             reloaded.geocoder_url.as_deref(),

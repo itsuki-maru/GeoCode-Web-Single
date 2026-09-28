@@ -18,6 +18,9 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use tauri::Manager;
 
+#[cfg(test)]
+mod camera_settings_tests;
+
 const SERVER_ADDR: &str = "127.0.0.1:3000";
 const WINDOW_URL: &str = "http://localhost:3000/index";
 
@@ -90,6 +93,21 @@ unsafe fn apply_env_vars(env: &ApplicationInitSetup, server_addr: &str) {
             &env.tile_server_api_key.as_deref().unwrap_or(""),
         );
         for (name, value) in [
+            // 設定元はJSONだけ。未指定項目は削除し、外部環境変数を引き継がない。
+            ("CAMERA_SHARING_ENABLED", &env.camera_sharing_enabled),
+            ("CAMERA_TURN_PROVIDER", &env.camera_turn_provider),
+            ("CAMERA_STUN_URLS", &env.camera_stun_urls),
+            ("CAMERA_TURN_URLS", &env.camera_turn_urls),
+            ("CAMERA_TURN_SECRET", &env.camera_turn_secret),
+            ("CAMERA_RELAY_ONLY", &env.camera_relay_only),
+            (
+                "CAMERA_CLOUDFLARE_TURN_KEY_ID",
+                &env.camera_cloudflare_turn_key_id,
+            ),
+            (
+                "CAMERA_CLOUDFLARE_TURN_API_TOKEN",
+                &env.camera_cloudflare_turn_api_token,
+            ),
             ("GEOCODER_PROVIDER", &env.geocoder_provider),
             ("GEOCODER_URL", &env.geocoder_url),
             ("GEOCODER_API_KEY", &env.geocoder_api_key),
@@ -207,6 +225,7 @@ async fn complete_setup(
     let tile_cache = setup_tile_cache().await;
 
     // axum ルーター
+    let _camera_cleanup = geocode_web_single::handler::live_camera::start_cleanup(pool.clone());
     let app_router = router::build_router(pool, tera, tile_cache);
 
     // TCP バインド
@@ -244,6 +263,7 @@ async fn complete_setup(
 
     // axum をバックグラウンドで起動（invoke はここで返る）
     tokio::spawn(async move {
+        let _camera_cleanup = _camera_cleanup;
         axum::serve(listener, app_router)
             .with_graceful_shutdown(async move {
                 shutdown_rx.await.ok();
@@ -301,6 +321,7 @@ fn run_server_mode(bind_addr: String) {
         // Redisキャッシュ接続を作成（未設定または接続失敗時はキャッシュなしで継続）
         let tile_cache = setup_tile_cache().await;
 
+        let _camera_cleanup = geocode_web_single::handler::live_camera::start_cleanup(pool.clone());
         let app_router = router::build_router(pool, tera, tile_cache);
 
         let listener = match tokio::net::TcpListener::bind(&bind_addr).await {
@@ -418,6 +439,8 @@ fn main() {
                     // Redisキャッシュ接続を作成（未設定または接続失敗時はキャッシュなしで継続）
                     let tile_cache = setup_tile_cache().await;
 
+                    let _camera_cleanup =
+                        geocode_web_single::handler::live_camera::start_cleanup(pool.clone());
                     let app_router = router::build_router(pool, tera, tile_cache);
 
                     let listener = match tokio::net::TcpListener::bind(SERVER_ADDR).await {

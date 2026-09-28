@@ -592,7 +592,9 @@ export function createMapSearchRuntime({
         // iOS can focus an outside element while synthesizing a candidate click.
         // Keep that touch's focus changes from hiding its target before click.
         let candidateTouchPending = false;
-        const resetCandidateTouch = (): void => { candidateTouchPending = false; };
+        const resetCandidateTouch = (): void => {
+          candidateTouchPending = false;
+        };
         const dismissOutside = (event: Event): void => {
           if (event.type === "focusin" && candidateTouchPending) {
             return;
@@ -602,8 +604,10 @@ export function createMapSearchRuntime({
           }
         };
         const onPointerDown = (event: PointerEvent): void => {
-          candidateTouchPending = event.pointerType === "touch" &&
-            !!resultDropdown?.open && !!resultList?.contains(event.target as Node);
+          candidateTouchPending =
+            event.pointerType === "touch" &&
+            !!resultDropdown?.open &&
+            !!resultList?.contains(event.target as Node);
           dismissOutside(event);
         };
         // Capture also observes outside controls which stop event propagation.

@@ -45,7 +45,7 @@ async fn migrations_create_schema_and_record_versions() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 14);
+    assert_eq!(migration_count, 15);
 
     let live_location_table_count: i64 = sqlx::query_scalar(
         r#"
@@ -164,7 +164,7 @@ async fn migrations_are_idempotent() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 14);
+    assert_eq!(migration_count, 15);
 }
 
 #[tokio::test]
@@ -247,7 +247,7 @@ async fn migrations_record_versions_for_existing_schema() {
     .await
     .expect("migration rows should be returned");
 
-    assert_eq!(rows.len(), 14);
+    assert_eq!(rows.len(), 15);
     assert_eq!(rows[0].get::<i64, _>("version"), 1);
     assert_eq!(rows[0].get::<String, _>("name"), "create_initial_schema");
     assert_eq!(rows[1].get::<i64, _>("version"), 2);
@@ -431,7 +431,7 @@ async fn live_map_settings_upgrade_preserves_existing_maps_and_runs_once() {
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::raw_sql("DROP TABLE live_map_layer; ALTER TABLE live_map DROP COLUMN layers_configured_by; ALTER TABLE live_map DROP COLUMN use_tile_overlays; DELETE FROM schema_migrations WHERE version >= 13;").execute(&pool).await.unwrap();
+    sqlx::raw_sql("DROP TABLE live_camera_signal; DROP TABLE live_camera_viewer; DROP TABLE live_camera_session; DROP TABLE live_map_layer; ALTER TABLE live_map DROP COLUMN layers_configured_by; ALTER TABLE live_map DROP COLUMN use_tile_overlays; DELETE FROM schema_migrations WHERE version >= 13;").execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO live_map(id,public_id,name,created_by,expires_at) VALUES('legacy','public','existing','owner','2099-01-01')").execute(&pool).await.unwrap();
     run_migrations(&pool).await.unwrap();
     let settings: (bool, Option<String>, String) = sqlx::query_as(

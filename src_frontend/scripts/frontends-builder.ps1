@@ -1,11 +1,8 @@
-# `-d`で依存関係を再構築し、`-SkipCargoBuild`でRustビルドを省略する
+# 依存関係を更新するかのフラグオプション`-d`を引数で受け取る
 Param(
-    [switch]$d,
-    [switch]$SkipCargoBuild
+    [switch]$d
 )
 
-$ErrorActionPreference = "Stop"
-$PSNativeCommandUseErrorActionPreference = $true
 $dependsDeleteFlag = $false
 
 if ($d) {
@@ -75,9 +72,9 @@ if ($dependsDeleteFlag) {
     CheckExistsPath $nodeModules
 }
 
-# node_modulesが存在しなければlockfileから依存関係を復元
+# node_modulesが存在しなければnpm installを実行
 if (-Not (Test-Path $nodeModules)) {
-    npm ci
+    npm install
 }
 
 # ビルド
@@ -112,9 +109,9 @@ if ($dependsDeleteFlag) {
     CheckExistsPath $nodeModules
 }
 
-# node_modulesが存在しなければlockfileから依存関係を復元
+# node_modulesが存在しなければnpm installを実行
 if (-Not (Test-Path $nodeModules)) {
-    npm ci
+    npm install
 }
 
 # ビルド
@@ -151,9 +148,9 @@ if ($dependsDeleteFlag) {
     CheckExistsPath $nodeModules
 }
 
-# node_modulesが存在しなければlockfileから依存関係を復元
+# node_modulesが存在しなければnpm installを実行
 if (-Not (Test-Path $nodeModules)) {
-    npm ci
+    npm install
 }
 
 # ビルド
@@ -178,7 +175,7 @@ if ($dependsDeleteFlag) {
 }
 
 if (-Not (Test-Path $nodeModules)) {
-    npm ci
+    npm install
 }
 
 npm run build
@@ -211,8 +208,6 @@ Get-ChildItem -LiteralPath $rustTemplatesDir -File -Filter "*.html" | ForEach-Ob
     Copy-Item -LiteralPath $_.FullName -Destination $distributionTemplatesDir -Force
 }
 
-# 必要な場合だけプロジェクトディレクトリへ移動してRustをコンパイル
-if (-Not $SkipCargoBuild) {
-    Set-Location $prepareDistributionDir
-    cargo build --release
-}
+# プロジェクトディレクトリに移動し、Rustをコンパイル
+Set-Location $prepareDistributionDir
+cargo build --release
