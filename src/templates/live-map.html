@@ -33,7 +33,10 @@
                 box-sizing: border-box;
                 width: 100%;
                 height: 100%;
-                padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+                padding: max(12px, env(safe-area-inset-top))
+                    max(12px, env(safe-area-inset-right))
+                    max(12px, env(safe-area-inset-bottom))
+                    max(12px, env(safe-area-inset-left));
                 background: #111;
                 color: #fff;
                 display: flex;
@@ -41,22 +44,32 @@
                 gap: 8px;
                 overscroll-behavior: contain;
             }
-            .live-camera-fullscreen::backdrop { background: #111; }
+            .live-camera-fullscreen::backdrop {
+                background: #111;
+            }
             .live-camera-fullscreen-toolbar {
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
                 gap: 12px;
             }
-            .live-camera-fullscreen-toolbar strong { overflow-wrap: anywhere; min-width: 0; }
-            .live-camera-fullscreen button { min-height: 44px; flex-shrink: 0; }
+            .live-camera-fullscreen-toolbar strong {
+                overflow-wrap: anywhere;
+                min-width: 0;
+            }
+            .live-camera-fullscreen button {
+                min-height: 44px;
+                flex-shrink: 0;
+            }
             .live-camera-fullscreen .live-camera-presentation {
                 display: flex;
                 flex-direction: column;
                 flex: 1;
                 min-height: 0;
             }
-            .live-camera-fullscreen .live-camera-presentation p { margin: 0 0 8px; }
+            .live-camera-fullscreen .live-camera-presentation p {
+                margin: 0 0 8px;
+            }
             .live-camera-fullscreen video {
                 flex: 1;
                 min-height: 0;
@@ -234,7 +247,7 @@
             }
             .live-account-popup .leaflet-popup-content {
                 width: auto !important;
-                max-height: 60dvh;
+                /* 右側の余白を内側に移し、スクロールバーをポップアップの右端に寄せる。 */
                 overflow: auto;
                 overflow-wrap: anywhere;
             }
