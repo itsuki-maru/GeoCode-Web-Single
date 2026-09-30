@@ -92,7 +92,9 @@ function isRunningAsPWA() {
 
 // 画像クリック時に別ウィンドウで拡大表示できるようにカスタムレンダラを定義
 const renderer = new marked.Renderer();
-renderer.image = function ({ href }) {
+renderer.image = function ({ href, text }) {
+  const camera = renderCameraImage({ href, text });
+  if (camera !== null) return camera;
   const separator = href.includes("?") ? "&" : "?";
   const newHref = href ? `${href}${separator}thumb=true` : "";
   const match = href.match(/\/static\/images\/([^\/]+)$/); // 画像ファイル名抜き出し
@@ -216,6 +218,7 @@ let xssOptions = {
     details: ["class"],
     summary: [],
     "app-youtube": ["video-id", "data-src"],
+    "app-camera": ["data-camera-src"],
   },
   // iframeの確認（念のため、iframeはここで不許可）
   onTag(tag, html) {
@@ -243,6 +246,7 @@ var map = L.map("map", {
   attributionControl: false,
 });
 observeMapView(map);
+installMjpegCameras(map);
 
 // 日本の最南端と最北端の座標を使用して境界を設定
 const southWest = L.latLng(20.25, 122.56), // 最南端の座標

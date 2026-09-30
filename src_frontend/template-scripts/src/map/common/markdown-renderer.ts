@@ -1,5 +1,8 @@
+import { renderCameraImage } from "./mjpeg-camera";
+
 interface MarkdownImageToken {
   href: string;
+  text?: string;
 }
 
 interface MarkdownLinkToken {
@@ -18,6 +21,7 @@ interface MarkedRendererNamespace {
 }
 
 interface MarkdownRendererOptions {
+  printing?: boolean;
   enablePwaDownloads?: boolean;
   imageMode?: "direct-preview" | "html-preview";
   isLocalhost(url: string): boolean;
@@ -75,6 +79,7 @@ export function createMapXssOptions(): MapXssOptions {
       details: ["class"],
       summary: [],
       "app-youtube": ["video-id", "data-src"],
+      "app-camera": ["data-camera-src"],
     },
     onTag(tag) {
       if (tag === "iframe") return "Not Allow iframe ";
@@ -86,6 +91,7 @@ export function createMapXssOptions(): MapXssOptions {
 }
 
 export function installMapMarkdownRenderer({
+  printing = false,
   enablePwaDownloads = false,
   imageMode = "direct-preview",
   isLocalhost,
@@ -94,7 +100,9 @@ export function installMapMarkdownRenderer({
   marked,
 }: MarkdownRendererOptions): MapXssOptions {
   const renderer = new marked.Renderer();
-  renderer.image = ({ href }) => {
+  renderer.image = ({ href, text }) => {
+    const camera = renderCameraImage({ href, text }, printing);
+    if (camera !== null) return camera;
     const separator = href.includes("?") ? "&" : "?";
     const thumbnailHref = href ? `${href}${separator}thumb=true` : "";
     if (imageMode === "html-preview") {

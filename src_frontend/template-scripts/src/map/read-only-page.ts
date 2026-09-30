@@ -12,6 +12,7 @@ import {
   setupDetailsLazyImages,
 } from "./common/content";
 import { installMapContentActions } from "./common/content-actions";
+import { installMjpegCameras } from "./common/mjpeg-camera";
 import { createReadOnlyLayerGroupRuntime } from "./common/layer-groups";
 import { installMapMarkdownExtensions } from "./common/markdown-extensions";
 import { downloadMapContentFile, installMapMarkdownRenderer } from "./common/markdown-renderer";
@@ -169,6 +170,7 @@ export function initializeReadOnlyMapPage(
 
   installMapMarkdownExtensions({ createNestedTokenizer, extractYouTubeId, marked });
   const xssOptions = installMapMarkdownRenderer({
+    printing: isPrint,
     enablePwaDownloads: isAnother,
     imageMode: isMobile ? "html-preview" : "direct-preview",
     isLocalhost,
@@ -221,6 +223,7 @@ export function initializeReadOnlyMapPage(
     zoom: initialView.zoom,
   });
   map = mapRuntime.map as DynamicRecord;
+  if (!isPrint) installMjpegCameras(map);
   if (persistSettings) observeMapView(map);
   bounds = mapRuntime.bounds;
   tileLayer = mapRuntime.tileLayer as DynamicRecord;

@@ -181,3 +181,7 @@ npm run build
 | `../frontend/tests/template-js/` | Tera参照、entry結合、実vendorとのスモーク、印刷等 |
 
 接続テストはPCディレクトリで `npm run test:template-js` を実行する。型チェック抑止箇所を変更した際は、単体テストだけでなくentryとvendorを組み合わせるテストを確認する。ブラウザAPIや実印刷の実機確認とは区別する。
+
+## MJPEGカメラ
+
+`src/map/common/mjpeg-camera.ts` は `![camera](HTTP/HTTPS URL)` の遅延受信・接続解除・手動再接続を担当する。Markdownレンダラー、PC・モバイル編集画面、閲覧専用画面、公開レイヤで共通利用する。`vite.config.ts`の編集画面用共通importにも登録する。接続のライフサイクルと印刷時の扱いはPostgreSQL版と同一。HTTP配信元の許可はSQLite版のJSON設定で行う（[本体仕様](../../SPECIFICATION.md)）。

@@ -26,7 +26,8 @@ fn json_is_only_camera_configuration_source() {
                     "--test-threads=1",
                     "--nocapture",
                 ])
-                .env(CHILD, case);
+                .env(CHILD, case)
+                .env("HTTP_IMAGE_ALLOWED_ORIGINS", "http://203.0.113.1");
             for key in keys {
                 command.env(
                     key.to_ascii_uppercase(),
@@ -71,6 +72,7 @@ fn json_is_only_camera_configuration_source() {
     }
     let enabled = matches!(case.as_str(), "p2p" | "cloudflare");
     if enabled {
+        value["http_image_allowed_origins"] = json!("http://192.168.1.20:80");
         value["camera_sharing_enabled"] = json!("true");
         value["camera_turn_provider"] = json!(if case == "p2p" { "none" } else { "cloudflare" });
         value["camera_relay_only"] = json!("false");
@@ -86,6 +88,10 @@ fn json_is_only_camera_configuration_source() {
     unsafe {
         apply_env_vars(&settings, "127.0.0.1:3000");
     }
+    assert_eq!(
+        std::env::var("HTTP_IMAGE_ALLOWED_ORIGINS").unwrap(),
+        settings.http_image_allowed_origins
+    );
     for key in keys {
         assert_eq!(
             std::env::var(key.to_ascii_uppercase()).ok().as_deref(),
@@ -101,6 +107,38 @@ fn json_is_only_camera_configuration_source() {
     let config = live_camera::CameraConfig::from_env();
     assert_eq!(config.available(), enabled);
     tokio::runtime::Runtime::new().unwrap().block_on(async {
+        use tower::ServiceExt;
+        let app = axum::Router::new()
+            .route("/", axum::routing::get(|| async { "ok" }))
+            .layer(axum::middleware::from_fn(
+                geocode_web_single::middleware::security::security_headers_and_origin,
+            ));
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let csp = response.headers()["content-security-policy"]
+            .to_str()
+            .unwrap();
+        let images = csp
+            .split(';')
+            .map(str::trim)
+            .find(|v| v.starts_with("img-src "))
+            .unwrap();
+        assert_eq!(
+            images,
+            if enabled {
+                "img-src 'self' data: blob: https: http://192.168.1.20"
+            } else {
+                "img-src 'self' data: blob: https:"
+            }
+        );
+        assert!(!csp.contains("203.0.113.1"));
         let response = live_camera::capabilities(axum::extract::Extension(config)).await;
         let bytes = axum::body::to_bytes(response.into_body(), 4096)
             .await

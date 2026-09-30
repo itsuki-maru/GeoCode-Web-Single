@@ -25,6 +25,7 @@ pub struct ApplicationInitSetup {
     pub allow_user_create_account: String,
     pub allow_user_update_password: String,
     pub allow_origins: String,
+    pub http_image_allowed_origins: String,
     pub tile_server_base_url: Option<String>,
     pub tile_server_api_key: Option<String>,
     pub camera_sharing_enabled: Option<String>,
