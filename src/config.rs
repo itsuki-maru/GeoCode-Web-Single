@@ -23,6 +23,7 @@ pub struct Config {
     pub allow_user_create_account: bool,
     pub allow_user_update_password: bool,
     pub allow_origins: String,
+    pub http_image_allowed_origins: Vec<String>,
     pub tile_server_base_url: Option<String>,
     pub tile_server_api_key: Option<String>,
     pub redis_url: Option<String>,
@@ -84,6 +85,10 @@ pub static CONFIG: Lazy<Config> = Lazy::new(|| Config {
         .parse::<bool>()
         .expect("Failed Parse Error."),
     allow_origins: env::var("ALLOW_ORIGINS").expect("ALLOW_ORIGINS must be set"),
+    http_image_allowed_origins: parse_http_image_allowed_origins(
+        env::var("HTTP_IMAGE_ALLOWED_ORIGINS").ok().as_deref(),
+    )
+    .unwrap_or_else(|message| panic!("Invalid HTTP_IMAGE_ALLOWED_ORIGINS: {message}")),
     tile_server_base_url: env::var("TILE_SERVER_BASE_URL").ok(),
     tile_server_api_key: env::var("TILE_SERVER_API_KEY").ok(),
     redis_url: env::var("REDIS_URL").ok(),
@@ -222,5 +227,92 @@ mod history_config_tests {
         assert_eq!(parse_history_enabled(Some("true")), Ok(true));
         assert!(parse_history_enabled(Some("yes")).is_err());
         assert!(parse_history_enabled(Some("")).is_err());
+    }
+}
+
+// URLパーサーによるパス・制御文字・非標準のIP表記の暗黙的な正規化を避けるため、
+// ホストとポートの部分を直接解析する。
+pub(crate) fn parse_http_image_allowed_origins(value: Option<&str>) -> Result<Vec<String>, String> {
+    let value = value.unwrap_or("").trim();
+    if value.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut origins = Vec::new();
+    for (index, entry) in value.split(',').enumerate() {
+        let invalid = || {
+            format!(
+                "entry {} must be http://IPv4[:port] (port 1-65535)",
+                index + 1
+            )
+        };
+        let authority = entry.trim().strip_prefix("http://").ok_or_else(invalid)?;
+        let (host, port) = match authority.split_once(':') {
+            Some((host, port)) => {
+                if port.is_empty() || !port.bytes().all(|c| c.is_ascii_digit()) {
+                    return Err(invalid());
+                }
+                let port = port.parse::<u16>().map_err(|_| invalid())?;
+                if port == 0 {
+                    return Err(invalid());
+                }
+                (host, port)
+            },
+            None => (authority, 80),
+        };
+        let ip = host.parse::<std::net::Ipv4Addr>().map_err(|_| invalid())?;
+        let origin = if port == 80 {
+            format!("http://{ip}")
+        } else {
+            format!("http://{ip}:{port}")
+        };
+        if !origins.contains(&origin) {
+            origins.push(origin);
+        }
+    }
+    Ok(origins)
+}
+
+#[cfg(test)]
+mod http_image_config_tests {
+    use super::parse_http_image_allowed_origins as parse;
+
+    #[test]
+    fn optional_origins_are_normalized_and_deduplicated() {
+        assert!(parse(None).unwrap().is_empty());
+        assert!(parse(Some("  ")).unwrap().is_empty());
+        assert_eq!(
+            parse(Some(
+                " http://192.168.1.20, http://192.168.1.20:80,http://192.168.1.21:8080 "
+            ))
+            .unwrap(),
+            vec!["http://192.168.1.20", "http://192.168.1.21:8080"]
+        );
+    }
+
+    #[test]
+    fn invalid_origins_cannot_widen_the_policy() {
+        for value in [
+            "http:",
+            "https://192.168.1.20",
+            "http://camera.local",
+            "http://*",
+            "http://192.168.1.20/",
+            "http://192.168.1.20/stream",
+            "http://user@192.168.1.20",
+            "http://192.168.1.20?x=1",
+            "http://192.168.1.20#x",
+            "http://192.168.1.20; script-src *",
+            "http://192.168.1.20\r\nX-Test: yes",
+            "http://192.168.1.20\\x",
+            "http://192.168.1.20:",
+            "http://192.168.1.20:0",
+            "http://192.168.1.20:65536",
+            "http://192.168.1.20:*",
+            "http://192.168.1.20,,http://192.168.1.21",
+            "http://127.1",
+            "http://[::1]",
+        ] {
+            assert!(parse(Some(value)).is_err(), "accepted {value:?}");
+        }
     }
 }

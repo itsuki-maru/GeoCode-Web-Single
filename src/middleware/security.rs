@@ -8,6 +8,26 @@ use axum::{
 
 const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://cloudflareinsights.com https://www.jma.go.jp; manifest-src 'self' https://geocode-web-mobile-app.pages.dev; frame-src 'self' https://www.youtube-nocookie.com; font-src 'self' data: https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'";
 
+fn build_content_security_policy(origins: &[String]) -> HeaderValue {
+    let base = CONTENT_SECURITY_POLICY;
+    let policy = if origins.is_empty() {
+        base.to_string()
+    } else {
+        base.replace(
+            "img-src 'self' data: blob: https:;",
+            &format!("img-src 'self' data: blob: https: {};", origins.join(" ")),
+        )
+    };
+    HeaderValue::from_str(&policy).expect("validated image origins must form a valid CSP header")
+}
+
+pub fn content_security_policy() -> &'static HeaderValue {
+    static POLICY: once_cell::sync::Lazy<HeaderValue> = once_cell::sync::Lazy::new(|| {
+        build_content_security_policy(&CONFIG.http_image_allowed_origins)
+    });
+    &POLICY
+}
+
 pub async fn security_headers_and_origin(req: Request, next: Next) -> Response<Body> {
     if is_state_changing(req.method()) {
         if let Some(origin) = req
@@ -45,7 +65,7 @@ pub async fn security_headers_and_origin(req: Request, next: Next) -> Response<B
     );
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(CONTENT_SECURITY_POLICY),
+        content_security_policy().clone(),
     );
     if CONFIG.secure_cookie {
         headers.insert(

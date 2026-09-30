@@ -52,6 +52,10 @@ struct ShutdownState(Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>);
 unsafe fn apply_env_vars(env: &ApplicationInitSetup, server_addr: &str) {
     // Rust 2024: unsafe fn 内でも unsafe ブロックが必要
     unsafe {
+        env::set_var(
+            "HTTP_IMAGE_ALLOWED_ORIGINS",
+            &env.http_image_allowed_origins,
+        );
         env::set_var("APP_TITLE", &env.app_title);
         env::set_var(
             "CREATEDATABASE_PATH",
@@ -204,6 +208,8 @@ async fn complete_setup(
     unsafe {
         apply_env_vars(&env, SERVER_ADDR);
     }
+    // JSON設定を反映してから、待受開始前にCSPを生成する。
+    geocode_web_single::middleware::security::content_security_policy();
 
     // ログ設定（RUST_LOG 設定後に呼ぶ）
     init_tracing();
@@ -303,6 +309,8 @@ fn run_server_mode(bind_addr: String) {
         unsafe {
             apply_env_vars(&env, &bind_addr);
         }
+        // JSON設定を反映してから、待受開始前にCSPを生成する。
+        geocode_web_single::middleware::security::content_security_policy();
 
         init_tracing();
         tracing::info!("==================== Server Mode Startup ====================");
@@ -407,6 +415,8 @@ fn main() {
                 unsafe {
                     apply_env_vars(&env, SERVER_ADDR);
                 }
+                // JSON設定を反映してから、待受開始前にCSPを生成する。
+                geocode_web_single::middleware::security::content_security_policy();
 
                 // ログ設定
                 init_tracing();

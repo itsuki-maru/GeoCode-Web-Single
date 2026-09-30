@@ -6,6 +6,20 @@ import {
 } from "../src/map/common/markdown-renderer";
 
 describe("map common Markdown renderer", () => {
+  it.each(["direct-preview", "html-preview"] as const)(
+    "keeps camera URLs inert in %s mode",
+    (imageMode) => {
+      const { renderer } = installRenderer({ imageMode });
+      const html = renderer.image({
+        href: "https://camera.test/stream?quality=60",
+        text: "camera",
+      });
+      expect(html).toContain('data-camera-src="https://camera.test/stream?quality=60"');
+      expect(html).not.toContain("<img");
+      expect(html).not.toContain("thumb=true");
+      expect(html).not.toContain("data-preview-src");
+    },
+  );
   it("renders direct preview images with thumbnail URLs", () => {
     const { renderer } = installRenderer();
 
@@ -23,9 +37,7 @@ describe("map common Markdown renderer", () => {
     expect(renderer.image({ href: "/static/images/photo.png" })).toContain(
       'data-preview-src="/images/html/photo.png"',
     );
-    expect(renderer.image({ href: "/external/photo.png" })).toBe(
-      '<img src="/external/photo.png">',
-    );
+    expect(renderer.image({ href: "/external/photo.png" })).toBe('<img src="/external/photo.png">');
   });
 
   it("renders PDF downloads only in an enabled PWA", () => {
@@ -34,9 +46,7 @@ describe("map common Markdown renderer", () => {
       isRunningAsPwa: () => true,
     });
 
-    expect(renderer.link({ href: "/guide.pdf" })).toContain(
-      'class="markdown-download-link"',
-    );
+    expect(renderer.link({ href: "/guide.pdf" })).toContain('class="markdown-download-link"');
     expect(renderer.link({ href: "https://external.test/guide.pdf" })).toContain(
       'title="外部リンク"',
     );
@@ -45,15 +55,11 @@ describe("map common Markdown renderer", () => {
   it("opens ordinary PDF and external links in a separate tab", () => {
     const { renderer } = installRenderer();
 
-    expect(renderer.link({ href: "/guide.pdf" })).toContain(
-      'title="PDFリンク"',
-    );
+    expect(renderer.link({ href: "/guide.pdf" })).toContain('title="PDFリンク"');
     expect(renderer.link({ href: "https://external.test/page" })).toContain(
       'rel="noopener noreferrer"',
     );
-    expect(renderer.link({ href: "/internal" })).toBe(
-      '<a href="/internal">link</a>',
-    );
+    expect(renderer.link({ href: "/internal" })).toBe('<a href="/internal">link</a>');
   });
 
   it("provides the established XSS allowlist", () => {
@@ -62,6 +68,7 @@ describe("map common Markdown renderer", () => {
     expect(options.whiteList.a).toContain("data-download-href");
     expect(options.whiteList.img).toContain("data-preview-src");
     expect(options.whiteList["app-youtube"]).toEqual(["video-id", "data-src"]);
+    expect(options.whiteList["app-camera"]).toEqual(["data-camera-src"]);
     expect(options.onTag("iframe", "<iframe>")).toBe("Not Allow iframe ");
     expect(options.stripIgnoreTagBody).toEqual(["script"]);
   });

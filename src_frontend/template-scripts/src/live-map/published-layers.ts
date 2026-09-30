@@ -17,6 +17,7 @@ import {
 import { extractYouTubeId } from "../map/common/base";
 import { installMapMarkdownExtensions } from "../map/common/markdown-extensions";
 import { installMapMarkdownRenderer } from "../map/common/markdown-renderer";
+import { installMjpegCameras } from "../map/common/mjpeg-camera";
 import { createCollapsibleLayerControl } from "./controls";
 
 export interface PublishedLayers {
@@ -46,6 +47,7 @@ export function addPublishedLayerControl(
   isMobile: boolean,
 ) {
   if (!data?.layers.length) return null;
+  installMjpegCameras(map);
   const { marked, filterXSS } = window as any;
   installMapMarkdownExtensions({
     createNestedTokenizer: createNestedTokenizer as any,

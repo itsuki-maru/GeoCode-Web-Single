@@ -73,6 +73,7 @@ struct ApplicationInitSetupPartial {
     allow_user_create_account: Option<String>,
     allow_user_update_password: Option<String>,
     allow_origins: Option<String>,
+    http_image_allowed_origins: Option<String>,
     tile_server_base_url: Option<String>,
     tile_server_api_key: Option<String>,
     camera_sharing_enabled: Option<String>,
@@ -239,6 +240,7 @@ pub fn build_env_from_form(
         allow_user_create_account: defaults.allow_user_create_account,
         allow_user_update_password: defaults.allow_user_update_password,
         allow_origins: defaults.allow_origins,
+        http_image_allowed_origins: String::new(),
         tile_server_base_url: None,
         tile_server_api_key: None,
         camera_sharing_enabled: None,
@@ -291,6 +293,7 @@ fn env_json_requires_migration(value: &serde_json::Value) -> bool {
         "allow_user_create_account",
         "allow_user_update_password",
         "allow_origins",
+        "http_image_allowed_origins",
         "tile_server_base_url",
         "tile_server_api_key",
         "camera_sharing_enabled",
@@ -356,6 +359,12 @@ fn complete_env(
         return Err(EnvJsonReadError::MissingRequiredFields(missing));
     }
 
+    // 設定の補完・保存より前にHTTP画像配信元を検証する。
+    let http_image_allowed_origins = partial.http_image_allowed_origins.unwrap_or_default();
+    crate::config::parse_http_image_allowed_origins(Some(&http_image_allowed_origins)).map_err(
+        |message| EnvJsonReadError::InvalidJson(format!("http_image_allowed_origins: {message}")),
+    )?;
+
     // 任意項目は既存値を優先し、欠落している場合だけ現在の既定値で補完する。
     Ok(ApplicationInitSetup {
         service_name: partial.service_name.unwrap_or_else(|| app_title.clone()),
@@ -386,6 +395,7 @@ fn complete_env(
             .allow_user_update_password
             .unwrap_or(defaults.allow_user_update_password),
         allow_origins: partial.allow_origins.unwrap_or(defaults.allow_origins),
+        http_image_allowed_origins,
         tile_server_base_url: partial.tile_server_base_url,
         tile_server_api_key: partial.tile_server_api_key,
         camera_sharing_enabled: partial.camera_sharing_enabled,
@@ -499,6 +509,8 @@ mod tests {
 
         let env = build_env_from_form(setup_dir.clone(), form).unwrap();
 
+        assert!(env.http_image_allowed_origins.is_empty());
+
         assert_eq!(env.admin_username, "geocodeweb");
         assert_eq!(env.admin_passwotd, "geocodeweb");
 
@@ -529,6 +541,7 @@ mod tests {
         write_env_json(&setup_dir, minimum_required_env_json());
 
         let env = read_env_json(&setup_dir).unwrap();
+        assert!(env.http_image_allowed_origins.is_empty());
 
         assert_eq!(env.app_title, "GeoCode Test");
         assert_eq!(env.service_name, "GeoCode Test");
@@ -615,6 +628,8 @@ mod tests {
     fn read_env_json_preserves_existing_optional_values() {
         let setup_dir = test_setup_dir("preserve");
         let mut value = minimum_required_env_json();
+        value["http_image_allowed_origins"] =
+            json!("http://192.168.1.20:80,http://192.168.1.21:8080");
         let object = value.as_object_mut().unwrap();
         object.insert("live_location_history_enabled".to_string(), json!("true"));
         object.insert("cache_control".to_string(), json!("public"));
@@ -646,6 +661,10 @@ mod tests {
         write_env_json(&setup_dir, value);
 
         let env = read_env_json(&setup_dir).unwrap();
+        assert_eq!(
+            env.http_image_allowed_origins,
+            "http://192.168.1.20:80,http://192.168.1.21:8080"
+        );
 
         assert_eq!(env.live_location_history_enabled, "true");
         assert_eq!(
@@ -696,6 +715,25 @@ mod tests {
         }
 
         fs::remove_dir_all(setup_dir).unwrap();
+    }
+
+    #[test]
+    fn invalid_http_image_origin_does_not_rewrite_settings() {
+        let directory = test_setup_dir("invalid-http-image");
+        let mut value = minimum_required_env_json();
+        value["http_image_allowed_origins"] = json!("http://*; script-src *");
+        write_env_json(&directory, value);
+        let path = directory.join("geocode-web-single.env.json");
+        let original = fs::read(&path).unwrap();
+        assert!(
+            read_env_json(&directory)
+                .unwrap_err()
+                .to_string()
+                .contains("http_image_allowed_origins")
+        );
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert!(!directory.join("geocode-web-single.env.json.bak").exists());
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

@@ -131,6 +131,7 @@ export function setupDetailsLazyImages(root: ParentNode = document): void {
     details.setAttribute("data-lazy-img-initialized", "true");
 
     details.querySelectorAll<HTMLElement>("img[src], video[src]").forEach((element) => {
+      if (element.closest("app-camera")) return;
       const src = element.getAttribute("src");
       if (src) {
         element.setAttribute("data-src", src);

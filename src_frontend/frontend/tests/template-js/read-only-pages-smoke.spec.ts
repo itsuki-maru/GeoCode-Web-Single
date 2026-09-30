@@ -17,6 +17,7 @@ import * as markerModule from "../../../template-scripts/src/map/common/marker";
 import { createReadOnlyShapeMeasurementDisplayRuntime } from "../../../template-scripts/src/map/common/shape-measurement-display";
 import { createReadOnlyShapeRestorationRuntime } from "../../../template-scripts/src/map/common/shape-restoration";
 import { initializeReadOnlyMapPage } from "../../../template-scripts/src/map/read-only-page";
+import * as mjpegCameraModule from "../../../template-scripts/src/map/common/mjpeg-camera";
 import {
   createReadOnlyMarkerLayerControl,
   hydrateReadOnlyMarkers,
@@ -378,6 +379,7 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
     ...baseModule,
     ...contentActionsModule,
     ...contentModule,
+    ...mjpegCameraModule,
     ...mapObjectFocusModule,
     ...mapViewPersistenceModule,
     ...markerModule,
