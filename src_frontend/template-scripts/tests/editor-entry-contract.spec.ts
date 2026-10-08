@@ -29,11 +29,16 @@ describe("editor map module entry contract", () => {
         resolve(repositoryRoot, `src/templates/${entryName}.html`),
         "utf8",
       );
-      expect(template).toContain(
-        `<script type="module" src="/assets/template-${entryName}.js"></script>`,
+      const document = new DOMParser().parseFromString(template, "text/html");
+      const moduleScripts = Array.from(document.querySelectorAll('script[type="module"]'));
+      expect(moduleScripts.map((script) => script.getAttribute("src"))).toEqual([
+        `/assets/template-${entryName}.js`,
+      ]);
+      const scriptSources = Array.from(document.querySelectorAll("script[src]"), (script) =>
+        script.getAttribute("src"),
       );
       editorEntrySources[entryName].forEach((source) => {
-        expect(template).not.toContain(`/assets/${basename(source)}`);
+        expect(scriptSources).not.toContain(`/assets/${basename(source)}`);
       });
     },
   );

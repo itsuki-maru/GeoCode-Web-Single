@@ -76,11 +76,16 @@ describe("read-only TypeScript entry contract", () => {
       "utf8",
     );
 
-    expect(template).toContain(
-      `<script type="module" src="/assets/template-${page}.js"></script>`,
+    const document = new DOMParser().parseFromString(template, "text/html");
+    const moduleScripts = Array.from(document.querySelectorAll('script[type="module"]'));
+    expect(moduleScripts.map((script) => script.getAttribute("src"))).toEqual([
+      `/assets/template-${page}.js`,
+    ]);
+    const scriptSources = Array.from(document.querySelectorAll("script[src]"), (script) =>
+      script.getAttribute("src"),
     );
-    expect(template).not.toContain(`/assets/${page}-base.js`);
-    expect(template).not.toContain(`/assets/${page}-layers.js`);
-    expect(template).not.toContain(`/assets/${page}.js`);
+    expect(scriptSources).not.toContain(`/assets/${page}-base.js`);
+    expect(scriptSources).not.toContain(`/assets/${page}-layers.js`);
+    expect(scriptSources).not.toContain(`/assets/${page}.js`);
   });
 });
