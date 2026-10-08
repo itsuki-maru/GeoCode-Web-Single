@@ -58,11 +58,20 @@ describe("地図テンプレートのES Modules配信契約", () => {
 
   it.each(mapPages)("%s.htmlが生成moduleを1本だけ読み込む", (pageName) => {
     const template = readRepositoryFile(`src/templates/${pageName}.html`);
-    expect(template).toContain(
-      `<script type="module" src="/assets/template-${pageName}.js"></script>`,
+    const document = new DOMParser().parseFromString(template, "text/html");
+    const moduleScripts = Array.from(document.querySelectorAll('script[type="module"]'));
+    expect(moduleScripts.map((script) => script.getAttribute("src"))).toEqual([
+      `/assets/template-${pageName}.js`,
+    ]);
+    const scriptSources = Array.from(document.querySelectorAll("script[src]"), (script) =>
+      script.getAttribute("src"),
     );
-    expect(template).not.toMatch(
-      /<script\s+src="\/assets\/(?:map-common|map-editor|map-(?:anather|mobile)|temporary-map)[^"]*\.js"/,
+    expect(scriptSources).not.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(
+          /^\/assets\/(?:map-common|map-editor|map-(?:anather|mobile)|temporary-map).*\.js$/,
+        ),
+      ]),
     );
   });
 
