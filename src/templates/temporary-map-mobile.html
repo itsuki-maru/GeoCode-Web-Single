@@ -1,9 +1,25 @@
 <!doctype html>
 <html lang="ja">
     <head>
-        <meta name="geocoder-csis" content="{{ geocoderCsis | default(value=false) }}" />
-        <meta name="geocoder-share-token" content="{{ geocoderShareToken | default(value='') }}" />
+        <meta
+            name="geocoder-csis"
+            content="{{ geocoderCsis | default(value=false) }}"
+        />
+        <meta
+            name="geocoder-share-token"
+            content="{{ geocoderShareToken | default(value='') }}"
+        />
         <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+        <link
+            rel="manifest"
+            href="https://geocode-web-mobile-app.pages.dev/assets/manifest-tab.json"
+        />
+        <link rel="icon" href="/favicon.ico" />
+        <link
+            rel="apple-touch-icon"
+            sizes="180x180"
+            href="/apple-touch-icon.png"
+        />
 
         <script>
             L_NO_TOUCH = false;
@@ -300,5 +316,8 @@
             shapes: {{ shapesObj | json_encode_for_html | safe }},
         };
     </script>
-    <script type="module" src="/assets/template-temporary-map-mobile.js"></script>
+    <script
+        type="module"
+        src="/assets/template-temporary-map-mobile.js"
+    ></script>
 </html>
