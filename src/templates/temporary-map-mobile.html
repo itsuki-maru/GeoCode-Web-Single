@@ -139,6 +139,38 @@
                 border: none;
             }
 
+            .is-measurement-selected {
+                stroke: #1769e0 !important;
+                stroke-width: 8px !important;
+                stroke-opacity: 1 !important;
+                stroke-dasharray: 10 5 !important;
+            }
+
+            #measurement-selection-toggle-btn:not(.is-hidden) {
+                display: block;
+                width: 100%;
+            }
+
+            #map .measurement-selection-summary {
+                margin-bottom: 10px;
+                padding: 10px 14px;
+                background: rgba(255, 255, 255, 0.96);
+                color: #172b4d;
+                border: 2px solid rgba(0, 0, 0, 0.2);
+                border-radius: 6px;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+                font-size: 14px;
+                line-height: 1.6;
+                max-width: calc(100vw - 40px);
+            }
+
+            .measurement-selection-summary[hidden] {
+                display: none;
+            }
+            .measurement-selection-summary > :first-child {
+                font-weight: bold;
+            }
+
             .shape-measure-label {
                 background: rgba(255, 255, 255, 0.96);
                 border: 1px solid #d0d7de;

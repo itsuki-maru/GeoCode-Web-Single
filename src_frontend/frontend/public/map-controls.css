@@ -281,6 +281,7 @@
 
 :where(.leaflet-control).measurement-control .custom-control-button.is-active {
     background-color: #e7f5ff;
+    border-color: #075985;
     color: #075985;
 }
 

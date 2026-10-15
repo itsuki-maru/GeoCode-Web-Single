@@ -42,6 +42,8 @@ import {
 import { createShapeArrowRuntime } from "./common/shape-arrow";
 import { createShapeLayerRuntime } from "./common/shape-layer";
 import { createShapeMeasurementRuntime } from "./common/shape-measurement";
+import { createMeasurementSelection } from "./common/measurement-selection";
+import { makeSummaryDraggable } from "./common/draggable-summary";
 import { createReadOnlyShapeMeasurementDisplayRuntime } from "./common/shape-measurement-display";
 import {
   createShapeMemoRuntime,
@@ -293,6 +295,7 @@ export function initializeReadOnlyMapPage(
     },
   });
   const memo = createShapeMemoRuntime({
+    onShapeClick: (layer, event) => selection.select(layer, event),
     escapeHtml,
     getLeaflet: () => L,
     getMap: () => map,
@@ -321,6 +324,7 @@ export function initializeReadOnlyMapPage(
     shapeVisibilityLayer,
   });
   const measurementDisplay = createReadOnlyShapeMeasurementDisplayRuntime({
+    summaryOnly: (layer) => selection.summaryOnly(layer),
     ...measurement,
     ensureShapeGroup: groups.ensureShapeGroup,
     filterMeasurementMarkersForBounds,
@@ -328,6 +332,29 @@ export function initializeReadOnlyMapPage(
     getMeasurementVisible: () => isMeasurementVisible,
     getShapeMeasurementManager: () => shapeMeasurementManager,
     map,
+  });
+  const selection = createMeasurementSelection({
+    getEnabled: () => isMeasurementVisible,
+    isVisible: (layer) => map.hasLayer(layer),
+    measure: (layer) => {
+      if (layer.shapeType === "polyline")
+        return { area: 0, distance: measurement.measurePolyline(layer).totalDistance };
+      if (layer.shapeType === "circle")
+        return { area: measurement.measureCircle(layer).area, distance: 0 };
+      const value = measurementDisplay.measurePolygon(layer);
+      return { area: value.area, distance: value.perimeter };
+    },
+    formatArea: measurement.formatArea,
+    formatDistance: measurement.formatDistance,
+    refresh: () => {
+      shapeMeasurementManager?.scheduleRefresh();
+      map.fire("measurementselectionchange");
+    },
+    closePopup: () => map.closePopup(),
+    stopEvent: (event) => {
+      const original = event?.originalEvent || event;
+      if (original) L.DomEvent.stop(original);
+    },
   });
   const restoration = createReadOnlyShapeRestorationRuntime({
     attachShapeMemoPopup: memo.attachShapeMemoPopup,
@@ -425,6 +452,7 @@ export function initializeReadOnlyMapPage(
   });
   shapeNameLabelManager.refresh();
   shapeMeasurementManager = viewport.createViewportShapeMeasurementManager({
+    isLayerVisible: (layer) => map.hasLayer(layer) && selection.includes(layer),
     attachMarkers: (layer, viewportBounds) =>
       measurementDisplay.attachShapeMeasurementMarkers(
         layer,
@@ -438,7 +466,10 @@ export function initializeReadOnlyMapPage(
   const layeredShapeDisplay = createLayeredShapeDisplayManager({
     isLayerVisible: layeredMarkerDisplay.isLayerVisible,
     map,
-    onRebuild: () => shapeNameLabelManager!.scheduleRefresh(),
+    onRebuild: () => {
+      shapeNameLabelManager!.scheduleRefresh();
+      selection.prune();
+    },
     shapeGroups,
     shapeLayers,
     shapeRecords,
@@ -491,6 +522,8 @@ export function initializeReadOnlyMapPage(
 
   const toggleMeasurementLabels = (): void => {
     isMeasurementVisible = !isMeasurementVisible;
+    if (!isMeasurementVisible) selection.clear();
+    selection.update();
     shapeMeasurementManager?.setEnabled(isMeasurementVisible);
     searchRuntime.updateMeasurementControlState();
   };
@@ -502,7 +535,31 @@ export function initializeReadOnlyMapPage(
   map.addControl(tooltipControl);
   const includeMeasurementControl = isAnother || hasSharedShapes;
   if (includeMeasurementControl) {
+    const SummaryControl = L.Control.extend({
+      options: { position: "bottomleft" },
+      onAdd() {
+        const element = L.DomUtil.create("div", "measurement-selection-summary");
+        element.setAttribute("role", "status");
+        element.setAttribute("aria-live", "polite");
+        L.DomEvent.disableClickPropagation(element);
+        L.DomEvent.disableScrollPropagation(element);
+        selection.bindSummary(element);
+        return element;
+      },
+    });
+    const summaryControl = new SummaryControl();
+    map.addControl(summaryControl);
+    if (isAnother) {
+      map.on(
+        "unload",
+        makeSummaryDraggable(summaryControl.getContainer(), map.getContainer(), () =>
+          map.fire("measurementselectionchange"),
+        ),
+      );
+    }
     const control = createMeasurementVisibilityControl({
+      onSelectionToggle: selection.toggle,
+      onSelectionButton: selection.bindButton,
       leaflet: L,
       onMergeToggle: searchRuntime.toggleMeasurementSegmentMerge,
       onToggle: toggleMeasurementLabels,
@@ -512,6 +569,7 @@ export function initializeReadOnlyMapPage(
     map.addControl(control);
     if (isMobile) registerHideableMapControl!(control);
   }
+  map.on("overlayremove overlayadd", () => selection.prune());
 
   if (!isPrint)
     addReadOnlySearchControls({
@@ -525,7 +583,12 @@ export function initializeReadOnlyMapPage(
       onCodeSearchControlAdded: isMobile ? registerHideableMapControl : undefined,
       onSearch: searchCoordinator.setMapObjectSearchQuery,
     });
-  if (isMobile) map.addControl(new MapUiVisibilityToggleControl!());
+  if (isMobile) {
+    const uiToggle = new MapUiVisibilityToggleControl!();
+    map.addControl(uiToggle);
+    const summary = map.getContainer().querySelector(".measurement-selection-summary");
+    if (summary) uiToggle.getContainer()?.before(summary);
+  }
   const { visibilityControl } = addReadOnlyMapVisibilityControls({
     includeShapeOverlays: isAnother || hasSharedShapes,
     initialUserLocationVisible: isAnother ? storage.getInitialUserLocationVisibility() : undefined,

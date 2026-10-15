@@ -9,6 +9,7 @@ import { createReadOnlyMapRuntime } from "../../../template-scripts/src/map/comm
 import * as baseModule from "../../../template-scripts/src/map/common/base";
 import * as contentActionsModule from "../../../template-scripts/src/map/common/content-actions";
 import * as contentModule from "../../../template-scripts/src/map/common/content";
+import { makeSummaryDraggable } from "../../../template-scripts/src/map/common/draggable-summary";
 import { createMapUiVisibilityRuntime } from "../../../template-scripts/src/map/common/map-ui-visibility";
 import * as mapObjectFocusModule from "../../../template-scripts/src/map/common/map-object-focus";
 import * as mapViewPersistenceModule from "../../../template-scripts/src/map/common/map-view-persistence";
@@ -361,6 +362,7 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
           shapes: page.globals.shapesFromAxum,
         };
   Object.assign(dom.window, page.globals, {
+    makeSummaryDraggable,
     __GEOCODE_MAP_BOOTSTRAP__: bootstrap,
     addReadOnlyMapVisibilityControls,
     addReadOnlySearchControls,
@@ -401,6 +403,15 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
   vi.stubGlobal("document", dom.window.document);
   vi.stubGlobal("navigator", dom.window.navigator);
   vi.stubGlobal("L", (dom.window as unknown as { L: unknown }).L);
+  // jsdom does not perform layout. Keep the real drag implementation, but supply
+  // its browser observer in both the VM window and the imported modules' realm.
+  class SmokeResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  Object.assign(dom.window, { ResizeObserver: SmokeResizeObserver });
+  vi.stubGlobal("ResizeObserver", SmokeResizeObserver);
   if (usesTypeScriptReadOnlyEntry) {
     const result = initializeReadOnlyMapPage(
       readOnlyPageName as

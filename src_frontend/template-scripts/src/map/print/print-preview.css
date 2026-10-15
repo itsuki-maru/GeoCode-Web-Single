@@ -177,6 +177,11 @@ body {
   max-width: 260px;
   margin: 10px;
 }
+#print-paper #map .measurement-selection-summary {
+  margin: 10px;
+  max-width: 260px;
+  box-sizing: border-box;
+}
 body.print-preparing #print-viewport,
 body.print-preparing #print-settings {
   pointer-events: none;
@@ -222,6 +227,8 @@ body.pdf-preparing .pdf-output {
     -webkit-print-color-adjust: exact;
   }
   #print-paper .leaflet-control-zoom,
+  #print-paper .measurement-selection-help,
+  #print-paper .measurement-selection-summary:not(.has-selection),
   #print-paper .leaflet-popup-close-button {
     display: none !important;
   }

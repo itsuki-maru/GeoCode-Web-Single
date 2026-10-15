@@ -2,7 +2,8 @@ import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import { PRINT_PAPERS, type PrintPaper } from "../common/print-state";
 
-const EXCLUDED = ".leaflet-control-zoom, .leaflet-popup-close-button";
+const EXCLUDED =
+  ".leaflet-control-zoom, .leaflet-popup-close-button, .measurement-selection-help, .measurement-selection-summary:not(.has-selection)";
 export function pdfScale(width: number, height: number): number {
   return Math.min(150 / 96, Math.sqrt(4_000_000 / (width * height)));
 }

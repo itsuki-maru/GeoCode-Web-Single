@@ -34,6 +34,7 @@ interface ShapeMemoLeaflet {
 }
 
 interface ShapeMemoDependencies {
+  onShapeClick?(layer: ShapeMemoLayer, event: unknown): boolean;
   escapeHtml(value: string): string;
   getLeaflet(): ShapeMemoLeaflet;
   getMap(): unknown;
@@ -60,6 +61,7 @@ export function getShapeMemoFromGeoJson(geojson: unknown): string {
 }
 
 export function createShapeMemoRuntime({
+  onShapeClick,
   escapeHtml,
   getLeaflet,
   getMap,
@@ -101,6 +103,7 @@ export function createShapeMemoRuntime({
     if (!layer || layer.shapeMemoClickBound === true) return;
     layer.shapeMemoClickBound = true;
     layer.on("click", (event) => {
+      if (onShapeClick?.(layer, event)) return;
       openShapeMemoPopup(layer, event?.latlng);
     });
   };
@@ -131,6 +134,7 @@ export function createShapeMemoRuntime({
         return;
       }
       if (eventType === "touchend") lastTouchEndAt = eventTimestamp;
+      if (onShapeClick?.(layer, event)) return;
       openShapeMemoPopup(layer, labelLatLng);
     };
 

@@ -38,8 +38,11 @@ let isTooltipVisible = false;
 // 計測ラベルの表示非表示を切り替える関数
 function toggleMeasurementLabels() {
   isMeasurementVisible = !isMeasurementVisible;
+  if (!isMeasurementVisible) clearMeasurementSelection();
+  updateMeasurementSelectionControl();
   shapeMeasurementManager?.setEnabled(isMeasurementVisible);
   updateMeasurementControlState();
+  updateMeasurementSummary();
 }
 
 // 計測コントロールの表示状態を反映する
@@ -164,6 +167,8 @@ shapeMeasurementManager = createViewportShapeMeasurementManager({
   getLayers: () => searchableShapeLayers,
   attachMarkers: (layer, bounds) => attachShapeMeasurementMarkers(layer, bounds),
   removeMarkers: removeShapeMeasurementMarkers,
+  isLayerVisible: (layer) =>
+    map.hasLayer(layer) && (!isMeasurementSelectionActive || measurementSelectedShapes.has(layer)),
 });
 const shapeLayerOverlays = {
   マーカー: markersClusterGroup,
@@ -235,6 +240,7 @@ map.on("overlayremove", function (event) {
   }
 
   if (event.layer === drawnShapesGroup) {
+    if (isMeasurementSelectionActive) clearMeasurementSelection();
     clearShapeGeometryEditing();
     saveShapeLayerVisibility(false);
   }
@@ -249,11 +255,29 @@ const MeasurementVisibleControl = L.Control.extend({
     const container = L.DomUtil.create("div", "leaflet-bar leaflet-control measurement-control");
     const button = L.DomUtil.create("button", "custom-control-button", container);
     button.innerHTML = "図形の計測";
+
     const mergeButton = L.DomUtil.create("button", "custom-control-button is-hidden", container);
     mergeButton.id = "measurement-merge-toggle-btn";
     mergeButton.type = "button";
     mergeButton.innerHTML = "辺を結合";
     mergeButton.setAttribute("aria-pressed", "false");
+    {
+      const selectionButton = L.DomUtil.create(
+        "button",
+        "custom-control-button is-hidden",
+        container,
+      );
+      selectionButton.id = "measurement-selection-toggle-btn";
+      selectionButton.type = "button";
+      selectionButton.textContent = "複数選択";
+      selectionButton.setAttribute("aria-pressed", "false");
+      selectionButton.disabled = currentMapMode !== "view" || Boolean(activeDrawMode);
+      selectionButton.title = "閲覧モードで同じタイプの図形をクリックして選択します";
+      L.DomEvent.on(selectionButton, "click", (event) => {
+        L.DomEvent.stop(event);
+        toggleMeasurementSelection();
+      });
+    }
 
     L.DomEvent.on(button, "click", function (e) {
       L.DomEvent.stop(e);
@@ -273,6 +297,27 @@ const MeasurementVisibleControl = L.Control.extend({
 
 const measurementVisibleControl = new MeasurementVisibleControl();
 map.addControl(measurementVisibleControl);
+{
+  const MeasurementSummaryControl = L.Control.extend({
+    options: { position: editorEntryProfile.isMobile ? "topright" : "bottomleft" },
+    onAdd() {
+      measurementSummaryElement = L.DomUtil.create("div", "measurement-selection-summary");
+      measurementSummaryElement.setAttribute("role", "status");
+      measurementSummaryElement.setAttribute("aria-live", "polite");
+      L.DomEvent.disableClickPropagation(measurementSummaryElement);
+      L.DomEvent.disableScrollPropagation(measurementSummaryElement);
+      updateMeasurementSummary();
+      return measurementSummaryElement;
+    },
+  });
+  const summaryControl = new MeasurementSummaryControl();
+  map.addControl(summaryControl);
+  if (editorEntryProfile.isMobile) {
+    shapeLayersControl.getContainer()?.after(summaryControl.getContainer());
+  } else {
+    map.on("unload", makeSummaryDraggable(summaryControl.getContainer(), map.getContainer()));
+  }
+}
 if (editorEntryProfile.isMobile) {
   registerHideableMapControl(measurementVisibleControl);
 }

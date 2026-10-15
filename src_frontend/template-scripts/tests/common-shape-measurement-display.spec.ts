@@ -3,9 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createReadOnlyShapeMeasurementDisplayRuntime } from "../src/map/common/shape-measurement-display";
 import { filterMeasurementMarkersForBounds } from "../src/map/common/search";
 
-type Dependencies = Parameters<
-  typeof createReadOnlyShapeMeasurementDisplayRuntime
->[0];
+type Dependencies = Parameters<typeof createReadOnlyShapeMeasurementDisplayRuntime>[0];
 
 function createDependencies(overrides: Partial<Dependencies> = {}) {
   const group = {
@@ -17,9 +15,7 @@ function createDependencies(overrides: Partial<Dependencies> = {}) {
     createGroupedSegmentEndpointMarkers: vi.fn(() => []),
     createGroupedSegmentMeasurementMarkers: vi.fn(() => []),
     createMeasurementLabelMarker: vi.fn((latLng, lines, variant) =>
-      latLng
-        ? { getLatLng: () => latLng, kind: "label", lines, variant }
-        : null,
+      latLng ? { getLatLng: () => latLng, kind: "label", lines, variant } : null,
     ),
     createMeasurementVertexMarker: vi.fn((latLng) =>
       latLng ? { getLatLng: () => latLng, kind: "vertex" } : null,
@@ -38,8 +34,7 @@ function createDependencies(overrides: Partial<Dependencies> = {}) {
     }),
     getShapeMeasurementManager: () => null,
     map: {
-      distance: (start, end) =>
-        Math.abs(end.lat - start.lat) + Math.abs(end.lng - start.lng),
+      distance: (start, end) => Math.abs(end.lat - start.lat) + Math.abs(end.lng - start.lng),
     },
     measureCircle: vi.fn(() => ({ area: 12, radius: 2 })),
     measurePolyline: vi.fn(() => ({
@@ -63,6 +58,32 @@ function createDependencies(overrides: Partial<Dependencies> = {}) {
 }
 
 describe("read-only shape measurement display runtime", () => {
+  it.each([false, true])(
+    "omits segment distances in multi-line summaries (merged=%s)",
+    (merged) => {
+      const { dependencies, group } = createDependencies({
+        summaryOnly: () => true,
+        getMeasurementSegmentMerged: () => merged,
+      });
+      const runtime = createReadOnlyShapeMeasurementDisplayRuntime(dependencies);
+      runtime.attachShapeMeasurementMarkers(
+        {
+          shapeType: "polyline",
+          getLatLngs: () => [
+            { lat: 0, lng: 0 },
+            { lat: 1, lng: 1 },
+            { lat: 2, lng: 2 },
+          ],
+        },
+        "layer",
+      );
+      expect(group.addLayer).toHaveBeenCalledOnce();
+      expect(group.addLayer).toHaveBeenCalledWith(
+        expect.objectContaining({ lines: ["総延長 7 m"] }),
+      );
+      expect(dependencies.createGroupedSegmentMeasurementMarkers).not.toHaveBeenCalled();
+    },
+  );
   it("flattens shape coordinates and selects each shape label position", () => {
     const { dependencies } = createDependencies();
     const runtime = createReadOnlyShapeMeasurementDisplayRuntime(dependencies);
