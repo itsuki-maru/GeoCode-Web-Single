@@ -131,6 +131,7 @@ function renderVisibleShapes() {
     map.closePopup();
   }
   shapeNameLabelManager?.scheduleRefresh();
+  pruneMeasurementSelection();
   shapeMeasurementManager?.scheduleRefresh();
 }
 

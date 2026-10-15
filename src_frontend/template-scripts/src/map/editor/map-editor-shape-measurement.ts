@@ -1,4 +1,135 @@
 // @ts-nocheck -- Leaflet編集画面の共有スコープを保ったまま移行する統合境界。
+// 計測の選択は編集対象から独立させ、地図の表示範囲が変わっても保持する。
+function handleMeasurementSelectionClick(layer, event) {
+  const originalEvent = event?.originalEvent || event;
+  if (
+    currentMapMode !== "view" ||
+    activeDrawMode ||
+    !isMeasurementVisible ||
+    !isMeasurementSelectionActive
+  ) {
+    return false;
+  }
+  if (!["polyline", "polygon", "rectangle", "circle"].includes(layer?.shapeType)) return false;
+  L.DomEvent.stop(originalEvent);
+  const touchTime = measurementSelectionTouchTimes.get(layer);
+  if (event?.type === "click" && touchTime !== undefined && Date.now() - touchTime < 500)
+    return true;
+  if (event?.type === "touchend") measurementSelectionTouchTimes.set(layer, Date.now());
+  closeShapeNameEditor();
+  map.closePopup();
+  if (measurementSelectedShapes.has(layer)) {
+    measurementSelectedShapes.delete(layer);
+    applyShapeStyle(layer);
+    if (measurementSelectedShapes.size === 0) {
+      clearMeasurementSelection(true);
+      return true;
+    }
+  } else {
+    if (measurementSelectionType && measurementSelectionType !== layer.shapeType) {
+      setDrawStatus("図形の計測: 最初に選択した図形と同じタイプだけを選択できます。", true, true);
+      return true;
+    }
+    measurementSelectionType = layer.shapeType;
+    measurementSelectedShapes.add(layer);
+    applyShapeStyle(layer);
+  }
+  updateMeasurementSummary();
+  shapeMeasurementManager?.scheduleRefresh();
+  return true;
+}
+
+function updateMeasurementSelectionControl() {
+  const button = document.getElementById("measurement-selection-toggle-btn");
+  if (!button) return;
+  button.classList.toggle("is-hidden", !isMeasurementVisible);
+  button.classList.toggle("is-active", isMeasurementSelectionActive);
+  button.setAttribute("aria-pressed", String(isMeasurementSelectionActive));
+  button.disabled = currentMapMode !== "view" || Boolean(activeDrawMode);
+}
+
+function toggleMeasurementSelection() {
+  if (!isMeasurementVisible || currentMapMode !== "view" || activeDrawMode) return;
+  if (isMeasurementSelectionActive) {
+    clearMeasurementSelection();
+  } else {
+    isMeasurementSelectionActive = true;
+    closeShapeNameEditor();
+    map.closePopup();
+    updateMeasurementSelectionControl();
+    shapeMeasurementManager?.scheduleRefresh();
+  }
+}
+
+function clearMeasurementSelection(keepSelectionMode = false) {
+  const previousSelection = [...measurementSelectedShapes];
+  measurementSelectedShapes.clear();
+  measurementSelectionType = null;
+  isMeasurementSelectionActive = keepSelectionMode;
+  previousSelection.forEach((layer) => applyShapeStyle(layer));
+  shapeMeasurementManager?.scheduleRefresh();
+  updateMeasurementSelectionControl();
+  updateMeasurementSummary();
+}
+
+function pruneMeasurementSelection() {
+  let changed = false;
+  measurementSelectedShapes.forEach((layer) => {
+    if (
+      !searchableShapeLayers.has(layer) ||
+      layer.shapeType !== measurementSelectionType ||
+      !mapEditorProfile.isShapeVisibleForMeasurement(layer)
+    ) {
+      measurementSelectedShapes.delete(layer);
+      applyShapeStyle(layer);
+      changed = true;
+    }
+  });
+  if (!changed) {
+    updateMeasurementSummary();
+    return;
+  }
+  if (measurementSelectedShapes.size === 0) clearMeasurementSelection(true);
+  else updateMeasurementSummary();
+}
+
+function updateMeasurementSummary() {
+  if (!measurementSummaryElement) return;
+  const visible = isMeasurementVisible && measurementSelectedShapes.size > 0;
+  measurementSummaryElement.hidden = !visible;
+  if (!visible) {
+    measurementSummaryElement.textContent = "";
+    return;
+  }
+  const names = { polyline: "線", polygon: "ポリゴン", rectangle: "四角形", circle: "円" };
+  let distance = 0;
+  let area = 0;
+  measurementSelectedShapes.forEach((layer) => {
+    if (measurementSelectionType === "polyline") {
+      distance += measurePolyline(layer).totalDistance;
+    } else if (measurementSelectionType === "circle") {
+      area += measureCircle(layer).area;
+    } else {
+      const measurement = measurePolygon(layer);
+      area += measurement.area;
+      distance += measurement.edges.reduce((sum, edge) => sum + edge.distance, 0);
+    }
+  });
+  const lines = [`${names[measurementSelectionType]} ${measurementSelectedShapes.size}件の合計`];
+  if (measurementSelectionType === "polyline") lines.push(`総延長 ${formatDistance(distance)}`);
+  else {
+    lines.push(`面積 ${formatArea(area)}`);
+    if (measurementSelectionType !== "circle") lines.push(`周長 ${formatDistance(distance)}`);
+  }
+  measurementSummaryElement.replaceChildren(
+    ...lines.map((text) => {
+      const line = document.createElement("div");
+      line.textContent = text;
+      return line;
+    }),
+  );
+}
+
 function flattenShapeLatLngs(latLngs) {
   if (!Array.isArray(latLngs)) {
     return [];
@@ -85,16 +216,19 @@ function createShapeMeasurementMarkers(layer) {
       .filter((segment) => segment.start && segment.end);
     measurementSegments = segments;
 
-    if (isMeasurementSegmentMerged) {
-      markers.push(...createGroupedSegmentMeasurementMarkers(segments));
-    } else {
-      segments.forEach((segment) => {
-        markers.push(
-          createMeasurementLabelMarker(getSegmentMidpoint(segment.start, segment.end), [
-            formatDistance(segment.distance),
-          ]),
-        );
-      });
+    const summaryOnly = measurementSelectedShapes.size > 1 && measurementSelectedShapes.has(layer);
+    if (!summaryOnly) {
+      if (isMeasurementSegmentMerged) {
+        markers.push(...createGroupedSegmentMeasurementMarkers(segments));
+      } else {
+        segments.forEach((segment) => {
+          markers.push(
+            createMeasurementLabelMarker(getSegmentMidpoint(segment.start, segment.end), [
+              formatDistance(segment.distance),
+            ]),
+          );
+        });
+      }
     }
 
     const summaryLatLng = getShapeLabelLatLng(layer);
@@ -253,6 +387,7 @@ function attachShapeNameTooltipClick(layer) {
   tooltipElement.dataset.shapeNameClickBound = "true";
   const openEditorFromLabel = (event) => {
     L.DomEvent.stop(event);
+    if (handleMeasurementSelectionClick(layer, event)) return;
     if (activeDrawMode || mapEditorProfile.shouldSuppressShapeLabelClick()) {
       return;
     }

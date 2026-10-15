@@ -46,6 +46,7 @@ type MeasurementLabelVariant =
   | "summary-rectangle";
 
 interface ShapeMeasurementDisplayDependencies {
+  summaryOnly?(layer: MeasurementLayer): boolean;
   calculateProjectedPolygonArea(latLngs: unknown): number;
   createGroupedSegmentEndpointMarkers(
     segments: MeasurementSegment[],
@@ -95,6 +96,7 @@ export const flattenShapeLatLngs = (latLngs: unknown): LatLng[] => {
 };
 
 export function createReadOnlyShapeMeasurementDisplayRuntime({
+  summaryOnly = () => false,
   calculateProjectedPolygonArea,
   createGroupedSegmentEndpointMarkers,
   createGroupedSegmentMeasurementMarkers,
@@ -193,7 +195,7 @@ export function createReadOnlyShapeMeasurementDisplayRuntime({
             start: LatLng;
           } => Boolean(segment.start && segment.end),
         );
-      addSegmentMarkers(markers, measurementSegments);
+      if (!summaryOnly(layer)) addSegmentMarkers(markers, measurementSegments);
 
       const summaryMarker = createMeasurementLabelMarker(
         getShapeLabelLatLng(layer),
@@ -284,6 +286,7 @@ export function createReadOnlyShapeMeasurementDisplayRuntime({
   };
 
   return {
+    measurePolygon,
     attachShapeMeasurementMarkers,
     flattenShapeLatLngs,
     getShapeLabelLatLng,

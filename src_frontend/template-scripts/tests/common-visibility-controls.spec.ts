@@ -11,10 +11,7 @@ function createLeafletMock() {
   const leaflet = {
     Control: {
       extend: vi.fn(
-        (definition: {
-          options: { position: string };
-          onAdd(): HTMLElement;
-        }) =>
+        (definition: { options: { position: string }; onAdd(): HTMLElement }) =>
           class {
             options = definition.options;
             onAdd = definition.onAdd;
@@ -28,11 +25,7 @@ function createLeafletMock() {
       stop,
     },
     DomUtil: {
-      create: (
-        tagName: string,
-        className: string,
-        container?: HTMLElement,
-      ) => {
+      create: (tagName: string, className: string, container?: HTMLElement) => {
         const element = document.createElement(tagName);
         element.className = className;
         container?.append(element);
@@ -45,6 +38,29 @@ function createLeafletMock() {
 }
 
 describe("read-only visibility controls", () => {
+  it("places the selection toggle below segment merge and binds its action", () => {
+    const mock = createLeafletMock();
+    const onSelectionToggle = vi.fn();
+    const onSelectionButton = vi.fn();
+    const control = createMeasurementVisibilityControl({
+      leaflet: mock.leaflet as never,
+      position: "topleft",
+      onToggle: vi.fn(),
+      onMergeToggle: vi.fn(),
+      onUpdateState: vi.fn(),
+      onSelectionToggle,
+      onSelectionButton,
+    });
+    const buttons = control.onAdd().querySelectorAll("button");
+    expect(Array.from(buttons, (button) => button.textContent)).toEqual([
+      "図形の計測",
+      "辺を結合",
+      "複数選択",
+    ]);
+    buttons[2]!.click();
+    expect(onSelectionToggle).toHaveBeenCalledOnce();
+    expect(onSelectionButton).toHaveBeenCalledWith(buttons[2]);
+  });
   it("creates the tooltip toggle at the requested position", () => {
     const mock = createLeafletMock();
     const onToggle = vi.fn();

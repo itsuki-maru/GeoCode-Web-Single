@@ -10,6 +10,18 @@ import {
   type PrintPaper,
 } from "../common/print-state";
 
+export function movePrintMapControls(mapElement: HTMLElement, settings: HTMLElement) {
+  mapElement.querySelectorAll<HTMLElement>(".leaflet-control").forEach((control) => {
+    if (
+      !control.matches(
+        ".leaflet-control-zoom, .leaflet-control-attribution, .nowcast-status, .measurement-selection-summary",
+      )
+    ) {
+      settings.append(control);
+    }
+  });
+}
+
 // This document owns both the interactive paper and the print job, so the map
 // keeps the same CSS pixel dimensions when the browser switches to print media.
 export function createPrintPreview(state: PrintMapState, close: () => void) {
@@ -59,11 +71,7 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
   });
   map.addControl(visibilityBulkControl);
   moveControl(visibilityBulkControl, "print-overlays");
-  mapElement.querySelectorAll<HTMLElement>(".leaflet-control").forEach((control) => {
-    if (!control.matches(".leaflet-control-zoom, .leaflet-control-attribution, .nowcast-status")) {
-      element("print-extra").append(control);
-    }
-  });
+  movePrintMapControls(mapElement, element("print-extra"));
 
   const viewport = element<HTMLElement>("print-viewport");
   const space = element<HTMLElement>("print-paper-space");
@@ -90,6 +98,7 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
     lastPending = Date.now();
     markChanged();
   };
+  map.on("measurementselectionchange", resetWait);
   const popupImages = () =>
     [...mapElement.querySelectorAll<HTMLImageElement>(".leaflet-popup-pane img[src]")].filter(
       (img) => {
@@ -327,6 +336,7 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
     window.removeEventListener("beforeprint", pause);
     window.removeEventListener("afterprint", resume);
     map.off("popupopen popupclose", resetWait);
+    map.off("measurementselectionchange", resetWait);
     for (const event of ["load", "error", "toggle", "scroll"])
       mapElement.removeEventListener(event, popupChanged, true);
     for (const layer of watchedLayers) {

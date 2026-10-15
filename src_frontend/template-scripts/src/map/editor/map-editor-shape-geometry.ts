@@ -743,12 +743,15 @@ function updateShapeVertexAddTargetStyles() {
       "is-shape-vertex-add-target",
       currentMapMode === "input" && canAddVertexToShape(layer),
     );
+    element.classList.toggle("is-measurement-selected", measurementSelectedShapes.has(layer));
   });
 }
 
 // 閲覧・入力・移動モードに合わせて図形編集状態を切り替える
 function setShapeGeometryEditingMode(mode) {
+  if (mode !== "view") clearMeasurementSelection();
   currentMapMode = mode;
+  updateMeasurementSelectionControl();
   map.getContainer()?.classList.toggle("is-shape-edit-mode", mode === "edit");
   clearShapeGeometryEditing();
   updateShapeVertexAddTargetStyles();
@@ -763,6 +766,7 @@ function attachShapeEvents(layer) {
   }
 
   const handleDeleteEvent = async function (event, shouldSuppressClick = false) {
+    if (handleMeasurementSelectionClick(layer, event)) return;
     if (activeDrawMode === "delete") {
       if (event.originalEvent) {
         L.DomEvent.stop(event.originalEvent);

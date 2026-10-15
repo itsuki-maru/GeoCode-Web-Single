@@ -29,6 +29,8 @@ interface TooltipVisibilityControlOptions {
 }
 
 interface MeasurementVisibilityControlOptions {
+  onSelectionToggle?: () => void;
+  onSelectionButton?: (button: HTMLButtonElement) => void;
   leaflet: LeafletNamespace;
   onMergeToggle: () => void;
   onToggle: () => void;
@@ -61,6 +63,8 @@ export function createTooltipVisibilityControl({
 }
 
 export function createMeasurementVisibilityControl({
+  onSelectionToggle,
+  onSelectionButton,
   leaflet,
   onMergeToggle,
   onToggle,
@@ -85,6 +89,22 @@ export function createMeasurementVisibilityControl({
       mergeButton.type = "button";
       mergeButton.innerHTML = "辺を結合";
       mergeButton.setAttribute("aria-pressed", "false");
+      if (onSelectionToggle) {
+        const selectionButton = leaflet.DomUtil.create(
+          "button",
+          "custom-control-button is-hidden",
+          container,
+        ) as HTMLButtonElement;
+        selectionButton.id = "measurement-selection-toggle-btn";
+        selectionButton.type = "button";
+        selectionButton.textContent = "複数選択";
+        selectionButton.setAttribute("aria-pressed", "false");
+        leaflet.DomEvent.on(selectionButton, "click", (event) => {
+          leaflet.DomEvent.stop(event);
+          onSelectionToggle();
+        });
+        onSelectionButton?.(selectionButton);
+      }
 
       leaflet.DomEvent.on(button, "click", (event) => {
         leaflet.DomEvent.stop(event);

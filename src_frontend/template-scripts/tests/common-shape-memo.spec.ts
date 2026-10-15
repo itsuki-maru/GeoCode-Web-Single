@@ -9,6 +9,25 @@ import {
 } from "../src/map/common/shape-memo";
 
 describe("map common shape memo", () => {
+  it("routes selection taps before memo popups and ignores synthetic label clicks", () => {
+    const onShapeClick = vi.fn(() => true);
+    const { runtime, dependencies, popup } = createRuntime(onShapeClick);
+    const handlers = new Map<string, (event: object) => void>();
+    const layer = {
+      on: (name: string, callback: (event: object) => void) => {
+        handlers.set(name, callback);
+      },
+      getTooltip: () => ({ getElement: () => document.createElement("div") }),
+      shapeMemo: "memo",
+    };
+    runtime.attachShapeMemoPopup(layer);
+    handlers.get("click")?.({});
+    runtime.attachShapeMemoTooltipOpen(layer, { lat: 1, lng: 2 });
+    dependencies.domListeners.get("touchend")?.({ type: "touchend" });
+    dependencies.domListeners.get("click")?.({ type: "click" });
+    expect(onShapeClick).toHaveBeenCalledTimes(2);
+    expect(popup.openOn).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     document.body.innerHTML = "";
   });
@@ -18,9 +37,7 @@ describe("map common shape memo", () => {
     expect(normalizeShapeName("  避難経路  ")).toBe("避難経路");
     expect(normalizeShapeName(null)).toBe("");
     expect(normalizeShapeMemo(123)).toBe("");
-    expect(getShapeMemoFromGeoJson({ properties: { memo: "note" } })).toBe(
-      "note",
-    );
+    expect(getShapeMemoFromGeoJson({ properties: { memo: "note" } })).toBe("note");
     expect(getShapeMemoFromGeoJson(null)).toBe("");
   });
 
@@ -40,16 +57,11 @@ describe("map common shape memo", () => {
     const latLng = { lat: 35, lng: 139 };
 
     expect(
-      runtime.openShapeMemoPopup(
-        { on: vi.fn(), shapeName: "避難所", shapeMemo: "memo" },
-        latLng,
-      ),
+      runtime.openShapeMemoPopup({ on: vi.fn(), shapeName: "避難所", shapeMemo: "memo" }, latLng),
     ).toBe(true);
     expect(popup.setLatLng).toHaveBeenCalledWith(latLng);
     expect(popup.openOn).toHaveBeenCalledWith(dependencies.map);
-    expect(dependencies.setupDetailsLazyImages).toHaveBeenCalledWith(
-      popup.element,
-    );
+    expect(dependencies.setupDetailsLazyImages).toHaveBeenCalledWith(popup.element);
   });
 
   it("binds a shape click only once", () => {
@@ -99,7 +111,9 @@ describe("map common shape memo", () => {
   });
 });
 
-function createRuntime() {
+function createRuntime(
+  onShapeClick?: Parameters<typeof createShapeMemoRuntime>[0]["onShapeClick"],
+) {
   const element = document.createElement("div");
   const popup = {
     element,
@@ -126,8 +140,8 @@ function createRuntime() {
     stopEvent,
   };
   const runtime = createShapeMemoRuntime({
-    escapeHtml: (value) =>
-      value.replaceAll("<", "&lt;").replaceAll(">", "&gt;"),
+    onShapeClick,
+    escapeHtml: (value) => value.replaceAll("<", "&lt;").replaceAll(">", "&gt;"),
     getLeaflet: () => ({
       DomEvent: {
         on: (_target, eventName, listener) => {
