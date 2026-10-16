@@ -392,7 +392,7 @@ async fn live_map_constraints_allow_only_one_unrevoked_map_and_unique_public_ids
 async fn overlay_sharing_migration_preserves_existing_links_and_runs_once() {
     let pool = memory_pool().await;
     run_migrations(&pool).await.unwrap();
-    // Recreate the pre-v12 column layout with two representative legacy links.
+    // 代表的な既存リンクを二つ用意し、バージョン 12 より前のカラム構成を再現する。
     sqlx::query("ALTER TABLE temporary_urls DROP COLUMN include_tile_overlays")
         .execute(&pool)
         .await

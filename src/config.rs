@@ -174,7 +174,7 @@ impl FromStr for CacheControl {
         if lower == "public" {
             Ok(CacheControl::Public)
         } else if lower.starts_with("private") {
-            // private, private=max-age=3600
+            // 設定例: private、private=max-age=3600
             if let Some(pos) = lower.find("max-age=") {
                 let value = &lower[pos + 8..];
                 let secs = value

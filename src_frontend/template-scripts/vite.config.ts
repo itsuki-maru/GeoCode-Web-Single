@@ -14,6 +14,7 @@ const templateScriptsDirectory = fileURLToPath(new URL("./", import.meta.url));
 
 export const editorCommonPrelude = `
 import { makeSummaryDraggable } from "/src/map/common/draggable-summary.ts";
+import { bindFloatingMeasurementLabels } from "/src/map/common/floating-measurement-labels.ts";
 import { renderCameraImage, installMjpegCameras } from "/src/map/common/mjpeg-camera.ts";
 import { createTileOverlayManager } from "/src/map/common/tile-overlays.ts";
 import { createLayerBulkToggleControl, extractYouTubeId } from "/src/map/common/base.ts";

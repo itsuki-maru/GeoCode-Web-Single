@@ -14,7 +14,7 @@ export interface TileOverlayRecord {
   sort_order: number;
 }
 
-// Leaflet is loaded by the page; keep this boundary independent of its global types.
+// Leaflet はページ側で読み込むため、この境界ではグローバルな型定義に依存しない。
 export function createTileOverlayManager(
   leaflet: any,
   map: any,
@@ -127,8 +127,8 @@ export function createTileOverlayManager(
             const now = Date.now();
             if (lastError !== undefined && now - lastError < 10000) return;
             lastError = now;
-            // Do not log URLs: some providers put access tokens in query strings.
-            // Image errors do not expose HTTP status; keep missing tiles in debug logs.
+            // クエリ文字列にアクセストークンを含む配信元があるため、URL をログに出力しない。
+            // 画像エラーからは HTTP ステータスを取得できないため、欠落タイルはデバッグログへ記録する。
             console.debug(
               "重ね合わせタイルの読み込みに失敗しました。対象地域にデータがない場合もあります。",
               {

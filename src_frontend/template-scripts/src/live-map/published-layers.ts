@@ -39,7 +39,7 @@ export interface PublishedLayers {
   }>;
 }
 
-// These libraries are supplied by the template, as on the other read-only maps.
+// これらのライブラリは、ほかの閲覧専用地図と同様にテンプレート側から提供される。
 export function addPublishedLayerControl(
   leaflet: any,
   map: any,
@@ -98,7 +98,7 @@ export function addPublishedLayerControl(
     groups.set(record.id, { group, record });
     control.addOverlay(group, escapeHtml(record.layer_name));
   }
-  // Only published markers enter this shared cluster; shapes stay in their visibility groups.
+  // 共有クラスターには公開済みマーカーだけを入れ、図形は各表示グループで管理する。
   const markerCluster = leaflet.markerClusterGroup().addTo(map);
   const publishedMarkers: Array<{ group: any; marker: any }> = [];
   const layerRecords = Object.fromEntries(data.layers.map((record) => [record.id, record]));

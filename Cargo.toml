@@ -6,7 +6,7 @@ license = "MIT"
 description = "Windows-first offline/local mapping wiki app built with Rust, Axum, Vue 3, SQLite, and Tauri."
 readme = "README.md"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+# その他のキーと定義は https://doc.rust-lang.org/cargo/reference/manifest.html を参照。
 
 [dependencies]
 axum = { version = "0.8", features = ["multipart"] }

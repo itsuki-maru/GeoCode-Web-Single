@@ -44,7 +44,7 @@ pub async fn candidates(
     ))
 }
 
-// None means that the editor has not changed the publication settings.
+// None は、編集画面で公開設定が変更されていないことを示す。
 pub async fn sync(
     transaction: &mut Transaction<'_, Sqlite>,
     map_id: &str,
@@ -101,7 +101,7 @@ pub async fn own_selection(
 }
 
 pub async fn published(pool: &SqlitePool, public_id: &str) -> Result<PublishedLayers, AppError> {
-    // Read a single snapshot, including current object contents, on each page load.
+    // ページを読み込むたびに、現在のオブジェクトの内容を含む一貫した状態を取得する。
     let mut tx = pool.begin().await?;
     let layers = sqlx::query_as::<_, Layer>(
         r#"

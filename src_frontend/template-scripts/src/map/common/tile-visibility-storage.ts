@@ -25,7 +25,7 @@ export function createTileVisibilityStorage(
       if (Object.keys(value).length) getStorage().setItem(key, JSON.stringify(value));
       else getStorage().removeItem(key);
     } catch {
-      // Storage may be disabled or full; the current map remains usable.
+      // ストレージが無効または容量不足でも、現在の地図は引き続き利用できるようにする。
     }
   };
   return {

@@ -9,6 +9,7 @@ import {
 import apiClient from "@/axiosClient";
 
 interface State {
+  loadRevision: number;
   mapObjectList: Map<string, MapObjectData>;
   filteredShapeIds: string[] | null;
 }
@@ -16,6 +17,7 @@ interface State {
 export const useMapObjectStore = defineStore("mapobjects", {
   state: (): State => {
     return {
+      loadRevision: 0,
       mapObjectList: new Map<string, MapObjectData>(),
       filteredShapeIds: null,
     };
@@ -30,8 +32,10 @@ export const useMapObjectStore = defineStore("mapobjects", {
   },
   actions: {
     async initList(): Promise<void> {
+      const revision = ++this.loadRevision;
       try {
         const response = await apiClient.get(getMapObjectsUrl);
+        if (revision !== this.loadRevision) return;
         this.mapObjectList.clear();
         this.filteredShapeIds = null;
         const mapObjData = response.data;
@@ -85,10 +89,18 @@ export const useMapObjectStore = defineStore("mapobjects", {
         return null;
       }
     },
-    async queryMapObject(layer_id: string, is_master: boolean): Promise<boolean> {
+    async queryMapObject(
+      layer_id: string,
+      is_master: boolean,
+      signal?: AbortSignal,
+    ): Promise<boolean> {
+      const revision = ++this.loadRevision;
       try {
         const requestUrl = `${getMapObjectsUrl}?layer=${layer_id}&is_master=${is_master}`;
-        const response = await apiClient.get(requestUrl);
+        const response = signal
+          ? await apiClient.get(requestUrl, { signal })
+          : await apiClient.get(requestUrl);
+        if (signal?.aborted || revision !== this.loadRevision) return false;
         this.mapObjectList.clear();
         this.filteredShapeIds = null;
         const mapObjData = response.data;
@@ -118,11 +130,13 @@ export const useMapObjectStore = defineStore("mapobjects", {
       query2: string = "",
       activeLayer: string,
     ): Promise<void> {
+      const revision = ++this.loadRevision;
       try {
         const searchParams = new URLSearchParams({ query1, query2, layer: activeLayer });
         const response = await apiClient.get<MapObjectQueryResponse>(
           `${mapQueryObjectsUrl}?${searchParams.toString()}`,
         );
+        if (revision !== this.loadRevision) return;
         this.mapObjectList.clear();
         const mapObjData = response.data.markers;
         this.filteredShapeIds = response.data.shape_ids;
@@ -170,6 +184,7 @@ export const useMapObjectStore = defineStore("mapobjects", {
     },
 
     clearMapObject(): void {
+      ++this.loadRevision;
       this.mapObjectList.clear();
       this.filteredShapeIds = null;
     },

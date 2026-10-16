@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, inject } from "vue";
+import { ref, computed, watch, inject, onUnmounted } from "vue";
 import type { Ref } from "vue";
 import { AxiosError } from "axios";
 import { useRouter } from "vue-router";
@@ -73,9 +73,9 @@ imageStore.initList();
 const layersStore = useLayersStore();
 const layersInitialization = layersStore.initList();
 const mapobjStore = useMapObjectStore();
-mapobjStore.initList();
 const shapeStore = useShapeStore();
-void shapeStore.queryShapes();
+mapobjStore.clearMapObject();
+shapeStore.clearShapeList();
 
 const layerList = computed(() => layersStore.layersList);
 
@@ -84,101 +84,152 @@ const activeLayer = ref("");
 const masterLayerId = ref("");
 const srcUrl = ref("");
 const pendingLayerMapUrl = ref<string | null>(null);
+const isMapFrameLoading = ref(false);
+const showProgressModal = ref(true);
 const mapObjectQueryFormData = ref<QueryForm>({ query1: "", query2: "" });
+
+let mapReloadSequence = 0;
+let mapReloadController: AbortController | null = null;
+let disposed = false;
+
+onUnmounted(() => {
+  disposed = true;
+  ++mapReloadSequence;
+  mapReloadController?.abort();
+  mapobjStore.clearMapObject();
+  shapeStore.clearShapeList();
+});
 
 const getMasterLayerId = async (): Promise<void> => {
   try {
-    const [response] = await Promise.all([
+    const [response, layersLoaded] = await Promise.all([
       apiClient.get(getMasterLayerIdUrl),
       layersInitialization,
     ]);
-    masterLayerId.value = response.data["id"];
+    if (disposed) return;
+    if (!layersLoaded || !response.data.id) throw new Error("Failed to load initial layers");
+    masterLayerId.value = response.data.id;
     activeLayer.value = resolveInitialLayerId(
       getLastActiveLayerId(),
       masterLayerId.value,
       new Set(layersStore.layersList.keys()),
     );
   } catch (error) {
-    if (apiClient.isAxiosError(error)) {
-      const axiosError = error as AxiosError;
-      if (axiosError.response) {
-        const status = axiosError.response.status;
-        switch (status) {
-          case 400:
-            showMessage(`${axiosError.response.data}`);
-            break;
-          case 401:
-            loginRedirect();
-            break;
-          default:
-            console.error(`An error occurred: ${status}`, axiosError.response.data);
-        }
-      }
+    if (disposed) return;
+    console.error(error);
+    if (apiClient.isAxiosError(error) && error.response?.status === 401) {
+      await loginRedirect();
+    } else {
+      showMessage("地図の初期情報を取得できませんでした。再読み込みしてください。");
     }
+  } finally {
+    if (!disposed && !activeLayer.value) showProgressModal.value = false;
   }
 };
-getMasterLayerId();
 
 const isMasterLayer = computed(() => activeLayer.value === masterLayerId.value);
 
-let loadedOnceFlag = false;
 let suppressNextActiveLayerReload = false;
-watch(activeLayer, async () => {
+watch(activeLayer, async (): Promise<void> => {
   if (!activeLayer.value) return;
   if (suppressNextActiveLayerReload) {
     suppressNextActiveLayerReload = false;
     return;
   }
-  if (loadedOnceFlag) showProgressModal.value = true;
-  const isMaster = activeLayer.value === masterLayerId.value;
   const selectedLayerId = activeLayer.value;
+  const isMaster = selectedLayerId === masterLayerId.value;
   const mapUrl =
-    pendingLayerMapUrl.value ?? `${baseUrl}/map?layer=${activeLayer.value}&is_master=${isMaster}`;
+    pendingLayerMapUrl.value ?? `${baseUrl}/map?layer=${selectedLayerId}&is_master=${isMaster}`;
   pendingLayerMapUrl.value = null;
   let synchronized = false;
+  let requestSequence = 0;
   try {
-    synchronized = await reloadMap(mapUrl, true);
+    const request = reloadMap(mapUrl, true);
+    requestSequence = mapReloadSequence;
+    synchronized = await request;
   } catch (error) {
     console.error(error);
-  } finally {
-    showProgressModal.value = false;
-    loadedOnceFlag = true;
   }
 
-  if (activeLayer.value !== selectedLayerId) return;
-
+  if (disposed || requestSequence !== mapReloadSequence || activeLayer.value !== selectedLayerId)
+    return;
   if (synchronized) {
     saveLastActiveLayerId(selectedLayerId);
   } else if (selectedLayerId !== masterLayerId.value) {
     activeLayer.value = masterLayerId.value;
+  } else {
+    showMessage("地図データを取得できませんでした。再読み込みしてください。");
   }
 });
 
-// --- 地図操作 ---
+// 読み込みごとに対象レイヤを保持し、最新の読み込みだけが現在の画面を更新できるようにする。
 const reloadMap = async (
   mapUrl: string,
   absolute: boolean = false,
   forceIframeReload: boolean = false,
 ): Promise<boolean> => {
-  await apiClient.get(authCheckUrl);
-  const shouldForceIframeReload = forceIframeReload && srcUrl.value === mapUrl;
-  srcUrl.value = mapUrl;
-  let synchronized = true;
+  const selectedLayerId = activeLayer.value;
+  if (!selectedLayerId || disposed) return false;
+  const isMaster = selectedLayerId === masterLayerId.value;
+  const sequence = ++mapReloadSequence;
+  mapReloadController?.abort();
+  const controller = new AbortController();
+  mapReloadController = controller;
+  const isCurrent = () =>
+    !disposed &&
+    !controller.signal.aborted &&
+    sequence === mapReloadSequence &&
+    activeLayer.value === selectedLayerId;
   if (absolute) {
-    mapObjectQueryFormData.value = { query1: "", query2: "" };
-    const isMaster = activeLayer.value === masterLayerId.value;
-    const [markersLoaded, shapesLoaded] = await Promise.all([
-      mapobjStore.queryMapObject(activeLayer.value, isMaster),
-      shapeStore.queryShapes(activeLayer.value, isMaster),
-    ]);
-    synchronized = markersLoaded && shapesLoaded;
-    mapIframeRef.value?.filterMapObjects(null, null);
+    showProgressModal.value = true;
+    mapobjStore.clearMapObject();
+    shapeStore.clearShapeList();
   }
-  if (shouldForceIframeReload) {
-    synchronized = (mapIframeRef.value?.reloadMapFrame() ?? false) && synchronized;
+  try {
+    await apiClient.get(authCheckUrl, { signal: controller.signal });
+    if (!isCurrent()) return false;
+    if (absolute) {
+      const [markersLoaded, shapesLoaded] = await Promise.all([
+        mapobjStore.queryMapObject(selectedLayerId, isMaster, controller.signal),
+        shapeStore.queryShapes(selectedLayerId, isMaster, controller.signal),
+      ]);
+      if (!isCurrent()) return false;
+      if (!markersLoaded || !shapesLoaded) {
+        mapobjStore.clearMapObject();
+        shapeStore.clearShapeList();
+        srcUrl.value = "";
+        isMapFrameLoading.value = false;
+        return false;
+      }
+      mapObjectQueryFormData.value = { query1: "", query2: "" };
+      mapIframeRef.value?.filterMapObjects(null, null);
+    }
+    const shouldForceIframeReload = forceIframeReload && srcUrl.value === mapUrl;
+    if (srcUrl.value !== mapUrl || shouldForceIframeReload) isMapFrameLoading.value = true;
+    srcUrl.value = mapUrl;
+    if (shouldForceIframeReload) {
+      const reloaded = mapIframeRef.value?.reloadMapFrame() ?? false;
+      if (!reloaded) isMapFrameLoading.value = false;
+      return reloaded;
+    }
+    return true;
+  } catch (error) {
+    if (!isCurrent()) return false;
+    if (absolute) {
+      srcUrl.value = "";
+      isMapFrameLoading.value = false;
+    }
+    throw error;
+  } finally {
+    if (isCurrent() && absolute) showProgressModal.value = false;
   }
-  return synchronized;
 };
+
+const onMapLoaded = (loadedUrl: string): void => {
+  if (loadedUrl === srcUrl.value) isMapFrameLoading.value = false;
+};
+
+void getMasterLayerId();
 
 const mapIframeRef = ref<InstanceType<typeof MapIframe> | null>(null);
 const liveLocationSharingRef = ref<InstanceType<typeof LiveLocationSharing> | null>(null);
@@ -258,7 +309,6 @@ const onMapReloadRequested = async (layerId?: string | null): Promise<void> => {
 };
 
 // --- モーダル状態管理 ---
-const showProgressModal = ref(false);
 const uploadProgressState = ref<UploadProgressState>({
   isOpen: false,
   phase: "preparing",
@@ -789,6 +839,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
     :srcUrl="srcUrl"
     :allowedOrigins="allowedOriginsRef"
     @mapReloadRequested="onMapReloadRequested"
+    @mapLoaded="onMapLoaded"
     @loginRedirect="loginRedirect"
     @previewImage="handlePreviewImageFromIframe"
     @userLocation="liveLocationSharingRef?.receivePosition($event)"
@@ -961,7 +1012,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
   <MessageModal :isOpen="isMessageModal" :message="messageText" @close="closeMessage" />
 
   <!-- プログレスモーダル -->
-  <ProgressSpinner :isOpen="showProgressModal" />
+  <ProgressSpinner :isOpen="showProgressModal || isMapFrameLoading" />
   <UploadProgressModal :isOpen="uploadProgressState.isOpen" :progress="uploadProgressState" />
 
   <!-- iFrameからの画像プレビュー -->

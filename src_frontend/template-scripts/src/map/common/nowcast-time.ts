@@ -50,7 +50,7 @@ export interface NowcastState {
   failed: boolean;
 }
 
-// One feed per page: subscribers share requests, polling and cancellation.
+// ページ内で取得処理を一本化し、購読者間でリクエスト・定期取得・中断処理を共有する。
 export function createNowcastFeed() {
   const listeners = new Set<(state: NowcastState) => void>();
   let state: NowcastState = { failed: false };
@@ -71,7 +71,7 @@ export function createNowcastFeed() {
   }
   function schedule() {
     if (!listeners.size || document.hidden) return;
-    // Wake every minute even during backoff to expire old images.
+    // 再試行の待機中でも毎分処理を再開し、古い画像を期限切れにする。
     timer = setTimeout(
       () => {
         publish();
@@ -99,7 +99,7 @@ export function createNowcastFeed() {
       if (!response.ok) throw new Error("Nowcast times unavailable");
       const time = selectNowcastTime(await response.json());
       if (request !== controller) return;
-      // A lagging cache must not move an already displayed analysis backwards.
+      // 更新の遅れたキャッシュによって、表示中の解析時刻を過去へ戻さない。
       state = {
         time: state.time && state.time.milliseconds > time.milliseconds ? state.time : time,
         failed: false,

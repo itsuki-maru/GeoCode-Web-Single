@@ -1,5 +1,6 @@
-// @ts-nocheck -- Leaflet plugins expose incompatible structural types at this integration boundary.
+// @ts-nocheck -- この統合境界では Leaflet プラグイン間の型定義に互換性がないため、型チェックを省略する。
 import { createTileOverlayManager } from "./common/tile-overlays";
+import { createLazyLayerObjects } from "./common/lazy-layer-objects";
 import type { PrintMapState } from "./common/print-state";
 import { readMapBootstrap } from "./bootstrap";
 import { createLayerBulkToggleControl, extractYouTubeId } from "./common/base";
@@ -324,7 +325,6 @@ export function initializeReadOnlyMapPage(
     shapeVisibilityLayer,
   });
   const measurementDisplay = createReadOnlyShapeMeasurementDisplayRuntime({
-    summaryOnly: (layer) => selection.summaryOnly(layer),
     ...measurement,
     ensureShapeGroup: groups.ensureShapeGroup,
     filterMeasurementMarkersForBounds,
@@ -382,26 +382,36 @@ export function initializeReadOnlyMapPage(
     },
   });
 
-  hydrateReadOnlyMarkers({
-    clusterGroups,
-    createMarkerGroupForLayer: groups.createMarkerGroupForLayer,
-    enableMarkerIconFallback: isTemporary ? enableMarkerIconFallback : undefined,
-    escapeHtml,
-    initialLayersVisible: temporaryBootstrap?.isChecked,
-    layerNames,
-    layerRecords: layers,
-    layerVisibilityGroups,
-    leaflet: L,
-    map,
-    markerOptionsForLayer,
-    markerRecords,
-    markers,
-    parseMarkdown: (markdown) => marked.parse(markdown),
-    renderIframe,
-    sanitizeHtml: (html) => filterXSS(html, xssOptions),
-    setupDetailsLazyImages,
-    shapeRecords,
-  });
+  // 地図オブジェクトの取得を待たず、メタデータから選択欄を作成する。
+  if (isAnother) Object.keys(layers).forEach(groups.createMarkerGroupForLayer);
+  const hydrateMarkers = (records) =>
+    hydrateReadOnlyMarkers({
+      onMarkerCreated: isAnother
+        ? (marker) =>
+            marker.on("add", () => {
+              if (isTooltipVisible) marker.openTooltip?.();
+            })
+        : undefined,
+      clusterGroups,
+      createMarkerGroupForLayer: groups.createMarkerGroupForLayer,
+      enableMarkerIconFallback: isTemporary ? enableMarkerIconFallback : undefined,
+      escapeHtml,
+      initialLayersVisible: temporaryBootstrap?.isChecked,
+      layerNames,
+      layerRecords: layers,
+      layerVisibilityGroups,
+      leaflet: L,
+      map,
+      markerOptionsForLayer,
+      markerRecords: records,
+      markers,
+      parseMarkdown: (markdown) => marked.parse(markdown),
+      renderIframe,
+      sanitizeHtml: (html) => filterXSS(html, xssOptions),
+      setupDetailsLazyImages,
+      shapeRecords,
+    });
+  hydrateMarkers(markerRecords);
 
   if (isPrint) {
     for (const [id, group] of Object.entries(layerVisibilityGroups)) {
@@ -409,23 +419,29 @@ export function initializeReadOnlyMapPage(
     }
   }
 
-  const hasSharedShapes = restoration.restoreSavedShapes({
-    addLayer: isAnother
-      ? (layer, layerId) => groups.addShapeLayerToManagedGroups(layer, layerId)
-      : (layer, layerId) => {
-          const group = groups.ensureShapeGroup(layerId);
-          if (!group) return false;
-          group.addLayer(layer);
-          return true;
-        },
-    applyShapeStyle: isAnother,
-    bindPolylineHover: !isMobile,
-    records: shapeRecords,
-    restoreShapeStyleOnHover: isAnother,
-    shapeLayers,
-  });
+  const restoreShapes = (records) =>
+    restoration.restoreSavedShapes({
+      addLayer: isAnother
+        ? (layer, layerId) => groups.addShapeLayerToManagedGroups(layer, layerId)
+        : (layer, layerId) => {
+            const group = groups.ensureShapeGroup(layerId);
+            if (!group) return false;
+            group.addLayer(layer);
+            return true;
+          },
+      applyShapeStyle: isAnother,
+      bindPolylineHover: !isMobile,
+      records,
+      restoreShapeStyleOnHover: isAnother,
+      shapeLayers,
+    });
+  const hasSharedShapes = restoreShapes(shapeRecords);
 
   const markerLayerControl = createReadOnlyMarkerLayerControl({
+    formatLayerName: isAnother
+      ? (id, name) =>
+          `<span data-layer-load-id="${escapeHtml(id)}">${name}<span class="layer-object-load-state" role="status" aria-live="polite"></span></span>`
+      : undefined,
     clusterGroups,
     createLayeredMarkerDisplayManager,
     escapeHtml,
@@ -462,6 +478,10 @@ export function initializeReadOnlyMapPage(
     getLayers: () => Object.values(shapeLayers),
     map,
     removeMarkers: measurementDisplay.removeShapeMeasurementMarkers,
+  });
+  map.on("unload", () => {
+    shapeNameLabelManager?.destroy();
+    shapeMeasurementManager?.destroy();
   });
   const layeredShapeDisplay = createLayeredShapeDisplayManager({
     isLayerVisible: layeredMarkerDisplay.isLayerVisible,
@@ -620,7 +640,64 @@ export function initializeReadOnlyMapPage(
   tileOverlayManager.sync(bootstrap.tileOverlays || []);
   if (isPrint) tileOverlayManager.setVisibility(printState.overlays);
 
+  let objectLoader: ReturnType<typeof createLazyLayerObjects> | undefined;
+  if (isAnother) {
+    const getSelectedLayerIds = () =>
+      Object.keys(layerVisibilityGroups).filter((id) => map.hasLayer(layerVisibilityGroups[id]));
+    const updateLoadStatus = () => {
+      markerLayerControl.layersControl
+        .getContainer()
+        ?.querySelectorAll<HTMLElement>("[data-layer-load-id]")
+        .forEach((label) => {
+          const state = objectLoader!.state(label.dataset.layerLoadId!);
+          const status = label.querySelector<HTMLElement>(".layer-object-load-state");
+          label.setAttribute("aria-busy", String(state === "loading"));
+          if (status) {
+            status.dataset.state = state;
+            status.textContent =
+              state === "error" ? "取得できませんでした。再チェックで再試行" : "";
+          }
+        });
+      map.fire("objectloadingchange");
+    };
+    objectLoader = createLazyLayerObjects({
+      layerIds: Object.keys(layers),
+      getSelectedLayerIds,
+      onChange: updateLoadStatus,
+      apply: (_id, data) => {
+        // 再チェック時は、取得済みデータと作成済みの Leaflet レイヤを再利用する。
+        hydrateMarkers(
+          Object.fromEntries(
+            Object.entries(data.markers).filter(([, record]) => !markers[`marker-${record.id}`]),
+          ),
+        );
+        restoreShapes(data.shapes.filter((record) => !shapeLayers[`shape-${record.id}`]));
+        Object.assign(markerRecords, data.markers);
+        const knownShapes = new Set(getShapeRecords(shapeRecords).map((record) => record.id));
+        data.shapes.forEach((record) => {
+          if (!knownShapes.has(record.id)) shapeRecords.push(record);
+        });
+        layeredMarkerDisplay.rebuildVisibleMarkers();
+        layeredShapeDisplay.rebuildVisibleShapes();
+        groups.syncAllShapeGroupsVisibility();
+        shapeNameLabelManager?.scheduleRefresh();
+        shapeMeasurementManager?.scheduleRefresh();
+      },
+    });
+    map.on("overlayadd", ({ layer }) => {
+      const id = groups.findLayerIdByMarkerGroup(layer);
+      if (id) void objectLoader!.load(id);
+    });
+    map.on("overlayremove", updateLoadStatus);
+    map.on("unload", () => objectLoader!.dispose());
+    getSelectedLayerIds().forEach((id) => {
+      void objectLoader!.load(id);
+    });
+  }
+
   return {
+    getObjectLoadStatus: () => objectLoader?.getStatus() ?? { loading: false, failed: false },
+    retryObjectLoads: () => objectLoader?.retrySelected(),
     map,
     markers,
     shapeLayers,

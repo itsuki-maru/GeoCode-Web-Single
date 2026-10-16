@@ -11,7 +11,7 @@ pub(super) fn query(url: &mut Url, address: &str) {
 
 pub(super) fn parse(bytes: &[u8]) -> Result<Vec<SearchResult>, AppError> {
     let xml = std::str::from_utf8(bytes).map_err(|_| AppError::BadGateway)?;
-    // DTDs (including external entities) are disabled by the parser by default.
+    // パーサーの既定の設定では、外部実体を含む DTD は無効になっている。
     let document = roxmltree::Document::parse(xml).map_err(|_| AppError::BadGateway)?;
     let root = document.root_element();
     if !root.has_tag_name("results") {

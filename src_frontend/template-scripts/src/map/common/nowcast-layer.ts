@@ -2,8 +2,8 @@ import { NOWCAST_MAX_AGE, NOWCAST_ROOT, nowcastFeed, type NowcastState } from ".
 
 const EMPTY_TILE = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
 
-// JMA publishes hrpns at z=4,6,8,10. Clamp the entire tile grid (including
-// coordinates and scale), not just the z segment of individual image URLs.
+// 気象庁の hrpns はズームレベル 4・6・8・10 で配信されるため、画像 URL の z だけでなく、
+// 座標と縮尺を含むタイル格子全体を配信レベルに合わせる。
 export function nowcastNativeZoom(zoom: number): number {
   return Math.max(4, Math.min(10, Math.floor(zoom / 2) * 2));
 }
@@ -132,7 +132,7 @@ export function createNowcastLayer(
     unsubscribe?.();
     unsubscribe = undefined;
     panel.remove();
-    // Do not briefly request an old timestamp when this layer is re-enabled.
+    // レイヤを再び有効にした際、古い時刻の画像を一時的に要求しない。
     url = EMPTY_TILE;
     layer.setUrl(EMPTY_TILE, true);
   }

@@ -22,8 +22,8 @@ export function movePrintMapControls(mapElement: HTMLElement, settings: HTMLElem
   });
 }
 
-// This document owns both the interactive paper and the print job, so the map
-// keeps the same CSS pixel dimensions when the browser switches to print media.
+// このページで用紙上の操作と印刷の両方を扱い、印刷用の表示へ切り替えても、
+// 地図の CSS ピクセル単位の寸法を維持する。
 export function createPrintPreview(state: PrintMapState, close: () => void) {
   const style = document.createElement("style");
   style.textContent = css;
@@ -98,11 +98,12 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
     lastPending = Date.now();
     markChanged();
   };
-  map.on("measurementselectionchange", resetWait);
+  map.on("measurementselectionchange measurementlabelmove", resetWait);
+  map.on("objectloadingchange", resetWait);
   const popupImages = () =>
     [...mapElement.querySelectorAll<HTMLImageElement>(".leaflet-popup-pane img[src]")].filter(
       (img) => {
-        // Collapsed details deliberately defer their media until expanded.
+        // 折り畳まれた詳細内のメディアは、展開するまで意図的に読み込みを遅らせる。
         for (let parent = img.parentElement; parent; parent = parent.parentElement) {
           if (parent instanceof HTMLDetailsElement && !parent.open) return false;
         }
@@ -176,8 +177,8 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
   size.addEventListener("change", updatePaper);
   titleInput.addEventListener("input", updatePaper);
   element("print-settings").addEventListener("change", (event) => {
-    // Title input already updates readiness on every keystroke. Its blur-time
-    // change event must not restart the wait just as an output button is clicked.
+    // タイトル入力のたびに出力可否を更新しているため、フォーカスが外れた際の
+    // change イベントで、出力ボタンを押した直後の待機をやり直さない。
     if (event.target !== titleInput) resetWait();
   });
   const resize = new ResizeObserver(fitPaper);
@@ -185,8 +186,9 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
   updatePaper();
 
   const readiness = () => {
-    let loading = moving;
-    let failed = false;
+    const objects = runtime.getObjectLoadStatus?.() ?? { loading: false, failed: false };
+    let loading = moving || objects.loading;
+    let failed = objects.failed;
     map.eachLayer((layer: any) => {
       if (layer.isLoading?.()) loading = true;
       const state = layer.getPrintStatus?.();
@@ -205,26 +207,32 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
       if (!img.complete) loading = true;
       else if (img.naturalWidth === 0) failed = true;
     }
-    return { loading, failed };
+    return { loading, failed, objects };
   };
   const refreshStatus = () => {
     if (disposed || printing) return;
-    const { loading, failed } = readiness();
+    const { loading, failed, objects } = readiness();
     const settling = Date.now() - lastChange < 700;
     const timedOut = loading && Date.now() - lastPending > 30000;
     if (!loading) lastPending = Date.now();
-    // Missing coverage and image/network failures are indistinguishable here.
-    // Allow the user to print the visible map instead of blocking indefinitely.
-    submit.disabled = moving || (!timedOut && (loading || settling));
-    submit.textContent = failed || timedOut ? "現在の表示で印刷" : "印刷";
+    // この処理では、提供範囲外のタイルと画像取得・通信の失敗を区別できない。
+    // 無期限に待機せず、現在表示できている地図を印刷できるようにする。
+    submit.disabled =
+      objects.loading || objects.failed || moving || (!timedOut && (loading || settling));
+    submit.textContent =
+      !objects.loading && !objects.failed && (failed || timedOut) ? "現在の表示で印刷" : "印刷";
     retry.hidden = !failed && !timedOut;
-    status.textContent = timedOut
-      ? "読み込みを完了できませんでした。再読み込みするか、現在の表示で印刷できます。"
-      : loading || settling
-        ? "地図を読み込んでいます…"
-        : failed
-          ? "地図画像の一部を表示できません。表示されている内容で印刷できます。必要に応じて再読み込みしてください。"
-          : "印刷準備完了";
+    status.textContent = objects.failed
+      ? "選択したグループのデータを取得できませんでした。再読み込みで再試行するか、該当グループのチェックを外してください。"
+      : objects.loading
+        ? "選択したグループのデータを読み込んでいます…"
+        : timedOut
+          ? "読み込みを完了できませんでした。再読み込みするか、現在の表示で印刷できます。"
+          : loading || settling
+            ? "地図を読み込んでいます…"
+            : failed
+              ? "地図画像の一部を表示できません。表示されている内容で印刷できます。必要に応じて再読み込みしてください。"
+              : "印刷準備完了";
     pdfControls?.refresh();
   };
   const timer = window.setInterval(refreshStatus, 200);
@@ -264,7 +272,7 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
     setBusy: (busy) => {
       if (busy) pause();
       else resume();
-      // Inert blocks pointer and keyboard changes; cancel/save controls remain usable.
+      // inert でポインターやキーボードによる変更を防ぎ、取消・保存の操作は可能にしておく。
       viewport.inert = busy;
       for (const child of [...element("print-settings").children]) {
         if (child instanceof HTMLElement && !child.classList.contains("pdf-output"))
@@ -275,9 +283,10 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
   });
   element("print-settings").addEventListener("input", () => pdfControls?.invalidate());
   element("print-settings").addEventListener("change", () => pdfControls?.invalidate());
-  // Label/measurement buttons can change content without Leaflet layer events.
+  // ラベルや計測のボタンでは、Leaflet のレイヤイベントが発生せずに表示内容が変わる場合がある。
   element("print-extra").addEventListener("click", () => pdfControls?.invalidate());
   retry.addEventListener("click", () => {
+    void runtime.retryObjectLoads?.();
     lastPending = Date.now();
     failedTiles = new WeakSet<HTMLImageElement>();
     map.eachLayer((layer: any) => (layer.retryPrint ? layer.retryPrint() : layer.redraw?.()));
@@ -336,7 +345,8 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
     window.removeEventListener("beforeprint", pause);
     window.removeEventListener("afterprint", resume);
     map.off("popupopen popupclose", resetWait);
-    map.off("measurementselectionchange", resetWait);
+    map.off("measurementselectionchange measurementlabelmove", resetWait);
+    map.off("objectloadingchange", resetWait);
     for (const event of ["load", "error", "toggle", "scroll"])
       mapElement.removeEventListener(event, popupChanged, true);
     for (const layer of watchedLayers) {

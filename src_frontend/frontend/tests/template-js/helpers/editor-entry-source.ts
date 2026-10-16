@@ -28,8 +28,8 @@ export function editorSourcePath(relativePath: string): string {
 }
 
 /**
- * Reuses the production entry assembly in jsdom, replacing only ESM imports
- * with values installed on the test window.
+ * 本番用のエントリー組み立て処理を jsdom で再利用し、ESM のインポートだけを
+ * テスト用のウィンドウに設定した値へ置き換える。
  */
 export function editorRuntimeSource(entryName: EditorEntryName): string {
   const runtimePrelude = editorCommonPrelude.replace(

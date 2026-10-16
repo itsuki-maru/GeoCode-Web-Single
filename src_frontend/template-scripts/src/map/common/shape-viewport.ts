@@ -1,3 +1,5 @@
+import { hasFloatingMeasurementLabels } from "./floating-measurement-labels";
+
 interface ViewportBounds {
   contains?(latLng: unknown): boolean;
   intersects?(bounds: unknown): boolean;
@@ -303,7 +305,7 @@ export function createShapeViewportRuntime({
           layer &&
           layer.isMeasurementLabel !== true &&
           isLayerVisible(layer) &&
-          intersectsViewport(layer, bounds)
+          (intersectsViewport(layer, bounds) || hasFloatingMeasurementLabels(layer))
         ) {
           attachMarkers?.(layer, bounds);
         }
@@ -327,7 +329,7 @@ export function createShapeViewportRuntime({
     const closeForZoom = () => {
       isZooming = true;
       cancelScheduledRefresh();
-      if (isEnabled) removeAllMarkers();
+      // 拡縮が完了するまで、マーカーのラベルを Leaflet のアニメーション表示領域内に残す。
     };
 
     const finishZoom = () => {

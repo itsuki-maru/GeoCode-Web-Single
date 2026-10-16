@@ -17,6 +17,7 @@ const state: PrintMapState = {
 };
 let preview: ReturnType<typeof createPrintPreview> | undefined;
 let L: any;
+let fetchData: ReturnType<typeof vi.fn<typeof fetch>>;
 beforeEach(() => {
   vi.useFakeTimers();
   document.body.innerHTML = '<div id="map"></div>';
@@ -55,7 +56,7 @@ beforeEach(() => {
     min_zoom: 0,
     max_zoom: 18,
   };
-  window.__GEOCODE_MAP_BOOTSTRAP__ = {
+  const bootstrap = {
     page: "map-anather",
     isCluster: false,
     initialView: { latitude: 30, longitude: 130, zoom: 5 },
@@ -119,6 +120,28 @@ beforeEach(() => {
       },
     ],
   };
+  // 初期データはメタデータだけとし、選択したグループの内容を取得 API から返す。
+  window.__GEOCODE_MAP_BOOTSTRAP__ = { ...bootstrap, markers: {}, shapes: [] };
+  fetchData = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+    const url = new URL(String(input), window.location.origin);
+    const layerId = url.searchParams.get("layer") ?? url.searchParams.get("layer_id");
+    if (url.searchParams.get("is_master") !== "false")
+      throw new Error("テスト用の取得 API にはグループの絞り込みが必要です。");
+    if (url.pathname === "/marker/read/all") {
+      return new Response(
+        JSON.stringify(Object.fromEntries(
+          Object.entries(bootstrap.markers).filter(([, marker]) => marker.layer_id === layerId),
+        )),
+      );
+    }
+    if (url.pathname === "/shapes") {
+      return new Response(
+        JSON.stringify(bootstrap.shapes.filter((shape) => shape.layer_id === layerId)),
+      );
+    }
+    throw new Error(`想定していない取得先です: ${url.pathname}`);
+  });
+  vi.stubGlobal("fetch", fetchData);
 });
 afterEach(() => {
   preview?.dispose();
@@ -145,9 +168,23 @@ function finishImages() {
     });
   });
 }
+async function finishObjectLoads() {
+  await vi.waitFor(() => {
+    const selected = [...document.querySelectorAll<HTMLElement>("[data-layer-load-id]")].filter(
+      (label) => label.closest("label")?.querySelector<HTMLInputElement>("input")?.checked,
+    );
+    expect(selected.length).toBeGreaterThan(0);
+    for (const label of selected) {
+      expect(label.querySelector<HTMLElement>(".layer-object-load-state")?.dataset.state).toBe(
+        "loaded",
+      );
+    }
+  });
+}
 describe("印刷プレビューと実際のLeaflet", () => {
   it.each(["marker", "shape"])("%sのポップアップを印刷中・キャンセル後も保持する", async (kind) => {
     preview = createPrintPreview(state, vi.fn());
+    await finishObjectLoads();
     let target: any;
     preview.map.eachLayer((layer: any) => {
       if (kind === "marker" ? layer instanceof L.Marker : layer.shapeMemo === "図形の詳細")
@@ -172,6 +209,7 @@ describe("印刷プレビューと実際のLeaflet", () => {
 
   it("ポップアップ画像の読み込み・失敗を反映し、閉じた詳細の画像は待たない", async () => {
     preview = createPrintPreview(state, vi.fn());
+    await finishObjectLoads();
     L.popup({ autoPan: false }).setLatLng([35.68, 139.76]).setContent(
       '<img id="popup-image" src="/popup.png"><details><img src="/hidden.png"></details>',
     ).openOn(preview.map);
@@ -198,7 +236,7 @@ describe("印刷プレビューと実際のLeaflet", () => {
     expect((document.getElementById("pdf-export") as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("現在の位置・背景・選択レイヤを引き継ぎ、印刷操作で保存設定を変更しない", () => {
+  it("現在の位置・背景・選択レイヤを引き継ぎ、印刷操作で保存設定を変更しない", async () => {
     const before = { ...localStorage };
     const watchPosition = vi.fn();
     Object.defineProperty(navigator, "geolocation", {
@@ -206,6 +244,13 @@ describe("印刷プレビューと実際のLeaflet", () => {
       value: { watchPosition },
     });
     preview = createPrintPreview(state, vi.fn());
+    expect(document.querySelector("#map .leaflet-marker-icon")).toBeNull();
+    await finishObjectLoads();
+    expect(fetchData).toHaveBeenCalledTimes(2);
+    for (const [input] of fetchData.mock.calls) {
+      const url = new URL(String(input), window.location.origin);
+      expect(url.searchParams.get("layer") ?? url.searchParams.get("layer_id")).toBe("group-a");
+    }
     expect(preview.map.getZoom()).toBe(12);
     expect(preview.map.getCenter().lat).toBeCloseTo(35.68);
     expect(document.querySelector<HTMLInputElement>(".tile-radio:checked")?.value).toBe("2");
@@ -214,6 +259,7 @@ describe("印刷プレビューと実際のLeaflet", () => {
     expect(checkbox("浸水想定").checked).toBe(false);
     expect(document.querySelector("#map .leaflet-marker-icon")).not.toBeNull();
     checkbox("施設").click();
+    await finishObjectLoads();
     checkbox("マーカー").click();
     checkbox("図形").click();
     checkbox("図形名").click();
@@ -254,6 +300,7 @@ describe("印刷プレビューと実際のLeaflet", () => {
   it("タイトル確定時のchangeイベントで出力待機をやり直さない", async () => {
     const print = vi.spyOn(window, "print").mockImplementation(() => {});
     preview = createPrintPreview(state, vi.fn());
+    await finishObjectLoads();
     const title = document.getElementById("print-title-input") as HTMLInputElement;
     title.value = "避難所案内";
     title.dispatchEvent(new Event("input", { bubbles: true }));
@@ -268,6 +315,7 @@ describe("印刷プレビューと実際のLeaflet", () => {
   it("印刷キーと親からの要求で同じ印刷処理を使い、長押しや不正な送信元を無視する", async () => {
     const print = vi.spyOn(window, "print").mockImplementation(() => {});
     preview = createPrintPreview(state, vi.fn());
+    await finishObjectLoads();
     const press = (extra: KeyboardEventInit = {}) => {
       const event = new KeyboardEvent("keydown", {
         key: "p",
@@ -311,6 +359,7 @@ describe("印刷プレビューと実際のLeaflet", () => {
     preview = createPrintPreview(state, vi.fn());
     const button = document.getElementById("print-submit") as HTMLButtonElement;
     expect(button.disabled).toBe(true);
+    await finishObjectLoads();
     finishImages();
     await vi.advanceTimersByTimeAsync(1000);
     expect(button.disabled).toBe(false);
@@ -345,6 +394,7 @@ describe("印刷プレビューと実際のLeaflet", () => {
 
   it("タイムアウト後は現在の表示で印刷でき、再試行で待機状態に戻る", async () => {
     preview = createPrintPreview(state, vi.fn());
+    await finishObjectLoads();
     const button = document.getElementById("print-submit") as HTMLButtonElement;
     await vi.advanceTimersByTimeAsync(31000);
     expect(button.disabled).toBe(false);
@@ -356,6 +406,46 @@ describe("印刷プレビューと実際のLeaflet", () => {
     expect(button.disabled).toBe(false);
     expect(button.textContent).toBe("印刷");
     expect((document.getElementById("print-retry") as HTMLButtonElement).hidden).toBe(true);
+  });
+
+  it("グループの取得中・取得失敗時は出力を止め、再試行の成功後に印刷できる", async () => {
+    let failMarkers!: (response: Response) => void;
+    fetchData.mockReturnValueOnce(new Promise<Response>((resolve) => {
+      failMarkers = resolve;
+    }));
+    const print = vi.spyOn(window, "print").mockImplementation(() => {});
+    preview = createPrintPreview(state, vi.fn());
+    const button = document.getElementById("print-submit") as HTMLButtonElement;
+    const pdf = document.getElementById("pdf-export") as HTMLButtonElement;
+    finishImages();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(button.disabled).toBe(true);
+    expect(pdf.disabled).toBe(true);
+    expect(document.getElementById("print-status")!.textContent).toContain(
+      "グループのデータを読み込んでいます",
+    );
+    button.click();
+    expect(print).not.toHaveBeenCalled();
+
+    failMarkers(new Response("取得失敗", { status: 500 }));
+    await vi.advanceTimersByTimeAsync(31000);
+    expect(button.disabled).toBe(true);
+    expect(pdf.disabled).toBe(true);
+    expect(document.getElementById("print-status")!.textContent).toContain(
+      "グループのデータを取得できませんでした",
+    );
+    button.click();
+    expect(print).not.toHaveBeenCalled();
+
+    document.getElementById("print-retry")!.click();
+    await finishObjectLoads();
+    finishImages();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fetchData).toHaveBeenCalledTimes(4);
+    expect(button.disabled).toBe(false);
+    expect(pdf.disabled).toBe(false);
+    button.click();
+    expect(print).toHaveBeenCalledOnce();
   });
 
   it("各欄の全解除・全選択はその欄の選択だけを切り替える", () => {

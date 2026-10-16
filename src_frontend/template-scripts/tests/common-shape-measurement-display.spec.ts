@@ -59,11 +59,13 @@ function createDependencies(overrides: Partial<Dependencies> = {}) {
 
 describe("read-only shape measurement display runtime", () => {
   it.each([false, true])(
-    "omits segment distances in multi-line summaries (merged=%s)",
+    "keeps individual segment distances alongside each line total (merged=%s)",
     (merged) => {
       const { dependencies, group } = createDependencies({
-        summaryOnly: () => true,
         getMeasurementSegmentMerged: () => merged,
+        createGroupedSegmentMeasurementMarkers: vi.fn(() => [
+          { getLatLng: () => ({ lat: 1, lng: 1 }) },
+        ]),
       });
       const runtime = createReadOnlyShapeMeasurementDisplayRuntime(dependencies);
       runtime.attachShapeMeasurementMarkers(
@@ -77,11 +79,13 @@ describe("read-only shape measurement display runtime", () => {
         },
         "layer",
       );
-      expect(group.addLayer).toHaveBeenCalledOnce();
+      expect(group.addLayer).toHaveBeenCalledTimes(merged ? 2 : 3);
       expect(group.addLayer).toHaveBeenCalledWith(
         expect.objectContaining({ lines: ["総延長 7 m"] }),
       );
-      expect(dependencies.createGroupedSegmentMeasurementMarkers).not.toHaveBeenCalled();
+      expect(dependencies.createGroupedSegmentMeasurementMarkers).toHaveBeenCalledTimes(
+        merged ? 1 : 0,
+      );
     },
   );
   it("flattens shape coordinates and selects each shape label position", () => {

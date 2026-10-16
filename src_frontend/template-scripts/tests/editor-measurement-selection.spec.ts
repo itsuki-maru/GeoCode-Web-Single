@@ -5,10 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 import { createShapeMeasurementRuntime } from "../src/map/common/shape-measurement";
 import { createShapeViewportRuntime } from "../src/map/common/shape-viewport";
 
-function setup() {
+function setup(isMobile = false) {
   const context = createContext({
     document,
-    editorEntryProfile: { isMobile: false },
+    editorEntryProfile: { isMobile },
     currentMapMode: "view",
     activeDrawMode: null,
     measurementSelectedShapes: new Set(),
@@ -16,7 +16,7 @@ function setup() {
     measurementSelectionType: null,
     measurementSummaryElement: document.createElement("div"),
     isMeasurementVisible: true,
-    isMeasurementSelectionActive: true,
+    isMeasurementSummaryVisible: true,
     searchableShapeLayers: new Set(),
     mapEditorProfile: { isShapeVisibleForMeasurement: (layer: any) => !layer.hidden },
     map: {
@@ -79,6 +79,25 @@ const polygon = (shapeType = "polygon") => ({
 });
 
 describe("editor measurement selection", () => {
+  it.each([false, true])(
+    "starts measuring on a shape click before totals are enabled (mobile=%s)",
+    (mobile) => {
+      const { context: c, select } = setup(mobile);
+      c.isMeasurementSummaryVisible = false;
+      const a = line(),
+        b = polygon();
+      select(a);
+      select(b);
+      expect(c.measurementSelectedShapes.size).toBe(2);
+      expect(c.measurementSummaryElement.hidden).toBe(true);
+      c.toggleMeasurementSelection();
+      expect(c.measurementSummaryElement.textContent).toContain("線 1件");
+      select(a);
+      expect(c.measurementSummaryElement.textContent).toContain("ポリゴン 1件");
+      expect(c.applyShapeStyle).not.toHaveBeenCalled();
+    },
+  );
+
   it("exposes selection only while measurement is open and resets it on closing", () => {
     const { context: c, select } = setup();
     const controls = readFileSync(resolve("src/map/editor/map-editor-controls.ts"), "utf8");
@@ -91,17 +110,17 @@ describe("editor measurement selection", () => {
       select(line());
       c.toggleMeasurementLabels();
       expect(c.isMeasurementVisible).toBe(false);
-      expect(c.isMeasurementSelectionActive).toBe(false);
+      expect(c.isMeasurementSummaryVisible).toBe(false);
       expect(c.measurementSelectedShapes.size).toBe(0);
       expect(button.classList.contains("is-hidden")).toBe(true);
       c.toggleMeasurementLabels();
       expect(button.classList.contains("is-hidden")).toBe(false);
-      expect(c.isMeasurementSelectionActive).toBe(false);
+      expect(c.isMeasurementSummaryVisible).toBe(false);
       c.currentMapMode = "edit";
       c.updateMeasurementSelectionControl();
       expect(button.disabled).toBe(true);
       c.toggleMeasurementSelection();
-      expect(c.isMeasurementSelectionActive).toBe(false);
+      expect(c.isMeasurementSummaryVisible).toBe(false);
     } finally {
       button.remove();
     }
@@ -120,7 +139,7 @@ describe("editor measurement selection", () => {
     await handlers.get("click")!({ originalEvent: { ctrlKey: false } });
     expect(c.measurementSelectedShapes.has(shape)).toBe(true);
     expect(c.openShapeMemoPopup).not.toHaveBeenCalled();
-    c.isMeasurementSelectionActive = false;
+    c.isMeasurementVisible = false;
     await handlers.get("click")!({ originalEvent: { ctrlKey: false } });
     expect(c.openShapeMemoPopup).toHaveBeenCalledOnce();
     show();
@@ -144,30 +163,34 @@ describe("editor measurement selection", () => {
     element.dispatchEvent(new MouseEvent("click", { ctrlKey: false }));
     expect(c.measurementSelectedShapes.has(shape)).toBe(true);
     expect(c.openShapeNameEditor).not.toHaveBeenCalled();
-    c.isMeasurementSelectionActive = false;
+    c.isMeasurementVisible = false;
     element.dispatchEvent(new MouseEvent("click"));
     expect(c.openShapeNameEditor).toHaveBeenCalledOnce();
   });
 
-  it("locks the type, toggles individual selections, and resets it after the last removal", () => {
+  it("accepts mixed types and aggregates the first remaining type in selection order", () => {
     const { context: c, select } = setup();
     const a = line();
     const b = line();
     select(a);
     select(b);
-    select(polygon());
-    expect(c.measurementSelectedShapes.size).toBe(2);
-    expect(c.setDrawStatus).toHaveBeenCalled();
+    const p = polygon();
+    select(p);
+    expect(c.measurementSelectedShapes.size).toBe(3);
+    expect(c.measurementSummaryElement.textContent).toContain("線 2件");
     select(a);
     expect(c.measurementSelectedShapes.has(b)).toBe(true);
     select(b);
+    expect(c.measurementSummaryElement.textContent).toContain("ポリゴン 1件");
+    select(p);
     expect(c.measurementSelectionType).toBeNull();
     expect(c.isMeasurementVisible).toBe(true);
-    expect(c.isMeasurementSelectionActive).toBe(true);
+    expect(c.isMeasurementSummaryVisible).toBe(true);
     select(polygon("rectangle"));
     select(polygon());
-    expect(c.measurementSelectedShapes.size).toBe(1);
+    expect(c.measurementSelectedShapes.size).toBe(2);
     expect(c.measurementSelectionType).toBe("rectangle");
+    expect(c.measurementSummaryElement.textContent).toContain("四角形 1件");
   });
 
   it("recalculates length while visible and retains the selected offscreen shapes", () => {
@@ -202,9 +225,9 @@ describe("editor measurement selection", () => {
 
   it("preserves ordinary clicks, editing and drawing behavior", () => {
     const { context: c, select } = setup();
-    c.isMeasurementSelectionActive = false;
+    c.isMeasurementVisible = false;
     expect(c.handleMeasurementSelectionClick(line(), { ctrlKey: true })).toBe(false);
-    c.isMeasurementSelectionActive = true;
+    c.isMeasurementVisible = true;
     c.currentMapMode = "edit";
     expect(select(line())).toBe(false);
     c.currentMapMode = "view";
@@ -215,7 +238,7 @@ describe("editor measurement selection", () => {
     expect(c.measurementSelectedShapes.size).toBe(0);
   });
 
-  it("toggles selection mode while keeping measurement enabled and updates the button", () => {
+  it("toggles only totals while preserving individual measurements and updates the button", () => {
     const { context: c, select } = setup();
     const button = document.createElement("button");
     button.id = "measurement-selection-toggle-btn";
@@ -223,17 +246,18 @@ describe("editor measurement selection", () => {
     try {
       select(line());
       c.toggleMeasurementSelection();
-      expect(c.measurementSelectedShapes.size).toBe(0);
-      expect(c.isMeasurementSelectionActive).toBe(false);
+      expect(c.measurementSelectedShapes.size).toBe(1);
+      expect(c.isMeasurementSummaryVisible).toBe(false);
       expect(c.isMeasurementVisible).toBe(true);
       expect(button.getAttribute("aria-pressed")).toBe("false");
-      expect(c.handleMeasurementSelectionClick(line(), { ctrlKey: true })).toBe(false);
+      expect(c.measurementSummaryElement.hidden).toBe(true);
+      expect(c.handleMeasurementSelectionClick(line(), { ctrlKey: true })).toBe(true);
       c.toggleMeasurementSelection();
       expect(button.getAttribute("aria-pressed")).toBe("true");
       select(polygon());
-      expect(c.measurementSelectionType).toBe("polygon");
+      expect(c.measurementSelectionType).toBe("polyline");
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      expect(c.measurementSelectedShapes.size).toBe(1);
+      expect(c.measurementSelectedShapes.size).toBe(3);
       expect(c.handleMeasurementSelectionKeydown).toBeUndefined();
       c.isMeasurementVisible = false;
       c.clearMeasurementSelection();
@@ -244,7 +268,7 @@ describe("editor measurement selection", () => {
   });
 
   it.each([false, true])(
-    "shows only each selected line's total when multiple lines are selected (merged=%s)",
+    "keeps each line's individual segment labels when multiple lines are measured (merged=%s)",
     (merged) => {
       const { context: c, select } = setup();
       c.isMeasurementSegmentMerged = merged;
@@ -259,9 +283,9 @@ describe("editor measurement selection", () => {
       expect(c.createShapeMeasurementMarkers(a).filter(Boolean)).toHaveLength(2);
       select(b);
       for (const shape of [a, b]) {
-        expect(c.createShapeMeasurementMarkers(shape).filter(Boolean)).toEqual([
-          { lines: ["総延長 5.0 m"] },
-        ]);
+        expect(c.createShapeMeasurementMarkers(shape).filter(Boolean)).toHaveLength(2);
+        c.toggleMeasurementSelection();
+        expect(c.createShapeMeasurementMarkers(shape).filter(Boolean)).toHaveLength(2);
       }
       select(b);
       expect(c.createShapeMeasurementMarkers(a).filter(Boolean)).toHaveLength(2);
@@ -280,7 +304,7 @@ describe("editor measurement selection", () => {
     tap("touchend");
     tap("click");
     expect(c.measurementSelectedShapes.size).toBe(0);
-    expect(c.isMeasurementSelectionActive).toBe(true);
+    expect(c.isMeasurementSummaryVisible).toBe(true);
   });
 
   it("removes filtered or deleted shapes and clears measurement when none remain", () => {
@@ -296,10 +320,23 @@ describe("editor measurement selection", () => {
     c.searchableShapeLayers.delete(b);
     c.pruneMeasurementSelection();
     expect(c.measurementSelectedShapes.size).toBe(0);
-    expect(c.measurementSummaryElement.hidden).toBe(true);
+    expect(c.measurementSummaryElement.textContent).toContain("選択してください");
   });
 
-  it("removes stale individual labels as the selection changes, and restores all-shape measurement when unselected", () => {
+  it("switches totals to the next type when the first shape is filtered out", () => {
+    const { context: c, select } = setup();
+    const a = { ...line(), hidden: false },
+      b = polygon();
+    select(a);
+    select(b);
+    select(line());
+    a.hidden = true;
+    c.pruneMeasurementSelection();
+    expect(c.measurementSelectedShapes.size).toBe(2);
+    expect(c.measurementSummaryElement.textContent).toContain("ポリゴン 1件");
+  });
+
+  it("displays only clicked shapes and never restores all-shape measurement when totals close", () => {
     const { context: c, select } = setup();
     const a = { ...line(), getBounds: () => ({}) };
     const b = { ...line(), getBounds: () => ({}) };
@@ -324,14 +361,13 @@ describe("editor measurement selection", () => {
       removeMarkers: (layer) => {
         displayed.delete(layer);
       },
-      isLayerVisible: (layer) =>
-        !c.isMeasurementSelectionActive || c.measurementSelectedShapes.has(layer),
+      isLayerVisible: (layer) => c.measurementSelectedShapes.has(layer),
     });
     c.shapeMeasurementManager = manager;
-    c.isMeasurementSelectionActive = false;
+    c.isMeasurementSummaryVisible = false;
     manager.setEnabled(true);
     manager.refresh();
-    expect(displayed.size).toBe(2);
+    expect(displayed.size).toBe(0);
     c.toggleMeasurementSelection();
     manager.refresh();
     expect(displayed.size).toBe(0);
@@ -341,11 +377,11 @@ describe("editor measurement selection", () => {
     select(b);
     manager.refresh();
     expect(displayed.size).toBe(2);
+    c.toggleMeasurementSelection();
+    manager.refresh();
+    expect(displayed.size).toBe(2);
     c.clearMeasurementSelection();
     manager.refresh();
-    expect(displayed.size).toBe(2);
-    manager.setEnabled(true);
-    manager.refresh();
-    expect(displayed.size).toBe(2);
+    expect(displayed.size).toBe(0);
   });
 });

@@ -1,4 +1,4 @@
-/** MJPEG URLs stay inert until their owning Leaflet popup is open. */
+/** MJPEG の URL は、対応する Leaflet のポップアップを開くまで読み込まない。 */
 export function cameraUrl(raw: string): string | null {
   // URLに空白・バックスラッシュ・制御文字が含まれていたら、不正な入力として null を返す
   if (/[\s\\\u0000-\u001f\u007f]/.test(raw)) return null;

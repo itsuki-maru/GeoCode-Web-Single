@@ -52,7 +52,7 @@ fn share_revision(password_hash: Option<&str>) -> String {
     )
 }
 
-// Issued only after the existing shared-map password check has succeeded.
+// 既存の共有地図のパスワード確認が成功した場合だけ発行する。
 pub(crate) fn share_token(map: &TemporaryUrlFromDB) -> Result<String, AppError> {
     let claims = ShareClaims {
         purpose: "address_search".into(),

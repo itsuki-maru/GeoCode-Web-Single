@@ -167,8 +167,7 @@ shapeMeasurementManager = createViewportShapeMeasurementManager({
   getLayers: () => searchableShapeLayers,
   attachMarkers: (layer, bounds) => attachShapeMeasurementMarkers(layer, bounds),
   removeMarkers: removeShapeMeasurementMarkers,
-  isLayerVisible: (layer) =>
-    map.hasLayer(layer) && (!isMeasurementSelectionActive || measurementSelectedShapes.has(layer)),
+  isLayerVisible: (layer) => map.hasLayer(layer) && measurementSelectedShapes.has(layer),
 });
 const shapeLayerOverlays = {
   マーカー: markersClusterGroup,
@@ -240,7 +239,7 @@ map.on("overlayremove", function (event) {
   }
 
   if (event.layer === drawnShapesGroup) {
-    if (isMeasurementSelectionActive) clearMeasurementSelection();
+    clearMeasurementSelection();
     clearShapeGeometryEditing();
     saveShapeLayerVisibility(false);
   }
@@ -255,6 +254,10 @@ const MeasurementVisibleControl = L.Control.extend({
     const container = L.DomUtil.create("div", "leaflet-bar leaflet-control measurement-control");
     const button = L.DomUtil.create("button", "custom-control-button", container);
     button.innerHTML = "図形の計測";
+    button.id = "measurement-toggle-btn";
+    button.type = "button";
+    button.setAttribute("aria-pressed", "false");
+    button.title = "有効にして図形をクリック・タップすると計測します。もう一度選ぶと解除します";
 
     const mergeButton = L.DomUtil.create("button", "custom-control-button is-hidden", container);
     mergeButton.id = "measurement-merge-toggle-btn";
@@ -269,10 +272,10 @@ const MeasurementVisibleControl = L.Control.extend({
       );
       selectionButton.id = "measurement-selection-toggle-btn";
       selectionButton.type = "button";
-      selectionButton.textContent = "複数選択";
+      selectionButton.textContent = "複数計測";
       selectionButton.setAttribute("aria-pressed", "false");
       selectionButton.disabled = currentMapMode !== "view" || Boolean(activeDrawMode);
-      selectionButton.title = "閲覧モードで同じタイプの図形をクリックして選択します";
+      selectionButton.title = "最初に選んだ図形と同じタイプの合計を表示・非表示にします";
       L.DomEvent.on(selectionButton, "click", (event) => {
         L.DomEvent.stop(event);
         toggleMeasurementSelection();

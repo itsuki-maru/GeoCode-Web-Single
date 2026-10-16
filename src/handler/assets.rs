@@ -27,7 +27,7 @@ use rust_embed::RustEmbed;
 #[folder = "dist/assets"]
 struct Asset;
 
-// STATIC JS & CSS & IMAGE RESPONSE
+// 静的な JavaScript・CSS・画像を返す。
 pub async fn serve_static_file(Path(uri): Path<String>) -> Result<Response<Body>, AppError> {
     match Asset::get(&uri) {
         Some(content) => {
@@ -59,7 +59,7 @@ pub async fn serve_static_file(Path(uri): Path<String>) -> Result<Response<Body>
     }
 }
 
-// USER UPLOAD IMAGE RESPONSE
+// ユーザーがアップロードした画像を返す。
 pub async fn serve_image_file(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
@@ -196,8 +196,8 @@ pub async fn serve_image_file(
             .map_err(|_| AppError::InternalServerError)?;
         *file_request.headers_mut() = request_headers;
 
-        // ServeFile handles byte ranges required by mobile media players and also
-        // supplies Content-Length and Accept-Ranges for full responses.
+        // ServeFile でモバイルのメディア再生に必要なバイト範囲指定に対応し、
+        // 全体を返す応答にも Content-Length と Accept-Ranges を付ける。
         let response = ServeFile::new(read_file)
             .oneshot(file_request)
             .await
@@ -216,7 +216,7 @@ pub async fn serve_image_file(
     }
 }
 
-// USER MARKER ICON RESPONSE
+// ユーザーのマーカーアイコンを返す。
 pub async fn serve_marker_icon_file(
     Extension(pool): Extension<SqlitePool>,
     Path(icon_name): Path<String>,
@@ -261,7 +261,7 @@ pub async fn serve_marker_icon_file(
         .map_err(|_| AppError::InternalServerError)
 }
 
-// SANITAIZE UPLOAD IMAGE FILENAME
+// アップロード画像のファイル名を安全な形式にする。
 fn sanitize_filename(file_name: &str) -> Option<String> {
     let file_name = file_name.split('/').last()?;
 
@@ -271,7 +271,7 @@ fn sanitize_filename(file_name: &str) -> Option<String> {
     Some(file_name.to_string())
 }
 
-// IMAGE PREVIEW HTML
+// 画像プレビュー用の HTML を返す。
 pub async fn image_preview_html_get_handler(
     Extension(tera): Extension<Arc<Mutex<Tera>>>,
     Path(image_name): Path<String>,

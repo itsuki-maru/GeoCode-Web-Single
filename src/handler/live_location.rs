@@ -188,7 +188,7 @@ pub async fn update_live_location_session_handler(
     Ok(StatusCode::NO_CONTENT)
 }
 
-// Copy the accepted row, including the server-assigned sequence and timestamps.
+// サーバーが付与した連番と時刻を含め、受け付けた行をコピーする。
 async fn record_history(connection: &mut SqliteConnection, user_id: &str) -> Result<(), AppError> {
     if CONFIG.live_location_history_enabled {
         sqlx::query(

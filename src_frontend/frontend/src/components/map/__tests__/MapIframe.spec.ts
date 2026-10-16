@@ -8,6 +8,17 @@ afterEach(() => {
 });
 
 describe("MapIframe", () => {
+  it("waits for a selected-layer URL before creating the frame and reports when it loads", async () => {
+    const wrapper = mount(MapIframe, {
+      props: { srcUrl: "", allowedOrigins: window.location.origin, height: 80 },
+    });
+    expect(wrapper.find("iframe").exists()).toBe(false);
+    const srcUrl = "/map?layer=selected&is_master=false";
+    await wrapper.setProps({ srcUrl });
+    await wrapper.get("iframe").trigger("load");
+    expect(wrapper.emitted("mapLoaded")).toEqual([[srcUrl]]);
+    wrapper.unmount();
+  });
   it("表示中の地図からの印刷要求だけを受け付ける", () => {
     const wrapper = mount(MapIframe, {
       attachTo: document.body,

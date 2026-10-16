@@ -34,7 +34,7 @@
         <link rel="stylesheet" href="/assets/leaflet.css" />
         <link rel="stylesheet" href="/assets/map-compat.css" />
         <link rel="stylesheet" href="/assets/map-controls.css" />
-        <!-- Leaflet.markercluster -->
+        <!-- Leaflet.markercluster の読み込み -->
         <script src="/assets/leaflet.markercluster.js"></script>
         <link rel="stylesheet" href="/assets/MarkerCluster.css" />
         <link rel="stylesheet" href="/assets/MarkerCluster.Default.css" />
@@ -56,6 +56,45 @@
             .leaflet-container {
                 font-size: 1rem;
             }
+
+            .layer-object-load-state {
+                display: block;
+                max-width: 240px;
+                white-space: normal;
+                color: #475569;
+                font-size: 11px;
+                font-weight: normal;
+            }
+
+            .layer-object-load-state[data-state="error"] {
+                color: #b91c1c;
+            }
+
+            /* 下の操作ボタンを確保し、レイヤ一覧だけを残りの高さに収める。 */
+            #map .leaflet-top.leaflet-right {
+                display: flex;
+                flex-direction: column;
+                align-items: flex-end;
+                max-height: calc(100% - 40px);
+            }
+
+            #map .leaflet-top.leaflet-right > .leaflet-control {
+                flex-shrink: 0;
+            }
+
+            #map .leaflet-top.leaflet-right > .leaflet-control-layers-expanded {
+                display: flex;
+                flex-direction: column;
+                flex-shrink: 1;
+                min-height: 0;
+            }
+
+            #map .leaflet-top.leaflet-right > .leaflet-control-layers-expanded > .leaflet-control-layers-list {
+                min-height: 0;
+                overflow-y: auto;
+                overscroll-behavior: contain;
+            }
+
             .leaflet-popup {
                 min-width: 500px;
                 max-width: 750px;
@@ -190,13 +229,6 @@
             .shape-measure-marker {
                 background: transparent;
                 border: none;
-            }
-
-            .is-measurement-selected {
-                stroke: #1769e0 !important;
-                stroke-width: 8px !important;
-                stroke-opacity: 1 !important;
-                stroke-dasharray: 10 5 !important;
             }
 
             #measurement-selection-toggle-btn:not(.is-hidden) {

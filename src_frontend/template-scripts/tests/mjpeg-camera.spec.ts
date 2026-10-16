@@ -98,7 +98,7 @@ describe("MJPEG lifecycle", () => {
     emit("popupclose");
     expect(image.getAttribute("src")).toBeNull();
     expect(popup.querySelector("img")).toBeNull();
-    await settle(); // Leaflet may keep a closed popup in the DOM during fade-out.
+    await settle(); // Leaflet はフェードアウト中、閉じたポップアップを DOM に残す場合がある。
     expect(popup.querySelector("img")).toBeNull();
     emit("popupopen");
     expect(popup.querySelector("img")).not.toBe(image);

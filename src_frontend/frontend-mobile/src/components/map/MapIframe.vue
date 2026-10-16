@@ -10,6 +10,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   mapReloadRequested: [layerId?: string | null];
   loginRedirect: [];
+  mapLoaded: [url: string];
   previewImage: [filename: string];
   userLocation: [position: Record<string, number | null>];
   userLocationError: [code: number];
@@ -96,7 +97,13 @@ const filterMapObjects = (markerIds: string[] | null, shapeIds: string[] | null)
   });
 };
 
-const handleIframeLoad = (): void => {
+const handleIframeLoad = (event: Event): void => {
+  if (
+    !(event.target instanceof HTMLIFrameElement) ||
+    event.target.getAttribute("src") !== props.srcUrl
+  )
+    return;
+  emit("mapLoaded", props.srcUrl);
   if (filteredObjectIds.value.markerIds !== null || filteredObjectIds.value.shapeIds !== null) {
     filterMapObjects(filteredObjectIds.value.markerIds, filteredObjectIds.value.shapeIds);
   }
@@ -179,6 +186,8 @@ defineExpose({
 <template>
   <div class="map-contents">
     <iframe
+      v-if="srcUrl"
+      :key="srcUrl"
       :src="srcUrl"
       frameborder="0"
       id="map-iframe"

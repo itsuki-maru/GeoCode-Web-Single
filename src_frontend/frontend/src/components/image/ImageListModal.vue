@@ -129,9 +129,9 @@ function selectTextOrClipboardCopy(elementId: string) {
           </thead>
           <tbody>
             <tr v-for="[id, image] in imageList" :key="id">
-              <!-- HTTPS mode: clipboard copy on click -->
+              <!-- HTTPS の場合は、クリックでクリップボードへコピーする。 -->
               <td v-if="isHttps" @click="onImageCopyPath(image.id)">{{ image.filename }}</td>
-              <!-- HTTP mode: show markdown text for selection -->
+              <!-- HTTP の場合は、選択してコピーできるようにマークダウンを表示する。 -->
               <td
                 v-else-if="isPDF(image.uuid_filename)"
                 :id="image.uuid_filename"

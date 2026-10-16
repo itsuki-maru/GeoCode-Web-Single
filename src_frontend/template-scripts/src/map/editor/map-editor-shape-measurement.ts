@@ -2,37 +2,21 @@
 // 計測の選択は編集対象から独立させ、地図の表示範囲が変わっても保持する。
 function handleMeasurementSelectionClick(layer, event) {
   const originalEvent = event?.originalEvent || event;
-  if (
-    currentMapMode !== "view" ||
-    activeDrawMode ||
-    !isMeasurementVisible ||
-    !isMeasurementSelectionActive
-  ) {
+  if (currentMapMode !== "view" || activeDrawMode || !isMeasurementVisible) {
     return false;
   }
   if (!["polyline", "polygon", "rectangle", "circle"].includes(layer?.shapeType)) return false;
   L.DomEvent.stop(originalEvent);
   const touchTime = measurementSelectionTouchTimes.get(layer);
-  if (event?.type === "click" && touchTime !== undefined && Date.now() - touchTime < 500)
+  if (originalEvent?.type === "click" && touchTime !== undefined && Date.now() - touchTime < 500)
     return true;
-  if (event?.type === "touchend") measurementSelectionTouchTimes.set(layer, Date.now());
+  if (originalEvent?.type === "touchend") measurementSelectionTouchTimes.set(layer, Date.now());
   closeShapeNameEditor();
   map.closePopup();
   if (measurementSelectedShapes.has(layer)) {
     measurementSelectedShapes.delete(layer);
-    applyShapeStyle(layer);
-    if (measurementSelectedShapes.size === 0) {
-      clearMeasurementSelection(true);
-      return true;
-    }
   } else {
-    if (measurementSelectionType && measurementSelectionType !== layer.shapeType) {
-      setDrawStatus("図形の計測: 最初に選択した図形と同じタイプだけを選択できます。", true, true);
-      return true;
-    }
-    measurementSelectionType = layer.shapeType;
     measurementSelectedShapes.add(layer);
-    applyShapeStyle(layer);
   }
   updateMeasurementSummary();
   shapeMeasurementManager?.scheduleRefresh();
@@ -43,30 +27,24 @@ function updateMeasurementSelectionControl() {
   const button = document.getElementById("measurement-selection-toggle-btn");
   if (!button) return;
   button.classList.toggle("is-hidden", !isMeasurementVisible);
-  button.classList.toggle("is-active", isMeasurementSelectionActive);
-  button.setAttribute("aria-pressed", String(isMeasurementSelectionActive));
+  button.classList.toggle("is-active", isMeasurementSummaryVisible);
+  button.setAttribute("aria-pressed", String(isMeasurementSummaryVisible));
   button.disabled = currentMapMode !== "view" || Boolean(activeDrawMode);
 }
 
 function toggleMeasurementSelection() {
   if (!isMeasurementVisible || currentMapMode !== "view" || activeDrawMode) return;
-  if (isMeasurementSelectionActive) {
-    clearMeasurementSelection();
-  } else {
-    isMeasurementSelectionActive = true;
-    closeShapeNameEditor();
-    map.closePopup();
-    updateMeasurementSelectionControl();
-    shapeMeasurementManager?.scheduleRefresh();
-  }
+  isMeasurementSummaryVisible = !isMeasurementSummaryVisible;
+  closeShapeNameEditor();
+  map.closePopup();
+  updateMeasurementSelectionControl();
+  updateMeasurementSummary();
 }
 
-function clearMeasurementSelection(keepSelectionMode = false) {
-  const previousSelection = [...measurementSelectedShapes];
+function clearMeasurementSelection() {
   measurementSelectedShapes.clear();
   measurementSelectionType = null;
-  isMeasurementSelectionActive = keepSelectionMode;
-  previousSelection.forEach((layer) => applyShapeStyle(layer));
+  isMeasurementSummaryVisible = false;
   shapeMeasurementManager?.scheduleRefresh();
   updateMeasurementSelectionControl();
   updateMeasurementSummary();
@@ -77,26 +55,22 @@ function pruneMeasurementSelection() {
   measurementSelectedShapes.forEach((layer) => {
     if (
       !searchableShapeLayers.has(layer) ||
-      layer.shapeType !== measurementSelectionType ||
       !mapEditorProfile.isShapeVisibleForMeasurement(layer)
     ) {
       measurementSelectedShapes.delete(layer);
-      applyShapeStyle(layer);
       changed = true;
     }
   });
-  if (!changed) {
-    updateMeasurementSummary();
-    return;
-  }
-  if (measurementSelectedShapes.size === 0) clearMeasurementSelection(true);
-  else updateMeasurementSummary();
+  updateMeasurementSummary();
+  if (changed) shapeMeasurementManager?.scheduleRefresh();
 }
 
 function updateMeasurementSummary() {
   if (!measurementSummaryElement) return;
-  const visible = isMeasurementVisible && measurementSelectedShapes.size > 0;
+  measurementSelectionType = measurementSelectedShapes.values().next().value?.shapeType ?? null;
+  const visible = isMeasurementVisible && isMeasurementSummaryVisible;
   measurementSummaryElement.hidden = !visible;
+  measurementSummaryElement.classList.toggle("has-selection", measurementSelectedShapes.size > 0);
   if (!visible) {
     measurementSummaryElement.textContent = "";
     return;
@@ -104,7 +78,10 @@ function updateMeasurementSummary() {
   const names = { polyline: "線", polygon: "ポリゴン", rectangle: "四角形", circle: "円" };
   let distance = 0;
   let area = 0;
+  let count = 0;
   measurementSelectedShapes.forEach((layer) => {
+    if (layer.shapeType !== measurementSelectionType) return;
+    count += 1;
     if (measurementSelectionType === "polyline") {
       distance += measurePolyline(layer).totalDistance;
     } else if (measurementSelectionType === "circle") {
@@ -115,9 +92,11 @@ function updateMeasurementSummary() {
       distance += measurement.edges.reduce((sum, edge) => sum + edge.distance, 0);
     }
   });
-  const lines = [`${names[measurementSelectionType]} ${measurementSelectedShapes.size}件の合計`];
+  const lines = measurementSelectionType
+    ? [`${names[measurementSelectionType]} ${count}件の合計`]
+    : ["計測する図形を選択してください"];
   if (measurementSelectionType === "polyline") lines.push(`総延長 ${formatDistance(distance)}`);
-  else {
+  else if (measurementSelectionType) {
     lines.push(`面積 ${formatArea(area)}`);
     if (measurementSelectionType !== "circle") lines.push(`周長 ${formatDistance(distance)}`);
   }
@@ -216,19 +195,16 @@ function createShapeMeasurementMarkers(layer) {
       .filter((segment) => segment.start && segment.end);
     measurementSegments = segments;
 
-    const summaryOnly = measurementSelectedShapes.size > 1 && measurementSelectedShapes.has(layer);
-    if (!summaryOnly) {
-      if (isMeasurementSegmentMerged) {
-        markers.push(...createGroupedSegmentMeasurementMarkers(segments));
-      } else {
-        segments.forEach((segment) => {
-          markers.push(
-            createMeasurementLabelMarker(getSegmentMidpoint(segment.start, segment.end), [
-              formatDistance(segment.distance),
-            ]),
-          );
-        });
-      }
+    if (isMeasurementSegmentMerged) {
+      markers.push(...createGroupedSegmentMeasurementMarkers(segments));
+    } else {
+      segments.forEach((segment) => {
+        markers.push(
+          createMeasurementLabelMarker(getSegmentMidpoint(segment.start, segment.end), [
+            formatDistance(segment.distance),
+          ]),
+        );
+      });
     }
 
     const summaryLatLng = getShapeLabelLatLng(layer);
@@ -307,7 +283,15 @@ function attachShapeMeasurementMarkers(layer, bounds = null) {
     return;
   }
 
-  const markers = filterMeasurementMarkersForBounds(createShapeMeasurementMarkers(layer), bounds);
+  const markers = filterMeasurementMarkersForBounds(
+    bindFloatingMeasurementLabels(
+      layer,
+      createShapeMeasurementMarkers(layer),
+      map,
+      isMeasurementSegmentMerged,
+    ),
+    bounds,
+  );
   layer.measurementMarkers = markers;
   if (markers.length === 0) {
     return;

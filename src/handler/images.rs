@@ -137,7 +137,7 @@ async fn validate_saved_document(path: &StdPath, extension: &str) -> Result<(), 
         Err(AppError::BadRequest)
     }
 }
-// GET IMAGES LIMIT
+// 件数を指定して画像を取得する。
 pub async fn get_enable_images_limit_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
@@ -170,7 +170,7 @@ pub async fn get_enable_images_limit_handler(
     Ok(Json(images_hash_map))
 }
 
-// SEARCH IMAGES
+// 画像を検索する。
 pub async fn query_image_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
@@ -228,7 +228,7 @@ pub async fn query_image_handler(
     Ok(Json(images_hash_map))
 }
 
-// GET ALL IMAGES
+// すべての画像を取得する。
 pub async fn get_enable_images_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
@@ -256,7 +256,7 @@ pub async fn get_enable_images_handler(
     Ok(Json(images_hash_map))
 }
 
-// UPLOAD IMAGE
+// 画像をアップロードする。
 pub async fn upload_image_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
@@ -495,7 +495,7 @@ pub async fn upload_image_handler(
     }))
 }
 
-// DELETE IMAGE
+// 画像を削除する。
 pub async fn delete_image_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,

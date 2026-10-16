@@ -4,11 +4,12 @@ import { shapeUrl, shapesUrl } from "@/router/urls";
 import apiClient from "@/axiosClient";
 
 interface State {
+  loadRevision: number;
   shapeList: Map<string, ShapeData>;
 }
 
 export const useShapeStore = defineStore("shapes", {
-  state: (): State => ({ shapeList: new Map<string, ShapeData>() }),
+  state: (): State => ({ shapeList: new Map<string, ShapeData>(), loadRevision: 0 }),
   getters: {
     getById:
       (state) =>
@@ -16,16 +17,30 @@ export const useShapeStore = defineStore("shapes", {
         state.shapeList.get(id),
   },
   actions: {
-    async queryShapes(layerId?: string, isMaster: boolean = true): Promise<boolean> {
+    clearShapeList(): void {
+      ++this.loadRevision;
+      this.shapeList.clear();
+    },
+    async queryShapes(
+      layerId?: string,
+      isMaster: boolean = true,
+      signal?: AbortSignal,
+    ): Promise<boolean> {
+      const revision = ++this.loadRevision;
       try {
         const params = new URLSearchParams({ is_master: String(isMaster) });
         if (layerId) params.set("layer_id", layerId);
-        const response = await apiClient.get<ShapeData[]>(`${shapesUrl}?${params.toString()}`);
+        const requestUrl = `${shapesUrl}?${params.toString()}`;
+        const response = signal
+          ? await apiClient.get<ShapeData[]>(requestUrl, { signal })
+          : await apiClient.get<ShapeData[]>(requestUrl);
+        if (signal?.aborted || revision !== this.loadRevision) return false;
         this.shapeList = new Map(
           response.data.map((shape): [string, ShapeData] => [shape.id, shape]).reverse(),
         );
         return true;
       } catch (error) {
+        if (signal?.aborted || revision !== this.loadRevision) return false;
         console.error("Shapes Store: Query Error.", error);
         return false;
       }

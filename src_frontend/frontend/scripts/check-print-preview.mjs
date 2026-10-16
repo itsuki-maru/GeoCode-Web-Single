@@ -1,8 +1,8 @@
-// Render the real map template with local test tiles, including its shared CSS.
-// Prerequisite: npm run build in frontend. Playwright is an optional QA dependency.
-// Example: node scripts/check-print-preview.mjs --browser=chrome --playwright-path=/path/to/playwright/index.mjs
-// Add --popup=marker or --popup=shape to check popup content, and --pdf=client for PDF export.
-// Verify page counts/content with: python scripts/check-print-preview-pdfs.py ../../dist/print-check/chrome
+// 共通 CSS を含む実際の地図テンプレートを、ローカルのテスト用タイルで描画する。
+// 事前に frontend で npm run build を実行する。Playwright は品質確認用の任意の依存パッケージ。
+// 実行例: node scripts/check-print-preview.mjs --browser=chrome --playwright-path=/path/to/playwright/index.mjs
+// ポップアップの内容は --popup=marker または --popup=shape、PDF 出力は --pdf=client を付けて確認する。
+// ページ数と内容の確認: python scripts/check-print-preview-pdfs.py ../../dist/print-check/chrome
 import assert from "node:assert/strict";
 import { createServer as createHttpServer } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
@@ -252,8 +252,8 @@ try {
     }
   }
   if (args.pdf === "client") {
-    // A displayed cross-origin image without CORS must fail explicitly, never
-    // produce a seemingly successful PDF with a missing map image.
+    // 表示できる外部オリジンの画像でも、CORS が許可されていない場合は明示的に失敗させ、
+    // 地図の画像が欠けた PDF を、正常に出力できたように扱わない。
     await page.evaluate(async (src) => {
       const img = document.createElement("img");
       img.id = "cors-test-image";

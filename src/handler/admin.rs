@@ -44,7 +44,7 @@ async fn require_superuser(user_id: String, pool: &SqlitePool) -> Result<(), App
     }
 }
 
-// ADMIN HTML GET
+// 管理画面の HTML を取得する。
 pub async fn admin_index_get_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
@@ -96,7 +96,7 @@ pub async fn get_users_handler(
     Ok(Json(users_hash_map))
 }
 
-// UPDATE USER PASSWORD
+// ユーザーのパスワードを更新する。
 pub async fn update_users_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
