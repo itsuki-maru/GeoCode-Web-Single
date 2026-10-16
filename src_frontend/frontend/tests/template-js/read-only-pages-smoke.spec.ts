@@ -503,6 +503,30 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
       if (desktop) expect(parentWindow.postMessage).toHaveBeenLastCalledWith({ type: "printOpen" }, "https://example.test");
     }
   });
+  it("モバイル共有地図の計測合計を複数計測ボタンの下の右上に表示する", () => {
+    const page = pages.find((page) => page.templateName === "temporary-map-mobile.html")!;
+    const dom = smokeLoadPage({
+      ...page,
+      globals: { ...page.globals, shapesObj: { "shape-1": shapeRecord } },
+    });
+    const document = dom.window.document;
+    const measurement = document.querySelector(".measurement-control")!;
+    const summary = document.querySelector<HTMLElement>(".measurement-selection-summary")!;
+    expect(measurement.parentElement?.classList.contains("leaflet-right")).toBe(true);
+    expect(measurement.parentElement?.classList.contains("leaflet-top")).toBe(true);
+    expect(measurement.nextElementSibling).toBe(summary);
+    expect(document.querySelector(".leaflet-bottom.leaflet-left")?.contains(summary)).toBe(false);
+
+    document.querySelector<HTMLButtonElement>("#measurement-toggle-btn")!.click();
+    dom.window.eval(`Object.values(__templateSmokeShapeLayers)[0].fire("click");`);
+    document.querySelector<HTMLButtonElement>("#measurement-selection-toggle-btn")!.click();
+    expect(summary.hidden).toBe(false);
+    expect(summary.textContent).toContain("合計");
+    expect(measurement.nextElementSibling).toBe(summary);
+    document.querySelector<HTMLButtonElement>("#measurement-toggle-btn")!.click();
+    expect(summary.hidden).toBe(true);
+  });
+
   const anotherMapPage = pages.find((page) => page.templateName === "map-anather.html")!;
 
   it("PC地図は親画面からの要求に現在の印刷用状態を返す", () => {

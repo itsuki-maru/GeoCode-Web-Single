@@ -63,9 +63,12 @@ const frame = defineComponent({
     return () => null;
   },
 });
-function mountView() {
+function mountView(showSplashScreen = ref(false)) {
   wrapper = shallowMount(MapView, {
-    global: { provide: { isShowAppHeader: ref(true) }, stubs: { MapIframe: frame } },
+    global: {
+      provide: { isShowAppHeader: ref(true), showSplashScreen },
+      stubs: { MapIframe: frame },
+    },
   });
   return wrapper;
 }
@@ -182,6 +185,41 @@ describe("selected layer startup", () => {
     expect(wrapper!.getComponent({ name: "MessageModal" }).props("message")).toContain(
       "地図データ",
     );
+  });
+
+  it("スプラッシュ中も取得を進め、終了後に地図が未表示ならプログレスを表示する", async () => {
+    const showSplashScreen = ref(true);
+    mountView(showSplashScreen);
+    expect(spinner()).toBe(false);
+    await flushPromises();
+    expect(dataRequests()).toHaveLength(2);
+    expect(frameComponent().props("srcUrl")).not.toBe("");
+    expect(spinner()).toBe(false);
+
+    showSplashScreen.value = false;
+    await flushPromises();
+    expect(spinner()).toBe(true);
+    frameComponent().vm.$emit("mapLoaded", frameComponent().props("srcUrl"));
+    await flushPromises();
+    expect(spinner()).toBe(false);
+
+    await changeLayer("a");
+    expect(spinner()).toBe(true);
+    frameComponent().vm.$emit("mapLoaded", frameComponent().props("srcUrl"));
+    await flushPromises();
+    expect(spinner()).toBe(false);
+  });
+
+  it("スプラッシュ中に地図を読み終えた場合は終了後もプログレスを表示しない", async () => {
+    const showSplashScreen = ref(true);
+    mountView(showSplashScreen);
+    await flushPromises();
+    frameComponent().vm.$emit("mapLoaded", frameComponent().props("srcUrl"));
+    await flushPromises();
+    expect(spinner()).toBe(false);
+    showSplashScreen.value = false;
+    await flushPromises();
+    expect(spinner()).toBe(false);
   });
 
   it("stops waiting for an old frame when the next layer and its fallback fail", async () => {

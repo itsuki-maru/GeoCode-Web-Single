@@ -48,6 +48,7 @@ const allowedOriginsRef = ref(appInitStore.appInitData.allowOrigins);
 
 const isShowAppHeader = inject("isShowAppHeader") as Ref<boolean>;
 isShowAppHeader.value = false;
+const showSplashScreen = inject<Ref<boolean>>("showSplashScreen", ref(false));
 
 const isHttpsProtocol = ref(false);
 const currentUrl = window.location.href;
@@ -1012,7 +1013,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
   <MessageModal :isOpen="isMessageModal" :message="messageText" @close="closeMessage" />
 
   <!-- プログレスモーダル -->
-  <ProgressSpinner :isOpen="showProgressModal || isMapFrameLoading" />
+  <ProgressSpinner :isOpen="!showSplashScreen && (showProgressModal || isMapFrameLoading)" />
   <UploadProgressModal :isOpen="uploadProgressState.isOpen" :progress="uploadProgressState" />
 
   <!-- iFrameからの画像プレビュー -->
