@@ -556,7 +556,7 @@ export function initializeReadOnlyMapPage(
   const includeMeasurementControl = isAnother || hasSharedShapes;
   if (includeMeasurementControl) {
     const SummaryControl = L.Control.extend({
-      options: { position: "bottomleft" },
+      options: { position: isMobile ? "topright" : "bottomleft" },
       onAdd() {
         const element = L.DomUtil.create("div", "measurement-selection-summary");
         element.setAttribute("role", "status");
@@ -568,15 +568,6 @@ export function initializeReadOnlyMapPage(
       },
     });
     const summaryControl = new SummaryControl();
-    map.addControl(summaryControl);
-    if (isAnother) {
-      map.on(
-        "unload",
-        makeSummaryDraggable(summaryControl.getContainer(), map.getContainer(), () =>
-          map.fire("measurementselectionchange"),
-        ),
-      );
-    }
     const control = createMeasurementVisibilityControl({
       onSelectionToggle: selection.toggle,
       onSelectionButton: selection.bindButton,
@@ -588,6 +579,15 @@ export function initializeReadOnlyMapPage(
     });
     map.addControl(control);
     if (isMobile) registerHideableMapControl!(control);
+    map.addControl(summaryControl);
+    if (isAnother) {
+      map.on(
+        "unload",
+        makeSummaryDraggable(summaryControl.getContainer(), map.getContainer(), () =>
+          map.fire("measurementselectionchange"),
+        ),
+      );
+    }
   }
   map.on("overlayremove overlayadd", () => selection.prune());
 
@@ -606,8 +606,6 @@ export function initializeReadOnlyMapPage(
   if (isMobile) {
     const uiToggle = new MapUiVisibilityToggleControl!();
     map.addControl(uiToggle);
-    const summary = map.getContainer().querySelector(".measurement-selection-summary");
-    if (summary) uiToggle.getContainer()?.before(summary);
   }
   const { visibilityControl } = addReadOnlyMapVisibilityControls({
     includeShapeOverlays: isAnother || hasSharedShapes,

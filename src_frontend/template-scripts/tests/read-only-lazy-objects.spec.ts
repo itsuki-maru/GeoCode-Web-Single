@@ -311,8 +311,10 @@ describe("lazy groups in the actual read-only map runtime", () => {
         checkbox("b").click();
         expect(summary.textContent).toContain("選択してください");
         checkbox("b").click();
-        await flush();
-        expect(document.querySelectorAll(".shape-measure-label")).toHaveLength(0);
+        // ラベルの削除は次の描画フレームで行われるため、削除完了を待つ。
+        await vi.waitFor(() =>
+          expect(document.querySelectorAll(".shape-measure-label")).toHaveLength(0),
+        );
       }
       measureButton.click();
       expect(summary.hidden).toBe(true);
