@@ -1,6 +1,5 @@
 interface Shape {
   shapeType?: string;
-  getElement?(): Element | null;
 }
 
 interface Dependencies<T extends Shape> {
@@ -17,11 +16,10 @@ interface Dependencies<T extends Shape> {
 // 表示範囲ではなく選択集合から集計する。画面外へ移動しても合計を維持する。
 export function createMeasurementSelection<T extends Shape>(deps: Dependencies<T>) {
   const selected = new Set<T>();
-  let active = false;
-  let type: string | null = null;
+  const touchTimes = new WeakMap<T, number>();
+  let showSummary = false;
   let summary: HTMLElement | null = null;
   let button: HTMLButtonElement | null = null;
-  let notice = "";
   const names: Record<string, string> = {
     polyline: "線",
     polygon: "ポリゴン",
@@ -30,28 +28,29 @@ export function createMeasurementSelection<T extends Shape>(deps: Dependencies<T
   };
   const update = () => {
     button?.classList.toggle("is-hidden", !deps.getEnabled());
-    button?.classList.toggle("is-active", active);
-    button?.setAttribute("aria-pressed", String(active));
-    selected.forEach((layer) => layer.getElement?.()?.classList.add("is-measurement-selected"));
+    button?.classList.toggle("is-active", showSummary);
+    button?.setAttribute("aria-pressed", String(showSummary));
     if (!summary) return;
-    summary.hidden = !deps.getEnabled() || !active;
+    summary.hidden = !deps.getEnabled() || !showSummary;
     summary.classList.toggle("has-selection", selected.size > 0);
+    // Set の挿入順を使い、残っている最初の図形と同じタイプだけを集計する。
+    const type = selected.values().next().value?.shapeType;
+    let count = 0;
     let area = 0;
     let distance = 0;
     selected.forEach((layer) => {
+      if (layer.shapeType !== type) return;
+      count += 1;
       const value = deps.measure(layer);
       area += value.area;
       distance += value.distance;
     });
-    const lines = type
-      ? [`${names[type]} ${selected.size}件の合計`]
-      : ["計測する図形を選択してください"];
+    const lines = type ? [`${names[type]} ${count}件の合計`] : ["計測する図形を選択してください"];
     if (type === "polyline") lines.push(`総延長 ${deps.formatDistance(distance)}`);
     else if (type) {
       lines.push(`面積 ${deps.formatArea(area)}`);
       if (type !== "circle") lines.push(`周長 ${deps.formatDistance(distance)}`);
     }
-    if (notice) lines.push(notice);
     summary.replaceChildren(
       ...lines.map((text) => {
         const element = document.createElement("div");
@@ -61,11 +60,8 @@ export function createMeasurementSelection<T extends Shape>(deps: Dependencies<T
     );
   };
   const clear = () => {
-    selected.forEach((layer) => layer.getElement?.()?.classList.remove("is-measurement-selected"));
     selected.clear();
-    type = null;
-    active = false;
-    notice = "";
+    showSummary = false;
     update();
     deps.refresh();
   };
@@ -82,46 +78,35 @@ export function createMeasurementSelection<T extends Shape>(deps: Dependencies<T
     },
     toggle() {
       if (!deps.getEnabled()) return;
-      if (active) clear();
-      else {
-        active = true;
-        deps.closePopup();
-        update();
-        deps.refresh();
-      }
+      showSummary = !showSummary;
+      deps.closePopup();
+      update();
+      deps.refresh();
     },
     select(layer: T, event: unknown): boolean {
-      if (!active || !deps.getEnabled() || !layer.shapeType || !names[layer.shapeType])
-        return false;
+      if (!deps.getEnabled() || !layer.shapeType || !names[layer.shapeType]) return false;
       deps.stopEvent(event);
-      if (type && type !== layer.shapeType) {
-        notice = "最初に選択した図形と同じタイプだけを選択できます。";
-        update();
+      const original = (event as { originalEvent?: { type?: string } })?.originalEvent || event;
+      const eventType = (original as { type?: string })?.type;
+      const touchTime = touchTimes.get(layer);
+      if (eventType === "click" && touchTime !== undefined && Date.now() - touchTime < 500)
         return true;
-      }
-      notice = "";
-      if (selected.delete(layer)) layer.getElement?.()?.classList.remove("is-measurement-selected");
-      else selected.add(layer);
-      type = selected.size ? layer.shapeType : null;
+      if (eventType === "touchend") touchTimes.set(layer, Date.now());
+      if (!selected.delete(layer)) selected.add(layer);
       deps.closePopup();
       update();
       deps.refresh();
       return true;
     },
     includes(layer: T) {
-      return !active || selected.has(layer);
-    },
-    summaryOnly(layer: T) {
-      return selected.size > 1 && selected.has(layer);
+      return selected.has(layer);
     },
     prune() {
       selected.forEach((layer) => {
         if (!deps.isVisible(layer)) {
           selected.delete(layer);
-          layer.getElement?.()?.classList.remove("is-measurement-selected");
         }
       });
-      if (!selected.size) type = null;
       update();
       deps.refresh();
     },

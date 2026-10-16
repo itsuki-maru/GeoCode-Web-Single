@@ -1,7 +1,7 @@
 import { createTileOverlayManager, type TileOverlayRecord } from "../map/common/tile-overlays";
 import { createCollapsibleLayerControl } from "./controls";
 
-// Leaflet is provided by the live-map template.
+// Leaflet はライブ地図のテンプレート側から提供される。
 export function addLiveTileOverlayControl(
   leaflet: any,
   map: any,

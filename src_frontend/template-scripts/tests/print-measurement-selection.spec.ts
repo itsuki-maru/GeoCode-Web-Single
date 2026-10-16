@@ -9,7 +9,7 @@ describe("measurement selection in print preview", () => {
   it("keeps live totals inside the printed map while moving operation buttons to settings", () => {
     const map = document.createElement("div");
     const settings = document.createElement("aside");
-    map.innerHTML = `<div class="leaflet-control measurement-control"><button>図形の計測</button><button>辺を結合</button><button>複数選択</button></div>
+    map.innerHTML = `<div class="leaflet-control measurement-control"><button>図形の計測</button><button>辺を結合</button><button>複数計測</button></div>
       <div class="leaflet-control measurement-selection-summary"></div>
       <div class="leaflet-control leaflet-control-attribution">出典</div>`;
     const summary = map.querySelector<HTMLElement>(".measurement-selection-summary")!;
@@ -36,8 +36,14 @@ describe("measurement selection in print preview", () => {
     expect(summary.textContent).toContain("面積 20 m²");
     expect(summary.textContent).not.toContain("半径");
     expect(summary.classList.contains("has-selection")).toBe(true);
+    selection.select({ shapeType: "polyline" }, {});
+    expect(summary.textContent).toContain("円 2件");
     expect(summary.textContent).not.toMatch(/タップ|クリック|解除/);
     selection.select(a, {});
+    expect(summary.textContent).toContain("面積 10 m²");
+    selection.toggle();
+    expect(summary.hidden).toBe(true);
+    selection.toggle();
     expect(summary.textContent).toContain("面積 10 m²");
     selection.clear();
     expect(summary.hidden).toBe(true);

@@ -1,3 +1,5 @@
+import { bindFloatingMeasurementLabels } from "./floating-measurement-labels";
+
 interface LatLng {
   lat: number;
   lng: number;
@@ -11,7 +13,7 @@ interface MeasurementSegment {
 }
 
 interface MeasurementMarker {
-  getLatLng?(): unknown;
+  getLatLng?(): LatLng;
   isMeasurementLabel?: boolean;
 }
 
@@ -46,7 +48,6 @@ type MeasurementLabelVariant =
   | "summary-rectangle";
 
 interface ShapeMeasurementDisplayDependencies {
-  summaryOnly?(layer: MeasurementLayer): boolean;
   calculateProjectedPolygonArea(latLngs: unknown): number;
   createGroupedSegmentEndpointMarkers(
     segments: MeasurementSegment[],
@@ -76,7 +77,11 @@ interface ShapeMeasurementDisplayDependencies {
   getPolylineCenterLatLng(layer: MeasurementLayer): LatLng | null;
   getSegmentMidpoint(start: LatLng, end: LatLng): LatLng;
   getShapeMeasurementManager(): MeasurementManager | null;
-  map: { distance(start: LatLng, end: LatLng): number };
+  map: {
+    distance(start: LatLng, end: LatLng): number;
+    getContainer?(): HTMLElement;
+    fire?(event: string): unknown;
+  };
   measureCircle(layer?: MeasurementLayer | null): {
     area: number;
     radius: number;
@@ -96,7 +101,6 @@ export const flattenShapeLatLngs = (latLngs: unknown): LatLng[] => {
 };
 
 export function createReadOnlyShapeMeasurementDisplayRuntime({
-  summaryOnly = () => false,
   calculateProjectedPolygonArea,
   createGroupedSegmentEndpointMarkers,
   createGroupedSegmentMeasurementMarkers,
@@ -195,7 +199,7 @@ export function createReadOnlyShapeMeasurementDisplayRuntime({
             start: LatLng;
           } => Boolean(segment.start && segment.end),
         );
-      if (!summaryOnly(layer)) addSegmentMarkers(markers, measurementSegments);
+      addSegmentMarkers(markers, measurementSegments);
 
       const summaryMarker = createMeasurementLabelMarker(
         getShapeLabelLatLng(layer),
@@ -257,7 +261,15 @@ export function createReadOnlyShapeMeasurementDisplayRuntime({
   ): void => {
     if (!layer) return;
 
-    const markers = filterMeasurementMarkersForBounds(createShapeMeasurementMarkers(layer), bounds);
+    const markers = filterMeasurementMarkersForBounds(
+      bindFloatingMeasurementLabels(
+        layer,
+        createShapeMeasurementMarkers(layer),
+        map,
+        getMeasurementSegmentMerged(),
+      ),
+      bounds,
+    );
     layer.measurementMarkers = markers;
     layer.measurementLayerId = layerId;
     if (markers.length === 0) return;

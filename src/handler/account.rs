@@ -22,7 +22,7 @@ use crate::model::{
 };
 use crate::utils::validate_password;
 
-// SIGNUP USER API
+// ユーザー登録用 API。
 pub async fn signup_handler(
     Extension(pool): Extension<SqlitePool>,
     Json(payload): Json<SignupPayload>,

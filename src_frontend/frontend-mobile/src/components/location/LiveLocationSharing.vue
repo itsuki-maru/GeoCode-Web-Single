@@ -93,7 +93,7 @@ async function stopSharing() {
     try {
       await apiClient.delete(`${liveLocationSessionUrl}/${id}`);
     } catch {
-      /* server freshness handles cleanup */
+      /* サーバー側でデータの鮮度を判定し、期限切れを処理する。 */
     }
 }
 function toggleSharing() {

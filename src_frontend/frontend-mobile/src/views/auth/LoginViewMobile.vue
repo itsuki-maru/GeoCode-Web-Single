@@ -17,7 +17,7 @@ const isShowMemoIcon = inject("isShowMemoIcon") as Ref<boolean>;
 // サインアップ・ログイン画面では非表示にする
 isShowMemoIcon.value = false;
 
-// "mapview".
+// 地図画面へ遷移するためのルーター。
 const router = useRouter();
 const homeRedirect = (): void => {
   router.push("/mapview");
@@ -52,7 +52,7 @@ const loginPost = async (): Promise<void> => {
   };
 
   try {
-    // Cookie save setting.
+    // Cookie の保存設定。
     const response = await apiClient.post(getTokenUrl, payload);
 
     const isTotp = response.data["totp_required"];

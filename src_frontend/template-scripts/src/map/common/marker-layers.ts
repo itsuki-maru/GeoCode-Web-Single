@@ -17,6 +17,7 @@ interface ReadOnlyShapeRecord {
 }
 
 interface MarkerLayer {
+  openTooltip?(): void;
   bindPopup(content: string): MarkerLayer;
   bindTooltip(content: string, options: { permanent: boolean }): MarkerLayer;
   getElement(): HTMLElement | null;
@@ -49,6 +50,7 @@ interface LeafletNamespace {
 }
 
 interface HydrateMarkerOptions {
+  onMarkerCreated?: (marker: MarkerLayer) => void;
   clusterGroups: Record<string, LayerGroup>;
   createMarkerGroupForLayer: (layerId: string | null | undefined) => LayerGroup | null;
   documentRoot?: Document;
@@ -78,6 +80,7 @@ interface HydrateMarkerOptions {
 }
 
 interface CreateMarkerLayerControlOptions {
+  formatLayerName?: (layerId: string, escapedName: string) => string;
   clusterGroups: Record<string, LayerGroup>;
   createLayeredMarkerDisplayManager: (options: {
     layerVisibilityGroups: Record<string, LayerGroup>;
@@ -98,6 +101,7 @@ interface CreateMarkerLayerControlOptions {
 }
 
 export function hydrateReadOnlyMarkers({
+  onMarkerCreated,
   clusterGroups,
   createMarkerGroupForLayer,
   documentRoot = document,
@@ -150,6 +154,7 @@ export function hydrateReadOnlyMarkers({
     const markerElement = marker.getElement();
     if (markerElement) markerElement.id = `marker-${markerData.id}`;
     markers[`marker-${markerData.id}`] = marker;
+    onMarkerCreated?.(marker);
   });
 
   const normalizedShapeRecords = Array.isArray(shapeRecords)
@@ -165,6 +170,7 @@ export function hydrateReadOnlyMarkers({
 }
 
 export function createReadOnlyMarkerLayerControl({
+  formatLayerName,
   clusterGroups,
   createLayeredMarkerDisplayManager,
   escapeHtml,
@@ -188,7 +194,7 @@ export function createReadOnlyMarkerLayerControl({
 
     const visibilityGroup = layerVisibilityGroups[layerId];
     if (!visibilityGroup) return;
-    layersControl.addOverlay(visibilityGroup, layerName);
+    layersControl.addOverlay(visibilityGroup, formatLayerName?.(layerId, layerName) ?? layerName);
     layerControlOverlayLayers.push(visibilityGroup);
   });
   layersControl.addTo(map);

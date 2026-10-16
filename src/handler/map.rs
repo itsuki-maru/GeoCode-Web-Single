@@ -344,33 +344,6 @@ pub async fn map_another_get_handler(
     // マーカーをクラスタリングするかどうか
     let is_cluster = params.is_cluster.unwrap_or(true);
 
-    // マーカーを取得
-    let markers = query_as!(
-        MarkerObject,
-        r#"
-        SELECT
-            id,
-            layer_id,
-            marker_name,
-            latitude,
-            longitude,
-            detail,
-            update_at
-        FROM marker_info_model
-        WHERE user_id = $1
-        "#,
-        user_id,
-    )
-    .fetch_all(&pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
-
-    // マーカーをハッシュマップに変換
-    let markers_hash_map = vec_to_hashmap(markers, |m| m.id.clone());
-
     // レイヤーを取得
     let layers = sqlx::query_as::<_, LayerObject>(
         r#"
@@ -398,31 +371,6 @@ pub async fn map_another_get_handler(
     // レイヤーをハッシュマップに変換
     let layers_hash_map = vec_to_hashmap(layers, |l| l.id.clone());
 
-    // シェイプの一覧を取得
-    let shapes = sqlx::query_as::<_, ShapeObject>(
-        r#"
-        SELECT
-            id,
-            user_id,
-            layer_id,
-            shape_type,
-            name,
-            geojson,
-            created_at,
-            updated_at
-        FROM shape_model
-        WHERE user_id = $1
-        ORDER BY created_at ASC
-        "#,
-    )
-    .bind(&user_id)
-    .fetch_all(&pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
-
     let mut context = Context::new();
     context.insert("latitude", &DEFAULT_ANOTHER_MAP_LATITUDE);
     context.insert("longitude", &DEFAULT_ANOTHER_MAP_LONGITUDE);
@@ -436,8 +384,9 @@ pub async fn map_another_get_handler(
     );
     context.insert("is_cluster", &is_cluster);
     context.insert("layersFromAxum", &layers_hash_map);
-    context.insert("markersFromAxum", &markers_hash_map);
-    context.insert("shapesFromAxum", &shapes);
+    // マーカーと図形は、画面でグループが選択された時点で取得する。
+    context.insert("markersFromAxum", &serde_json::json!({}));
+    context.insert("shapesFromAxum", &serde_json::json!([]));
 
     let tera = tera.lock().await;
     match tera.render("map-anather.html", &context) {

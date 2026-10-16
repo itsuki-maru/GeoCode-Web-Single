@@ -1,4 +1,4 @@
-/** Rebuild attribution using only text and HTTP(S) anchors in an inert template. */
+/** 内容を実行しないテンプレート内で、テキストと HTTP(S) のリンクだけを使って出典表示を組み立て直す。 */
 export function formatTileAttribution(value: string): string {
   const source = document.createElement("template");
   source.innerHTML = value;
@@ -29,14 +29,14 @@ export function formatTileAttribution(value: string): string {
       try {
         if (/^https?:\/\//i.test(href)) url = new URL(href);
       } catch {
-        /* Invalid links remain plain text. */
+        /* 無効なリンクは通常のテキストとして残す。 */
       }
       if (url && (url.protocol === "https:" || url.protocol === "http:")) {
         const link = document.createElement("a");
         link.href = url.href;
         link.target = "_blank";
         link.rel = "noopener noreferrer";
-        // Never copy input attributes or markup into the output link.
+        // 入力側の属性やマークアップを、出力するリンクへコピーしない。
         link.textContent = element.textContent || "";
         parent.appendChild(link);
         return;

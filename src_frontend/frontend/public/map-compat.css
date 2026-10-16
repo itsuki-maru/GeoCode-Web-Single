@@ -1,6 +1,6 @@
 /*
- * Map templates historically relied on Bootstrap 3's global reset styles.
- * Keep the required layout and form normalization without loading Bootstrap.
+ * 地図テンプレートは、従来 Bootstrap 3 によるページ全体のスタイル初期化に依存していた。
+ * Bootstrap を読み込まずに、必要な配置とフォームのスタイル調整を維持する。
  */
 html {
   font-size: 62.5%;

@@ -110,7 +110,7 @@ function applyMapObjectUpdateFromParent(payload) {
   return false;
 }
 
-// Only the embedded desktop editor delegates printing to the application.
+// 埋め込み表示の PC 版編集画面だけ、印刷処理をアプリケーション側へ委ねる。
 if (!editorEntryProfile.isMobile && window.parent !== window) {
   const printParentOrigin = document.referrer
     ? new URL(document.referrer).origin
@@ -177,7 +177,7 @@ window.addEventListener("message", function (event) {
       try {
         success = tileOverlayManager.sync(messageData.tiles);
       } catch {
-        /* Parent reloads on failure. */
+        /* 失敗した場合は親画面で再読み込みする。 */
       }
       window.parent.postMessage(
         { type: "tileOverlaysUpdateResult", requestId: messageData.requestId, success },

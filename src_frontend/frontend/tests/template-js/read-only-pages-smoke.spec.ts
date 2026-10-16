@@ -403,8 +403,8 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
   vi.stubGlobal("document", dom.window.document);
   vi.stubGlobal("navigator", dom.window.navigator);
   vi.stubGlobal("L", (dom.window as unknown as { L: unknown }).L);
-  // jsdom does not perform layout. Keep the real drag implementation, but supply
-  // its browser observer in both the VM window and the imported modules' realm.
+  // jsdom はレイアウトを計算しないため、実際のドラッグ処理は維持しつつ、
+  // VM のウィンドウとインポート先の実行環境の両方に、ブラウザーの監視機能を補う。
   class SmokeResizeObserver {
     observe() {}
     unobserve() {}

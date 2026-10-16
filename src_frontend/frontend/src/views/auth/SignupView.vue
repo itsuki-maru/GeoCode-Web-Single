@@ -12,7 +12,7 @@ const resetExternalSiteHref = inject("resetExternalSiteHref") as () => void;
 isShowOtherFunctionButtonZone.value = false;
 resetExternalSiteHref();
 
-// Signup ok next page.
+// 登録成功後の画面へ遷移する。
 const router = useRouter();
 const loginRedirect = (): void => {
   router.push("/account/login");

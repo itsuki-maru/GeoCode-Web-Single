@@ -589,8 +589,8 @@ export function createMapSearchRuntime({
             buttons[next]?.focus();
           }
         });
-        // iOS can focus an outside element while synthesizing a candidate click.
-        // Keep that touch's focus changes from hiding its target before click.
+        // iOS では、候補のタップからクリックイベントを生成する途中で、外部の要素へフォーカスが移る場合がある。
+        // その際のフォーカス移動で、クリック前に対象の候補が非表示になることを防ぐ。
         let candidateTouchPending = false;
         const resetCandidateTouch = (): void => {
           candidateTouchPending = false;
@@ -610,7 +610,7 @@ export function createMapSearchRuntime({
             !!resultList?.contains(event.target as Node);
           dismissOutside(event);
         };
-        // Capture also observes outside controls which stop event propagation.
+        // イベントの伝播を止める外部コントロールも、キャプチャ段階で検知する。
         document.addEventListener("pointerdown", onPointerDown, true);
         document.addEventListener("pointercancel", resetCandidateTouch, true);
         document.addEventListener("keydown", resetCandidateTouch, true);
@@ -619,7 +619,7 @@ export function createMapSearchRuntime({
         window.addEventListener("resize", fitResults);
         window.visualViewport?.addEventListener("resize", fitResults);
         window.visualViewport?.addEventListener("scroll", fitResults);
-        // Leaflet invokes onRemove when disposing this control.
+        // このコントロールを破棄する際は、Leaflet が onRemove を呼び出す。
         (container as HTMLElement & { cleanupSearch?: () => void }).cleanupSearch = () => {
           document.removeEventListener("pointerdown", onPointerDown, true);
           document.removeEventListener("pointercancel", resetCandidateTouch, true);
@@ -877,6 +877,9 @@ export function createMapSearchRuntime({
   };
 
   const updateMeasurementControlState = (): void => {
+    const measurementButton = document.getElementById("measurement-toggle-btn");
+    measurementButton?.classList.toggle("is-active", getMeasurementVisible());
+    measurementButton?.setAttribute("aria-pressed", String(getMeasurementVisible()));
     const mergeButton = document.getElementById("measurement-merge-toggle-btn");
     if (!mergeButton) return;
     mergeButton.classList.toggle("is-hidden", !getMeasurementVisible());

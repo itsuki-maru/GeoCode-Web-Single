@@ -1057,10 +1057,15 @@ async fn map_handlers_render_templates_with_sqlite_data() {
     .into_response();
     assert_eq!(response.status(), StatusCode::OK);
 
+    let tera = test_tera();
+    tera.lock().await.add_raw_template(
+        "map-anather.html",
+        "{{ latitude }}|{{ longitude }}|{{ zoom }}|{{ markersFromAxum | length }}|{{ shapesFromAxum | length }}|{{ layersFromAxum | length }}",
+    ).expect("another map test template should load");
     let response = map_another_get_handler(
         Extension(user_id),
         Extension(pool),
-        Extension(test_tera()),
+        Extension(tera),
         Query(MapAnotherWindowQueryParams {
             is_cluster: Some(false),
         }),
@@ -1073,10 +1078,106 @@ async fn map_handlers_render_templates_with_sqlite_data() {
         .await
         .expect("another map response body should be readable");
     let body = String::from_utf8(bytes.to_vec()).expect("another map should be utf-8");
-    assert!(body.contains("initialView:"));
-    assert!(body.contains("latitude: 37.65"));
-    assert!(body.contains("longitude: 138"));
-    assert!(body.contains("zoom: 6"));
+    assert_eq!(body, "37.65|138|6|0|0|1");
+}
+
+// マスターも単独グループとして絞り込み、ほかのレイヤや所有者のデータを返さない。
+#[tokio::test]
+async fn map_group_object_apis_filter_layers_and_owners() {
+    let pool = common::test_pool().await;
+    let owner = common::create_test_user(&pool, "group-owner").await;
+    let other = common::create_test_user(&pool, "group-other").await;
+    let master = common::master_layer_id(&pool, &owner).await;
+    let foreign = common::master_layer_id(&pool, &other).await;
+    let Json(created) = create_layer_handler(
+        Extension(owner.clone()),
+        Extension(pool.clone()),
+        Query(LayerCreateQueryParams {
+            name: Some("group".into()),
+        }),
+    )
+    .await
+    .unwrap();
+    let group = created.id;
+    let master_marker = insert_marker(&pool, &owner, &master).await;
+    let master_shape = insert_shape(&pool, &owner, &master).await;
+    let group_marker = insert_marker(&pool, &owner, &group).await;
+    let group_shape = insert_shape(&pool, &owner, &group).await;
+    insert_marker(&pool, &other, &foreign).await;
+    insert_shape(&pool, &other, &foreign).await;
+    for (layer, marker, shape) in [
+        (&master, &master_marker, &master_shape),
+        (&group, &group_marker, &group_shape),
+    ] {
+        let Json(markers) = marker_get_handler(
+            Extension(owner.clone()),
+            Extension(pool.clone()),
+            Query(MarkerReadQueryPrams {
+                layer: Some(layer.clone()),
+                is_master: Some(false),
+            }),
+        )
+        .await
+        .unwrap();
+        let Json(shapes) = shapes_get_handler(
+            Extension(owner.clone()),
+            Extension(pool.clone()),
+            Query(ShapeReadQueryParams {
+                layer_id: Some(layer.clone()),
+                is_master: Some(false),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(markers.len(), 1);
+        assert!(markers.contains_key(marker));
+        assert_eq!(shapes.len(), 1);
+        assert_eq!(&shapes[0].id, shape);
+    }
+    let Json(markers) = marker_get_handler(
+        Extension(owner.clone()),
+        Extension(pool.clone()),
+        Query(MarkerReadQueryPrams {
+            layer: Some(foreign.clone()),
+            is_master: Some(false),
+        }),
+    )
+    .await
+    .unwrap();
+    let Json(shapes) = shapes_get_handler(
+        Extension(owner.clone()),
+        Extension(pool.clone()),
+        Query(ShapeReadQueryParams {
+            layer_id: Some(foreign),
+            is_master: Some(false),
+        }),
+    )
+    .await
+    .unwrap();
+    assert!(markers.is_empty());
+    assert!(shapes.is_empty());
+    let Json(markers) = marker_get_handler(
+        Extension(owner.clone()),
+        Extension(pool.clone()),
+        Query(MarkerReadQueryPrams {
+            layer: Some(master.clone()),
+            is_master: Some(true),
+        }),
+    )
+    .await
+    .unwrap();
+    let Json(shapes) = shapes_get_handler(
+        Extension(owner),
+        Extension(pool),
+        Query(ShapeReadQueryParams {
+            layer_id: Some(master),
+            is_master: Some(true),
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(markers.len(), 2);
+    assert_eq!(shapes.len(), 2);
 }
 
 // 共有URLの生成、現在URL取得、表示状態を維持したパスワード認証、無効化を確認する。

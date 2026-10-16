@@ -47,7 +47,7 @@ async fn all_map_pages_load_their_owners_latest_tiles() {
     .await
     .unwrap();
     let other_definition = definition(true);
-    // Distinct IDs prove the shared map follows its creator, not all admins.
+    // ID を分け、共有地図が全管理者ではなく作成者の設定を参照することを検証する。
     let Json(other_tile) = admin_create(
         Extension(other.clone()),
         Extension(pool.clone()),
@@ -72,7 +72,7 @@ async fn all_map_pages_load_their_owners_latest_tiles() {
     .await
     .unwrap();
     let tera = geocode_web_single::build_tera_extension().unwrap();
-    // Exercise current source templates even if the distribution bundle is older.
+    // 配布用の成果物が古い場合でも、現在のソースにあるテンプレートを検証する。
     {
         let mut templates = tera.lock().await;
         for name in [
@@ -245,7 +245,7 @@ async fn permissions_selection_isolation_and_definition_lifecycle() {
         assert_eq!(selected.len(), 1);
     }
     assert!(selected_tiles(&pool, &admin).await.unwrap().is_empty());
-    // Another account cannot remove this user's selection.
+    // 別のアカウントから、このユーザーの選択を解除できないことを検証する。
     let _ = user_select(
         Extension(admin.clone()),
         Extension(pool.clone()),
@@ -318,7 +318,7 @@ async fn permissions_selection_isolation_and_definition_lifecycle() {
 async fn upgrade_preserves_existing_data_and_cascades_user_deletion() {
     let pool = common::test_pool().await;
     let user = common::create_test_admin(&pool, "upgrade-tile-user").await;
-    // Recreate the schema immediately before this feature's migration.
+    // この機能のマイグレーションを適用する直前のスキーマを再現する。
     sqlx::raw_sql("DROP TABLE user_tile_overlay_model; DROP TABLE tile_overlay_model; DELETE FROM schema_migrations WHERE version=11;")
         .execute(&pool).await.unwrap();
     geocode_web_single::db::run_migrations(&pool).await.unwrap();
@@ -409,8 +409,8 @@ async fn selection_waits_for_concurrent_disable() {
         .unwrap();
     assert_eq!(count, 0);
     pool.close().await;
-    // Windows can briefly retain a file handle after the pool closes. Retry
-    // only sharing/lock violations; never hide other errors or a lasting lock.
+    // Windows ではプールを閉じた直後もファイルが使用中の場合があるため、
+    // 共有・ロック違反だけを再試行し、ほかのエラーや継続するロックは見逃さない。
     for attempt in 0..50 {
         match std::fs::remove_file(&path) {
             Ok(()) => break,
@@ -561,7 +561,7 @@ async fn temporary_overlay_sharing_is_opt_in_and_query_only_controls_visibility(
                 )
                 .await;
                 assert_eq!(body, format!("{}|{}|false", usize::from(enabled), visible));
-                // The same selection survives password prompts, failed retries and successful authentication.
+                // パスワード入力、再試行の失敗、認証成功の後も、同じ選択が維持されることを検証する。
                 sqlx::query("UPDATE temporary_urls SET password_hash=$1 WHERE id=$2")
                     .bind(bcrypt::hash("pass1234", 4).unwrap())
                     .bind(&created.id)

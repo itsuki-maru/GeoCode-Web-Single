@@ -1,8 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
 import type { RouteRecordRaw } from "vue-router";
-import { useMapObjectStore } from "@/stores/mapobjects";
-import { useLayersStore } from "@/stores/layers";
-import { useImageStore } from "@/stores/images";
 import { authCheckUrl } from "./urls";
 import apiClient from "@/axiosClient";
 
@@ -23,13 +20,7 @@ const routeSettings: RouteRecordRaw[] = [
     beforeEnter: async (to, from, next) => {
       // 認証確認
       try {
-        const res = await apiClient.get(authCheckUrl);
-        const mapobjStore = useMapObjectStore();
-        mapobjStore.initList();
-        const layersStore = useLayersStore();
-        layersStore.initList();
-        const imageStore = useImageStore();
-        imageStore.initList();
+        await apiClient.get(authCheckUrl);
         // 正常処理
         next();
       } catch (error) {

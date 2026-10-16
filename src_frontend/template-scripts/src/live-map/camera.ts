@@ -10,7 +10,7 @@ class CameraHttpError extends Error {
   }
 }
 
-/** A single popup owns one connection. HTTP signals contain no media. */
+/** ポップアップごとに接続を一つ持ち、HTTP の制御通信には映像を含めない。 */
 export class CameraViewer {
   readonly element = document.createElement("div");
   private readonly status = document.createElement("p");
@@ -248,7 +248,7 @@ export class CameraViewer {
         messages: sent,
       });
       if (!valid()) return;
-      this.lastReply = started; // Delayed replies must not extend permission beyond the server lease.
+      this.lastReply = started; // 応答が遅れても、サーバー側の有効期限を超えて権限を延長しない。
       this.pending.splice(0, sent.length);
       for (const signal of response.messages) {
         if (!valid()) return;

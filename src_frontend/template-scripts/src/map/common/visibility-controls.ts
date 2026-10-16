@@ -80,6 +80,10 @@ export function createMeasurementVisibilityControl({
       );
       const button = leaflet.DomUtil.create("button", "custom-control-button", container);
       button.innerHTML = "図形の計測";
+      button.id = "measurement-toggle-btn";
+      button.setAttribute("type", "button");
+      button.setAttribute("aria-pressed", "false");
+      button.title = "有効にして図形をクリック・タップすると計測します。もう一度選ぶと解除します";
       const mergeButton = leaflet.DomUtil.create(
         "button",
         "custom-control-button is-hidden",
@@ -97,7 +101,8 @@ export function createMeasurementVisibilityControl({
         ) as HTMLButtonElement;
         selectionButton.id = "measurement-selection-toggle-btn";
         selectionButton.type = "button";
-        selectionButton.textContent = "複数選択";
+        selectionButton.textContent = "複数計測";
+        selectionButton.title = "最初に選んだ図形と同じタイプの合計を表示・非表示にします";
         selectionButton.setAttribute("aria-pressed", "false");
         leaflet.DomEvent.on(selectionButton, "click", (event) => {
           leaflet.DomEvent.stop(event);

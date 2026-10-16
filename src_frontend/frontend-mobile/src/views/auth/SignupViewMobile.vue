@@ -10,7 +10,7 @@ const isShowMemoIcon = inject("isShowMemoIcon") as Ref<boolean>;
 // サインアップ・ログイン画面では非表示にする
 isShowMemoIcon.value = false;
 
-// Signup ok next page.
+// 登録成功後の画面へ遷移する。
 const router = useRouter();
 const loginRedirect = (): void => {
   router.push("/account/login");

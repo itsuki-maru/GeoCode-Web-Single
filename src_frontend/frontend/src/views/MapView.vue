@@ -29,7 +29,7 @@ import {
   saveLastActiveLayerId,
 } from "@/composables/useLastActiveLayer";
 
-// Components
+// コンポーネント
 import UserPrivacySetting from "@/components/UserPrivacySetting.vue";
 import ProgressSpinner from "@/components/common/ProgressSpinner.vue";
 import UploadProgressModal from "@/components/common/UploadProgressModal.vue";
@@ -53,12 +53,12 @@ import OnetimeSettingModal from "@/components/share/OnetimeSettingModal.vue";
 import OnetimeUrlModal from "@/components/share/OnetimeUrlModal.vue";
 import JsonImportModal from "@/components/json/JsonImportModal.vue";
 
-// --- App init ---
+// --- アプリケーションの初期化 ---
 const appInitStore = useApplicationInitStore();
 const allowedOriginsRef = ref(appInitStore.appInitData.allowOrigins);
 const router = useRouter();
 
-// --- Protocol detection ---
+// --- 通信プロトコルの判定 ---
 const isHttpsProtocol = ref(false);
 const currentUrl = window.location.href;
 const url = new URL(currentUrl);
@@ -66,7 +66,7 @@ if (url.protocol === "https:" || url.hostname === "localhost") {
   isHttpsProtocol.value = true;
 }
 
-// --- Stores ---
+// --- ストア ---
 const imageStore = useImageStore();
 imageStore.initList();
 const imageList = computed((): Map<string, ImageData> => imageStore.imageList);
@@ -76,22 +76,23 @@ const layersInitialization = layersStore.initList();
 const layerList = computed((): Map<string, LayersData> => layersStore.layersList);
 
 const mapobjStore = useMapObjectStore();
-mapobjStore.initList();
 const markerList = computed((): Map<string, MapObjectData> => mapobjStore.mapObjectList);
 const shapeStore = useShapeStore();
-void shapeStore.queryShapes();
+mapobjStore.clearMapObject();
+shapeStore.clearShapeList();
 const shapeList = computed((): Map<string, ShapeData> => shapeStore.shapeList);
 
-// --- Window size ---
+// --- 画面サイズ ---
 const { divHeight } = useWindowSize();
 const { isMapObjectTableOpen, toggleMapObjectTable } = useMapObjectTableVisibility();
 
-// --- Active layer management ---
+// --- 選択中レイヤの管理 ---
 const activeLayer = ref("");
 const masterLayerId = ref("");
 const srcUrl = ref("");
 const pendingLayerMapUrl = ref<string | null>(null);
-const showProgressModal = ref(false);
+const isMapFrameLoading = ref(false);
+const showProgressModal = ref(true);
 const uploadProgressState = ref<UploadProgressState>({
   isOpen: false,
   phase: "preparing",
@@ -103,39 +104,45 @@ const isReload = ref(true);
 
 const isMasterLayer = computed((): boolean => activeLayer.value === masterLayerId.value);
 
+let mapReloadSequence = 0;
+let mapReloadController: AbortController | null = null;
+let disposed = false;
+
+onUnmounted(() => {
+  disposed = true;
+  ++mapReloadSequence;
+  mapReloadController?.abort();
+  mapobjStore.clearMapObject();
+  shapeStore.clearShapeList();
+});
+
 const getMasterLayerId = async (): Promise<void> => {
   try {
-    const [response] = await Promise.all([
+    const [response, layersLoaded] = await Promise.all([
       apiClient.get(getMasterLayerIdUrl),
       layersInitialization,
     ]);
-    masterLayerId.value = response.data["id"];
+    if (disposed) return;
+    if (!layersLoaded || !response.data.id) throw new Error("Failed to load initial layers");
+    masterLayerId.value = response.data.id;
     activeLayer.value = resolveInitialLayerId(
       getLastActiveLayerId(),
       masterLayerId.value,
       new Set(layersStore.layersList.keys()),
     );
   } catch (error) {
-    if (apiClient.isAxiosError(error)) {
-      const axiosError = error as AxiosError;
-      if (axiosError.response) {
-        switch (axiosError.response.status) {
-          case 400:
-            showMessage(`${axiosError.response.data}`);
-            break;
-          case 401:
-            loginRedirect();
-            break;
-          default:
-            console.error(`An error occurred: ${axiosError.response.status}`);
-        }
-      }
+    if (disposed) return;
+    console.error(error);
+    if (apiClient.isAxiosError(error) && error.response?.status === 401) {
+      await loginRedirect();
+    } else {
+      showMessage("地図の初期情報を取得できませんでした。再読み込みしてください。");
     }
+  } finally {
+    if (!disposed && !activeLayer.value) showProgressModal.value = false;
   }
 };
-getMasterLayerId();
 
-let loadedOnceFlag = false;
 let suppressNextActiveLayerReload = false;
 watch(activeLayer, async (): Promise<void> => {
   if (!activeLayer.value) return;
@@ -143,58 +150,101 @@ watch(activeLayer, async (): Promise<void> => {
     suppressNextActiveLayerReload = false;
     return;
   }
-  if (loadedOnceFlag) showProgressModal.value = true;
-  const isMaster = activeLayer.value === masterLayerId.value;
   const selectedLayerId = activeLayer.value;
+  const isMaster = selectedLayerId === masterLayerId.value;
   const mapUrl =
-    pendingLayerMapUrl.value ?? `${baseUrl}/map?layer=${activeLayer.value}&is_master=${isMaster}`;
+    pendingLayerMapUrl.value ?? `${baseUrl}/map?layer=${selectedLayerId}&is_master=${isMaster}`;
   pendingLayerMapUrl.value = null;
   let synchronized = false;
+  let requestSequence = 0;
   try {
-    synchronized = await reloadMap(mapUrl, true);
+    const request = reloadMap(mapUrl, true);
+    requestSequence = mapReloadSequence;
+    synchronized = await request;
   } catch (error) {
     console.error(error);
-  } finally {
-    showProgressModal.value = false;
-    loadedOnceFlag = true;
   }
 
-  if (activeLayer.value !== selectedLayerId) return;
-
+  if (disposed || requestSequence !== mapReloadSequence || activeLayer.value !== selectedLayerId)
+    return;
   if (synchronized) {
     saveLastActiveLayerId(selectedLayerId);
   } else if (selectedLayerId !== masterLayerId.value) {
     activeLayer.value = masterLayerId.value;
+  } else {
+    showMessage("地図データを取得できませんでした。再読み込みしてください。");
   }
 });
 
-// --- Map operations ---
+// 読み込みごとに対象レイヤを保持し、最新の読み込みだけが現在の画面を更新できるようにする。
 const reloadMap = async (
   mapUrl: string,
   absolute: boolean = false,
   forceIframeReload: boolean = false,
 ): Promise<boolean> => {
-  await apiClient.get(authCheckUrl);
-  const shouldForceIframeReload = forceIframeReload && srcUrl.value === mapUrl;
-  srcUrl.value = mapUrl;
-  let synchronized = true;
+  const selectedLayerId = activeLayer.value;
+  if (!selectedLayerId || disposed) return false;
+  const isMaster = selectedLayerId === masterLayerId.value;
+  const sequence = ++mapReloadSequence;
+  mapReloadController?.abort();
+  const controller = new AbortController();
+  mapReloadController = controller;
+  const isCurrent = () =>
+    !disposed &&
+    !controller.signal.aborted &&
+    sequence === mapReloadSequence &&
+    activeLayer.value === selectedLayerId;
   if (absolute) {
-    isReload.value = true;
-    mapObjectQueryFormData.value = { query1: "", query2: "" };
-    const isMaster = activeLayer.value === masterLayerId.value;
-    const [markersLoaded, shapesLoaded] = await Promise.all([
-      mapobjStore.queryMapObject(activeLayer.value, isMaster),
-      shapeStore.queryShapes(activeLayer.value, isMaster),
-    ]);
-    synchronized = markersLoaded && shapesLoaded;
-    mapIframeRef.value?.filterMapObjects(null, null);
-    showProgressModal.value = false;
+    showProgressModal.value = true;
+    mapobjStore.clearMapObject();
+    shapeStore.clearShapeList();
   }
-  if (shouldForceIframeReload) {
-    synchronized = (mapIframeRef.value?.reloadMapFrame() ?? false) && synchronized;
+  try {
+    await apiClient.get(authCheckUrl, { signal: controller.signal });
+    if (!isCurrent()) return false;
+    if (absolute) {
+      const [markersLoaded, shapesLoaded] = await Promise.all([
+        mapobjStore.queryMapObject(selectedLayerId, isMaster, controller.signal),
+        shapeStore.queryShapes(selectedLayerId, isMaster, controller.signal),
+      ]);
+      if (!isCurrent()) return false;
+      if (!markersLoaded || !shapesLoaded) {
+        mapobjStore.clearMapObject();
+        shapeStore.clearShapeList();
+        srcUrl.value = "";
+        isMapFrameLoading.value = false;
+        return false;
+      }
+      isReload.value = true;
+      mapObjectQueryFormData.value = { query1: "", query2: "" };
+      mapIframeRef.value?.filterMapObjects(null, null);
+    }
+    const shouldForceIframeReload = forceIframeReload && srcUrl.value === mapUrl;
+    if (srcUrl.value !== mapUrl || shouldForceIframeReload) isMapFrameLoading.value = true;
+    srcUrl.value = mapUrl;
+    if (shouldForceIframeReload) {
+      const reloaded = mapIframeRef.value?.reloadMapFrame() ?? false;
+      if (!reloaded) isMapFrameLoading.value = false;
+      return reloaded;
+    }
+    return true;
+  } catch (error) {
+    if (!isCurrent()) return false;
+    if (absolute) {
+      srcUrl.value = "";
+      isMapFrameLoading.value = false;
+    }
+    throw error;
+  } finally {
+    if (isCurrent() && absolute) showProgressModal.value = false;
   }
-  return synchronized;
 };
+
+const onMapLoaded = (loadedUrl: string): void => {
+  if (loadedUrl === srcUrl.value) isMapFrameLoading.value = false;
+};
+
+void getMasterLayerId();
 
 const handleUploadProgressChange = (progress: UploadProgressState): void => {
   uploadProgressState.value = progress;
@@ -320,7 +370,7 @@ const handleMapObjectSearch = async (query: QueryForm, reset: boolean = false): 
   }
 };
 
-// --- Login redirect ---
+// --- ログイン画面への遷移 ---
 async function loginRedirect(): Promise<void> {
   try {
     await apiClient.post(disableTokenUrl);
@@ -330,7 +380,7 @@ async function loginRedirect(): Promise<void> {
   router.push("/account/login");
 }
 
-// --- Message modal ---
+// --- メッセージ表示モーダル ---
 const isMessageModal = ref(false);
 const messageText = ref("");
 const showMessage = (message: string): void => {
@@ -342,7 +392,7 @@ const closeMessage = (): void => {
   messageText.value = "";
 };
 
-// --- Modal states ---
+// --- モーダルの状態 ---
 const isOpenEditModal = ref(false);
 const selectedObjectId = ref("");
 const selectedObjectType = ref<"marker" | "shape">("marker");
@@ -360,23 +410,23 @@ const isLayerRenameModal = ref(false);
 const renameLayerId = ref("");
 const renameLayerName = ref("");
 
-// Image preview state
+// 画像プレビューの状態
 const imagePreviewModal = ref(false);
 const imagePreviewFilename = ref("");
 const imagePreviewId = ref("");
 const imagePreviewReadOnly = ref(false);
 
-// Uploaded URL modal (HTTP)
+// アップロード先 URL の表示モーダル（HTTP）
 const isUploadedMessageModal = ref(false);
 const uploadedUrl = ref("");
 const uploadedUniqueFileName = ref("");
 
-// Onetime URL state
+// 一時 URL の状態
 const oneTimeUrl = ref("");
 const oneTimeUuid = ref("");
 const oneTimeExpiration = ref("");
 
-// --- Map object edit ---
+// --- 地図オブジェクトの編集 ---
 const mapObjectEditRef = ref<InstanceType<typeof MapObjectEditModal> | null>(null);
 
 const openEditModal = (type: "marker" | "shape", id: string): void => {
@@ -390,7 +440,7 @@ const closeEditModal = (): void => {
   isOpenEditModal.value = false;
 };
 
-// --- Layer operations ---
+// --- レイヤ操作 ---
 const layerListRef = ref<InstanceType<typeof LayerListModal> | null>(null);
 const openLayerList = (): void => {
   isLayerListModal.value = true;
@@ -407,7 +457,7 @@ const onLayerRename = (id: string, name: string): void => {
   isLayerRenameModal.value = true;
 };
 
-// Layer delete
+// レイヤの削除
 const isDeleteLayerCheckModal = ref(false);
 const deleteLayerId = ref("");
 const deleteLayerName = ref("");
@@ -470,7 +520,7 @@ const confirmLayerDelete = async (): Promise<void> => {
   }
 };
 
-// --- Image operations ---
+// --- 画像操作 ---
 const openImagePreview = (filename: string, id: string): void => {
   if (filename.endsWith(".pdf")) {
     window.open(`${baseUrl}/static/images/${filename}`, "_blank", "noopener noreferrer");
@@ -524,7 +574,7 @@ function selectTextOrClipboardCopy(elementId: string) {
   }
 }
 
-// --- Onetime URL ---
+// --- 一時 URL ---
 const onetimeSettingRef = ref<InstanceType<typeof OnetimeSettingModal> | null>(null);
 const openOnetimeSetting = (): void => {
   onetimeSettingRef.value?.initRows();
@@ -552,7 +602,7 @@ const handleOnetimeInvalidated = async (): Promise<void> => {
   await onetimeSettingRef.value?.fetchCurrentSharedUrl();
 };
 
-// --- JSON export ---
+// --- JSON のエクスポート ---
 const getLayerForId = (layer_id: string): string => {
   const layerObj = layersStore.getById(layer_id);
   return layerObj ? layerObj.name : "Layer Name Get Error";
@@ -593,7 +643,7 @@ const exportJsonData = async (): Promise<void> => {
   }
 };
 
-// --- User privacy setting ---
+// --- ユーザーのプライバシー設定 ---
 const userSettingModalRef = ref<{
   openCloseUserSettingModal: () => void;
   isUserPrivate: boolean;
@@ -624,7 +674,7 @@ watch(
 const mapToolbarRef = ref<InstanceType<typeof MapToolbar> | null>(null);
 const mapObjectQueryFormData = ref<QueryForm>({ query1: "", query2: "" });
 
-// --- Keyboard shortcuts ---
+// --- キーボードショートカット ---
 const handleKeyDown = (event: KeyboardEvent) => {
   if (isOpenPrintMapModal.value) return;
   if (
@@ -703,7 +753,7 @@ const onMapReloadRequested = async (layerId?: string | null): Promise<void> => {
   await reloadMap(`${baseUrl}/map?layer=${activeLayer.value}&is_master=${isMaster}`, true);
 };
 
-// --- Image delete from list ---
+// --- 一覧からの画像削除 ---
 const onImageDeleteRequest = (id: string): void => {
   imagePreviewId.value = id;
   imagePreviewFilename.value = "";
@@ -752,6 +802,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
           :height="divHeight"
           :allowedOrigins="allowedOriginsRef"
           @mapReloadRequested="onMapReloadRequested"
+          @mapLoaded="onMapLoaded"
           @printMap="isOpenPrintMapModal = true"
           @loginRedirect="loginRedirect()"
           @previewImage="openReadOnlyPreview"
@@ -783,7 +834,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
     {{ isMapObjectTableOpen ? "テーブルを閉じる" : "テーブルを開く" }}
   </button>
 
-  <!-- Modals -->
+  <!-- モーダル -->
   <MapObjectEditModal
     ref="mapObjectEditRef"
     :isOpen="isOpenEditModal"
@@ -863,7 +914,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
     @loginRedirect="loginRedirect()"
   />
 
-  <!-- Uploaded URL modal (HTTP) -->
+  <!-- アップロード先 URL の表示モーダル（HTTP） -->
   <div class="overlay-uploaded-message" v-show="isUploadedMessageModal">
     <div class="content-uploaded-message" @click.stop>
       <h2 class="modal-h2">メッセージ</h2>
@@ -935,7 +986,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
 
   <MessageModal :isOpen="isMessageModal" :message="messageText" @close="closeMessage" />
 
-  <ProgressSpinner :isOpen="showProgressModal" />
+  <ProgressSpinner :isOpen="showProgressModal || isMapFrameLoading" />
   <UploadProgressModal :isOpen="uploadProgressState.isOpen" :progress="uploadProgressState" />
 </template>
 
@@ -1044,7 +1095,7 @@ button:active {
   background-color: #e8e8e8;
 }
 
-/* Uploaded URL modal (HTTP) */
+/* アップロード先 URL の表示モーダル（HTTP） */
 .overlay-uploaded-message {
   z-index: 3;
   position: fixed;

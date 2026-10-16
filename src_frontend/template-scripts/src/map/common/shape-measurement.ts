@@ -21,6 +21,7 @@ interface MeasurementMarker {
   getElement?(): HTMLElement | null;
   isMeasurementLabel?: boolean;
   isMeasurementVertex?: boolean;
+  measurementLabelVariant?: string;
   setOpacity?(opacity: number): void;
   setStyle?(style: { fillOpacity: number; opacity: number }): void;
 }
@@ -280,6 +281,7 @@ export function createShapeMeasurementRuntime({
       }),
     });
     marker.isMeasurementLabel = true;
+    marker.measurementLabelVariant = variant;
     return marker;
   };
 

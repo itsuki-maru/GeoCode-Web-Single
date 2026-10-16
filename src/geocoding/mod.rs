@@ -90,7 +90,7 @@ impl GeocoderConfig {
         address: &str,
     ) -> Result<Vec<SearchResult>, AppError> {
         let mut url = self.url.clone();
-        // Preserve operator-supplied options, replacing search parameters only.
+        // 運用者が指定したオプションを維持し、検索パラメーターだけを置き換える。
         let names: &[&str] = match self.provider {
             Provider::Gsi => &["q"],
             Provider::Abr => &["address", "limit"],

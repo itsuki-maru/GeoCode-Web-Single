@@ -57,7 +57,7 @@ async fn count(pool: &SqlitePool) -> i64 {
         .unwrap()
 }
 
-// Execute in separate processes with LIVE_LOCATION_HISTORY_ENABLED=true and false.
+// LIVE_LOCATION_HISTORY_ENABLED を有効・無効に切り替え、それぞれ別のプロセスで実行する。
 #[tokio::test]
 async fn history_lifecycle_and_types() {
     let pool = common::test_pool().await;
@@ -92,7 +92,7 @@ async fn history_lifecycle_and_types() {
         .await
         .is_err()
     );
-    // Move the timestamp forward to avoid a second-boundary-dependent rate-limit assertion.
+    // 秒の切り替わりに依存せず利用頻度の制限を検証できるよう、時刻を先へ進める。
     sqlx::query("UPDATE live_location_session SET received_at = datetime('now', '+1 second') WHERE user_id = $1").bind(&user).execute(&pool).await.unwrap();
     assert!(
         update_live_location_session_handler(

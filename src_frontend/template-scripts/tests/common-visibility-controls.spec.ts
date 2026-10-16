@@ -55,7 +55,7 @@ describe("read-only visibility controls", () => {
     expect(Array.from(buttons, (button) => button.textContent)).toEqual([
       "図形の計測",
       "辺を結合",
-      "複数選択",
+      "複数計測",
     ]);
     buttons[2]!.click();
     expect(onSelectionToggle).toHaveBeenCalledOnce();

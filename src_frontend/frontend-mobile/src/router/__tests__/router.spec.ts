@@ -18,7 +18,7 @@ vi.mock("@/stores/images", () => ({
   useImageStore: () => ({ initList: dependencies.imagesInit }),
 }));
 
-// Guard tests use the real router, but do not need to load the view component trees.
+// ガードのテストでは実際のルーターを使うが、画面のコンポーネント一式を読み込む必要はない。
 vi.mock("@/views/AppTopMobile.vue", () => ({ default: { render: () => null } }));
 vi.mock("@/views/MapViewMobile.vue", () => ({ default: { render: () => null } }));
 vi.mock("@/views/auth/LoginViewMobile.vue", () => ({ default: { render: () => null } }));
@@ -31,14 +31,14 @@ beforeEach(async () => {
 });
 
 describe("地図ルートの認証ガード", () => {
-  it("認証成功後に地図画面へ遷移して各ストアを初期化する", async () => {
+  it("認証成功後に地図画面へ遷移し、データ取得は画面側に任せる", async () => {
     dependencies.authCheck.mockResolvedValue({ data: {} });
     await router.push("/mapview");
     expect(dependencies.authCheck).toHaveBeenCalledExactlyOnceWith(authCheckUrl);
     expect(router.currentRoute.value.name).toBe("map");
-    expect(dependencies.mapObjectsInit).toHaveBeenCalledOnce();
-    expect(dependencies.layersInit).toHaveBeenCalledOnce();
-    expect(dependencies.imagesInit).toHaveBeenCalledOnce();
+    expect(dependencies.mapObjectsInit).not.toHaveBeenCalled();
+    expect(dependencies.layersInit).not.toHaveBeenCalled();
+    expect(dependencies.imagesInit).not.toHaveBeenCalled();
   });
 
   it("認証失敗時はストアを初期化せずログイン画面へリダイレクトする", async () => {

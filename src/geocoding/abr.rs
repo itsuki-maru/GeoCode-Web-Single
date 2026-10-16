@@ -1,4 +1,4 @@
-// ABR OpenAPI 3.0.22 /geocode (FeatureCollection). Version 2 is not supported.
+// ABR の OpenAPI 3.0.22 にある /geocode（FeatureCollection）に対応し、バージョン 2 には対応しない。
 use super::{Geometry, SearchResult, result};
 use crate::error::AppError;
 use reqwest::Url;

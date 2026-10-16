@@ -235,8 +235,8 @@ pub async fn user_select(
     Json(input): Json<SelectionInput>,
 ) -> Result<Json<Vec<TileOverlay>>, AppError> {
     if input.selected {
-        // Acquire SQLite's write lock before checking the definition. This serializes
-        // selection with disabling/deleting and avoids upgrading a read transaction.
+        // 定義を確認する前に SQLite の書き込みロックを取得し、
+        // 選択処理と無効化・削除を順番に実行して、読み取りから書き込みへの切り替えを避ける。
         let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
         let enabled: Option<bool> =
             sqlx::query_scalar("SELECT enabled FROM tile_overlay_model WHERE id=$1")

@@ -1,8 +1,9 @@
-// Keep the normal control position until the first drag; then float within the map.
+// 初期表示時、または最初のドラッグ後から地図枠内に浮かせて表示する。
 export function makeSummaryDraggable(
   panel: HTMLElement,
   mapElement: HTMLElement,
   onPositionChange: () => void = () => {},
+  initialPosition?: { x: number; y: number },
 ) {
   let floating = false;
   let drag: { id: number; offsetX: number; offsetY: number } | null = null;
@@ -10,7 +11,7 @@ export function makeSummaryDraggable(
   panel.style.touchAction = "none";
   panel.title = "ドラッグして移動";
 
-  // Print preview scales the paper with CSS; store positions in unscaled map pixels.
+  // 印刷プレビューでは用紙が CSS で拡縮されるため、位置は拡縮前の地図のピクセル座標で保持する。
   const scaleFor = (bounds: DOMRect) => ({
     x: bounds.width / mapElement.offsetWidth || 1,
     y: bounds.height / mapElement.offsetHeight || 1,
@@ -49,6 +50,18 @@ export function makeSummaryDraggable(
     panel.style.cursor = "grabbing";
     panel.setPointerCapture(event.pointerId);
   };
+  if (initialPosition) {
+    floating = true;
+    mapElement.append(panel);
+    Object.assign(panel.style, {
+      position: "absolute",
+      margin: "0",
+      right: "auto",
+      bottom: "auto",
+      zIndex: "1000",
+    });
+    place(initialPosition.x, initialPosition.y);
+  }
   const move = (event: PointerEvent) => {
     if (!drag || event.pointerId !== drag.id) return;
     event.preventDefault();
@@ -77,6 +90,8 @@ export function makeSummaryDraggable(
   panel.addEventListener("pointercancel", finish);
   panel.addEventListener("lostpointercapture", finish);
   return () => {
+    if (drag && panel.hasPointerCapture(drag.id)) panel.releasePointerCapture(drag.id);
+    drag = null;
     resize.disconnect();
     panel.removeEventListener("pointerdown", down);
     panel.removeEventListener("pointermove", move);

@@ -743,7 +743,6 @@ function updateShapeVertexAddTargetStyles() {
       "is-shape-vertex-add-target",
       currentMapMode === "input" && canAddVertexToShape(layer),
     );
-    element.classList.toggle("is-measurement-selected", measurementSelectedShapes.has(layer));
   });
 }
 

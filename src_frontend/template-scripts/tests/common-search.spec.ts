@@ -240,8 +240,10 @@ describe("map common search", () => {
   });
 
   it("updates and toggles the measurement control state", () => {
-    document.body.innerHTML = '<button id="measurement-merge-toggle-btn"></button>';
+    document.body.innerHTML =
+      '<button id="measurement-toggle-btn"></button><button id="measurement-merge-toggle-btn"></button>';
     let isMerged = false;
+    let isVisible = false;
     const refresh = vi.fn();
     const runtime = createMapSearchRuntime({
       getLeaflet: createLeafletMock,
@@ -250,7 +252,7 @@ describe("map common search", () => {
         setView: vi.fn(),
       }),
       getMeasurementSegmentMerged: () => isMerged,
-      getMeasurementVisible: () => true,
+      getMeasurementVisible: () => isVisible,
       isValidCoordinate: () => true,
       refreshAllShapeMeasurementMarkers: refresh,
       setMeasurementSegmentMerged: (value) => {
@@ -258,12 +260,24 @@ describe("map common search", () => {
       },
     });
 
+    const measurementButton = document.getElementById("measurement-toggle-btn")!;
+    runtime.updateMeasurementControlState();
+    expect(measurementButton.classList.contains("is-active")).toBe(false);
+    expect(measurementButton.getAttribute("aria-pressed")).toBe("false");
+    isVisible = true;
+    runtime.updateMeasurementControlState();
+    expect(measurementButton.classList.contains("is-active")).toBe(true);
+    expect(measurementButton.getAttribute("aria-pressed")).toBe("true");
     runtime.toggleMeasurementSegmentMerge();
     const button = document.getElementById("measurement-merge-toggle-btn")!;
     expect(isMerged).toBe(true);
     expect(refresh).toHaveBeenCalledOnce();
     expect(button.classList.contains("is-active")).toBe(true);
     expect(button.getAttribute("aria-pressed")).toBe("true");
+    isVisible = false;
+    runtime.updateMeasurementControlState();
+    expect(measurementButton.classList.contains("is-active")).toBe(false);
+    expect(measurementButton.getAttribute("aria-pressed")).toBe("false");
   });
 
   it("moves the map when a valid coordinate is searched", () => {
@@ -577,7 +591,7 @@ describe("map common search", () => {
     if (blurTarget === "outside-focusin") {
       input.dispatchEvent(new FocusEvent("focusin", { bubbles: true, relatedTarget: summary }));
     }
-    // iOS can move focus outside between touchend and the synthesized click.
+    // iOS では、touchend からクリックイベントを生成するまでの間に、フォーカスが外へ移る場合がある。
     expect(dropdown.open).toBe(true);
     expect(setView).not.toHaveBeenCalled();
     candidate.click();

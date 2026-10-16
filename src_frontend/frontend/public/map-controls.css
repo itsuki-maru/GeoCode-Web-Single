@@ -1,6 +1,6 @@
-/* Shared Leaflet controls. Keep normalization scoped to controls so standalone
- * pages do not need map-compat.css's document-wide reset.
- * 10px matches the existing maps' 1rem at a 62.5% root font size.
+/* Leaflet の共通コントロール。スタイルの調整はコントロール内に限定し、単独表示の
+ * ページで map-compat.css によるページ全体のリセットを不要にする。
+ * 10px は、ルートの文字サイズが 62.5% の既存地図における 1rem に合わせている。
  */
 .leaflet-control {
     color: #333;
@@ -34,8 +34,8 @@
     border-radius: 0;
 }
 
-/* Constrain the parent as well as the select: long option labels must not
- * determine the intrinsic width of the Leaflet control. */
+/* 長い選択肢に合わせて Leaflet コントロールの幅が広がらないよう、
+ * 選択欄だけでなく親要素の幅も制限する。 */
 .leaflet-control.address-search-control {
     width: 260px;
     max-width: calc(100vw - 24px);
@@ -298,7 +298,7 @@
     opacity: 0.65;
 }
 
-/* Mobile control variants retain the existing larger touch targets. */
+/* モバイル版では、従来どおりタッチ操作に適した大きさを維持する。 */
 .map-mobile-controls .map-ui-visibility-toggle-control .custom-control-button,
 .temporary-map-mobile-controls .temporary-user-location-control .custom-control-button,
 .temporary-map-mobile-controls .map-ui-visibility-toggle-control .custom-control-button {

@@ -15,8 +15,8 @@ function checkAbort(signal: AbortSignal) {
   if (signal.aborted) throw new DOMException("中止しました", "AbortError");
 }
 
-// Load through <img>, not fetch: existing CSP permits HTTPS images. Anonymous
-// CORS is still required even when the original map displays the image normally.
+// 既存の CSP で許可されている HTTPS 画像を、fetch ではなく img 要素で読み込む。
+// 元の地図で正常に表示できる画像でも、認証情報を送らない CORS リクエストの許可が必要。
 async function imageData(src: string, signal: AbortSignal): Promise<string> {
   checkAbort(signal);
   const img = new Image();
@@ -96,7 +96,7 @@ export async function generateMapPdf(
   };
   const imgs = [...paper.querySelectorAll("img")];
   const sources = new Map<string, string>();
-  // Sequential conversion bounds peak memory and requests; repeated tiles reuse data.
+  // 順番に変換してメモリ使用量と通信数を抑え、同じタイルには変換済みデータを再利用する。
   for (const img of imgs.filter(visible)) {
     checkAbort(signal);
     const src = img.currentSrc || img.src;
@@ -111,7 +111,7 @@ export async function generateMapPdf(
     const clone = svg.cloneNode(true) as SVGSVGElement;
     const originals = [svg, ...svg.querySelectorAll("*")];
     const copies = [clone, ...clone.querySelectorAll("*")];
-    // Standalone SVGs cannot see the document stylesheet. Preserve computed paint.
+    // 単独の SVG からはページのスタイルを参照できないため、計算済みの描画スタイルを保持する。
     originals.forEach((original, i) => {
       const style = getComputedStyle(original);
       for (const property of [
@@ -150,8 +150,8 @@ export async function generateMapPdf(
       ),
     );
   }
-  // Custom HTML icons with remote CSS backgrounds need explicit handling rather
-  // than html2canvas silently omitting inaccessible assets.
+  // 外部画像を CSS の背景に使う独自 HTML アイコンは、明示的に処理する。
+  // html2canvas が取得できない画像を通知せずに省略することを防ぐ。
   const elements = [paper, ...paper.querySelectorAll<HTMLElement>("*")];
   const backgrounds = new Map<number, string>();
   for (const [index, node] of elements.entries()) {
@@ -223,7 +223,7 @@ export async function generateMapPdf(
     });
     pdf.setProperties({ title: title || "地図", creator: "GeoCode-Web" });
     pdf.addImage(canvas, "PNG", 0, 0, chosen.width, chosen.height, undefined, "FAST");
-    // Keep attribution links usable even though page content is rasterized.
+    // ページを画像化した後も、出典リンクをクリックできるようにする。
     for (const link of paper.querySelectorAll<HTMLAnchorElement>(
       ".leaflet-control-attribution a",
     )) {
@@ -239,7 +239,7 @@ export async function generateMapPdf(
     }
     return pdf.output("blob");
   } finally {
-    // html2canvas does not remove its temporary iframe when onclone rejects.
+    // onclone が失敗した場合、html2canvas は一時的な iframe を削除しない。
     temporary.frame?.remove();
     if (canvas) canvas.width = canvas.height = 0;
     sources.clear();

@@ -1,4 +1,4 @@
-// @ts-nocheck -- Leaflet is provided as a browser global by the server template.
+// @ts-nocheck -- Leaflet はサーバー側テンプレートからブラウザーのグローバル変数として提供される。
 import { addPublishedLayerControl } from "../live-map/published-layers";
 import { CameraViewer } from "../live-map/camera";
 import { createLiveMapUiVisibilityControl } from "../live-map/ui-visibility";

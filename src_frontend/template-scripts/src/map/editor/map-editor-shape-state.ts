@@ -54,7 +54,7 @@ let suppressedPropagatedMapClickEvent = null;
 let suppressTouchEndUntil = 0;
 let activePenPointerId = null;
 let isMeasurementVisible = false;
-let isMeasurementSelectionActive = false;
+let isMeasurementSummaryVisible = false;
 let isMeasurementSegmentMerged = false;
 const measurementSelectedShapes = new Set();
 const measurementSelectionTouchTimes = new WeakMap();
@@ -470,9 +470,6 @@ function applyShapeStyle(layer, isDeleteMode = false) {
     nextStyle.fill = false;
   }
   layer.setStyle(nextStyle);
-  layer
-    .getElement?.()
-    ?.classList.toggle("is-measurement-selected", measurementSelectedShapes.has(layer));
   bindShapeArrowStyle(layer);
   applyShapeArrowStyle(layer);
 }
@@ -518,7 +515,7 @@ function resetDrawingState(message = "図形描画: オフ", isError = false) {
 
 // 指定モードで図形描画を開始する
 function beginDrawing(mode) {
-  if (isMeasurementSelectionActive) clearMeasurementSelection();
+  clearMeasurementSelection();
   closeShapeNameEditor();
   clearShapeGeometryEditing();
   toggleDrawPanel(true);
