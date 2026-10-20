@@ -162,6 +162,7 @@ export function filterMeasurementMarkersForBounds<TMarker extends MeasurementMar
 }
 
 export function createLayeredMarkerDisplayManager<TLayer extends object>({
+  isRecordAllowed = () => true,
   map,
   markerRecords,
   markers,
@@ -169,6 +170,7 @@ export function createLayeredMarkerDisplayManager<TLayer extends object>({
   layerVisibilityGroups,
   inputId = "marker-search-input",
 }: {
+  isRecordAllowed?: (record: SearchMarkerRecord) => boolean;
   map: SearchMap;
   markerRecords: Record<string, SearchMarkerRecord>;
   markers: Record<string, TLayer>;
@@ -194,7 +196,11 @@ export function createLayeredMarkerDisplayManager<TLayer extends object>({
   const rebuildVisibleMarkers = (): void => {
     visibleMarkerGroup.clearLayers();
     Object.values(markerRecords).forEach((record) => {
-      if (!isLayerVisible(record.layer_id) || !matchesMarkerSearch(record, searchQuery)) {
+      if (
+        !isLayerVisible(record.layer_id) ||
+        !isRecordAllowed(record) ||
+        !matchesMarkerSearch(record, searchQuery)
+      ) {
         return;
       }
 
@@ -231,6 +237,7 @@ export function createLayeredShapeDisplayManager<
   TShape extends SearchShapeLayer<TMarker>,
   TMarker extends object,
 >({
+  isRecordAllowed = () => true,
   map,
   shapeRecords,
   shapeLayers,
@@ -238,6 +245,7 @@ export function createLayeredShapeDisplayManager<
   isLayerVisible,
   onRebuild = null,
 }: {
+  isRecordAllowed?: (record: SearchShapeRecord) => boolean;
   map: SearchMap;
   shapeRecords: SearchShapeRecord[] | Record<string, SearchShapeRecord>;
   shapeLayers: Record<string, TShape>;
@@ -257,6 +265,7 @@ export function createLayeredShapeDisplayManager<
         !shapeLayer ||
         !targetGroup ||
         !isLayerVisible(layerId) ||
+        !isRecordAllowed(record) ||
         !matchesShapeSearch(record, searchQuery)
       ) {
         return;

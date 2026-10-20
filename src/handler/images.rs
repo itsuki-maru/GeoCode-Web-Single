@@ -235,13 +235,14 @@ pub async fn get_enable_images_handler(
 ) -> Result<Json<HashMap<String, ImageData>>, AppError> {
     let images = query_as!(
         ImageData,
-        r#"SELECT
-            id,
-            user_id,
-            filename,
-            uuid_filename
-        FROM image_model
-        WHERE user_id = $1
+        r#"
+        SELECT
+                    id,
+                    user_id,
+                    filename,
+                    uuid_filename
+                FROM image_model
+                WHERE user_id = $1
         "#,
         user_id,
     )

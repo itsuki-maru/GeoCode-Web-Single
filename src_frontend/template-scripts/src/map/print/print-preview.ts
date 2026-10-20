@@ -24,7 +24,12 @@ export function movePrintMapControls(mapElement: HTMLElement, settings: HTMLElem
 
 // このページで用紙上の操作と印刷の両方を扱い、印刷用の表示へ切り替えても、
 // 地図の CSS ピクセル単位の寸法を維持する。
-export function createPrintPreview(state: PrintMapState, close: () => void) {
+export function createPrintPreview(
+  state: PrintMapState,
+  close: () => void,
+  page: "map-anather" | "form-answer-map" = "map-anather",
+  session?: { parentOrigin: string; requestId: string },
+) {
   const style = document.createElement("style");
   style.textContent = css;
   const pageStyle = document.createElement("style");
@@ -54,7 +59,7 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
   const paper = element<HTMLElement>("print-paper");
   const mapElement = element<HTMLElement>("map");
   paper.append(mapElement);
-  const runtime = initializeReadOnlyMapPage("map-anather", state);
+  const runtime = initializeReadOnlyMapPage(page, state);
   const map = runtime.map;
   const moveControl = (control: any, destination: string) => {
     const container = control.getContainer();
@@ -317,14 +322,15 @@ export function createPrintPreview(state: PrintMapState, close: () => void) {
       if (!event.repeat) submit.click();
     }
   };
-  const parentOrigin = document.referrer
-    ? new URL(document.referrer).origin
-    : window.location.origin;
+  const parentOrigin =
+    session?.parentOrigin ||
+    (document.referrer ? new URL(document.referrer).origin : window.location.origin);
   const receivePrint = (event: MessageEvent) => {
     if (
       event.source === window.parent &&
       event.origin === parentOrigin &&
-      event.data?.type === "printExecute"
+      event.data?.type === "printExecute" &&
+      (!session || event.data.requestId === session.requestId)
     )
       submit.click();
   };

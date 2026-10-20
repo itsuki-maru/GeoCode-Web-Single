@@ -1,6 +1,9 @@
 use geocode_web_single::db::run_migrations;
 use sqlx::{Row, SqlitePool, sqlite::SqlitePoolOptions};
 
+#[allow(dead_code)]
+mod common;
+
 async fn memory_pool() -> SqlitePool {
     SqlitePoolOptions::new()
         .max_connections(1)
@@ -45,7 +48,7 @@ async fn migrations_create_schema_and_record_versions() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 15);
+    assert_eq!(migration_count, 18);
 
     let live_location_table_count: i64 = sqlx::query_scalar(
         r#"
@@ -164,7 +167,7 @@ async fn migrations_are_idempotent() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 15);
+    assert_eq!(migration_count, 18);
 }
 
 #[tokio::test]
@@ -247,7 +250,7 @@ async fn migrations_record_versions_for_existing_schema() {
     .await
     .expect("migration rows should be returned");
 
-    assert_eq!(rows.len(), 15);
+    assert_eq!(rows.len(), 18);
     assert_eq!(rows[0].get::<i64, _>("version"), 1);
     assert_eq!(rows[0].get::<String, _>("name"), "create_initial_schema");
     assert_eq!(rows[1].get::<i64, _>("version"), 2);
@@ -431,7 +434,7 @@ async fn live_map_settings_upgrade_preserves_existing_maps_and_runs_once() {
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::raw_sql("DROP TABLE live_camera_signal; DROP TABLE live_camera_viewer; DROP TABLE live_camera_session; DROP TABLE live_map_layer; ALTER TABLE live_map DROP COLUMN layers_configured_by; ALTER TABLE live_map DROP COLUMN use_tile_overlays; DELETE FROM schema_migrations WHERE version >= 13;").execute(&pool).await.unwrap();
+    sqlx::raw_sql("DROP TABLE live_camera_signal; DROP TABLE live_camera_viewer; DROP TABLE live_camera_session; DROP TABLE live_map_layer; ALTER TABLE live_map DROP COLUMN layers_configured_by; ALTER TABLE live_map DROP COLUMN use_tile_overlays; DELETE FROM schema_migrations WHERE version BETWEEN 13 AND 15;").execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO live_map(id,public_id,name,created_by,expires_at) VALUES('legacy','public','existing','owner','2099-01-01')").execute(&pool).await.unwrap();
     run_migrations(&pool).await.unwrap();
     let settings: (bool, Option<String>, String) = sqlx::query_as(
@@ -457,4 +460,78 @@ async fn live_map_settings_upgrade_preserves_existing_maps_and_runs_once() {
             .await
             .unwrap();
     assert!(!enabled);
+}
+
+#[tokio::test]
+async fn common_form_upgrade_preserves_legacy_config_answers_and_markdown() {
+    let pool = common::test_pool().await;
+    let user = common::create_test_user(&pool, "legacy-forms").await;
+    let layer = common::master_layer_id(&pool, &user).await;
+    sqlx::raw_sql(
+        r#"
+        DROP INDEX idx_layer_common_form;
+        DROP INDEX idx_marker_form_managed_layer;
+        DROP INDEX idx_shape_form_managed_layer;
+        ALTER TABLE marker_form_config_model DROP COLUMN managed_layer_id;
+        ALTER TABLE shape_form_config_model DROP COLUMN managed_layer_id;
+        ALTER TABLE layer_model DROP COLUMN common_form_version;
+        ALTER TABLE layer_model DROP COLUMN common_form_id;
+        ALTER TABLE layer_model DROP COLUMN form_binding_revision;
+        DROP INDEX idx_marker_answer_form_target_time;
+        DROP INDEX idx_shape_answer_form_target_time;
+        ALTER TABLE marker_form_config_model DROP COLUMN source_form;
+        ALTER TABLE shape_form_config_model DROP COLUMN source_form;
+        ALTER TABLE marker_form_submission_model DROP COLUMN source_form;
+        ALTER TABLE marker_form_submission_model DROP COLUMN form_snapshot;
+        ALTER TABLE shape_form_submission_model DROP COLUMN source_form;
+        ALTER TABLE shape_form_submission_model DROP COLUMN form_snapshot;
+        DROP TABLE common_form_revision_model;
+        DROP TABLE common_form_model;
+        DELETE FROM schema_migrations WHERE version >= 16;
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(r#"
+        INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at)
+        VALUES('legacy-marker',$1,$2,'既存対象',35,139,'既存本文',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+        "#).bind(&user).bind(&layer).execute(&pool).await.unwrap();
+    sqlx::raw_sql(r#"
+        INSERT INTO marker_form_config_model(marker_id,public_id,enabled,form_title,form_description,form_schema,create_at,update_at)
+        VALUES('legacy-marker','legacy-public',1,'既存フォーム','','{"fields":[]}',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
+        INSERT INTO marker_form_submission_model(id,marker_id,submitted_values,rendered_markdown,create_at)
+        VALUES('legacy-answer','legacy-marker','{"note":"以前の記録"}','以前のMarkdown',CURRENT_TIMESTAMP);
+        "#).execute(&pool).await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    let row: (String, String, Option<String>, Option<String>) = sqlx::query_as(
+        r#"
+        SELECT submitted_values,rendered_markdown,source_form,form_snapshot
+        FROM marker_form_submission_model WHERE id='legacy-answer'
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        row,
+        (
+            "{\"note\":\"以前の記録\"}".into(),
+            "以前のMarkdown".into(),
+            None,
+            None
+        )
+    );
+    let config:(bool,String,Option<String>)=sqlx::query_as(r#"
+        SELECT enabled,public_id,source_form FROM marker_form_config_model WHERE marker_id='legacy-marker'
+        "#).fetch_one(&pool).await.unwrap();
+    assert_eq!(config, (true, "legacy-public".into(), None));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM schema_migrations")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        18
+    );
 }

@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="ja">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>回答の地図</title>
+    </head>
+    <body>
+        <p role="alert">{{ message }}</p>
+        <script>
+            window.parent.postMessage({type:"answer-map-error",requestId:{{requestId|json_encode_for_html|safe}},message:{{message|json_encode_for_html|safe}}},{{parentOrigin|json_encode_for_html|safe}});
+        </script>
+    </body>
+</html>

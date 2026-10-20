@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import CommonFormsModal from "@/components/map-object/CommonFormsModal.vue";
 import { ref, computed, watch } from "vue";
 import type { LayersData, QueryForm } from "@/interface";
 import { baseUrl, assetsUrl } from "@/setting";
 import { useWindowSize } from "@/composables/useWindowSize";
+
+const commonFormsOpen = ref(false);
 
 const props = defineProps<{
   activeLayer: string;
@@ -23,7 +26,6 @@ const emit = defineEmits<{
   printMap: [];
   exportJson: [];
   importJson: [];
-  userSetting: [];
   reloadMap: [url: string, absolute: boolean];
   layerList: [];
   mapObjectSearch: [query: QueryForm, reset: boolean];
@@ -145,10 +147,9 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
         />
       </button>
       <button
-        v-if="!isMasterLayer"
         @click="emit('exportJson')"
         class="btn-head-image"
-        title="エクスポート&#10;マーカーやレイヤ情報をエクスポートします。画像はエクスポートされません。&#10;エクスポートしたデータは別の端末でインポートすることができます。"
+        title="JSONエクスポート&#10;レイヤ・フォーム・回答履歴を出力します。version 3形式（20MiBまで）です。画像は参照のみです。"
       >
         <img :src="`${assetsUrl}download_24.png`" class="btn-img" alt="download_24.png" />
       </button>
@@ -170,15 +171,12 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
         <img :src="`${assetsUrl}print_24.png`" class="btn-img" alt="" />
       </button>
       <button
-        @click="emit('userSetting')"
+        type="button"
         class="btn-head-image"
-        title="ユーザー設定&#10;アカウントのプライバシー設定を変更します。"
+        title="共通フォーム作成・管理"
+        @click="commonFormsOpen = true"
       >
-        <img
-          :src="`${assetsUrl}manage_accounts_24.png`"
-          class="btn-img"
-          alt="manage_accounts_24.png"
-        />
+        <img :src="`${assetsUrl}form_24.png`" class="btn-img" alt="共通フォーム作成・管理" />
       </button>
     </div>
     <div class="right-btn-header-zone" role="search" aria-label="地図オブジェクト検索">
@@ -244,6 +242,7 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
       </select>
     </div>
   </div>
+  <CommonFormsModal :isOpen="commonFormsOpen" @close="commonFormsOpen = false" />
 </template>
 
 <style scoped>

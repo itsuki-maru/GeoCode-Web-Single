@@ -258,6 +258,8 @@ export default defineConfig({
     outDir: "dist",
     rollupOptions: {
       input: {
+        "form-answer-map-print": fileURLToPath(new URL("./src/entries/form-answer-map-print.ts", import.meta.url)),
+        "form-answer-map": fileURLToPath(new URL("./src/entries/form-answer-map.ts", import.meta.url)),
         "image-preview": fileURLToPath(
           new URL("./src/entries/image-preview.ts", import.meta.url),
         ),

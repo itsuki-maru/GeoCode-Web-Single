@@ -22,6 +22,7 @@ export interface MarkerFormSchema {
 }
 
 export interface MarkerFormBootstrap {
+  configToken?: string;
   isPasswordProtected: boolean;
   schema: MarkerFormSchema;
   submissionPath: string;

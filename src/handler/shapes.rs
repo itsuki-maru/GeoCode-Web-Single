@@ -4,7 +4,6 @@ use crate::model::{
     ShapeUpdateJsonData,
 };
 use crate::shape_validation::validate_shape_geojson;
-use crate::utils::ensure_owned_layer;
 use axum::{
     Json,
     extract::{Extension, Path, Query},
@@ -57,7 +56,7 @@ pub async fn shapes_get_handler(
             ORDER BY created_at ASC
             "#,
         )
-        .bind(user_id)
+        .bind(&user_id)
         .bind(params.layer_id)
         .fetch_all(&pool)
         .await
@@ -78,7 +77,7 @@ pub async fn shapes_get_handler(
             ORDER BY created_at ASC
             "#,
         )
-        .bind(user_id)
+        .bind(&user_id)
         .fetch_all(&pool)
         .await
     }
@@ -96,13 +95,14 @@ pub async fn create_shape_handler(
     Extension(pool): Extension<SqlitePool>,
     Json(payload): Json<ShapeCreateJsonData>,
 ) -> Result<Json<ShapeCreatedResponse>, AppError> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     // シェープの種類とGeoJSONをチェック
     validate_shape_geojson(&payload.shape_type, &payload.geojson)?;
 
     // 図形名を正規化
     let normalized_name = normalize_shape_name(payload.name.as_deref())?;
 
-    ensure_owned_layer(&pool, &user_id, &payload.layer_id).await?;
+    super::layer_forms::ensure_owned(&mut tx, &user_id, &payload.layer_id).await?;
 
     let new_shape_id = Uuid::now_v7().to_string();
     let now = Utc::now().naive_utc();
@@ -123,21 +123,24 @@ pub async fn create_shape_handler(
         RETURNING id
         "#,
     )
-    .bind(new_shape_id)
-    .bind(user_id)
-    .bind(payload.layer_id)
+    .bind(&new_shape_id)
+    .bind(&user_id)
+    .bind(&payload.layer_id)
     .bind(payload.shape_type)
     .bind(normalized_name)
     .bind(payload.geojson.to_string())
     .bind(now)
     .bind(now)
-    .fetch_one(&pool)
+    .fetch_one(&mut *tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "database error.");
         AppError::Sqlx(e)
     })?;
 
+    super::layer_forms::sync_object(&mut tx, &user_id, "shape", &new_shape_id, &payload.layer_id)
+        .await?;
+    tx.commit().await?;
     Ok(Json(ShapeCreatedResponse {
         id: inserted_id.0.to_string(),
         message: "Shape Created.".to_string(),
@@ -150,15 +153,16 @@ pub async fn delete_shape_handler(
     Extension(pool): Extension<SqlitePool>,
     Path(shape_id): Path<String>,
 ) -> Result<Json<MessageApi>, AppError> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let query_result = sqlx::query(
         r#"
         DELETE FROM shape_model
         WHERE id = $1 AND user_id = $2
         "#,
     )
-    .bind(shape_id)
-    .bind(user_id)
-    .execute(&pool)
+    .bind(&shape_id)
+    .bind(&user_id)
+    .execute(&mut *tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "database error.");
@@ -169,6 +173,7 @@ pub async fn delete_shape_handler(
         return Err(AppError::Validation("Failed to delete shape.".into()));
     }
 
+    tx.commit().await?;
     Ok(Json(MessageApi {
         message: "Shape Deleted.".to_string(),
     }))
@@ -181,6 +186,14 @@ pub async fn update_shape_handler(
     Path(shape_id): Path<String>,
     Json(payload): Json<ShapeUpdateJsonData>,
 ) -> Result<Json<MessageApi>, AppError> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let previous_layer: String =
+        sqlx::query_scalar("SELECT layer_id FROM shape_model WHERE id=$1 AND user_id=$2")
+            .bind(&shape_id)
+            .bind(&user_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or(AppError::NotFound)?;
     let normalized_name = normalize_shape_name(payload.name.as_deref())?;
 
     let next_layer_id = payload.layer_id;
@@ -198,7 +211,7 @@ pub async fn update_shape_handler(
         )
         .bind(&shape_id)
         .bind(&user_id)
-        .fetch_optional(&pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "database error.");
@@ -222,9 +235,9 @@ pub async fn update_shape_handler(
             )
             "#,
         )
-        .bind(layer_id)
+        .bind(&layer_id)
         .bind(&user_id)
-        .fetch_one(&pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "database error.");
@@ -251,13 +264,13 @@ pub async fn update_shape_handler(
         "#,
     )
     .bind(normalized_name)
-    .bind(next_layer_id)
+    .bind(&next_layer_id)
     .bind(next_shape_type)
     .bind(next_geojson)
     .bind(Utc::now().naive_utc())
-    .bind(shape_id)
+    .bind(&shape_id)
     .bind(&user_id)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "database error.");
@@ -268,6 +281,12 @@ pub async fn update_shape_handler(
         return Err(AppError::Validation("Failed to update shape.".into()));
     }
 
+    if let Some(layer) = next_layer_id {
+        if previous_layer != layer {
+            super::layer_forms::sync_object(&mut tx, &user_id, "shape", &shape_id, &layer).await?;
+        }
+    }
+    tx.commit().await?;
     Ok(Json(MessageApi {
         message: "Shape Updated.".to_string(),
     }))

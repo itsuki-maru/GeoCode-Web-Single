@@ -58,12 +58,11 @@ pub async fn get_all_layers_handler(
             layer_model.marker_icon_id,
             marker_icon_model.uuid_filename AS marker_icon_filename
         FROM layer_model
-        LEFT JOIN marker_icon_model
-        ON marker_icon_model.id = layer_model.marker_icon_id
+        LEFT JOIN marker_icon_model ON marker_icon_model.id = layer_model.marker_icon_id
         WHERE layer_model.user_id = $1
         "#,
     )
-    .bind(user_id)
+    .bind(&user_id)
     .fetch_all(&pool)
     .await
     .map_err(|e| {
@@ -100,8 +99,16 @@ pub async fn create_layer_handler(
                     create_at,
                     update_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6)
-                RETURNING id
+                VALUES (
+                    $1,
+                    $2,
+                    $3,
+                    $4,
+                    $5,
+                    $6
+                )
+                RETURNING
+                    id
                 "#,
                 new_layer_id,
                 user_id,
@@ -132,6 +139,7 @@ pub async fn delete_layer_handler(
     Extension(pool): Extension<SqlitePool>,
     Path(layer_id): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let query_result = query!(
         r#"
         DELETE FROM layer_model
@@ -140,7 +148,7 @@ pub async fn delete_layer_handler(
         layer_id,
         user_id
     )
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "database error.");
@@ -149,6 +157,7 @@ pub async fn delete_layer_handler(
 
     let affected_rows = query_result.rows_affected();
     if affected_rows > 0 {
+        tx.commit().await?;
         Ok(Json(LayerDeleteResponse {
             message: "Layer successfully deleted.".to_string(),
         }))
@@ -165,6 +174,7 @@ pub async fn update_layername_handler(
     Json(payload): Json<LayerNameUpdatePayload>,
 ) -> Result<Json<MessageApi>, AppError> {
     let now = Utc::now().naive_utc();
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     if payload.name.trim().is_empty() {
         return Err(AppError::Validation(
             "layer name must not be empty".to_string(),
@@ -174,16 +184,19 @@ pub async fn update_layername_handler(
         if let Some(ref icon_id) = payload.marker_icon_id {
             let owned = sqlx::query_scalar::<_, bool>(
                 r#"
-                SELECT EXISTS(
-                    SELECT 1
+                SELECT
+                    EXISTS (
+                    SELECT
+                        1
                     FROM marker_icon_model
-                    WHERE id = $1 AND user_id = $2
+                    WHERE id = $1
+                        AND user_id = $2
                 )
                 "#,
             )
             .bind(&icon_id)
             .bind(&user_id)
-            .fetch_one(&pool)
+            .fetch_one(&mut *tx)
             .await?;
             if !owned {
                 return Err(AppError::BadRequest);
@@ -201,11 +214,11 @@ pub async fn update_layername_handler(
     )
     .bind(payload.name.trim())
     .bind(payload.update_marker_icon)
-    .bind(payload.marker_icon_id)
+    .bind(&payload.marker_icon_id)
     .bind(now)
-    .bind(layer_id)
-    .bind(user_id)
-    .execute(&pool)
+    .bind(&layer_id)
+    .bind(&user_id)
+    .execute(&mut *tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "database error.");
@@ -213,6 +226,8 @@ pub async fn update_layername_handler(
     })?;
 
     if query_result.rows_affected() > 0 {
+        super::layer_forms::change(&mut tx, &user_id, &layer_id, &payload).await?;
+        tx.commit().await?;
         Ok(Json(MessageApi {
             message: "Layer successfully updated.".to_string(),
         }))

@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { ref, watch, computed } from "vue";
+import { ref, watch, computed, onBeforeUnmount } from "vue";
+import apiClient from "@/axiosClient";
+import MessageModal from "@/components/common/MessageModal.vue";
+import MapObjectFormInputModal from "./MapObjectFormInputModal.vue";
+import type { MapObjectData, ShapeData } from "@/interface";
 import BaseModal from "@/components/common/BaseModal.vue";
 import MapObjectFormSettingsModal from "@/components/map-object/MapObjectFormSettingsModal.vue";
 import { useMapObjectStore } from "@/stores/mapobjects";
@@ -36,6 +40,52 @@ const activeShapeLineType = ref("solid");
 const activeShapeArrowType = ref<"none" | "start" | "end" | "both">("none");
 const activeShapeWeight = ref(5);
 const isFormSettingsOpen = ref(false);
+const isFormInputOpen = ref(false),
+  formAvailable = ref(false),
+  confirmFormOpen = ref(false),
+  updateBusy = ref(false);
+const initialEditState = ref("");
+const editState = () =>
+  JSON.stringify([
+    activeObjectName.value,
+    activeObjectDetail.value,
+    activeObjectLayer.value,
+    activeShapeColor.value,
+    activeShapeLineType.value,
+    activeShapeArrowType.value,
+    activeShapeWeight.value,
+  ]);
+let availabilitySequence = 0;
+let availabilityController: AbortController | undefined;
+const refreshFormAvailability = async () => {
+  const seq = ++availabilitySequence,
+    id = props.targetId,
+    type = props.targetType;
+  availabilityController?.abort();
+  availabilityController = new AbortController();
+  formAvailable.value = false;
+  if (!props.isOpen || !id) return;
+  try {
+    const config = (
+      await apiClient.get<{ form_schema: { fields: unknown[] } }>(`/${type}/${id}/form`, {
+        signal: availabilityController.signal,
+      })
+    ).data;
+    if (
+      seq === availabilitySequence &&
+      props.isOpen &&
+      id === props.targetId &&
+      type === props.targetType
+    )
+      formAvailable.value = !!config.form_schema.fields.length;
+  } catch {
+    /* 通常編集はフォーム情報の通信失敗に左右されない。 */
+  }
+};
+onBeforeUnmount(() => {
+  ++availabilitySequence;
+  availabilityController?.abort();
+});
 const detailTextarea = ref<HTMLTextAreaElement | null>(null);
 const isShape = computed(() => props.targetType === "shape");
 const isPolyline = computed(
@@ -84,25 +134,33 @@ const loadTarget = (): void => {
 watch(
   () => [props.targetId, props.targetType, props.isOpen] as const,
   () => {
-    if (props.isOpen) loadTarget();
+    isFormInputOpen.value = false;
+    isFormSettingsOpen.value = false;
+    confirmFormOpen.value = false;
+    if (props.isOpen) {
+      loadTarget();
+      initialEditState.value = editState();
+    }
+    void refreshFormAvailability();
   },
+  { immediate: true },
 );
 
-const updateMapObject = async (): Promise<void> => {
+const saveMapObject = async (keepOpen = false): Promise<boolean> => {
   if (props.targetId === "" || activeObjectLayer.value === "") {
     emit("message", "所属レイヤを選択してください。");
-    return;
+    return false;
   }
   if (!isShape.value && (activeObjectName.value === "" || activeObjectDetail.value === "")) {
     emit("message", "マーカー名と内容の両方に入力が必要です。");
-    return;
+    return false;
   }
   let updatePayload: MapObjectUpdatePayload;
   let previousLayerId: string;
 
   if (isShape.value) {
     const shape = shapeStore.getById(props.targetId);
-    if (!shape) return;
+    if (!shape) return false;
     previousLayerId = shape.layer_id;
     const nextGeoJson = JSON.parse(JSON.stringify(shape.geojson)) as ShapeGeoJson;
     const dashArray =
@@ -133,7 +191,7 @@ const updateMapObject = async (): Promise<void> => {
     );
     if (!updatedShape) {
       emit("message", "図形情報を更新できませんでした。");
-      return;
+      return false;
     }
     updatePayload = {
       objectType: "shape",
@@ -145,7 +203,7 @@ const updateMapObject = async (): Promise<void> => {
     };
   } else {
     const marker = mapobjStore.getById(props.targetId);
-    if (!marker) return;
+    if (!marker) return false;
     previousLayerId = marker.layer_id;
     const updatedMarker = await mapobjStore.updateMapObject(
       props.targetId,
@@ -155,7 +213,7 @@ const updateMapObject = async (): Promise<void> => {
     );
     if (!updatedMarker) {
       emit("message", "マーカー情報を更新できませんでした。");
-      return;
+      return false;
     }
     updatePayload = {
       objectType: "marker",
@@ -169,8 +227,76 @@ const updateMapObject = async (): Promise<void> => {
   }
 
   emit("updated", updatePayload, previousLayerId);
+  if (!keepOpen) {
+    emit("close");
+    emit("message", "更新しました。");
+  } else {
+    loadTarget();
+    initialEditState.value = editState();
+  }
+  return true;
+};
+const updateMapObject = async (keepOpen = false): Promise<boolean> => {
+  if (updateBusy.value) return false;
+  updateBusy.value = true;
+  try {
+    return await saveMapObject(keepOpen);
+  } finally {
+    updateBusy.value = false;
+  }
+};
+const openFormInput = () => {
+  if (!formAvailable.value || updateBusy.value) return;
+  if (editState() !== initialEditState.value) {
+    confirmFormOpen.value = true;
+    return;
+  }
+  isFormInputOpen.value = true;
+};
+const saveThenOpenForm = async () => {
+  confirmFormOpen.value = false;
+  const id = props.targetId,
+    type = props.targetType;
+  if (
+    (await updateMapObject(true)) &&
+    props.isOpen &&
+    props.targetId === id &&
+    props.targetType === type
+  )
+    isFormInputOpen.value = true;
+};
+const formSaved = (object: MapObjectData | ShapeData) => {
+  if (object.id !== props.targetId) return;
+  let payload: MapObjectUpdatePayload;
+  const previousLayerId = activeObjectLayer.value;
+  if ("geojson" in object) {
+    shapeStore.shapeList.set(object.id, object);
+    payload = {
+      objectType: "shape",
+      id: object.id,
+      layerId: object.layer_id,
+      shapeType: object.shape_type,
+      name: object.name || "",
+      geojson: object.geojson,
+    };
+  } else {
+    mapobjStore.mapObjectList.set(object.id, object);
+    payload = {
+      objectType: "marker",
+      id: object.id,
+      layerId: object.layer_id,
+      name: object.marker_name,
+      detail: object.detail,
+      latitude: object.latitude,
+      longitude: object.longitude,
+    };
+  }
+  loadTarget();
+  initialEditState.value = editState();
+  isFormInputOpen.value = false;
+  emit("updated", payload, previousLayerId);
   emit("close");
-  emit("message", "更新しました。");
+  emit("message", "フォームの回答を保存しました。");
 };
 
 function insertMarkdown(text: string) {
@@ -201,7 +327,10 @@ defineExpose({ insertUploadedMarkdown });
 
 <template>
   <BaseModal :isOpen="isOpen" @close="emit('close')">
-    <div class="main-container">
+    <div
+      class="main-container"
+      :inert="updateBusy || isFormInputOpen || isFormSettingsOpen || confirmFormOpen"
+    >
       <h2 id="map-object-edit-h2">{{ isShape ? "図形情報の編集" : "マーカー情報の編集" }}</h2>
       <div class="input-text-row">
         <input
@@ -245,7 +374,10 @@ defineExpose({ insertUploadedMarkdown });
         </label>
       </div>
       <div class="textarea-row">
-        <label class="detail-label">{{ isShape ? "メモ（Markdown）" : "マーカーの内容" }}</label>
+        <label class="detail-label" for="detail">
+          {{ isShape ? "メモ（Markdown）" : "マーカーの内容" }}
+          <span class="free-input-label">自由入力</span>
+        </label>
         <div class="markdown-editor">
           <textarea
             ref="detailTextarea"
@@ -253,10 +385,19 @@ defineExpose({ insertUploadedMarkdown });
             :class="{ 'shape-detail-markdown': isShape }"
             id="detail"
             name="detail"
+            aria-describedby="detail-input-help"
             placeholder="## マークダウンで記述"
             :maxlength="isShape ? 10000 : undefined"
             v-model="activeObjectDetail"
           ></textarea>
+          <button
+            type="button"
+            :disabled="updateBusy"
+            @click="updateMapObject()"
+            class="btn-update"
+          >
+            +更新
+          </button>
           <div class="input-tools">
             <button
               @click="emit('openImageUpload')"
@@ -369,27 +510,133 @@ defineExpose({ insertUploadedMarkdown });
             </button>
           </div>
         </div>
+        <div id="detail-input-help" class="input-help">
+          <p>ここに直接入力した内容は、<strong>フォーム回答の分析対象にはなりません</strong>。</p>
+          <p>
+            フォーム回答から追記された文章を直接編集しても、分析用の回答データは変更されません。
+          </p>
+          <p v-if="formAvailable">
+            分析するデータは「<strong>フォームで回答を登録</strong>」から入力してください。
+          </p>
+          <p v-else>
+            分析するデータはフォームから登録します。未設定の場合は「<strong>入力フォーム設定</strong>」から設定してください。
+          </p>
+        </div>
       </div>
-      <div class="btn-commit-row">
-        <button @click="isFormSettingsOpen = true" class="btn-standard btn-form-settings">
-          フォーム
+      <div class="btn-commit-row" :class="{ 'has-form-input': formAvailable }">
+        <button
+          :disabled="updateBusy"
+          @click="isFormSettingsOpen = true"
+          class="btn-standard btn-form-settings"
+        >
+          入力フォーム設定
         </button>
-        <button @click="updateMapObject()" class="btn-standard btn-update">+更新</button>
+        <button
+          v-if="formAvailable"
+          type="button"
+          class="btn-standard btn-form-settings btn-form-answer"
+          :disabled="updateBusy"
+          @click="openFormInput"
+        >
+          フォームで回答を登録
+        </button>
       </div>
-      <button type="button" class="close-button" @click="emit('close')">閉じる</button>
+      <button type="button" class="close-button" :disabled="updateBusy" @click="emit('close')">
+        閉じる
+      </button>
     </div>
   </BaseModal>
   <MapObjectFormSettingsModal
     :isOpen="isFormSettingsOpen"
     :targetType="targetType"
     :targetId="targetId"
+    @saved="refreshFormAvailability"
     @close="isFormSettingsOpen = false"
     @message="(text: string) => emit('message', text)"
+  />
+  <MapObjectFormInputModal
+    v-if="isFormInputOpen"
+    :isOpen="isFormInputOpen"
+    :targetType="targetType"
+    :targetId="targetId"
+    @close="isFormInputOpen = false"
+    @saved="formSaved"
+  />
+  <MessageModal
+    :isOpen="confirmFormOpen"
+    message="未保存の編集内容を保存して、フォーム入力を開きますか？"
+    confirmLabel="保存してフォームを開く"
+    @close="confirmFormOpen = false"
+    @confirm="saveThenOpenForm"
   />
 </template>
 
 <style scoped>
+.free-input-label {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #e9edf2;
+  color: #425466;
+  font-size: 0.8rem;
+}
+.input-help {
+  color: #475569;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.input-help {
+  margin-top: 8px;
+  text-align: left;
+}
+.input-help p {
+  margin: 4px 0;
+}
+.btn-commit-row.has-form-input > .btn-form-answer {
+  height: auto;
+  min-height: 40px;
+  white-space: normal;
+  line-height: 1.3;
+  padding: 6px 4px;
+}
+.btn-commit-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.btn-commit-row > button {
+  flex: 0 1 auto;
+  min-width: 0;
+  height: 40px;
+  margin: 0;
+  padding: 8px 4px;
+  border-radius: 16px;
+  font-size: clamp(10px, 3.1vw, 13px);
+  box-sizing: border-box;
+}
+.btn-commit-row.has-form-input {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.btn-commit-row.has-form-input > button {
+  width: 100%;
+}
+.btn-commit-row button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .main-container {
+  max-height: calc(100dvh - 64px);
+  overflow-y: auto;
+  box-sizing: border-box;
   display: flex;
   position: relative;
   flex-direction: column;
@@ -460,8 +707,9 @@ defineExpose({ insertUploadedMarkdown });
 .input-detail-markdown {
   display: block;
   width: 100%;
-  height: 60vh;
-  padding: 10px 80px 10px 12px;
+  height: clamp(160px, 32dvh, 280px);
+  padding: 10px 80px 76px 12px;
+  resize: vertical;
   margin: auto;
   box-sizing: border-box;
   font-size: 22px;
@@ -477,7 +725,7 @@ defineExpose({ insertUploadedMarkdown });
 }
 
 .shape-detail-markdown {
-  height: 48vh;
+  height: clamp(144px, 26dvh, 240px);
 }
 
 .input-tools {
@@ -486,9 +734,9 @@ defineExpose({ insertUploadedMarkdown });
   grid-auto-rows: max-content;
   align-content: start;
   gap: 12px;
-  top: 24px;
+  top: 8px;
   right: 8px;
-  bottom: 150px;
+  bottom: 68px;
   width: 55px;
   overflow-x: hidden;
   overflow-y: auto;
@@ -500,9 +748,8 @@ defineExpose({ insertUploadedMarkdown });
 }
 
 .btn-commit-row {
-  position: absolute;
-  bottom: 7%;
-  right: 5%;
+  position: static;
+  margin-top: 12px;
 }
 
 .btn-function-image-editor {
@@ -587,9 +834,26 @@ defineExpose({ insertUploadedMarkdown });
 }
 
 .btn-update {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 1;
+  min-width: 90px;
+  height: 44px;
+  margin: 0;
+  padding: 0 14px;
   border: 1px solid rgb(23, 155, 126);
+  border-radius: 16px;
   background: rgb(23, 155, 126);
   color: #fff;
+  box-shadow: 3px 3px 5px 0 rgba(75, 75, 75, 0.5);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-update:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .btn-form-settings {

@@ -47,13 +47,13 @@ use geocode_web_single::{
     },
     middleware::token_is_active,
     model::{
-        ExportPackage, GenarateUrlPayload, LayerCreateQueryParams, LayerNameUpdatePayload,
-        LoginPayload, MapAnotherWindowQueryParams, MapObjectQuerySearchParams, MapReadQueryPrams,
-        MapStateParams, MarkerCreateRequestParams, MarkerInfoUpdateJsonData,
-        MarkerMoveRequestParams, MarkerQuerySearchParams, MarkerReadQueryPrams,
-        OnetimePasswordForm, ShapeCreateJsonData, ShapeReadQueryParams, ShapeUpdateJsonData,
-        SignupPayload, ThumbnailQueryParams, TotpLoginPayload, TotpVerifyRequest,
-        UpdateAccountPasswordPayload, UpdateAccountPrivacyPayload, UpdateUserData,
+        GenarateUrlPayload, LayerCreateQueryParams, LayerNameUpdatePayload, LoginPayload,
+        MapAnotherWindowQueryParams, MapObjectQuerySearchParams, MapReadQueryPrams, MapStateParams,
+        MarkerCreateRequestParams, MarkerInfoUpdateJsonData, MarkerMoveRequestParams,
+        MarkerQuerySearchParams, MarkerReadQueryPrams, OnetimePasswordForm, ShapeCreateJsonData,
+        ShapeReadQueryParams, ShapeUpdateJsonData, SignupPayload, ThumbnailQueryParams,
+        TotpLoginPayload, TotpVerifyRequest, UpdateAccountPasswordPayload,
+        UpdateAccountPrivacyPayload, UpdateUserData,
     },
 };
 use serde_json::{Value, json};
@@ -220,6 +220,7 @@ async fn layer_handlers_cover_create_read_update_delete() {
             name: "renamed layer".to_string(),
             marker_icon_id: None,
             update_marker_icon: false,
+            ..Default::default()
         }),
     )
     .await
@@ -903,7 +904,9 @@ async fn file_handlers_cover_export_and_import() {
     let bytes = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("export body should be readable");
-    let package: ExportPackage = serde_json::from_slice(&bytes).expect("export should be json");
+    let package: geocode_web_single::model::transfer::TransferPackage =
+        serde_json::from_slice(&bytes).expect("export should be json");
+    assert_eq!(package.version, 3);
     assert_eq!(package.markers.len(), 1);
     assert_eq!(package.shapes.len(), 1);
 

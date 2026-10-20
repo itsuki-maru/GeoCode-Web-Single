@@ -62,7 +62,8 @@ pub async fn totp_setup_handler(
             let query_result = query!(
                 r#"
                 UPDATE user_model
-                SET totp_temp_secret = $1
+                SET
+                    totp_temp_secret = $1
                 WHERE id = $2
                 "#,
                 secret_base32,
@@ -288,7 +289,14 @@ pub async fn totp_disable_handler(
     Json(payload): Json<TotpVerifyRequest>,
 ) -> Result<Response, AppError> {
     let (username, current_secret) = sqlx::query_as::<_, (String, String)>(
-        "SELECT username, totp_secret FROM user_model WHERE id = $1 AND is_locked = false",
+        r#"
+        SELECT
+            username,
+            totp_secret
+        FROM user_model
+        WHERE id = $1
+            AND is_locked = false
+        "#,
     )
     .bind(&user_id)
     .fetch_optional(&pool)

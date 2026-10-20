@@ -4,6 +4,7 @@ const MAP_PAGES = new Set<MapBootstrap["page"]>([
   "map",
   "map-mobile",
   "map-anather",
+  "form-answer-map",
   "temporary-map",
   "temporary-map-mobile",
 ]);
@@ -27,7 +28,7 @@ export function readMapBootstrap(): MapBootstrap {
     throw new Error("Map bootstrap data is invalid");
   }
 
-  if (value.page === "map-anather") {
+  if (value.page === "map-anather" || value.page === "form-answer-map") {
     if (
       typeof value.isCluster !== "boolean" ||
       !Array.isArray(value.shapes) ||
@@ -55,6 +56,14 @@ export function readMapBootstrap(): MapBootstrap {
     throw new Error("Temporary-map bootstrap data is invalid");
   }
 
+  if (
+    value.page === "form-answer-map" &&
+    (!isRecord(value.answerPreview) ||
+      !isRecord(value.answerPreview.query) ||
+      !Array.isArray(value.answerPreview.targets))
+  ) {
+    throw new Error("Answer-map bootstrap data is invalid");
+  }
   return value as unknown as MapBootstrap;
 }
 

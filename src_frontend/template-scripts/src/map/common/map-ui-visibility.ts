@@ -23,11 +23,15 @@ interface LeafletNamespace {
 interface MapUiVisibilityRuntimeOptions {
   initialHidden: boolean;
   leaflet: LeafletNamespace;
+  hideButtonLabel?: string;
+  togglePosition?: "topleft" | "bottomleft";
 }
 
 export function createMapUiVisibilityRuntime({
   initialHidden,
   leaflet,
+  hideButtonLabel = "地図だけを表示",
+  togglePosition = "bottomleft",
 }: MapUiVisibilityRuntimeOptions) {
   const hideableContainers = new Set<HTMLElement>();
   let isHidden = initialHidden;
@@ -36,7 +40,7 @@ export function createMapUiVisibilityRuntime({
   const updateToggleButton = (): void => {
     if (!toggleButton) return;
 
-    const buttonText = isHidden ? "機能を表示" : "地図だけを表示";
+    const buttonText = isHidden ? "機能を表示" : hideButtonLabel;
     toggleButton.textContent = buttonText;
     toggleButton.setAttribute("aria-label", buttonText);
     toggleButton.setAttribute("aria-pressed", String(isHidden));
@@ -68,7 +72,7 @@ export function createMapUiVisibilityRuntime({
   };
 
   const MapUiVisibilityToggleControl = leaflet.Control.extend({
-    options: { position: "bottomleft" },
+    options: { position: togglePosition },
     onAdd() {
       const container = leaflet.DomUtil.create(
         "div",

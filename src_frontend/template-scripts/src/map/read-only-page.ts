@@ -3,6 +3,7 @@ import { createTileOverlayManager } from "./common/tile-overlays";
 import { createLazyLayerObjects } from "./common/lazy-layer-objects";
 import type { PrintMapState } from "./common/print-state";
 import { readMapBootstrap } from "./bootstrap";
+import { hasValidAnswerGeometry } from "./answer-preview";
 import { createLayerBulkToggleControl, extractYouTubeId } from "./common/base";
 import {
   createNestedTokenizer,
@@ -60,7 +61,11 @@ import {
   createTooltipVisibilityControl,
 } from "./common/visibility-controls";
 
-type ReadOnlyPageName = "map-anather" | "temporary-map" | "temporary-map-mobile";
+type ReadOnlyPageName =
+  | "map-anather"
+  | "form-answer-map"
+  | "temporary-map"
+  | "temporary-map-mobile";
 
 type DynamicRecord = Record<string, any>;
 
@@ -148,10 +153,18 @@ export function initializeReadOnlyMapPage(
   }
 
   const { L, filterXSS, marked } = getBrowserLibraries();
-  const isAnother = expectedPage === "map-anather";
+  const isAnother = expectedPage === "map-anather" || expectedPage === "form-answer-map";
   const isPrint = isAnother && Boolean(printState);
-  const persistSettings = isAnother && !isPrint;
-  const isMobile = expectedPage === "temporary-map-mobile";
+  const isAnswerPreview =
+    expectedPage === "form-answer-map" || (isAnother && Boolean(bootstrap.answerPreview));
+  let answerTargets: Set<string> | null = null;
+  const persistSettings = isAnother && !isPrint && !isAnswerPreview;
+  const isMobileAnswerMap =
+    expectedPage === "form-answer-map" &&
+    !isPrint &&
+    new URLSearchParams(window.location.search).get("map_ui") === "mobile";
+  const isMobile = expectedPage === "temporary-map-mobile" || isMobileAnswerMap;
+  if (isMobileAnswerMap) document.body.classList.add("map-mobile-controls");
   const isTemporary = !isAnother;
   const temporaryBootstrap = isTemporary
     ? (bootstrap as Extract<typeof bootstrap, { page: "temporary-map" | "temporary-map-mobile" }>)
@@ -161,7 +174,14 @@ export function initializeReadOnlyMapPage(
   const markerRecords = bootstrap.markers;
   const shapeRecords = bootstrap.shapes;
 
-  const storage = createMapStorage(tileServers);
+  const storage = createMapStorage(
+    tileServers,
+    isAnswerPreview
+      ? {
+          getStorage: () => ({ getItem: () => null, setItem: () => {} }) as Storage,
+        }
+      : undefined,
+  );
   const shapeStyle = createShapeStyleCore(() => SHAPE_STYLE);
   const shapeArrow = createShapeArrowRuntime({
     getDefaultStyle: () => SHAPE_STYLE,
@@ -205,14 +225,16 @@ export function initializeReadOnlyMapPage(
   let MapUiVisibilityToggleControl: (new () => object) | undefined;
   if (isMobile) {
     const mobileUi = createMapUiVisibilityRuntime({
-      initialHidden: temporaryBootstrap!.isMapUiHidden,
+      initialHidden: temporaryBootstrap?.isMapUiHidden ?? false,
+      hideButtonLabel: isMobileAnswerMap ? "機能を非表示" : undefined,
+      togglePosition: isMobileAnswerMap ? "topleft" : undefined,
       leaflet: L,
     });
     registerHideableMapControl = mobileUi.registerHideableMapControl;
     MapUiVisibilityToggleControl = mobileUi.MapUiVisibilityToggleControl;
   }
 
-  const lastMapView = isAnother ? loadLastMapView() : null;
+  const lastMapView = isAnother && !isAnswerPreview ? loadLastMapView() : null;
   const initialView =
     printState?.view ??
     (isAnother ? (lastMapView ?? bootstrap.initialView) : temporaryBootstrap!.initialView);
@@ -226,6 +248,7 @@ export function initializeReadOnlyMapPage(
     zoom: initialView.zoom,
   });
   map = mapRuntime.map as DynamicRecord;
+  if (isMobileAnswerMap) map.addControl(new MapUiVisibilityToggleControl!());
   if (!isPrint) installMjpegCameras(map);
   if (persistSettings) observeMapView(map);
   bounds = mapRuntime.bounds;
@@ -260,7 +283,8 @@ export function initializeReadOnlyMapPage(
   if (isTemporary || (printState?.markersVisible ?? storage.getInitialMarkerVisibility()))
     visibleMarkerGroup.addTo(map);
   const drawnShapesGroup = isAnother ? L.featureGroup() : undefined;
-  const suppressShapes = isAnother && viewport.shouldSuppressInitialShapeRendering(shapeRecords);
+  const suppressShapes =
+    isAnother && !isAnswerPreview && viewport.shouldSuppressInitialShapeRendering(shapeRecords);
   const shapeVisibilityLayer = L.layerGroup();
   if (
     isTemporary ||
@@ -360,7 +384,14 @@ export function initializeReadOnlyMapPage(
     attachShapeMemoPopup: memo.attachShapeMemoPopup,
     attachShapeMemoTooltipOpen: memo.attachShapeMemoTooltipOpen,
     bindPolylineHoverHighlight: shapeArrow.bindPolylineHoverHighlight,
-    createLeafletShapeLayer: shapeLayer.createLeafletShapeLayer,
+    createLeafletShapeLayer: (...args) => {
+      if (!isAnswerPreview) return shapeLayer.createLeafletShapeLayer(...args);
+      try {
+        return shapeLayer.createLeafletShapeLayer(...args);
+      } catch {
+        return null;
+      }
+    },
     escapeHtml,
     getDefaultShapeColor: () => SHAPE_STYLE.color,
     getShapeMemoFromGeoJson,
@@ -396,7 +427,7 @@ export function initializeReadOnlyMapPage(
       createMarkerGroupForLayer: groups.createMarkerGroupForLayer,
       enableMarkerIconFallback: isTemporary ? enableMarkerIconFallback : undefined,
       escapeHtml,
-      initialLayersVisible: temporaryBootstrap?.isChecked,
+      initialLayersVisible: isAnswerPreview || temporaryBootstrap?.isChecked,
       layerNames,
       layerRecords: layers,
       layerVisibilityGroups,
@@ -431,7 +462,9 @@ export function initializeReadOnlyMapPage(
           },
       applyShapeStyle: isAnother,
       bindPolylineHover: !isMobile,
-      records,
+      records: isAnswerPreview
+        ? getShapeRecords(records).filter((record) => hasValidAnswerGeometry(record.geojson))
+        : records,
       restoreShapeStyleOnHover: isAnother,
       shapeLayers,
     });
@@ -443,7 +476,11 @@ export function initializeReadOnlyMapPage(
           `<span data-layer-load-id="${escapeHtml(id)}">${name}<span class="layer-object-load-state" role="status" aria-live="polite"></span></span>`
       : undefined,
     clusterGroups,
-    createLayeredMarkerDisplayManager,
+    createLayeredMarkerDisplayManager: (options) =>
+      createLayeredMarkerDisplayManager({
+        ...options,
+        isRecordAllowed: (record) => !answerTargets || answerTargets.has(`marker:${record.id}`),
+      }),
     escapeHtml,
     layerNames,
     layerVisibilityGroups,
@@ -484,6 +521,7 @@ export function initializeReadOnlyMapPage(
     shapeMeasurementManager?.destroy();
   });
   const layeredShapeDisplay = createLayeredShapeDisplayManager({
+    isRecordAllowed: (record) => !answerTargets || answerTargets.has(`shape:${record.id}`),
     isLayerVisible: layeredMarkerDisplay.isLayerVisible,
     map,
     onRebuild: () => {
@@ -509,8 +547,10 @@ export function initializeReadOnlyMapPage(
     return control;
   };
   groups.syncAllShapeGroupsVisibility();
-  if (isAnother) addBulkControl();
-  else {
+  if (isAnother) {
+    const bulkControl = addBulkControl();
+    if (isMobileAnswerMap) registerHideableMapControl!(bulkControl);
+  } else {
     const bulkControl = addBulkControl();
     if (isMobile) {
       registerHideableMapControl!(bulkControl);
@@ -553,6 +593,7 @@ export function initializeReadOnlyMapPage(
     position: isAnother || isMobile ? "topleft" : "topright",
   });
   map.addControl(tooltipControl);
+  if (isMobileAnswerMap) registerHideableMapControl!(tooltipControl);
   const includeMeasurementControl = isAnother || hasSharedShapes;
   if (includeMeasurementControl) {
     const SummaryControl = L.Control.extend({
@@ -603,14 +644,14 @@ export function initializeReadOnlyMapPage(
       onCodeSearchControlAdded: isMobile ? registerHideableMapControl : undefined,
       onSearch: searchCoordinator.setMapObjectSearchQuery,
     });
-  if (isMobile) {
+  if (isMobile && !isMobileAnswerMap) {
     const uiToggle = new MapUiVisibilityToggleControl!();
     map.addControl(uiToggle);
   }
   const { visibilityControl } = addReadOnlyMapVisibilityControls({
     includeShapeOverlays: isAnother || hasSharedShapes,
     initialUserLocationVisible: isAnother ? storage.getInitialUserLocationVisibility() : undefined,
-    initializeUserLocation: isPrint ? () => null : initializeUserLocation,
+    initializeUserLocation: isPrint || isAnswerPreview ? () => null : initializeUserLocation,
     leaflet: L,
     map,
     onUserLocationVisibilityChange: persistSettings
@@ -639,7 +680,7 @@ export function initializeReadOnlyMapPage(
   if (isPrint) tileOverlayManager.setVisibility(printState.overlays);
 
   let objectLoader: ReturnType<typeof createLazyLayerObjects> | undefined;
-  if (isAnother) {
+  if (isAnother && !isAnswerPreview) {
     const getSelectedLayerIds = () =>
       Object.keys(layerVisibilityGroups).filter((id) => map.hasLayer(layerVisibilityGroups[id]));
     const updateLoadStatus = () => {
@@ -694,6 +735,38 @@ export function initializeReadOnlyMapPage(
   }
 
   return {
+    getPrintState: (): PrintMapState => {
+      const center = map.getCenter();
+      return {
+        view: { latitude: center.lat, longitude: center.lng, zoom: map.getZoom() },
+        tileServerId: document.querySelector<HTMLInputElement>(".tile-radio:checked")?.value || "1",
+        overlays: tileOverlayManager.getVisibility(),
+        markersVisible: map.hasLayer(visibleMarkerGroup),
+        shapesVisible: map.hasLayer(shapeVisibilityLayer),
+        shapeNamesVisible: map.hasLayer(shapeNameVisibilityLayer),
+        layerIds: Object.keys(layerVisibilityGroups).filter((id) =>
+          map.hasLayer(layerVisibilityGroups[id]),
+        ),
+      };
+    },
+    setAnswerTargets: (keys: string[]) => {
+      const previous = answerTargets;
+      const rebuild = () => {
+        layeredMarkerDisplay.rebuildVisibleMarkers();
+        layeredShapeDisplay.rebuildVisibleShapes();
+        groups.syncAllShapeGroupsVisibility();
+        map.fire("answerfilterchange");
+      };
+      try {
+        answerTargets = new Set(keys);
+        rebuild();
+      } catch (error) {
+        answerTargets = previous;
+        rebuild();
+        throw error;
+      }
+    },
+    visibleMarkerGroup,
     getObjectLoadStatus: () => objectLoader?.getStatus() ?? { loading: false, failed: false },
     retryObjectLoads: () => objectLoader?.retrySelected(),
     map,

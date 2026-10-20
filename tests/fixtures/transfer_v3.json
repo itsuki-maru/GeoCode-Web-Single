@@ -1,0 +1,550 @@
+{
+  "format": "geocode-web",
+  "version": 3,
+  "exported_at": "2026-10-20T12:34:56.123456Z",
+  "image_policy": "references_only",
+  "layers": [
+    {
+      "key": "l1",
+      "layer_name": "同名",
+      "is_master": false,
+      "common_form": {
+        "form_key": "f1",
+        "version": 2
+      },
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "updated_at": "2026-10-20T12:34:56.123456Z"
+    },
+    {
+      "key": "l2",
+      "layer_name": "同名",
+      "is_master": false,
+      "common_form": null,
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "updated_at": "2026-10-20T12:34:56.123456Z"
+    },
+    {
+      "key": "l3",
+      "layer_name": "空レイヤ",
+      "is_master": false,
+      "common_form": null,
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "updated_at": "2026-10-20T12:34:56.123456Z"
+    },
+    {
+      "key": "l4",
+      "layer_name": "空管理レイヤ",
+      "is_master": true,
+      "common_form": {
+        "form_key": "f1",
+        "version": 2
+      },
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "updated_at": "2026-10-20T12:34:56.123456Z"
+    }
+  ],
+  "markers": [
+    {
+      "key": "m1",
+      "layer_key": "l1",
+      "marker_name": "管理対象",
+      "latitude": 35,
+      "longitude": 139,
+      "detail": "元の本文 ![参照](/static/images/original.jpg)",
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "updated_at": "2026-10-20T12:34:56.123456Z"
+    },
+    {
+      "key": "m2",
+      "layer_key": "l2",
+      "marker_name": "手動コピー",
+      "latitude": 35.1,
+      "longitude": 139.1,
+      "detail": "手動本文",
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "updated_at": "2026-10-20T12:34:56.123456Z"
+    },
+    {
+      "key": "m3",
+      "layer_key": "l2",
+      "marker_name": "個別対象",
+      "latitude": 35.2,
+      "longitude": 139.2,
+      "detail": "個別本文",
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "updated_at": "2026-10-20T12:34:56.123456Z"
+    }
+  ],
+  "shapes": [
+    {
+      "key": "g1",
+      "layer_key": "l1",
+      "shape_type": "polyline",
+      "name": "管理図形",
+      "geojson": {
+        "type": "Feature",
+        "properties": {
+          "memo": "元の図形メモ",
+          "style": {
+            "weight": 4
+          }
+        },
+        "geometry": {
+          "type": "LineString",
+          "coordinates": [
+            [
+              139,
+              35
+            ],
+            [
+              140,
+              36
+            ]
+          ]
+        }
+      },
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "updated_at": "2026-10-20T12:34:56.123456Z"
+    }
+  ],
+  "common_forms": [
+    {
+      "key": "f1",
+      "version": 2,
+      "deleted": false,
+      "form_title": "共通フォーム",
+      "form_description": "説明",
+      "form_schema": {
+        "fields": [
+          {
+            "id": "n",
+            "type": "number",
+            "label": "数値"
+          },
+          {
+            "id": "flag",
+            "type": "checkbox",
+            "label": "確認"
+          },
+          {
+            "id": "photo",
+            "type": "image",
+            "label": "画像"
+          }
+        ]
+      },
+      "revisions": [
+        {
+          "version": 1,
+          "form_schema": {
+            "fields": [
+              {
+                "id": "n",
+                "type": "number",
+                "label": "数値"
+              }
+            ]
+          }
+        },
+        {
+          "version": 2,
+          "form_schema": {
+            "fields": [
+              {
+                "id": "n",
+                "type": "number",
+                "label": "数値"
+              },
+              {
+                "id": "flag",
+                "type": "checkbox",
+                "label": "確認"
+              },
+              {
+                "id": "photo",
+                "type": "image",
+                "label": "画像"
+              }
+            ]
+          }
+        }
+      ],
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "updated_at": "2026-10-20T12:34:56.123456Z"
+    },
+    {
+      "key": "f2",
+      "version": 1,
+      "deleted": true,
+      "form_title": "削除済み",
+      "form_description": "説明",
+      "form_schema": {
+        "fields": [
+          {
+            "id": "old",
+            "type": "text",
+            "label": "旧項目"
+          }
+        ]
+      },
+      "revisions": [
+        {
+          "version": 1,
+          "form_schema": {
+            "fields": [
+              {
+                "id": "old",
+                "type": "text",
+                "label": "旧項目"
+              }
+            ]
+          }
+        }
+      ],
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "updated_at": "2026-10-20T12:34:56.123456Z"
+    },
+    {
+      "key": "f3",
+      "version": 1,
+      "deleted": false,
+      "form_title": "未適用",
+      "form_description": "説明",
+      "form_schema": {
+        "fields": [
+          {
+            "id": "n",
+            "type": "number",
+            "label": "数値"
+          }
+        ]
+      },
+      "revisions": [
+        {
+          "version": 1,
+          "form_schema": {
+            "fields": [
+              {
+                "id": "n",
+                "type": "number",
+                "label": "数値"
+              }
+            ]
+          }
+        }
+      ],
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "updated_at": "2026-10-20T12:34:56.123456Z"
+    }
+  ],
+  "form_configs": [
+    {
+      "target": {
+        "type": "marker",
+        "key": "m1"
+      },
+      "form_title": "共通フォーム",
+      "form_description": "説明",
+      "form_schema": {
+        "fields": [
+          {
+            "id": "n",
+            "type": "number",
+            "label": "数値"
+          },
+          {
+            "id": "flag",
+            "type": "checkbox",
+            "label": "確認"
+          },
+          {
+            "id": "photo",
+            "type": "image",
+            "label": "画像"
+          }
+        ]
+      },
+      "source_form": {
+        "form_key": "f1",
+        "version": 2
+      },
+      "managed_layer_key": "l1",
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "updated_at": "2026-10-20T12:34:56.123456Z"
+    },
+    {
+      "target": {
+        "type": "shape",
+        "key": "g1"
+      },
+      "form_title": "共通フォーム",
+      "form_description": "説明",
+      "form_schema": {
+        "fields": [
+          {
+            "id": "n",
+            "type": "number",
+            "label": "数値"
+          },
+          {
+            "id": "flag",
+            "type": "checkbox",
+            "label": "確認"
+          },
+          {
+            "id": "photo",
+            "type": "image",
+            "label": "画像"
+          }
+        ]
+      },
+      "source_form": {
+        "form_key": "f1",
+        "version": 2
+      },
+      "managed_layer_key": "l1",
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "updated_at": "2026-10-20T12:34:56.123456Z"
+    },
+    {
+      "target": {
+        "type": "marker",
+        "key": "m2"
+      },
+      "form_title": "手動の定義",
+      "form_description": "説明",
+      "form_schema": {
+        "fields": [
+          {
+            "id": "n",
+            "type": "number",
+            "label": "数値"
+          },
+          {
+            "id": "manual",
+            "type": "text",
+            "label": "個別追加"
+          }
+        ]
+      },
+      "source_form": {
+        "form_key": "f1",
+        "version": 1
+      },
+      "managed_layer_key": null,
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "updated_at": "2026-10-20T12:34:56.123456Z"
+    },
+    {
+      "target": {
+        "type": "marker",
+        "key": "m3"
+      },
+      "form_title": "個別フォーム",
+      "form_description": "説明",
+      "form_schema": {
+        "fields": [
+          {
+            "id": "n",
+            "type": "number",
+            "label": "数値"
+          },
+          {
+            "id": "flag",
+            "type": "checkbox",
+            "label": "確認"
+          },
+          {
+            "id": "photo",
+            "type": "image",
+            "label": "画像"
+          }
+        ]
+      },
+      "source_form": null,
+      "managed_layer_key": null,
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "updated_at": "2026-10-20T12:34:56.123456Z"
+    }
+  ],
+  "submissions": [
+    {
+      "key": "a1",
+      "target": {
+        "type": "marker",
+        "key": "m1"
+      },
+      "submitted_values": {
+        "n": 1
+      },
+      "form_snapshot": {
+        "form_title": "旧タイトル",
+        "form_description": "説明",
+        "form_schema": {
+          "fields": [
+            {
+              "id": "n",
+              "type": "number",
+              "label": "数値"
+            }
+          ]
+        }
+      },
+      "source_form": {
+        "form_key": "f1",
+        "version": 1
+      },
+      "rendered_markdown": "元の回答Markdown 1",
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "source_order": 1
+    },
+    {
+      "key": "a2",
+      "target": {
+        "type": "marker",
+        "key": "m1"
+      },
+      "submitted_values": {
+        "n": 0,
+        "flag": false,
+        "photo": {
+          "url": "/static/images/original.jpg",
+          "filename": "元画像.jpg",
+          "content_type": "image/jpeg"
+        }
+      },
+      "form_snapshot": {
+        "form_title": "共通フォーム",
+        "form_description": "説明",
+        "form_schema": {
+          "fields": [
+            {
+              "id": "n",
+              "type": "number",
+              "label": "数値"
+            },
+            {
+              "id": "flag",
+              "type": "checkbox",
+              "label": "確認"
+            },
+            {
+              "id": "photo",
+              "type": "image",
+              "label": "画像"
+            }
+          ]
+        }
+      },
+      "source_form": {
+        "form_key": "f1",
+        "version": 2
+      },
+      "rendered_markdown": "元の回答Markdown 2",
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "source_order": 2
+    },
+    {
+      "key": "a3",
+      "target": {
+        "type": "marker",
+        "key": "m2"
+      },
+      "submitted_values": {
+        "n": 9007199254740993.01234567890123456789,
+        "manual": "手動値"
+      },
+      "form_snapshot": {
+        "form_title": "手動の定義",
+        "form_description": "説明",
+        "form_schema": {
+          "fields": [
+            {
+              "id": "n",
+              "type": "number",
+              "label": "数値"
+            },
+            {
+              "id": "manual",
+              "type": "text",
+              "label": "個別追加"
+            }
+          ]
+        }
+      },
+      "source_form": {
+        "form_key": "f1",
+        "version": 1
+      },
+      "rendered_markdown": "元の回答Markdown 3",
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "source_order": 3
+    },
+    {
+      "key": "a4",
+      "target": {
+        "type": "marker",
+        "key": "m3"
+      },
+      "submitted_values": {
+        "unknown": null,
+        "flag": false,
+        "zero": 0,
+        "empty": ""
+      },
+      "form_snapshot": null,
+      "source_form": null,
+      "rendered_markdown": "元の回答Markdown 4",
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "source_order": 4
+    },
+    {
+      "key": "a5",
+      "target": {
+        "type": "shape",
+        "key": "g1"
+      },
+      "submitted_values": {
+        "old": "過去"
+      },
+      "form_snapshot": null,
+      "source_form": {
+        "form_key": "f2",
+        "version": 1
+      },
+      "rendered_markdown": "元の回答Markdown 5",
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "source_order": 5
+    },
+    {
+      "key": "a6",
+      "target": {
+        "type": "marker",
+        "key": "m1"
+      },
+      "submitted_values": {
+        "old": "別フォームの回答"
+      },
+      "form_snapshot": {
+        "form_title": "削除済み",
+        "form_description": "説明",
+        "form_schema": {
+          "fields": [
+            {
+              "id": "old",
+              "type": "text",
+              "label": "旧項目"
+            }
+          ]
+        }
+      },
+      "source_form": {
+        "form_key": "f2",
+        "version": 1
+      },
+      "rendered_markdown": "元の回答Markdown 6",
+      "created_at": "2026-10-20T12:34:56.123456Z",
+      "source_order": 6
+    }
+  ]
+}

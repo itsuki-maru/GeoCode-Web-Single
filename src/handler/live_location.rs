@@ -53,7 +53,13 @@ async fn sharing_is_allowed(
     user_id: &str,
 ) -> Result<bool, AppError> {
     sqlx::query_scalar::<_, bool>(
-        "SELECT can_share_live_location FROM user_model WHERE id = $1 AND is_locked = false",
+        r#"
+        SELECT
+            can_share_live_location
+        FROM user_model
+        WHERE id = $1
+            AND is_locked = false
+        "#,
     )
     .bind(user_id)
     .fetch_optional(connection)
@@ -138,7 +144,14 @@ pub async fn update_live_location_session_handler(
     }
 
     let guard = sqlx::query_as::<_, SessionGuard>(
-        "SELECT sequence_no, received_at FROM live_location_session WHERE user_id = $1 AND session_id = $2",
+        r#"
+        SELECT
+            sequence_no,
+            received_at
+        FROM live_location_session
+        WHERE user_id = $1
+            AND session_id = $2
+        "#,
     )
     .bind(&user_id)
     .bind(&session_id)
@@ -214,11 +227,17 @@ async fn delete_session(
     user_id: &str,
     session_id: &str,
 ) -> Result<(), AppError> {
-    sqlx::query("DELETE FROM live_location_session WHERE user_id = $1 AND session_id = $2")
-        .bind(user_id)
-        .bind(session_id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        r#"
+        DELETE FROM live_location_session
+        WHERE user_id = $1
+            AND session_id = $2
+        "#,
+    )
+    .bind(user_id)
+    .bind(session_id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 

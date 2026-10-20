@@ -132,3 +132,32 @@ describe("レスポンスインターセプター", () => {
     expect(state.push).toHaveBeenCalledWith("/account/login");
   });
 });
+
+describe("所有者フォームの認証更新", () => {
+  it.each(["marker", "shape"])("%s: 期限切れ時も同じmultipartを再送する", async (kind) => {
+    const body = new FormData();
+    body.append(
+      "submission",
+      JSON.stringify({ config_token: "snapshot", values: { n: "20", flag: false } }),
+    );
+    body.append("image__photo", new Blob(["image"]), "photo.jpg");
+    const original = {
+      url: `/${kind}/one/form/submissions`,
+      method: "post",
+      data: body,
+      headers: {},
+    };
+    state.post.mockResolvedValue({ data: {} });
+    state.request.mockResolvedValue({ data: "saved" });
+    await expect(
+      state.responseHandler?.({
+        response: { status: 401, data: { error: "token_expired" } },
+        config: original,
+      }),
+    ).resolves.toEqual({ data: "saved" });
+    expect(state.post).toHaveBeenCalledWith("/account/refresh");
+    expect(state.request).toHaveBeenCalledWith(original);
+    expect(original.data).toBe(body);
+    expect(state.requestHandler?.(original).headers).not.toHaveProperty("Content-Type");
+  });
+});

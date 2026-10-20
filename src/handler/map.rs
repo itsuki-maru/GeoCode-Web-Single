@@ -221,7 +221,7 @@ pub async fn map_get_handler(
             marker_icon_model.uuid_filename AS marker_icon_filename
         FROM layer_model
         LEFT JOIN marker_icon_model
-        ON marker_icon_model.id = layer_model.marker_icon_id
+            ON marker_icon_model.id = layer_model.marker_icon_id
         WHERE layer_model.user_id = $1
         "#,
     )
@@ -237,34 +237,34 @@ pub async fn map_get_handler(
 
     let shapes = sqlx::query_as::<_, ShapeObject>(if is_master {
         r#"
-            SELECT
-                id,
-                user_id,
-                layer_id,
-                shape_type,
-                name,
-                geojson,
-                created_at,
-                updated_at
-            FROM shape_model
-            WHERE user_id = $1
-            ORDER BY created_at ASC
-            "#
+        SELECT
+            id,
+            user_id,
+            layer_id,
+            shape_type,
+            name,
+            geojson,
+            created_at,
+            updated_at
+        FROM shape_model
+        WHERE user_id = $1
+        ORDER BY created_at ASC
+        "#
     } else {
         r#"
-            SELECT
-                id,
-                user_id,
-                layer_id,
-                shape_type,
-                name,
-                geojson,
-                created_at,
-                updated_at
-            FROM shape_model
-            WHERE user_id = $1 AND layer_id = $2
-            ORDER BY created_at ASC
-            "#
+        SELECT
+            id,
+            user_id,
+            layer_id,
+            shape_type,
+            name,
+            geojson,
+            created_at,
+            updated_at
+        FROM shape_model
+        WHERE user_id = $1 AND layer_id = $2
+        ORDER BY created_at ASC
+        "#
     });
     let shapes = if is_master {
         shapes.bind(&user_id).fetch_all(&pool).await
@@ -356,7 +356,7 @@ pub async fn map_another_get_handler(
             marker_icon_model.uuid_filename AS marker_icon_filename
         FROM layer_model
         LEFT JOIN marker_icon_model
-        ON marker_icon_model.id = layer_model.marker_icon_id
+            ON marker_icon_model.id = layer_model.marker_icon_id
         WHERE layer_model.user_id = $1
         "#,
     )

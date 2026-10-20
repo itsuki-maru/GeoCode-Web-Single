@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
+import LayerCommonFormSetting from "./LayerCommonFormSetting.vue";
+import MessageModal from "@/components/common/MessageModal.vue";
+import apiClient from "@/axiosClient";
 import BaseModal from "@/components/common/BaseModal.vue";
 import { useLayersStore } from "@/stores/layers";
 import MarkerIconPicker from "@/components/layer/MarkerIconPicker.vue";
@@ -19,10 +22,17 @@ const emit = defineEmits<{
 const layersStore = useLayersStore();
 const editName = ref("");
 const selectedIconId = ref<string | null>(null);
+const formSetting = ref<InstanceType<typeof LayerCommonFormSetting> | null>(null);
+const saving = ref(false),
+  formLoading = ref(false),
+  confirmOpen = ref(false),
+  confirmMessage = ref("");
+let pending: Record<string, unknown> = {};
 
 watch(
   () => [props.currentName, props.layerId, props.isOpen],
   () => {
+    confirmOpen.value = false;
     editName.value = props.currentName;
     selectedIconId.value = layersStore.layersList.get(props.layerId)?.marker_icon_id ?? null;
   },
@@ -34,17 +44,58 @@ const layerNameChange = async (): Promise<void> => {
     emit("message", "レイヤ名が入力されていません。");
     return;
   }
-  await layersStore.updateLayer(props.layerId, editName.value, selectedIconId.value);
-  emit("renamed", props.layerId, editName.value);
-  emit("message", "レイヤ設定を変更しました。");
-  emit("close");
+  try {
+    const change = formSetting.value?.getChange();
+    if (change) {
+      pending = change.payload;
+      confirmMessage.value = change.message;
+      confirmOpen.value = true;
+      return;
+    }
+    await saveLayer({});
+  } catch (error) {
+    emit("message", error instanceof Error ? error.message : "設定を確認してください。");
+  }
+};
+const saveLayer = async (formPayload: Record<string, unknown>) => {
+  if (saving.value) return;
+  saving.value = true;
+  const savedLayerId = props.layerId,
+    savedName = editName.value;
+  confirmOpen.value = false;
+  try {
+    await apiClient.put(`/layer/update/${savedLayerId}`, {
+      name: savedName,
+      marker_icon_id: selectedIconId.value,
+      update_marker_icon: true,
+      ...formPayload,
+    });
+    const refreshed = await layersStore.initList();
+    if (props.isOpen && props.layerId === savedLayerId) emit("renamed", savedLayerId, savedName);
+    if (props.isOpen && props.layerId === savedLayerId) emit("close");
+    emit(
+      "message",
+      refreshed
+        ? "レイヤ設定を変更しました。"
+        : "設定は保存しました。画面を再読み込みしてください。",
+    );
+  } catch (error) {
+    emit(
+      "message",
+      apiClient.isAxiosError(error) && error.response?.status === 409
+        ? "対象件数またはフォームが更新されました。設定を開き直してください。"
+        : "レイヤ設定を変更できませんでした。",
+    );
+  } finally {
+    saving.value = false;
+  }
 };
 </script>
 
 <template>
-  <BaseModal :isOpen="isOpen" @close="emit('close')">
+  <BaseModal :isOpen="isOpen" :closeOnOverlayClick="!saving" @close="emit('close')">
     <h2 class="modal-h2">レイヤ設定</h2>
-    <div class="setting-contents">
+    <div class="setting-contents" :inert="saving">
       <div class="name-setting">
         <label for="layer-name-mobile">レイヤ名</label>
         <input
@@ -59,13 +110,34 @@ const layerNameChange = async (): Promise<void> => {
           :disabled="layersStore.layersList.get(layerId)?.is_master"
         />
       </div>
+      <LayerCommonFormSetting
+        ref="formSetting"
+        :layerId="layerId"
+        :isOpen="isOpen"
+        :disabled="saving"
+        @busy="formLoading = $event"
+      />
+
       <MarkerIconPicker v-model="selectedIconId" @message="emit('message', $event)" />
       <div class="btn-zone">
-        <button @click="emit('close')" class="btn-standard">閉じる</button>
-        <button @click="layerNameChange()" class="btn-standard btn-primary">変更</button>
+        <button :disabled="saving" @click="emit('close')" class="btn-standard">閉じる</button>
+        <button
+          :disabled="saving || formLoading"
+          @click="layerNameChange()"
+          class="btn-standard btn-primary"
+        >
+          変更
+        </button>
       </div>
     </div>
   </BaseModal>
+  <MessageModal
+    :isOpen="isOpen && confirmOpen"
+    :message="confirmMessage"
+    confirmLabel="変更する"
+    @close="confirmOpen = false"
+    @confirm="saveLayer(pending)"
+  />
 </template>
 
 <style scoped>

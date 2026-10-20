@@ -52,6 +52,7 @@ import QRCodeGeneratorModal from "@/components/qrcode/QRCodeGeneratorModal.vue";
 import OnetimeSettingModal from "@/components/share/OnetimeSettingModal.vue";
 import OnetimeUrlModal from "@/components/share/OnetimeUrlModal.vue";
 import JsonImportModal from "@/components/json/JsonImportModal.vue";
+import { fetchJsonExport } from "@/utils/json-transfer";
 
 // --- アプリケーションの初期化 ---
 const appInitStore = useApplicationInitStore();
@@ -400,6 +401,7 @@ const isNewLayerModal = ref(false);
 const showImageUploadModal = ref(false);
 const showImageListModal = ref(false);
 const showJsonUploadModal = ref(false);
+const jsonExportBusy = ref(false);
 const isQRCodeGenModal = ref(false);
 const isOnetimeSettingModal = ref(false);
 const isOnetimeUrlModal = ref(false);
@@ -609,37 +611,46 @@ const getLayerForId = (layer_id: string): string => {
 };
 
 const exportJsonData = async (): Promise<void> => {
-  let requestUrl = `${exportJsonUrl}${activeLayer.value}`;
-  if (isMasterLayer.value) {
-    requestUrl = `${exportJsonUrl}${activeLayer.value}?is_master=true`;
-  }
+  if (jsonExportBusy.value) return;
+  jsonExportBusy.value = true;
+  const layerId = activeLayer.value;
+  const filename = `export_${getLayerForId(layerId)}_v3.json`;
+  const requestUrl = `${exportJsonUrl}${layerId}`;
   try {
-    const response = await apiClient.get(requestUrl);
-    const jsonData = JSON.stringify(response.data, null, 2);
-    let blob = new Blob([jsonData], { type: "text/plain" });
+    const blob = await fetchJsonExport(requestUrl);
     const downloadUrl = window.URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = downloadUrl;
-    link.setAttribute("download", `export_${getLayerForId(activeLayer.value)}.json`);
+    link.setAttribute("download", filename);
     document.body.appendChild(link);
     link.click();
     link.remove();
+    setTimeout(() => window.URL.revokeObjectURL(downloadUrl), 60000);
   } catch (error) {
     if (apiClient.isAxiosError(error)) {
       const axiosError = error as AxiosError;
       if (axiosError.response) {
         switch (axiosError.response.status) {
           case 400:
-            showMessage(`${axiosError.response.data}`);
+          case 413:
+            showMessage(
+              (axiosError.response.data as { error?: string })?.error ??
+                "JSONを出力できませんでした。",
+            );
             break;
           case 401:
             loginRedirect();
             break;
           default:
+            showMessage("JSONを出力できませんでした。再試行してください。");
             console.error(`An error occurred: ${axiosError.response.status}`);
         }
       }
+    } else {
+      showMessage("JSONを出力できませんでした。再試行してください。");
     }
+  } finally {
+    jsonExportBusy.value = false;
   }
 };
 
@@ -653,6 +664,8 @@ const userSettingModalRef = ref<{
 const userPrivacySettingFunction = () => {
   userSettingModalRef.value?.openCloseUserSettingModal();
 };
+
+defineExpose({ openUserPrivacySettings: userPrivacySettingFunction });
 
 watch(
   () => userSettingModalRef.value?.isUserPrivate,
@@ -676,6 +689,7 @@ const mapObjectQueryFormData = ref<QueryForm>({ query1: "", query2: "" });
 
 // --- キーボードショートカット ---
 const handleKeyDown = (event: KeyboardEvent) => {
+  if (event.defaultPrevented || document.querySelector(".answer-map-overlay")) return;
   if (isOpenPrintMapModal.value) return;
   if (
     (event.ctrlKey || event.metaKey) &&
@@ -782,9 +796,8 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
     @onetimeSetting="openOnetimeSetting()"
     @fullScreenMap="isOpenFullScreenMapModal = true"
     @printMap="isOpenPrintMapModal = true"
-    @exportJson="exportJsonData()"
+    @exportJson="exportJsonData"
     @importJson="showJsonUploadModal = true"
-    @userSetting="userPrivacySettingFunction()"
     @reloadMap="reloadMap"
     @layerList="openLayerList()"
     @mapObjectSearch="handleMapObjectSearch"

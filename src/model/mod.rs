@@ -13,6 +13,7 @@ pub mod marker_icon;
 pub mod onetime_url;
 pub mod shape;
 pub mod tiles;
+pub mod transfer;
 
 pub use account::*;
 pub use admin::*;

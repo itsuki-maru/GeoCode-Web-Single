@@ -197,7 +197,9 @@ pub async fn token_handler(
                     query!(
                         r#"
                         UPDATE user_model
-                        SET failed_count = $1, next_challenge_time = $2
+                        SET
+                            failed_count = $1,
+                            next_challenge_time = $2
                         WHERE id = $3
                         "#,
                         failed_count,
@@ -361,7 +363,13 @@ pub async fn refresh_token_handler(
     Extension(pool): Extension<SqlitePool>,
 ) -> Result<impl IntoResponse, AppError> {
     let auth_version = sqlx::query_scalar::<_, i64>(
-        "SELECT auth_version FROM user_model WHERE id = $1 AND is_locked = false",
+        r#"
+        SELECT
+            auth_version
+        FROM user_model
+        WHERE id = $1
+            AND is_locked = false
+        "#,
     )
     .bind(&user_id)
     .fetch_optional(&pool)
@@ -425,7 +433,13 @@ pub async fn account_password_update_handler(
     validate_password(&payload.new_password)?;
 
     let current_hash = sqlx::query_scalar::<_, String>(
-        "SELECT password FROM user_model WHERE id = $1 AND is_locked = false",
+        r#"
+        SELECT
+            password
+        FROM user_model
+        WHERE id = $1
+            AND is_locked = false
+        "#,
     )
     .bind(&user_id)
     .fetch_optional(&pool)
@@ -533,7 +547,14 @@ pub async fn disable_token(
     Extension(pool): Extension<SqlitePool>,
 ) -> Result<impl IntoResponse, AppError> {
     let updated = sqlx::query_scalar::<_, i64>(
-        "UPDATE user_model SET auth_version = auth_version + 1 WHERE id = $1 RETURNING auth_version",
+        r#"
+        UPDATE user_model
+        SET
+            auth_version = auth_version + 1
+        WHERE id = $1
+        RETURNING
+            auth_version
+        "#,
     )
     .bind(user_id)
     .fetch_optional(&pool)

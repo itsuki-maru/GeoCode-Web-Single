@@ -50,7 +50,8 @@ pub async fn generate_url_handler(
         r#"
         SELECT COUNT(*) as count
         FROM temporary_urls
-        WHERE user_id = $1"#,
+        WHERE user_id = $1
+        "#,
         user_id,
     )
     .fetch_one(&pool)
@@ -247,7 +248,21 @@ async fn get_shapes_hash_map(
         .join(", ");
 
     let shapes_sql = format!(
-        "SELECT id, user_id, layer_id, shape_type, name, geojson, created_at, updated_at FROM shape_model WHERE user_id = $1 AND layer_id IN ({}) ORDER BY created_at ASC",
+        r#"
+        SELECT
+            id,
+            user_id,
+            layer_id,
+            shape_type,
+            name,
+            geojson,
+            created_at,
+            updated_at
+        FROM shape_model
+        WHERE user_id = $1
+            AND layer_id IN ({})
+        ORDER BY created_at ASC
+        "#,
         placeholders
     );
 
@@ -280,7 +295,18 @@ async fn get_markers_hash_map(
         .join(", ");
 
     let markers_sql = format!(
-        "SELECT id, layer_id, marker_name, latitude, longitude, detail FROM marker_info_model WHERE user_id = $1 AND layer_id IN ({})",
+        r#"
+        SELECT
+            id,
+            layer_id,
+            marker_name,
+            latitude,
+            longitude,
+            detail
+        FROM marker_info_model
+        WHERE user_id = $1
+            AND layer_id IN ({})
+        "#,
         placeholders
     );
     let mut markers_query = sqlx::query_as::<_, MarkerObjectFromRow>(&markers_sql).bind(&user_id);
@@ -316,18 +342,20 @@ async fn get_layer_hash_map(
     // レイヤ取得（パラメータバインド使用）
     // SQLite では　ANY が使えないため IN を使用
     let layers_sql = format!(
-        r#"SELECT
-            layer_model.id,
-            layer_model.user_id,
-            layer_model.layer_name,
-            layer_model.is_master,
-            layer_model.marker_icon_id,
-            marker_icon_model.uuid_filename AS marker_icon_filename
-        FROM layer_model
-        LEFT JOIN marker_icon_model
-            ON marker_icon_model.id = layer_model.marker_icon_id
-        WHERE layer_model.user_id = $1
-            AND layer_model.id IN ({})"#,
+        r#"
+        SELECT
+                    layer_model.id,
+                    layer_model.user_id,
+                    layer_model.layer_name,
+                    layer_model.is_master,
+                    layer_model.marker_icon_id,
+                    marker_icon_model.uuid_filename AS marker_icon_filename
+                FROM layer_model
+                LEFT JOIN marker_icon_model
+                    ON marker_icon_model.id = layer_model.marker_icon_id
+                WHERE layer_model.user_id = $1
+                    AND layer_model.id IN ({})
+        "#,
         placeholders
     );
     let mut layers_query = sqlx::query_as::<_, LayerObjectFromRow>(&layers_sql).bind(&user_id);
@@ -398,7 +426,21 @@ pub async fn temporary_map_get_handler(
 
             let temp_url = sqlx::query_as!(
                 TemporaryUrlFromDB,
-                r#"SELECT id, user_id, url, expiration, password_hash, layers, markers, shapes, create_at, include_tile_overlays as "include_tile_overlays!: bool" FROM temporary_urls WHERE id = $1"#,
+                r#"
+                SELECT
+                    id,
+                    user_id,
+                    url,
+                    expiration,
+                    password_hash,
+                    layers,
+                    markers,
+                    shapes,
+                    create_at,
+                    include_tile_overlays as "include_tile_overlays!: bool"
+                FROM temporary_urls
+                WHERE id = $1
+                "#,
                 url_id
             )
             .fetch_one(&pool)
@@ -409,10 +451,16 @@ pub async fn temporary_map_get_handler(
                 Ok(temp_url) => {
                     // 共有URLが期限切れの場合
                     if temp_url.is_expired() {
-                        query!("DELETE FROM temporary_urls WHERE id = $1", url_id)
-                            .execute(&pool)
-                            .await
-                            .map_err(|_| AppError::InternalServerError)?;
+                        query!(
+                            r#"
+                            DELETE FROM temporary_urls
+                            WHERE id = $1
+                            "#,
+                            url_id
+                        )
+                        .execute(&pool)
+                        .await
+                        .map_err(|_| AppError::InternalServerError)?;
                         return render_not_found_page(&tera, viewport_content).await;
                     } else if temp_url.password_hash.is_some() {
                         return render_password_required_page(
@@ -479,7 +527,21 @@ pub async fn temporary_map_auth_handler(
 
     let temp_url = query_as!(
         TemporaryUrlFromDB,
-        r#"SELECT id, user_id, url, expiration, password_hash, layers, markers, shapes, create_at, include_tile_overlays as "include_tile_overlays!: bool" FROM temporary_urls WHERE id = $1"#,
+        r#"
+        SELECT
+            id,
+            user_id,
+            url,
+            expiration,
+            password_hash,
+            layers,
+            markers,
+            shapes,
+            create_at,
+            include_tile_overlays as "include_tile_overlays!: bool"
+        FROM temporary_urls
+        WHERE id = $1
+        "#,
         url_id
     )
     .fetch_optional(&pool)
@@ -496,10 +558,16 @@ pub async fn temporary_map_auth_handler(
 
     // 期限切れの場合、削除して NotFound を返す
     if temp_url.is_expired() {
-        query!("DELETE FROM temporary_urls WHERE id = $1", url_id)
-            .execute(&pool)
-            .await
-            .map_err(|_| AppError::InternalServerError)?;
+        query!(
+            r#"
+            DELETE FROM temporary_urls
+            WHERE id = $1
+            "#,
+            url_id
+        )
+        .execute(&pool)
+        .await
+        .map_err(|_| AppError::InternalServerError)?;
         return render_not_found_page(&tera, viewport_content).await;
     }
 
@@ -654,17 +722,17 @@ async fn render_temporary_map_page(
         TileServers,
         r#"
         SELECT
-            id,
-            layer_name,
-            label,
-            url,
-            attribution,
-            include_foreign_tiles,
-            min_zoom,
-            max_zoom,
-            create_at,
-            updated_at
-        FROM tileserver_model
+                    id,
+                    layer_name,
+                    label,
+                    url,
+                    attribution,
+                    include_foreign_tiles,
+                    min_zoom,
+                    max_zoom,
+                    create_at,
+                    updated_at
+                FROM tileserver_model
         "#
     )
     .fetch_all(pool)

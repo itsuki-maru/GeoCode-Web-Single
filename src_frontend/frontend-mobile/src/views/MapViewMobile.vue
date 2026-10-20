@@ -26,6 +26,7 @@ import ProgressSpinner from "@/components/common/ProgressSpinner.vue";
 import UploadProgressModal from "@/components/common/UploadProgressModal.vue";
 import MessageModal from "@/components/common/MessageModal.vue";
 import ConfirmModal from "@/components/common/ConfirmModal.vue";
+import CommonFormsModal from "@/components/map-object/CommonFormsModal.vue";
 import MapToolbar from "@/components/map/MapToolbar.vue";
 import MapIframe from "@/components/map/MapIframe.vue";
 import LiveLocationSharing from "@/components/location/LiveLocationSharing.vue";
@@ -321,6 +322,7 @@ const isMessageModal = ref(false);
 const messageText = ref("");
 const showFunctionContent = ref(false);
 const isOpenToolbar = ref(false);
+const commonFormsOpen = ref(false);
 const isOpenEditModal = ref(false);
 const selectedObjectId = ref("");
 const selectedObjectType = ref<"marker" | "shape">("marker");
@@ -704,6 +706,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
     @openToolbar="isOpenToolbar = !isOpenToolbar"
   />
   <LiveLocationSharing ref="liveLocationSharingRef" />
+  <CommonFormsModal :isOpen="commonFormsOpen" @close="commonFormsOpen = false" />
 
   <!-- ツールバーボタン群 -->
   <transition>
@@ -758,6 +761,14 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
         </button>
         <button @click="openLayerListModal()" class="btn-function-image" title="レイヤ一覧">
           <img :src="`${assetsUrl}layer_add_24.png`" class="function-img" alt="layer_add_24.png" />
+        </button>
+        <button
+          type="button"
+          class="btn-function-image common-form-button"
+          title="共通フォーム作成・管理"
+          @click="commonFormsOpen = true"
+        >
+          <img :src="`${assetsUrl}form_24.png`" class="function-img" alt="共通フォーム作成・管理" />
         </button>
       </div>
     </div>
@@ -1083,13 +1094,13 @@ button:active {
 
 #function-btn-row {
   display: flex;
-  gap: 30px;
+  gap: clamp(8px, 4vw, 30px);
   text-align: center;
   justify-content: center;
   position: fixed;
   bottom: 14%;
   left: 50%;
-  width: 96%;
+  width: 93%;
   transform: translateX(-50%);
   background-color: transparent;
   padding-top: 20px;

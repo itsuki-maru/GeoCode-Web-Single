@@ -1,7 +1,7 @@
 use axum::{
     Json,
     extract::{Extension, Multipart, Path, Query},
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path as FsPath, PathBuf};
@@ -15,18 +15,21 @@ use sqlx::{query, query_as};
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::model::{
-    ExportJsonScheme, ExportLayers, ExportMarkers, ExportPackage, ExportShapeJsonScheme,
-    ExportShapes, ImportMarkers, ImportPackage, ReturningId,
-};
+use crate::model::transfer::{LEGACY_LIMIT, TRANSFER_LIMIT, TransferPackage};
+use crate::model::{ImportMarkers, ImportPackage, ReturningId};
 use crate::shape_validation::validate_shape_geojson;
-use crate::utils::check_ismaster_handler;
 
-const MAX_IMPORT_FILE_SIZE_BYTES: usize = 5 * 1024 * 1024;
+mod v3;
+mod validation;
+
+const MAX_IMPORT_FILE_SIZE_BYTES: usize = TRANSFER_LIMIT;
 
 // インポートデータの正規化
 fn normalize_import_package(content: &str) -> Result<ImportPackage, AppError> {
     if let Ok(package) = serde_json::from_str::<ImportPackage>(content) {
+        if !matches!(package.version, None | Some(1 | 2)) {
+            return Err(validation::invalid("対応していないバージョンです。"));
+        }
         return Ok(package);
     }
 
@@ -42,6 +45,7 @@ fn normalize_import_package(content: &str) -> Result<ImportPackage, AppError> {
 // エクスポートJSONのクエリパラメータの検証
 #[derive(Debug, Deserialize)]
 pub struct ExportJsonQueryParams {
+    version: Option<u32>,
     save_local: Option<bool>,
     filename: Option<String>,
 }
@@ -126,138 +130,20 @@ pub async fn export_json_handler(
     Extension(pool): Extension<SqlitePool>,
     Path(layer_id): Path<String>,
     Query(params): Query<ExportJsonQueryParams>,
-) -> Result<impl IntoResponse, AppError> {
-    let is_master_layer = check_ismaster_handler(&user_id, &layer_id, &pool).await;
-
-    let marker_records = if is_master_layer {
-        query_as::<_, ExportJsonScheme>(
-            r#"
-            SELECT
-                marker_name,
-                latitude,
-                longitude,
-                detail,
-                layer_name,
-                is_master
-            FROM marker_info_model
-            INNER JOIN layer_model
-            ON marker_info_model.layer_id = layer_model.id
-            WHERE marker_info_model.user_id = $1
-            "#,
-        )
-        .bind(&user_id)
-        .fetch_all(&pool)
-        .await
-    } else {
-        query_as::<_, ExportJsonScheme>(
-            r#"
-            SELECT
-                marker_name,
-                latitude,
-                longitude,
-                detail,
-                layer_name,
-                is_master
-            FROM marker_info_model
-            INNER JOIN layer_model
-            ON marker_info_model.layer_id = layer_model.id
-            WHERE marker_info_model.user_id = $1 AND marker_info_model.layer_id = $2
-            "#,
-        )
-        .bind(&user_id)
-        .bind(&layer_id)
-        .fetch_all(&pool)
-        .await
+) -> Result<Response, AppError> {
+    if params.version.unwrap_or(3) != 3 {
+        return Err(validation::invalid(
+            "JSONの出力はversion 3のみ対応しています。最新のGeoCode-Webで読み込んでください。",
+        ));
     }
-    .map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
+    let text = v3::export(&pool, &user_id, &layer_id).await?;
+    export_response(text, &params).await
+}
 
-    let shape_records = if is_master_layer {
-        query_as::<_, ExportShapeJsonScheme>(
-            r#"
-            SELECT
-                shape_type,
-                name,
-                geojson,
-                layer_name,
-                is_master
-            FROM shape_model
-            INNER JOIN layer_model
-            ON shape_model.layer_id = layer_model.id
-            WHERE shape_model.user_id = $1
-            ORDER BY shape_model.created_at ASC
-            "#,
-        )
-        .bind(&user_id)
-        .fetch_all(&pool)
-        .await
-    } else {
-        query_as::<_, ExportShapeJsonScheme>(
-            r#"
-            SELECT
-                shape_type,
-                name,
-                geojson,
-                layer_name,
-                is_master
-            FROM shape_model
-            INNER JOIN layer_model
-            ON shape_model.layer_id = layer_model.id
-            WHERE shape_model.user_id = $1 AND shape_model.layer_id = $2
-            ORDER BY shape_model.created_at ASC
-            "#,
-        )
-        .bind(&user_id)
-        .bind(&layer_id)
-        .fetch_all(&pool)
-        .await
-    }
-    .map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
-
-    let markers_vec: Vec<ExportMarkers> = marker_records
-        .into_iter()
-        .map(|row| {
-            let layer = ExportLayers {
-                layer_name: row.layer_name,
-                is_master: row.is_master,
-            };
-
-            ExportMarkers {
-                marker_name: row.marker_name,
-                latitude: row.latitude,
-                longitude: row.longitude,
-                detail: row.detail,
-                layer,
-            }
-        })
-        .collect();
-
-    let shapes_vec: Vec<ExportShapes> = shape_records
-        .into_iter()
-        .map(|row| ExportShapes {
-            shape_type: row.shape_type,
-            name: row.name,
-            geojson: row.geojson,
-            layer: ExportLayers {
-                layer_name: row.layer_name,
-                is_master: row.is_master,
-            },
-        })
-        .collect();
-
-    let export_package = ExportPackage {
-        version: 2,
-        markers: markers_vec,
-        shapes: shapes_vec,
-    };
-
-    let json_text = serde_json::to_string(&export_package).unwrap_or("".to_string());
-
+async fn export_response(
+    json_text: String,
+    params: &ExportJsonQueryParams,
+) -> Result<Response, AppError> {
     // ローカル保存が有効な場合、ファイルを保存してレスポンスを返す（Tauri）
     if params.save_local.unwrap_or(false) {
         let filename = params.filename.as_deref().unwrap_or("export.json");
@@ -267,25 +153,35 @@ pub async fn export_json_handler(
             "file_path": export_path.to_string_lossy(),
         })
         .to_string();
-        let response = Response::builder()
+        return Response::builder()
             .status(200)
             .header("Content-Type", "application/json")
-            .body(response_body)
+            .header("Cache-Control", "no-store")
+            .body(axum::body::Body::from(response_body))
             .map_err(|_e| AppError::InternalServerError);
-        return Ok(response);
     }
 
     // ローカル保存が無効な場合、ファイルをダウンロード用のレスポンスとして返す（ブラウザ）
-    let response = Response::builder()
+    Response::builder()
         .status(200)
         .header("Content-Type", "application/json")
+        .header("Cache-Control", "no-store")
         .header(
             "Content-Disposition",
             "attachment; filename=\"export.json\"",
         )
-        .body(json_text)
-        .map_err(|_e| AppError::InternalServerError);
-    Ok(response)
+        .body(axum::body::Body::from(json_text))
+        .map_err(|_e| AppError::InternalServerError)
+}
+
+fn multipart_error(error: axum::extract::multipart::MultipartError) -> AppError {
+    if error.status() == axum::http::StatusCode::PAYLOAD_TOO_LARGE {
+        AppError::PayloadTooLarge(
+            "JSONファイルは20MiB以内、要求全体は21MiB以内にしてください。".into(),
+        )
+    } else {
+        AppError::BadRequest
+    }
 }
 
 // レイヤ情報インポートハンドラー
@@ -297,30 +193,51 @@ pub async fn import_json_handler(
     // 現在時刻を取得
     let now = Utc::now().naive_utc();
 
-    // トランザクションの開始
-    let mut tx = pool.begin().await?;
-
     // Multipartを読み込み
-    while let Some(field) = payload
-        .next_field()
-        .await
-        .map_err(|_e| AppError::BadRequest)?
-    {
+    while let Some(field) = payload.next_field().await.map_err(multipart_error)? {
         // JSONファイルかを拡張子により検証
         let file_name = field.file_name().unwrap_or("file").to_string();
-        if file_name.ends_with(".json") {
+        if file_name.to_ascii_lowercase().ends_with(".json") {
             let mut field = field;
             let mut bytes = Vec::new();
-            while let Some(chunk) = field.chunk().await.map_err(|_| AppError::BadRequest)? {
+            while let Some(chunk) = field.chunk().await.map_err(multipart_error)? {
                 if bytes.len().saturating_add(chunk.len()) > MAX_IMPORT_FILE_SIZE_BYTES {
                     return Err(AppError::PayloadTooLarge(
-                        "import JSON must be 5MB or smaller".to_string(),
+                        "JSONファイルは20MiB以内にしてください。".to_string(),
                     ));
                 }
                 bytes.extend_from_slice(&chunk);
             }
+            drop(field);
+            if payload
+                .next_field()
+                .await
+                .map_err(multipart_error)?
+                .is_some()
+            {
+                return Err(validation::invalid(
+                    "JSONファイルは1件だけ指定してください。",
+                ));
+            }
             let content = String::from_utf8(bytes).map_err(|_| AppError::BadRequest)?;
+            let envelope: serde_json::Value =
+                serde_json::from_str(&content).map_err(|_| AppError::BadRequest)?;
+            if envelope.get("version").and_then(serde_json::Value::as_u64) == Some(3) {
+                let package: TransferPackage = serde_json::from_value(envelope).map_err(|e| {
+                    AppError::Validation(format!("version 3のデータ形式が不正です: {e}"))
+                })?;
+                v3::import(&pool, &user_id, package).await?;
+                return Ok(Json(MessageApi {
+                    message: "Upload Ok.".into(),
+                }));
+            }
+            if content.len() > LEGACY_LIMIT {
+                return Err(AppError::PayloadTooLarge(
+                    "旧形式のJSONは5MiB以内にしてください。".into(),
+                ));
+            }
             let import_package = normalize_import_package(&content)?;
+            let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
 
             let mut imported_layer_names = HashSet::new();
             for marker in &import_package.markers {
@@ -344,17 +261,25 @@ pub async fn import_json_handler(
                 query_as!(
                     ReturningId,
                     r#"
-                        INSERT INTO layer_model (
-                            id,
-                            user_id,
-                            layer_name,
-                            is_master,
-                            create_at,
-                            update_at
-                        )
-                        VALUES ($1, $2, $3, $4, $5, $6)
-                        RETURNING id
-                        "#,
+                    INSERT INTO layer_model (
+                        id,
+                        user_id,
+                        layer_name,
+                        is_master,
+                        create_at,
+                        update_at
+                    )
+                    VALUES (
+                        $1,
+                        $2,
+                        $3,
+                        $4,
+                        $5,
+                        $6
+                    )
+                    RETURNING
+                        id
+                    "#,
                     new_layer_id,
                     user_id,
                     layer_name,
@@ -382,20 +307,32 @@ pub async fn import_json_handler(
 
                 query_as!(
                     ReturningId,
-                    r#"INSERT INTO marker_info_model (
-                            id,
-                            user_id,
-                            layer_id,
-                            marker_name,
-                            latitude,
-                            longitude,
-                            detail,
-                            create_at,
-                            update_at
-                        )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                        RETURNING id
-                        "#,
+                    r#"
+                    INSERT INTO marker_info_model (
+                        id,
+                        user_id,
+                        layer_id,
+                        marker_name,
+                        latitude,
+                        longitude,
+                        detail,
+                        create_at,
+                        update_at
+                    )
+                    VALUES (
+                        $1,
+                        $2,
+                        $3,
+                        $4,
+                        $5,
+                        $6,
+                        $7,
+                        $8,
+                        $9
+                    )
+                    RETURNING
+                        id
+                    "#,
                     new_marker_id,
                     user_id,
                     layer_id,
@@ -412,6 +349,14 @@ pub async fn import_json_handler(
                     tracing::error!(error = %e, "database error.");
                     AppError::Sqlx(e)
                 })?;
+                super::layer_forms::sync_object(
+                    &mut tx,
+                    &user_id,
+                    "marker",
+                    &new_marker_id,
+                    &layer_id,
+                )
+                .await?;
             }
 
             // データベースに図形をインサート
@@ -434,12 +379,21 @@ pub async fn import_json_handler(
                         created_at,
                         updated_at
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    VALUES (
+                        $1,
+                        $2,
+                        $3,
+                        $4,
+                        $5,
+                        $6,
+                        $7,
+                        $8
+                    )
                     "#,
                 )
-                .bind(new_shape_id)
+                .bind(&new_shape_id)
                 .bind(&user_id)
-                .bind(layer_id)
+                .bind(&layer_id)
                 .bind(&shape.shape_type)
                 .bind(&shape.name)
                 .bind(&shape.geojson)
@@ -451,6 +405,14 @@ pub async fn import_json_handler(
                     tracing::error!(error = %e, "database error.");
                     AppError::Sqlx(e)
                 })?;
+                super::layer_forms::sync_object(
+                    &mut tx,
+                    &user_id,
+                    "shape",
+                    &new_shape_id,
+                    &layer_id,
+                )
+                .await?;
             }
 
             tx.commit().await?;

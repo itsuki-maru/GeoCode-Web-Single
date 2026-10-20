@@ -93,3 +93,23 @@ URL表記は **map-another**、ファイル・entry表記は **map-anather**。�
 - 公開URLのアクセス制御をHTMLだけの条件分岐で代替しない。
 
 地図の参照・entry接続テストはPCディレクトリで `npm run test:template-js`、初期データやフォームの単体テストはtemplate-scriptsディレクトリで `npm test`。共有期限・パスワード・認可・Teraレンダリングを含む動作はバックエンドと組み合わせて確認する。
+
+## 回答地図の追加絞り込み
+
+- PostgreSQL版先行。回答地図専用の `form-answer-map.html` / `form-answer-map.ts` を使用し、通常の `map-anather` と印刷の経路を維持する。SQLite版は変更しない。
+- PC・モバイルのAnswerMapModalは同一構成。共通フォームと最大10件のAND条件で初期対象を絞る。日付・数値の範囲は両端を含む。0・false・未入力・項目なしを区別する。値はsubmitted_values、定義はform_snapshotを使用する。
+- 初期map APIから取得したquery/as_ofと対象IDをmap-filter JSON APIに渡す。候補は追加条件で狭めず、0件でも編集・解除できる。候補・件数・検索は読み取りトランザクション内で取得する。
+- answer-filter.tsはorigin・親window・requestId・更新IDを確認し、初期対象の部分集合だけを受け付ける。対象IDは種別を含む。保持済みレイヤを再利用し、iframeを再読み込みしない。中心・ズーム・名前検索・レイヤ選択を保持する。
+- 共通検索のisRecordAllowedは任意の判定関数。未指定の通常地図は従来動作。回答地図では検索解除・レイヤ切替でも追加条件を維持する。表示件数は実際に表示中のレイヤを数え、表示不可の対象と区別する。
+- 失敗時は直前の地図を維持し、古い応答・閉じた画面の応答を破棄する。解除は元の一覧条件へ戻す。範囲変更は「表示対象に合わせる」で明示的に行う。閉じるボタンは左下。一覧状態・通常地図設定は保存変更しない。
+- answer-preview.tsは初期の範囲調整・件数・query/targetsのready通知を担当する。失敗はform-answer-map-error.htmlで通知する。HTMLのJSON値はjson_encode_for_html経由とし、成功・失敗ともno-store。
+- 色分けUI・凡例は追加絞り込みへ置き換える。answer-analysis.tsと任意analysis入力は旧呼び出しの互換性維持に限って残す。
+## 回答地図の印刷（PostgreSQL版・PC先行）
+
+- 回答地図の「地図を印刷」またはCtrl+P / Command+Pから既存の印刷プレビューを開く。モバイル版は印刷UIを表示しない。用紙・タイトル・印刷・PDF出力・画像読み込み待機は共通処理を使用する。
+- 印刷開始時点で、反映済みの回答条件・名前検索・レイヤ表示・マーカー/図形表示をすべて満たす対象を固定する。画面外の対象も保持し、用紙上の範囲はプレビューで調整できる。未反映の条件編集は使用しない。更新中・0表示対象では起動しない。
+- 元の地図から中心・ズーム・背景地図・重ね合わせタイル・図形名の表示設定と、対象の保持済みデータを複製する。本文・メモは検索のために再解析しない。DBの再検索・対象の追加取得は行わず、全選択や名前検索解除でも除外対象を復活させない。
+- 対象は最大10,000件、転送データはUTF-8 JSONで32MiBまで。超過時は切り捨てず条件を絞るよう案内する。送信元origin/window・地図要求ID・条件更新ID・印刷要求IDを照合する。印刷スナップショットは印刷中に変更しない。
+- 認証必須POST /form-answers/map-printはform-answer-map-print.htmlの枠だけを返す。parent_origin・request_idを検証し、Cache-Controlはno-store。対象データは親からpostMessageで受け取る。初回表示・再試行の401はauthenticated-form.tsによる認証更新と1回の再送に対応する。
+- 専用entry form-answer-map-print.tsで検証したスナップショットを初期化し、print-preview.tsの共通処理へ渡す。通常の/map-another?print=1の初期化は従来どおり。印刷キーは最前面の回答地図・印刷プレビューへ接続する。
+- 閉じた後は元の回答地図の条件・中心・ズーム・レイヤ状態を維持する。通常地図の保存設定、DBスキーマ、SQLite版は変更しない。
