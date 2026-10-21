@@ -1064,7 +1064,7 @@ summary {
   text-overflow: ellipsis;
 }
 .table-scroll {
-  max-height: 52dvh;
+  max-height: 35dvh;
 }
 th {
   position: sticky;
