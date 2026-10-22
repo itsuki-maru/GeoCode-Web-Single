@@ -715,6 +715,12 @@ onBeforeUnmount(() => {
                     <option v-for="f in forms" :key="f.id" :value="f.id">{{ f.label }}</option>
                   </select></label
                 >
+                <button class="btn-close" type="button" @click="fetchResult(false, true)">
+                  地図条件を解除
+                </button>
+                <button class="btn-close" type="button" :disabled="!visibleCount" @click="fit">
+                  表示範囲の移動
+                </button>
                 <button
                   class="btn-close"
                   type="button"
@@ -723,14 +729,8 @@ onBeforeUnmount(() => {
                 >
                   条件を追加
                 </button>
-                <button class="btn-close" type="button" @click="fetchResult(false)">
-                  絞り込み
-                </button>
-                <button class="btn-close" type="button" @click="fetchResult(false, true)">
-                  地図条件を解除
-                </button>
-                <button class="btn-close" type="button" :disabled="!visibleCount" @click="fit">
-                  表示中の範囲へ移動
+                <button class="btn-close filter-submit" type="button" @click="fetchResult(false)">
+                  絞り込み実行
                 </button>
               </div>
               <div v-for="row in rows" :key="row.id" class="condition-row">
@@ -802,7 +802,7 @@ onBeforeUnmount(() => {
               </div>
             </fieldset>
             <p class="filter-help">
-              最大10件のAND条件です。日付の期間は開始日・終了日を含みます。条件変更後は「絞り込み」で反映します。
+              最大10件のAND条件です。日付の期間は開始日・終了日を含みます。条件変更後は「絞り込み実行」で反映します。
             </p>
             <p v-if="overflow" class="filter-help">
               フォーム候補は200件までです。一覧で条件を絞ってください。
@@ -1043,6 +1043,10 @@ button {
   flex-shrink: 0;
   cursor: pointer;
   font: inherit;
+}
+.filter-submit {
+  background: #2165bb;
+  border-color: #2165bb;
 }
 button:disabled {
   opacity: 0.5;

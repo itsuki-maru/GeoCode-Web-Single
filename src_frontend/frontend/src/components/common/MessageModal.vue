@@ -48,7 +48,7 @@ const emit = defineEmits<{
 
 .message-btn-close {
   display: flex;
-  justify-content: space-between;
+  justify-content: center;
   flex-wrap: wrap;
   gap: 16px;
   text-align: center;

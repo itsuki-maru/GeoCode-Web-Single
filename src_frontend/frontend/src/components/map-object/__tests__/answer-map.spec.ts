@@ -109,7 +109,7 @@ describe("回答地図の非同期絞り込み", () => {
     await click(w, "条件を追加");
     await w.get('[aria-label="入力項目"]').setValue("n:number");
     await w.get('[aria-label="条件の値"]').setValue("20");
-    await click(w, "絞り込み");
+    await click(w, "絞り込み実行");
     const updateId = message.mock.calls.at(-1)![0].updateId;
     send(w, { type: "answer-map-filter-applied", updateId, visible: 2, renderable: 2 });
     await flushPromises();
@@ -356,7 +356,7 @@ describe("回答地図の非同期絞り込み", () => {
     await w.findAll('[aria-label="入力項目"]')[1].setValue("n:number");
     await w.findAll('[aria-label="条件の値"]')[1].setValue("20");
     post.mockResolvedValueOnce({ data: result([keys[0]]) });
-    await click(w, "絞り込み");
+    await click(w, "絞り込み実行");
     const body = post.mock.calls.at(-1)![1] as any;
     expect(body.query).toEqual(query);
     expect(body.targets).toEqual(keys);
@@ -399,7 +399,7 @@ describe("回答地図の非同期絞り込み", () => {
     const frame = w.get("iframe").element as HTMLIFrameElement;
     const message = vi.spyOn(frame.contentWindow!, "postMessage").mockImplementation(() => {});
     post.mockResolvedValueOnce({ data: result([]) });
-    await click(w, "絞り込み");
+    await click(w, "絞り込み実行");
     const command = message.mock.calls.at(-1)![0];
     send(w, {
       type: "answer-map-filter-applied",
@@ -410,7 +410,7 @@ describe("回答地図の非同期絞り込み", () => {
     await flushPromises();
     expect(w.text()).toContain("条件に一致する対象がありません");
     post.mockRejectedValueOnce(new Error("network"));
-    await click(w, "絞り込み");
+    await click(w, "絞り込み実行");
     expect(w.text()).toContain("直前の表示を維持");
     expect(w.text()).toContain("一致0件");
     expect(w.get("iframe").element).toBe(frame);

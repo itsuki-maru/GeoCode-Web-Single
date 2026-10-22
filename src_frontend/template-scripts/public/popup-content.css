@@ -40,6 +40,13 @@
   display: none;
 }
 .geocode-content-popup .popup-content-title {
+  margin: 0 0 8px;
+}
+.geocode-content-popup .popup-content-body {
+  margin-top: 0;
+  padding-top: 0;
+}
+.leaflet-popup-content .geocode-content-popup .popup-content-body > :first-child {
   margin-top: 0;
 }
 @media print {

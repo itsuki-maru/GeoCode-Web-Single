@@ -100,32 +100,34 @@ const saveLayer = async (formPayload: Record<string, unknown>) => {
     :closeOnOverlayClick="!(saving || policySaving)"
     @close="emit('close')"
   >
-    <h2 class="modal-h2">レイヤ設定</h2>
-    <div class="setting-contents" :inert="saving || policySaving">
-      <div class="name-setting">
-        <label for="layer-name-mobile">レイヤ名</label>
-        <input
-          id="layer-name-mobile"
-          type="text"
-          maxlength="15"
-          title="設定できるレイヤ名は15文字以内です。"
-          placeholder="レイヤ名称（15字以内）"
-          class="input-textbox"
-          required
-          v-model="editName"
-          :disabled="layersStore.layersList.get(layerId)?.is_master"
+    <div class="layer-settings-layout" :inert="saving || policySaving">
+      <h2 class="modal-h2">レイヤ設定</h2>
+      <div class="setting-contents">
+        <div class="name-setting">
+          <label for="layer-name-mobile">レイヤ名</label>
+          <input
+            id="layer-name-mobile"
+            type="text"
+            maxlength="15"
+            title="設定できるレイヤ名は15文字以内です。"
+            placeholder="レイヤ名称（15字以内）"
+            class="input-textbox"
+            required
+            v-model="editName"
+            :disabled="layersStore.layersList.get(layerId)?.is_master"
+          />
+        </div>
+        <LayerCommonFormSetting
+          ref="formSetting"
+          :layerId="layerId"
+          :isOpen="isOpen"
+          :disabled="saving || policySaving"
+          @busy="formLoading = $event"
         />
-      </div>
-      <LayerCommonFormSetting
-        ref="formSetting"
-        :layerId="layerId"
-        :isOpen="isOpen"
-        :disabled="saving || policySaving"
-        @busy="formLoading = $event"
-      />
 
-      <LayerInputPolicy :layerId="layerId" :disabled="saving" @busy="policySaving = $event" />
-      <MarkerIconPicker v-model="selectedIconId" @message="emit('message', $event)" />
+        <LayerInputPolicy :layerId="layerId" :disabled="saving" @busy="policySaving = $event" />
+        <MarkerIconPicker v-model="selectedIconId" @message="emit('message', $event)" />
+      </div>
       <div class="btn-zone">
         <button :disabled="saving || policySaving" @click="emit('close')" class="btn-standard">
           閉じる
@@ -150,12 +152,24 @@ const saveLayer = async (formPayload: Record<string, unknown>) => {
 </template>
 
 <style scoped>
+.layer-settings-layout {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(90vh - 2em);
+  max-height: calc(90dvh - 2em);
+  min-height: 0;
+}
+
 .modal-h2 {
   border-bottom: solid 2px #acacac;
   text-align: center;
+  flex-shrink: 0;
 }
 
 .setting-contents {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   text-align: center;
 }
 
@@ -168,6 +182,7 @@ const saveLayer = async (formPayload: Record<string, unknown>) => {
 }
 
 .btn-zone {
+  flex-shrink: 0;
   margin-top: 20px;
   display: flex;
   justify-content: space-between;
