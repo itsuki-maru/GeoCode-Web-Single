@@ -88,3 +88,11 @@ html2canvasで用紙領域を画像化し、jsPDFで1ページのPDFをブラウ
 ## 関連する実装
 
 [印刷プレビュー](../src_frontend/template-scripts/src/map/print/print-preview.ts)、[PDF生成](../src_frontend/template-scripts/src/map/print/pdf-export.ts)、[PDF操作](../src_frontend/template-scripts/src/map/print/pdf-controls.ts)、[PC UI仕様](../src_frontend/frontend/SPECIFICATION.md)、[地図表示](MAP_VIEWING.md)。
+
+## 回答検索結果の地図を印刷する（PC版）
+
+[回答一覧](FORM_ANSWERS.md)の条件を反映し、「地図で確認」を開きます。回答条件・対象名・レイヤで追加の絞り込みを反映し、「地図を印刷」を押してプレビューを確認してください。プレビューの印刷・PDF出力を利用できます。閉じると元の回答地図へ戻ります。
+
+対象はその地図で絞り込んだ範囲です。位置・形状は現在の情報で、回答当時の地図ではありません。表示内容の切り替えは[地図表示](MAP_VIEWING.md#popup-content)を参照してください。「フォームからの回答」は一致回答だけでなく、その対象の全回答の修正後の内容を表示します。紙・PDFには選択した表示種別が記載されます。
+
+モバイル版には回答地図の印刷・PDF出力と地図からのCSV出力はありません。一覧からのCSV出力は利用できます。

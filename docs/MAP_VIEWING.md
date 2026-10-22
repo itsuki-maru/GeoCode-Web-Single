@@ -71,3 +71,13 @@ Service Workerの登録はあるが、オフライン地図の提供を意味し
 ## 関連する実装
 
 [地図ハンドラー](../src/handler/map.rs)、[外部サイト](../src/handler/external_site.rs)、[地図共通処理](../src_frontend/template-scripts/src/map/common/)、[PC UI](../src_frontend/frontend/SPECIFICATION.md)、[モバイルUI](../src_frontend/frontend-mobile/SPECIFICATION.md)。
+
+<a id="popup-content"></a>
+
+## 本文・メモの表示切り替え
+
+所有者の通常地図・モバイル地図・別画面地図・回答確認用地図・回答地図の印刷プレビューでは、マーカーと図形の「表示内容」から「通常表示」「自由入力の内容」「フォームからの回答」を選べます。初期状態と開き直したときは、自由入力とフォーム回答を結合した「通常表示」です。
+
+「フォームからの回答」は、その対象の全回答の修正後の内容を表示します。回答地図の検索に一致した回答だけには限定しません。安全に分離できない旧データや取得に失敗した場合などは、通常表示のみとなり、理由を案内します。表示切り替えは保存データ・分析条件を変更しません。共有・ライブ・一時共有マップは対象外です。
+
+対象画面は `map.html`、`map-mobile.html`、`map-anather.html`、`form-answer-map.html`、`form-answer-map-print.html`。回答検索と地図への移動は[フォーム回答](FORM_ANSWERS.md)を参照してください。
