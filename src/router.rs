@@ -79,8 +79,8 @@ use crate::handler::onetime_url::{
     temporary_map_get_handler,
 };
 use crate::handler::shapes::{
-    create_shape_handler, delete_shape_handler, shapes_get_handler, update_shape_handler,
-    update_shape_geometry_handler,
+    create_shape_handler, delete_shape_handler, shapes_get_handler, update_shape_geometry_handler,
+    update_shape_handler,
 };
 use crate::handler::tiles::proxy_tile_handler;
 use crate::handler::totp::{

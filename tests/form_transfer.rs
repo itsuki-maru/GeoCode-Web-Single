@@ -793,7 +793,11 @@ async fn corrected_answers_and_body_bindings_survive_transfer_with_fresh_ids() {
     let package = export(&sender, &master(&pool, &user).await, "").await;
     // The PostgreSQL cross-engine test consumes the edited SQLite export too.
     std::fs::create_dir_all("target/transfer-tests").unwrap();
-    std::fs::write("target/transfer-tests/sqlite-cross-v3.json", package.to_string()).unwrap();
+    std::fs::write(
+        "target/transfer-tests/sqlite-cross-v3.json",
+        package.to_string(),
+    )
+    .unwrap();
     let exported = package["markers"]
         .as_array()
         .unwrap()

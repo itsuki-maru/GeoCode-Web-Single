@@ -1,5 +1,7 @@
 pub(crate) mod answer_edit;
-pub use answer_edit::{get_handler as answer_edit_get_handler, update_handler as answer_edit_update_handler};
+pub use answer_edit::{
+    get_handler as answer_edit_get_handler, update_handler as answer_edit_update_handler,
+};
 mod owner_input;
 pub use owner_input::{
     get_marker_input_handler, get_shape_input_handler, submit_marker_input_handler,
@@ -781,7 +783,8 @@ async fn persist_submission(
         .await?;
     }
 
-    let document = answer_edit::document(&mut tx, &form.owner_id, "marker", &form.marker_id).await?;
+    let document =
+        answer_edit::document(&mut tx, &form.owner_id, "marker", &form.marker_id).await?;
     let answer_id = Uuid::now_v7().to_string();
     sqlx::query(
         r#"
@@ -820,7 +823,15 @@ async fn persist_submission(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    answer_edit::append_parts(&mut tx, &form.owner_id, "marker", &form.marker_id, document.parts, &answer_id).await?;
+    answer_edit::append_parts(
+        &mut tx,
+        &form.owner_id,
+        "marker",
+        &form.marker_id,
+        document.parts,
+        &answer_id,
+    )
+    .await?;
     tx.commit().await?;
     Ok(updated)
 }
@@ -1046,7 +1057,15 @@ async fn persist_shape_submission(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or(AppError::NotFound)?;
-    answer_edit::append_parts(&mut tx, &form.owner_id, "shape", &form.shape_id, document.parts, &answer_id).await?;
+    answer_edit::append_parts(
+        &mut tx,
+        &form.owner_id,
+        "shape",
+        &form.shape_id,
+        document.parts,
+        &answer_id,
+    )
+    .await?;
     tx.commit().await?;
     Ok(updated)
 }
