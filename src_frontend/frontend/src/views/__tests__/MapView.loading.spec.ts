@@ -7,6 +7,7 @@ vi.mock("@/axiosClient", () => ({ default: api }));
 vi.mock("vue-router", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 import MapView from "@/views/MapView.vue";
 import { useMapObjectStore } from "@/stores/mapobjects";
+import { useLayersStore } from "@/stores/layers";
 import { useShapeStore } from "@/stores/shapes";
 import { LAST_ACTIVE_LAYER_STORAGE_KEY } from "@/composables/useLastActiveLayer";
 import { getLayersUrl, getMasterLayerIdUrl, getMapObjectsUrl, shapesUrl } from "@/router/urls";
@@ -54,12 +55,17 @@ let layerResponse: Promise<{ data: typeof layers }>;
 let getMarkers: (id: string) => Promise<{ data: Record<string, ReturnType<typeof marker>> }>;
 let getShapes: (id: string) => Promise<{ data: ReturnType<typeof shape>[] }>;
 
+const updateFrame = vi.fn();
 const frame = defineComponent({
   name: "MapIframe",
-  props: ["srcUrl", "height", "allowedOrigins"],
+  props: ["srcUrl", "height", "allowedOrigins", "inputPolicies"],
   emits: ["mapLoaded"],
   setup(_, { expose }) {
-    expose({ filterMapObjects: vi.fn(), reloadMapFrame: () => true });
+    expose({
+      filterMapObjects: vi.fn(),
+      reloadMapFrame: () => true,
+      updateMapObject: updateFrame,
+    });
     return () => null;
   },
 });
@@ -81,6 +87,7 @@ const changeLayer = async (id: string) => {
 };
 
 beforeEach(() => {
+  updateFrame.mockReset().mockResolvedValue(true);
   setActivePinia(createPinia());
   localStorage.clear();
   layerResponse = Promise.resolve({ data: layers });
@@ -232,5 +239,39 @@ describe("selected layer startup", () => {
     frameComponent().vm.$emit("mapLoaded", latestUrl);
     await flushPromises();
     expect(spinner()).toBe(false);
+  });
+
+  it("レイヤの制限設定を地図へ渡し、変更しても地図やデータを再取得しない", async () => {
+    mountView();
+    await flushPromises();
+    const src = frameComponent().props("srcUrl");
+    const count = dataRequests().length;
+    expect(frameComponent().props("inputPolicies")).toEqual({ master: false, a: false, b: false });
+    useLayersStore().layersList.get("a")!.restrict_free_text = true;
+    await flushPromises();
+    expect(frameComponent().props("inputPolicies")).toEqual({ master: false, a: true, b: false });
+    expect(frameComponent().props("srcUrl")).toBe(src);
+    expect(dataRequests()).toHaveLength(count);
+    useLayersStore().layersList.get("a")!.restrict_free_text = false;
+    await flushPromises();
+    expect(frameComponent().props("inputPolicies")).toEqual({ master: false, a: false, b: false });
+  });
+  it("回答編集の保存結果を表示中のオブジェクトと地図へ反映する", async () => {
+    mountView();
+    await flushPromises();
+    const object = { ...marker("master"), detail: "修正後の本文" };
+    window.dispatchEvent(new CustomEvent("geocode-answer-updated", { detail: object }));
+    await flushPromises();
+    expect(useMapObjectStore().mapObjectList.get("master")?.detail).toBe("修正後の本文");
+    expect(updateFrame).toHaveBeenCalledWith(
+      expect.objectContaining({ objectType: "marker", id: "master", detail: "修正後の本文" }),
+    );
+    window.dispatchEvent(
+      new CustomEvent("geocode-answer-updated", {
+        detail: { ...marker("hidden"), detail: "別レイヤ" },
+      }),
+    );
+    await flushPromises();
+    expect(useMapObjectStore().mapObjectList.has("hidden")).toBe(false);
   });
 });

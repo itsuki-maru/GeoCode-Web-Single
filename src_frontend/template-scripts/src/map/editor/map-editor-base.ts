@@ -347,6 +347,17 @@ var tileLayer = L.tileLayer(initialTileServer["url"], {
 // マーカーにIDを振るためのオブジェクト
 let markers = {};
 // Leaflet.markerclusterの使用
+popupContent = createPopupContentRuntime({
+  map,
+  sanitizeHtml: (html) => filterXSS(html, xssOptions),
+  renderMarkdown: (text) => renderIframe(filterXSS(marked.parse(text), xssOptions)),
+  setupImages: setupDetailsLazyImages,
+  loadBody: async (kind, id) => {
+    const response = await fetchWithAuth(`/${kind}/${id}/form/body`, { cache: "no-store" });
+    if (!response.ok) throw new Error("Popup request failed");
+    return response.json();
+  },
+});
 let markersClusterGroup = L.markerClusterGroup();
 
 // HTMLと同時に取得したマーカーデータをプロット配備
@@ -377,20 +388,21 @@ for (const key in markersFromAxum) {
       `<div class="custom-tooltip">${escapeHtml(markersFromAxum[key]["marker_name"])}</div>`,
     );
   }
-  if (markersFromAxum[key]["detail"]) {
-    const mdText = `# ${markersFromAxum[key]["marker_name"]}\n\n${markersFromAxum[key]["detail"]}`;
-    const mdToHtml = marked.parse(mdText);
-    const cleanHtml = filterXSS(mdToHtml, xssOptions);
-    const renderHtml = renderIframe(cleanHtml);
-    const bindMDToHtml = `<div class="md-detail-contents">${renderHtml}</div>`;
-    marker.bindPopup(bindMDToHtml);
-  }
+  marker.bindPopup(
+    popupContent.render({
+      kind: "marker",
+      id: String(markersFromAxum[key].id),
+      name: markersFromAxum[key].marker_name || "",
+      body: markersFromAxum[key].detail || "",
+    }),
+  );
 
   // マーカーのHTML要素を取得し、id属性を設定
   let markerIcon = marker.getElement();
   if (markerIcon) {
     markerIcon.id = `marker-${markersFromAxum[key]["id"]}`;
   }
+  marker.id = markersFromAxum[key]["id"];
   markers[`marker-${markersFromAxum[key]["id"]}`] = marker;
   if (markerId !== "0") {
     openMarkerPopup(markerId);

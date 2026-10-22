@@ -1,5 +1,6 @@
 import type { FormAnswerMapBootstrap } from "../types";
 import { isPrintMapState, type PrintMapState } from "../common/print-state";
+import { isPopupBody } from "../common/popup-content";
 
 export interface AnswerPrintSnapshot {
   state: PrintMapState;
@@ -55,6 +56,22 @@ export function isAnswerPrintSnapshot(v: any): v is AnswerPrintSnapshot {
   )
     return false;
   const keys = [...markers.map((m) => `marker:${m.id}`), ...shapes.map((s) => `shape:${s.id}`)];
+  if (
+    b.popupBodies !== undefined &&
+    (!record(b.popupBodies) ||
+      Object.entries(b.popupBodies).some(
+        ([key, value]) => !keys.includes(key) || !isPopupBody(value),
+      ))
+  )
+    return false;
+  if (
+    b.popupAnalysis !== undefined &&
+    (!record(b.popupAnalysis) ||
+      Object.entries(b.popupAnalysis).some(
+        ([key, value]) => !keys.includes(key) || typeof value !== "string",
+      ))
+  )
+    return false;
   const targets = new Set(b.answerPreview.targets);
   if (
     new Set(keys).size !== keys.length ||
@@ -93,6 +110,14 @@ export function createAnswerPrintSnapshot(
       initialView: state.view,
       markers,
       shapes,
+      popupBodies: Object.fromEntries(
+        Object.entries(bootstrap.popupBodies || {}).filter(([key]) => targets.has(key)),
+      ),
+      popupAnalysis: Object.fromEntries(
+        Object.entries(
+          runtime.popupContent?.getAnalysis() || ({} as Record<string, string>),
+        ).filter(([key]) => targets.has(key)),
+      ) as Record<string, string>,
       layers: Object.fromEntries(
         Object.entries(bootstrap.layers).filter(([id]) => layerIds.has(id)),
       ),

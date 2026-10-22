@@ -283,6 +283,8 @@ async fn marker_handlers_cover_create_read_update_delete() {
         Extension(pool.clone()),
         Path(created.id.clone()),
         Json(MarkerInfoUpdateJsonData {
+            free_text: None,
+            body_token: None,
             name: "Tokyo".to_string(),
             detail: "Station area".to_string(),
             layer_id,
@@ -467,6 +469,8 @@ async fn shape_handlers_cover_create_read_delete_and_validation() {
         Extension(pool.clone()),
         Path(created.id.clone()),
         Json(ShapeUpdateJsonData {
+            free_text: None,
+            body_token: None,
             name: Some("Updated Area".to_string()),
             layer_id: None,
             shape_type: Some("polygon".to_string()),
@@ -495,6 +499,8 @@ async fn shape_handlers_cover_create_read_delete_and_validation() {
             Extension(pool.clone()),
             Path(created.id.clone()),
             Json(ShapeUpdateJsonData {
+                free_text: None,
+                body_token: None,
                 name: Some("Invalid update".to_string()),
                 layer_id: None,
                 shape_type: None,
@@ -518,6 +524,8 @@ async fn shape_handlers_cover_create_read_delete_and_validation() {
             Extension(pool.clone()),
             Path(created.id.clone()),
             Json(ShapeUpdateJsonData {
+                free_text: None,
+                body_token: None,
                 name: Some("Updated Area".to_string()),
                 layer_id: None,
                 shape_type: Some("triangle".to_string()),

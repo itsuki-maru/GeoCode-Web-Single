@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
+import LayerInputPolicy from "./LayerInputPolicy.vue";
 import LayerCommonFormSetting from "./LayerCommonFormSetting.vue";
 import MessageModal from "@/components/common/MessageModal.vue";
 import apiClient from "@/axiosClient";
@@ -23,6 +24,7 @@ const layersStore = useLayersStore();
 const editName = ref("");
 const selectedIconId = ref<string | null>(null);
 const formSetting = ref<InstanceType<typeof LayerCommonFormSetting> | null>(null);
+const policySaving = ref(false);
 const saving = ref(false),
   formLoading = ref(false),
   confirmOpen = ref(false),
@@ -93,9 +95,13 @@ const saveLayer = async (formPayload: Record<string, unknown>) => {
 </script>
 
 <template>
-  <BaseModal :isOpen="isOpen" :closeOnOverlayClick="!saving" @close="emit('close')">
+  <BaseModal
+    :isOpen="isOpen"
+    :closeOnOverlayClick="!(saving || policySaving)"
+    @close="emit('close')"
+  >
     <h2 class="modal-h2">レイヤ設定</h2>
-    <div class="setting-contents" :inert="saving">
+    <div class="setting-contents" :inert="saving || policySaving">
       <div class="name-setting">
         <label for="layer-name-mobile">レイヤ名</label>
         <input
@@ -114,15 +120,18 @@ const saveLayer = async (formPayload: Record<string, unknown>) => {
         ref="formSetting"
         :layerId="layerId"
         :isOpen="isOpen"
-        :disabled="saving"
+        :disabled="saving || policySaving"
         @busy="formLoading = $event"
       />
 
+      <LayerInputPolicy :layerId="layerId" :disabled="saving" @busy="policySaving = $event" />
       <MarkerIconPicker v-model="selectedIconId" @message="emit('message', $event)" />
       <div class="btn-zone">
-        <button :disabled="saving" @click="emit('close')" class="btn-standard">閉じる</button>
+        <button :disabled="saving || policySaving" @click="emit('close')" class="btn-standard">
+          閉じる
+        </button>
         <button
-          :disabled="saving || formLoading"
+          :disabled="saving || policySaving || formLoading"
           @click="layerNameChange()"
           class="btn-standard btn-primary"
         >

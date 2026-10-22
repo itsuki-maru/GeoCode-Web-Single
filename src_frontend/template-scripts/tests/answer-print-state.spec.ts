@@ -54,6 +54,21 @@ function fixture() {
   return { state, bootstrap, runtime: { getPrintState: () => state } };
 }
 describe("frozen answer print snapshot", () => {
+  it("freezes popup sections and analysis for only the selected objects", () => {
+    const f = fixture();
+    const body = { free_text: "自由", managed_markdown: "回答", sync_required: false };
+    f.bootstrap.popupBodies = { "marker:same": body, "marker:excluded": body };
+    (f.runtime as any).popupContent = {
+      getAnalysis: () => ({ "marker:same": "分析値", "marker:excluded": "除外" }),
+    };
+    const snapshot = createAnswerPrintSnapshot(f.bootstrap, f.runtime, ["marker:same"]);
+    expect(snapshot.bootstrap.popupBodies).toEqual({ "marker:same": body });
+    expect(snapshot.bootstrap.popupAnalysis).toEqual({ "marker:same": "分析値" });
+    body.free_text = "変更後";
+    expect(snapshot.bootstrap.popupBodies!["marker:same"].free_text).toBe("自由");
+    snapshot.bootstrap.popupBodies!["marker:foreign"] = body;
+    expect(isAnswerPrintSnapshot(snapshot)).toBe(false);
+  });
   it("accepts 10,000 objects and rejects excess objects without truncation", () => {
     const f = fixture();
     f.bootstrap.shapes = [];

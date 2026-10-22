@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import BaseModal from "@/components/common/BaseModal.vue";
+import MapObjectFormInputModal from "./MapObjectFormInputModal.vue";
+import type { MapObjectData, ShapeData } from "@/interface";
 import AnswerMapModal from "./AnswerMapModal.vue";
 import apiClient from "@/axiosClient";
 import { submitAuthenticatedForm } from "@/utils/authenticated-form";
@@ -14,12 +16,13 @@ interface Field {
 }
 interface Answer {
   id: string;
-  target_type: string;
+  target_type: "marker" | "shape";
   target_id: string;
   target_name: string;
   layer_id: string | null;
   layer_name: string | null;
   create_at: string;
+  edited_at?: string | null;
   submitted_values: Record<string, unknown>;
   form_snapshot: {
     form_title: string;
@@ -30,6 +33,13 @@ interface Answer {
   common_form_name: string | null;
   common_form_deleted: boolean | null;
 }
+const canEdit = (answer: Answer): boolean => {
+  const fields = answer.form_snapshot?.form_schema.fields;
+  return (
+    !!fields?.length &&
+    Object.keys(answer.submitted_values).every((id) => fields.some((field) => field.id === id))
+  );
+};
 interface Options {
   forms: { id: string; name: string; deleted: boolean }[];
   layers: { id: string; name: string }[];
@@ -42,6 +52,7 @@ interface Cursor {
   target_type: string;
 }
 interface Page {
+  editing_supported?: boolean;
   rows: Answer[];
   total: number;
   as_of: string;
@@ -84,6 +95,33 @@ const nextCursor = ref<Cursor | null>(null);
 const cursors = ref<(Cursor | null)[]>([null]);
 const page = ref(0);
 const detail = ref<Answer | null>(null);
+const editing = ref<Answer | null>(null),
+  editingSupported = ref(false);
+watch(
+  () => [props.isOpen, props.targetId, props.targetType, props.initialFormId],
+  () => {
+    editing.value = null;
+  },
+);
+const answerSaved = async (object: MapObjectData | ShapeData) => {
+  const fromDetail = !!detail.value,
+    answerId = editing.value?.id,
+    answerKind = editing.value?.target_type;
+  editing.value = null;
+  window.dispatchEvent(new CustomEvent("geocode-answer-updated", { detail: object }));
+  if (applied.value) {
+    const request = { ...applied.value };
+    delete request.as_of;
+    applied.value = request;
+  }
+  cursors.value = [null];
+  await search(null, 0, false);
+  if (fromDetail)
+    detail.value =
+      rows.value.find((row) => row.id === answerId && row.target_type === answerKind) || null;
+  mapOpen.value = false;
+  message.value = "回答を更新しました。";
+};
 const loading = ref(false);
 const optionsLoading = ref(false);
 const exporting = ref(false);
@@ -256,6 +294,7 @@ const search = async (cursor: Cursor | null = null, index = 0, fresh = true) => 
       .data;
     if (sequence !== searchSequence) return;
     rows.value = result.rows;
+    editingSupported.value = result.editing_supported === true;
     if (fresh) {
       const fieldsChanged =
         JSON.stringify(resultFields.value.map(fieldKey)) !==
@@ -415,7 +454,7 @@ const imageUrl = (row: Answer, field: Field) => {
 
 <template>
   <BaseModal :isOpen="isOpen" :zIndex="24" :closeOnOverlayClick="false" @close="emit('close')">
-    <div class="answers-modal">
+    <div :inert="!!editing" class="answers-modal">
       <header>
         <h2 class="modal-h2">回答一覧</h2>
         <button class="close-button" @click="emit('close')">閉じる</button>
@@ -660,7 +699,23 @@ const imageUrl = (row: Answer, field: Field) => {
                     exists(row, field) ? formatValue(row.submitted_values[field.id]) : "項目なし"
                   }}
                 </td>
-                <td><button @click="detail = row">詳細を見る</button></td>
+                <td>
+                  <div class="row-actions">
+                    <button @click="detail = row">詳細を見る</button>
+                    <button
+                      v-if="editingSupported"
+                      :disabled="!canEdit(row)"
+                      :title="
+                        row.form_snapshot
+                          ? '回答を編集'
+                          : '投稿時のフォーム定義がないため編集できません'
+                      "
+                      @click="editing = row"
+                    >
+                      編集
+                    </button>
+                  </div>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -683,13 +738,17 @@ const imageUrl = (row: Answer, field: Field) => {
     </div>
   </BaseModal>
   <BaseModal :isOpen="isOpen && !!detail" :zIndex="26" @close="detail = null">
-    <div v-if="detail" class="answer-detail">
+    <div v-if="detail" :inert="!!editing" class="answer-detail">
       <header>
         <h2 class="modal-h2">回答の詳細</h2>
         <button class="close-button" @click="detail = null">閉じる</button>
+        <button v-if="editingSupported" :disabled="!canEdit(detail)" @click="editing = detail">
+          回答を編集
+        </button>
       </header>
       <div class="answer-detail-scroll">
         <p>{{ detail.target_name }} / {{ dateLabel(detail.create_at) }}</p>
+        <p v-if="detail.edited_at">編集日時：{{ dateLabel(detail.edited_at) }}</p>
         <details class="management-info">
           <summary>管理用情報</summary>
           <p>対象ID：{{ detail.target_id }}</p>
@@ -723,6 +782,15 @@ const imageUrl = (row: Answer, field: Field) => {
       </div>
     </div>
   </BaseModal>
+  <MapObjectFormInputModal
+    v-if="editing"
+    :isOpen="isOpen && !!editing"
+    :targetType="editing.target_type"
+    :targetId="editing.target_id"
+    :answerId="editing.id"
+    @close="editing = null"
+    @saved="answerSaved"
+  />
   <iframe ref="exportFrame" :name="downloadFrame" title="回答CSVダウンロード" hidden />
   <AnswerMapModal
     :printEnabled="true"
@@ -1063,8 +1131,18 @@ summary {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.row-actions {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.row-actions > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 .table-scroll {
-  max-height: 35dvh;
+  max-height: 43dvh;
 }
 th {
   position: sticky;

@@ -7,8 +7,8 @@ use sqlx::FromRow;
 pub struct ShapeObject {
     pub id: String,
     pub user_id: String,
-    pub shape_type: String,
     pub layer_id: String,
+    pub shape_type: String,
     pub name: Option<String>,
     pub geojson: Value,
     pub created_at: NaiveDateTime,
@@ -35,6 +35,20 @@ pub struct ShapeUpdateJsonData {
     pub layer_id: Option<String>,
     pub shape_type: Option<String>,
     pub geojson: Option<Value>,
+    #[serde(default)]
+    pub free_text: Option<String>,
+    #[serde(default)]
+    pub body_token: Option<String>,
+}
+
+/// Coordinate-only updates cannot carry memo, style, layer, or name changes.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShapeGeometryUpdateData {
+    pub base_shape_type: String,
+    pub base_geometry: Value,
+    pub shape_type: String,
+    pub coordinates: Value,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

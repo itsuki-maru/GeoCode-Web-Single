@@ -475,6 +475,20 @@ CREATE TABLE IF NOT EXISTS live_map_password_rate_limit (
             "../../migrations/20261021120000_layer_common_forms.sql"
         )],
     },
+    Migration {
+        version: 19,
+        name: "layer_input_policy",
+        statements: &[include_str!(
+            "../../migrations/20261022000000_layer_input_policy.sql"
+        )],
+    },
+    Migration {
+        version: 20,
+        name: "answer_editing",
+        statements: &[include_str!(
+            "../../migrations/20261023000000_answer_editing.sql"
+        )],
+    },
 ];
 
 // データベース接続の確立

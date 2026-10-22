@@ -348,6 +348,7 @@ async fn get_layer_hash_map(
                     layer_model.user_id,
                     layer_model.layer_name,
                     layer_model.is_master,
+            layer_model.restrict_free_text,
                     layer_model.marker_icon_id,
                     marker_icon_model.uuid_filename AS marker_icon_filename
                 FROM layer_model

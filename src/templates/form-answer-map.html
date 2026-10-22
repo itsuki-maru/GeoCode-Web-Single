@@ -372,10 +372,20 @@
                 .answer-preview .leaflet-popup-content { width: auto !important; max-width: calc(100vw - 80px); }
                 .answer-preview .md-detail-contents { width: auto; min-width: 0; max-width: 100%; box-sizing: border-box; max-height: 45dvh; overflow-wrap: anywhere; }
             }
+            .answer-preview.map-mobile-controls .leaflet-popup {
+                width: 400px;
+                min-width: 0;
+                max-width: 400px;
+            }
+            .answer-preview.map-mobile-controls .leaflet-popup-content {
+                width: auto !important;
+                max-width: none;
+            }
         </style>
         <style>
             .answer-preview .answer-analysis-value { border-left: 4px solid #555; padding: 8px; background: #f5f5f5; overflow-wrap: anywhere; }
         </style>
+        <link rel="stylesheet" href="/assets/popup-content.css" />
     </head>
     <body class="answer-preview">
         <div class="folium-map" id="map"></div>
@@ -383,6 +393,7 @@
     <script>
         window.__GEOCODE_MAP_BOOTSTRAP__ = {
             page: "form-answer-map",
+            popupBodies: {{ popupBodies | json_encode_for_html | safe }},
             answerPreview: {{ answerPreview | default(value=false) | json_encode_for_html | safe }},
             isCluster: {{ is_cluster }},
             initialView: {

@@ -75,6 +75,9 @@ const imageList = computed((): Map<string, ImageData> => imageStore.imageList);
 const layersStore = useLayersStore();
 const layersInitialization = layersStore.initList();
 const layerList = computed((): Map<string, LayersData> => layersStore.layersList);
+const layerInputPolicies = computed(() =>
+  Object.fromEntries([...layerList.value].map(([id, value]) => [id, !!value.restrict_free_text])),
+);
 
 const mapobjStore = useMapObjectStore();
 const markerList = computed((): Map<string, MapObjectData> => mapobjStore.mapObjectList);
@@ -290,6 +293,47 @@ const reloadMapObjectFallback = async (payload: MapObjectUpdatePayload): Promise
   const isMaster = activeLayer.value === masterLayerId.value;
   await reloadMap(getMapObjectMapUrl(payload, activeLayer.value, isMaster));
 };
+
+const receiveAnswerUpdate = (event: Event) => {
+  const object = (event as CustomEvent<MapObjectData | ShapeData>).detail;
+  if (!object?.id) return;
+  let payload: MapObjectUpdatePayload;
+  if ("geojson" in object) {
+    if (!shapeStore.shapeList.has(object.id)) return;
+    shapeStore.shapeList.set(object.id, object);
+    payload = {
+      objectType: "shape",
+      id: object.id,
+      layerId: object.layer_id,
+      shapeType: object.shape_type,
+      name: object.name || "",
+      geojson: object.geojson,
+    };
+  } else {
+    if (!mapobjStore.mapObjectList.has(object.id)) return;
+    mapobjStore.mapObjectList.set(object.id, object);
+    payload = {
+      objectType: "marker",
+      id: object.id,
+      layerId: object.layer_id,
+      name: object.marker_name,
+      detail: object.detail,
+      latitude: object.latitude,
+      longitude: object.longitude,
+    };
+  }
+  void (async () => {
+    const updated = (await mapIframeRef.value?.updateMapObject(payload)) ?? false;
+    if (!updated) {
+      await reloadMapObjectFallback(payload);
+      return;
+    }
+    if (mapObjectQueryFormData.value.query1 || mapObjectQueryFormData.value.query2)
+      await handleMapObjectSearch(mapObjectQueryFormData.value);
+  })();
+};
+window.addEventListener("geocode-answer-updated", receiveAnswerUpdate);
+onUnmounted(() => window.removeEventListener("geocode-answer-updated", receiveAnswerUpdate));
 
 const handleMapObjectUpdated = async (
   payload: MapObjectUpdatePayload,
@@ -812,6 +856,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
         <MapIframe
           ref="mapIframeRef"
           :srcUrl="srcUrl"
+          :inputPolicies="layerInputPolicies"
           :height="divHeight"
           :allowedOrigins="allowedOriginsRef"
           @mapReloadRequested="onMapReloadRequested"

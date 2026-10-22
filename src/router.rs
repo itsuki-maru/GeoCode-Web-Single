@@ -80,6 +80,7 @@ use crate::handler::onetime_url::{
 };
 use crate::handler::shapes::{
     create_shape_handler, delete_shape_handler, shapes_get_handler, update_shape_handler,
+    update_shape_geometry_handler,
 };
 use crate::handler::tiles::proxy_tile_handler;
 use crate::handler::totp::{
@@ -129,6 +130,24 @@ pub fn build_router(
 
     // アクセストークンによる認可を要する
     let mut secured_routes = Router::new()
+        .route(
+            "/shape/{shape_id}/geometry",
+            put(update_shape_geometry_handler),
+        )
+        .route(
+            "/shape/{id}/form/body",
+            get(crate::handler::marker_forms::answer_edit::shape_body_handler),
+        )
+        .route(
+            "/marker/{id}/form/body",
+            get(crate::handler::marker_forms::answer_edit::marker_body_handler),
+        )
+        .route(
+            "/form-answers/{kind}/{answer_id}",
+            get(crate::handler::marker_forms::answer_edit::get_handler)
+                .put(crate::handler::marker_forms::answer_edit::update_handler)
+                .layer(DefaultBodyLimit::max(6 * 1024 * 1024)),
+        )
         .route("/tile-overlays", get(tile_overlays::user_list))
         .route("/tile-overlays/{id}", put(tile_overlays::user_select))
         .route(
@@ -158,6 +177,10 @@ pub fn build_router(
             delete(delete_marker_icon_handler),
         )
         .route("/layer/read/all", get(get_all_layers_handler))
+        .route(
+            "/layer/{layer_id}/input-policy",
+            put(crate::handler::layer_input_policy::update_handler),
+        )
         .route("/layer/delete/{layer_id}", delete(delete_layer_handler))
         .route("/layer/update/{layer_id}", put(update_layername_handler))
         .route(

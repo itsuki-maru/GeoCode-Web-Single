@@ -1,4 +1,30 @@
 // @ts-nocheck -- Leaflet編集画面の共有スコープを保つ統合境界。
+function mergeShapeFreeText(info, text) {
+  if (text === info.free_text) return info.body;
+  let first = true;
+  let body = info.parts
+    .map((part) => {
+      if (part.type === "answer") return part.markdown;
+      const value = first ? text : "";
+      first = false;
+      return value;
+    })
+    .join("");
+  return first ? text + body : body;
+}
+function isLayerInputRestricted(id) {
+  return layersFromAxum?.[id]?.restrict_free_text === true;
+}
+function isShapeInputRestricted(target) {
+  return isLayerInputRestricted(target?.layerId || target?.options?.shapeRecord?.layer_id);
+}
+function syncMarkerInputRestriction(marker, record) {
+  if (!marker?.dragging) return;
+  if (currentMapMode === "edit" && !isLayerInputRestricted(record?.layer_id))
+    marker.dragging.enable();
+  else marker.dragging.disable();
+}
+
 function getCurrentShapeLayerId() {
   if (typeof layer !== "string") {
     return null;
@@ -142,11 +168,21 @@ async function persistShapeMetadata(
   nextLayerId,
   nextGeoJson,
   nextShapeType = null,
+  bodyEdit = null,
 ) {
   if (!layer?.shapeId) {
     throw new Error("shape update target missing");
   }
 
+  const restricted = isShapeInputRestricted(layer) || isLayerInputRestricted(nextLayerId);
+  if (
+    restricted &&
+    ((nextGeoJson &&
+      JSON.stringify(nextGeoJson) !== JSON.stringify(layer.options?.shapeRecord?.geojson)) ||
+      (nextShapeType && nextShapeType !== layer.shapeType))
+  ) {
+    throw new Error("入力が制限されています。");
+  }
   const response = await fetchWithAuth(`/shape/${layer.shapeId}`, {
     method: "PUT",
     headers: {
@@ -157,6 +193,7 @@ async function persistShapeMetadata(
       layer_id: nextLayerId,
       shape_type: nextShapeType,
       geojson: nextGeoJson,
+      ...bodyEdit,
     }),
   });
 
@@ -267,7 +304,7 @@ function openShapeNameEditor(layer) {
 
   editingShapePopup = editorPopup;
 
-  setTimeout(() => {
+  setTimeout(async () => {
     const input = document.getElementById("shape-name-editor-input");
     const layerSelect = document.getElementById("shape-layer-editor-select");
     const colorInput = document.getElementById("shape-color-editor-input");
@@ -305,6 +342,89 @@ function openShapeNameEditor(layer) {
       }
     }
 
+    let bodyInfo = null;
+    let bodyUnavailable = false;
+    saveButton.disabled = true;
+    memoInput.readOnly = true;
+    try {
+      const response = await fetchWithAuth(`/shape/${layer.shapeId}/form/body`);
+      if (response.ok) {
+        const info = await response.json();
+        if (typeof info.free_text === "string" && Array.isArray(info.parts)) {
+          bodyInfo = info;
+          if (!info.sync_required) memoInput.value = info.free_text;
+          const note = document.createElement("div");
+          note.className = "shape-name-editor-help";
+          const title = document.createElement("p");
+          title.textContent = info.sync_required
+            ? "本文・メモと回答の対応確認が必要です。回答一覧から編集してください。"
+            : "フォーム由来のメモは回答一覧から編集できます。";
+          note.append(title);
+          if (info.managed_markdown) {
+            const details = document.createElement("details"),
+              summary = document.createElement("summary"),
+              content = document.createElement("pre");
+            summary.textContent = "フォーム回答からのメモ";
+            content.textContent = info.managed_markdown;
+            content.style.whiteSpace = "pre-wrap";
+            content.style.maxHeight = "120px";
+            content.style.overflow = "auto";
+            details.append(summary, content);
+            note.append(details);
+          }
+          memoInput.after(note);
+        }
+      } else if (response.status !== 404) bodyUnavailable = true;
+    } catch {
+      bodyUnavailable = true;
+    }
+    if (editingShapeLayer !== layer) return;
+    saveButton.disabled = false;
+    if (bodyUnavailable)
+      setDrawStatus(
+        "本文・メモを確認できないため、メモは読み取り専用です。編集を開き直してください。",
+        true,
+      );
+
+    const protectedInputs = [
+      memoInput,
+      colorInput,
+      lineTypeSelect,
+      arrowTypeSelect,
+      weightInput,
+    ].filter(Boolean);
+    const initialValues = protectedInputs.map((el) => el.value);
+    const updateRestriction = () => {
+      const restricted = isShapeInputRestricted(layer) || isLayerInputRestricted(layerSelect.value);
+      memoInput.readOnly = restricted || !!bodyInfo?.sync_required || bodyUnavailable;
+      memoInput.placeholder = restricted ? "入力が制限されています。" : "Markdownでメモを入力";
+      for (const el of protectedInputs) if (el !== memoInput) el.disabled = restricted;
+    };
+    let previousSelection = layerSelect.value;
+    layerSelect.addEventListener("change", () => {
+      if (
+        isLayerInputRestricted(layerSelect.value) &&
+        protectedInputs.some((el, i) => el.value !== initialValues[i])
+      ) {
+        layerSelect.value = previousSelection;
+        setDrawStatus(
+          "内容・メモ・図形スタイルの変更を保存してから移動先を選択してください。",
+          true,
+        );
+        return;
+      }
+      previousSelection = layerSelect.value;
+      updateRestriction();
+    });
+    if (isShapeInputRestricted(layer)) {
+      const note = document.createElement("p");
+      note.className = "shape-name-editor-help";
+      note.textContent =
+        "メモの自由記述が制限されています。名前・所属レイヤの変更と、地図上での頂点編集は可能です。";
+      memoInput.after(note);
+    }
+    updateRestriction();
+
     input.focus();
     input.select();
 
@@ -327,14 +447,24 @@ function openShapeNameEditor(layer) {
         weightInput.value,
         arrowTypeSelect?.value,
       );
-      const nextGeoJson = buildShapeGeoJson(
-        layer,
-        layer.shapeType,
-        nextShapeStyle,
-        memoInput.value,
-      );
+      const restricted = isShapeInputRestricted(layer) || isLayerInputRestricted(nextLayerId);
+      const bodyEdit =
+        !restricted && bodyInfo && !bodyInfo.sync_required
+          ? { free_text: memoInput.value, body_token: bodyInfo.body_token }
+          : null;
+      const nextMemo = bodyEdit ? mergeShapeFreeText(bodyInfo, memoInput.value) : memoInput.value;
+      const nextGeoJson = restricted
+        ? layer.options.shapeRecord.geojson
+        : buildShapeGeoJson(layer, layer.shapeType, nextShapeStyle, nextMemo);
       try {
-        await persistShapeMetadata(layer, nextName, nextLayerId, nextGeoJson);
+        await persistShapeMetadata(
+          layer,
+          nextName,
+          nextLayerId,
+          restricted ? null : nextGeoJson,
+          null,
+          bodyEdit,
+        );
         applyShapeRecord(layer, {
           id: layer.shapeId,
           layer_id: nextLayerId,

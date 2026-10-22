@@ -42,7 +42,7 @@ function handleRadioChange(event) {
     markersClusterGroup.eachLayer(function (marker) {
       if (marker.dragging) {
         // marker.dragging が存在するか確認
-        marker.dragging.enable();
+        syncMarkerInputRestriction(marker, markersFromAxum[marker.id]);
       }
     });
   }

@@ -217,6 +217,7 @@ pub async fn map_get_handler(
             layer_model.user_id,
             layer_model.layer_name,
             layer_model.is_master,
+            layer_model.restrict_free_text,
             layer_model.marker_icon_id,
             marker_icon_model.uuid_filename AS marker_icon_filename
         FROM layer_model
@@ -352,6 +353,7 @@ pub async fn map_another_get_handler(
             layer_model.user_id,
             layer_model.layer_name,
             layer_model.is_master,
+            layer_model.restrict_free_text,
             layer_model.marker_icon_id,
             marker_icon_model.uuid_filename AS marker_icon_filename
         FROM layer_model

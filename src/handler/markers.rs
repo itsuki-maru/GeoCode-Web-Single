@@ -162,6 +162,15 @@ pub async fn update_marker_position_handler(
 
     match (params.marker_id, params.latitude, params.longitude) {
         (Some(marker_id), Some(latitude), Some(longitude)) => {
+            let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+            let (layer_id, old_lat, old_lon): (String, f64, f64) = sqlx::query_as("SELECT layer_id, latitude, longitude FROM marker_info_model WHERE id=$1 AND user_id=$2")
+                .bind(&marker_id).bind(&user_id).fetch_optional(&mut *tx).await?.ok_or(AppError::NotFound)?;
+            let restricted =
+                super::layer_input_policy::restricted(&mut tx, &user_id, &layer_id).await?;
+            super::layer_input_policy::reject_change(
+                restricted,
+                old_lat != latitude || old_lon != longitude,
+            )?;
             let query_result = query!(
                 r#"
                 UPDATE marker_info_model
@@ -178,7 +187,7 @@ pub async fn update_marker_position_handler(
                 marker_id,
                 user_id,
             )
-            .execute(&pool)
+            .execute(&mut *tx)
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "database error.");
@@ -187,6 +196,7 @@ pub async fn update_marker_position_handler(
 
             let affected_rows = query_result.rows_affected();
             if affected_rows > 0 {
+                tx.commit().await?;
                 Ok(Json(MessageApi {
                     message: "Update Ok.".to_string(),
                 }))
@@ -207,9 +217,9 @@ pub async fn update_marker_info_handler(
     Path(marker_id): Path<String>,
     Json(payload): Json<MarkerInfoUpdateJsonData>,
 ) -> Result<Json<MessageApi>, AppError> {
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    let previous_layer: String =
-        sqlx::query_scalar("SELECT layer_id FROM marker_info_model WHERE id=$1 AND user_id=$2")
+    let mut tx = super::answer_sqlite::begin_write(&pool).await?;
+    let (previous_layer, previous_detail): (String, String) =
+        sqlx::query_as("SELECT layer_id, detail FROM marker_info_model WHERE id=$1 AND user_id=$2")
             .bind(&marker_id)
             .bind(&user_id)
             .fetch_optional(&mut *tx)
@@ -218,6 +228,29 @@ pub async fn update_marker_info_handler(
     // 現在時刻を取得
     let now = Utc::now().naive_utc();
 
+    if payload.name.trim().is_empty() {
+        return Err(AppError::Validation(
+            "マーカー名を入力してください。".into(),
+        ));
+    }
+    let detail = super::marker_forms::answer_edit::normal_body(
+        &mut tx,
+        &user_id,
+        "marker",
+        &marker_id,
+        &payload.detail,
+        payload.free_text.as_deref(),
+        payload.body_token.as_deref(),
+    )
+    .await?;
+    let source_restricted =
+        super::layer_input_policy::restricted(&mut tx, &user_id, &previous_layer).await?;
+    let target_restricted =
+        super::layer_input_policy::restricted(&mut tx, &user_id, &payload.layer_id).await?;
+    super::layer_input_policy::reject_change(
+        source_restricted || target_restricted,
+        previous_detail != detail,
+    )?;
     super::layer_forms::ensure_owned(&mut tx, &user_id, &payload.layer_id).await?;
 
     let query_result = query!(
@@ -232,7 +265,7 @@ pub async fn update_marker_info_handler(
         "#,
         payload.name,
         payload.layer_id,
-        payload.detail,
+        detail,
         now,
         marker_id,
         user_id,

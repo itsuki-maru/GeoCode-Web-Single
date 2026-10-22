@@ -259,5 +259,63 @@ pub(super) fn validate(p: &TransferPackage) -> Result<(), AppError> {
             )?;
         }
     }
+    for (target, parts, body) in p
+        .markers
+        .iter()
+        .map(|m| {
+            (
+                Target {
+                    kind: "marker".into(),
+                    key: m.key.clone(),
+                },
+                &m.body_parts,
+                m.detail.as_str(),
+            )
+        })
+        .chain(p.shapes.iter().map(|s| {
+            (
+                Target {
+                    kind: "shape".into(),
+                    key: s.key.clone(),
+                },
+                &s.body_parts,
+                s.geojson
+                    .get("properties")
+                    .and_then(|p| p.get("memo"))
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+            )
+        }))
+    {
+        if let Some(parts) = parts {
+            let answers: HashMap<_, _> = p
+                .submissions
+                .iter()
+                .filter(|s| s.target == target)
+                .map(|s| (s.key.as_str(), s))
+                .collect();
+            let mut used = HashSet::new();
+            let mut rendered = String::new();
+            for part in parts {
+                match part {
+                    BodyPart::Text { text } => rendered.push_str(text),
+                    BodyPart::Answer { key } => {
+                        if !used.insert(key.as_str()) {
+                            return Err(invalid("本文の回答参照が重複しています。"));
+                        }
+                        rendered.push_str(
+                            &answers
+                                .get(key.as_str())
+                                .ok_or_else(|| invalid("本文の回答参照が不正です。"))?
+                                .rendered_markdown,
+                        );
+                    },
+                }
+            }
+            if used.len() != answers.len() || rendered != body {
+                return Err(invalid("本文・メモと回答の対応が一致しません。"));
+            }
+        }
+    }
     Ok(())
 }

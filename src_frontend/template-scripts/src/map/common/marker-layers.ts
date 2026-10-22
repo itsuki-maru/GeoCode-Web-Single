@@ -50,6 +50,7 @@ interface LeafletNamespace {
 }
 
 interface HydrateMarkerOptions {
+  renderPopup?: (record: ReadOnlyMarkerRecord) => string;
   onMarkerCreated?: (marker: MarkerLayer) => void;
   clusterGroups: Record<string, LayerGroup>;
   createMarkerGroupForLayer: (layerId: string | null | undefined) => LayerGroup | null;
@@ -101,6 +102,7 @@ interface CreateMarkerLayerControlOptions {
 }
 
 export function hydrateReadOnlyMarkers({
+  renderPopup,
   onMarkerCreated,
   clusterGroups,
   createMarkerGroupForLayer,
@@ -145,7 +147,9 @@ export function hydrateReadOnlyMarkers({
       permanent: false,
     });
 
-    if (markerData.detail) {
+    if (renderPopup) {
+      marker.bindPopup(renderPopup(markerData));
+    } else if (markerData.detail) {
       const markdown = `# ${markerData.marker_name}\n\n${markerData.detail}`;
       const renderedHtml = renderIframe(sanitizeHtml(parseMarkdown(markdown)));
       marker.bindPopup(`<div class="md-detail-contents">${renderedHtml}</div>`);

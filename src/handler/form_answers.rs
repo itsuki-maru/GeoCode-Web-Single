@@ -66,6 +66,8 @@ pub struct AnswerRow {
     pub target_name: String,
     pub layer_id: Option<String>,
     pub layer_name: Option<String>,
+    pub edited_at: Option<chrono::NaiveDateTime>,
+    pub revision: i64,
     pub create_at: NaiveDateTime,
     pub submitted_values: Value,
     pub form_snapshot: Option<Value>,
@@ -84,6 +86,10 @@ impl<'r> FromRow<'r, sqlx::sqlite::SqliteRow> for AnswerRow {
             target_name: row.try_get("target_name")?,
             layer_id: row.try_get("layer_id")?,
             layer_name: row.try_get("layer_name")?,
+            edited_at: row
+                .try_get::<Option<DateTime<Utc>>, _>("edited_at")?
+                .map(|t| t.naive_utc()),
+            revision: row.try_get("revision")?,
             // SQLiteのNaiveDateTimeデコードはオフセットを除くだけなので、UTCへ変換する。
             create_at: row.try_get::<DateTime<Utc>, _>("create_at")?.naive_utc(),
             submitted_values: row.try_get("submitted_values")?,
@@ -97,6 +103,7 @@ impl<'r> FromRow<'r, sqlx::sqlite::SqliteRow> for AnswerRow {
 
 #[derive(Serialize)]
 pub struct AnswerPage {
+    pub editing_supported: bool,
     pub rows: Vec<AnswerRow>,
     pub total: i64,
     pub as_of: DateTime<Utc>,
@@ -365,6 +372,8 @@ pub(super) fn build_query(
                 m.layer_id,
                 l.layer_name,
                 s.create_at COLLATE answer_time AS create_at,
+                s.edited_at,
+                s.revision,
                 s.submitted_values,
                 s.form_snapshot,
                 s.source_form,
@@ -522,7 +531,7 @@ pub(super) fn append_conditions(b: &mut QueryBuilder<'_, Sqlite>, conditions: &[
 }
 
 const ROW_COLUMNS: &str = r#"
-    id, target_type, target_id, target_name, layer_id, layer_name, create_at, submitted_values, form_snapshot,
+    id, target_type, target_id, target_name, layer_id, layer_name, create_at, edited_at, revision, submitted_values, form_snapshot,
         source_form, common_form_name, common_form_deleted
     "#;
 
@@ -579,6 +588,7 @@ pub async fn search_answers_handler(
         None
     };
     Ok(Json(AnswerPage {
+        editing_supported: true,
         rows,
         total,
         as_of: at,

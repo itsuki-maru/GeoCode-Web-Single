@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed, onBeforeUnmount } from "vue";
+import { mergeFreeText, type FormBody } from "@/utils/form-body";
 import apiClient from "@/axiosClient";
 import MessageModal from "@/components/common/MessageModal.vue";
 import MapObjectFormInputModal from "./MapObjectFormInputModal.vue";
@@ -45,6 +46,59 @@ const isFormInputOpen = ref(false),
   confirmFormOpen = ref(false),
   updateBusy = ref(false);
 const initialEditState = ref("");
+const bodyInfo = ref<FormBody | null>(null),
+  bodyLoading = ref(false),
+  bodyError = ref("");
+let bodySequence = 0;
+const loadBody = async () => {
+  const sequence = ++bodySequence,
+    id = props.targetId,
+    kind = props.targetType;
+  bodyInfo.value = null;
+  bodyError.value = "";
+  if (!props.isOpen || !id) {
+    bodyLoading.value = false;
+    return;
+  }
+  bodyLoading.value = true;
+  const original = activeObjectDetail.value;
+  try {
+    const info = (await apiClient.get<FormBody>(`/${kind}/${id}/form/body`)).data;
+    if (
+      sequence !== bodySequence ||
+      !props.isOpen ||
+      id !== props.targetId ||
+      kind !== props.targetType
+    )
+      return;
+    if (typeof info.free_text !== "string" || !Array.isArray(info.parts)) return;
+    bodyInfo.value = info;
+    if (!info.sync_required && activeObjectDetail.value === original) {
+      activeObjectDetail.value = info.free_text;
+      const initial = JSON.parse(initialEditState.value) as unknown[];
+      initial[1] = info.free_text;
+      initialEditState.value = JSON.stringify(initial);
+      const protectedInitial = JSON.parse(initialProtectedState.value) as unknown[];
+      protectedInitial[0] = info.free_text;
+      initialProtectedState.value = JSON.stringify(protectedInitial);
+    }
+  } catch (error) {
+    if (sequence !== bodySequence) return;
+    if (!(apiClient.isAxiosError(error) && error.response?.status === 404))
+      bodyError.value = "本文・メモを確認できませんでした。編集を開き直してください。";
+  } finally {
+    if (sequence === bodySequence) bodyLoading.value = false;
+  }
+};
+const displayedBody = () =>
+  bodyInfo.value && !bodyInfo.value.sync_required
+    ? mergeFreeText(bodyInfo.value, activeObjectDetail.value)
+    : activeObjectDetail.value;
+const bodyEdit = () =>
+  bodyInfo.value && !bodyInfo.value.sync_required
+    ? { free_text: activeObjectDetail.value, body_token: bodyInfo.value.body_token }
+    : undefined;
+
 const editState = () =>
   JSON.stringify([
     activeObjectName.value,
@@ -84,10 +138,51 @@ const refreshFormAvailability = async () => {
 };
 onBeforeUnmount(() => {
   ++availabilitySequence;
+  ++bodySequence;
   availabilityController?.abort();
 });
 const detailTextarea = ref<HTMLTextAreaElement | null>(null);
 const isShape = computed(() => props.targetType === "shape");
+// Both the saved layer and destination apply until the move has been saved.
+const originalLayerId = computed(() =>
+  isShape.value
+    ? shapeStore.getById(props.targetId)?.layer_id
+    : mapobjStore.getById(props.targetId)?.layer_id,
+);
+const inputRestricted = computed(
+  () =>
+    !!(
+      layerList.value.get(originalLayerId.value || "")?.restrict_free_text ||
+      layerList.value.get(activeObjectLayer.value)?.restrict_free_text
+    ),
+);
+const protectedState = () =>
+  JSON.stringify([
+    activeObjectDetail.value,
+    activeShapeColor.value,
+    activeShapeLineType.value,
+    activeShapeArrowType.value,
+    activeShapeWeight.value,
+  ]);
+const initialProtectedState = ref("");
+const selectObjectLayer = (event: Event) => {
+  const select = event.target as HTMLSelectElement;
+  const next = select.value;
+  if (
+    layerList.value.get(next)?.restrict_free_text &&
+    initialProtectedState.value &&
+    protectedState() !== initialProtectedState.value
+  ) {
+    select.value = activeObjectLayer.value;
+    emit(
+      "message",
+      "内容・メモ・図形スタイルの変更を保存するか、編集を開き直してから移動先を選択してください。",
+    );
+    return;
+  }
+  activeObjectLayer.value = next;
+};
+
 const isPolyline = computed(
   () => isShape.value && shapeStore.getById(props.targetId)?.shape_type === "polyline",
 );
@@ -113,6 +208,7 @@ const lineTypeFromDashArray = (dashArray: string | null | undefined): string => 
 
 const loadTarget = (): void => {
   if (!props.targetId) return;
+  initialProtectedState.value = "";
   if (isShape.value) {
     const shape = shapeStore.getById(props.targetId);
     activeObjectName.value = shape?.name || "";
@@ -123,12 +219,14 @@ const loadTarget = (): void => {
     activeShapeLineType.value = lineTypeFromDashArray(shape?.geojson.properties.style?.dashArray);
     activeShapeArrowType.value = shape?.geojson.properties.style?.arrowType || "none";
     activeShapeWeight.value = shape?.geojson.properties.style?.weight || 5;
+    initialProtectedState.value = protectedState();
     return;
   }
   const marker = mapobjStore.getById(props.targetId);
   activeObjectName.value = marker?.marker_name || "";
   activeObjectDetail.value = marker?.detail || "";
   activeObjectLayer.value = marker?.layer_id || "";
+  initialProtectedState.value = protectedState();
 };
 
 watch(
@@ -142,17 +240,36 @@ watch(
       initialEditState.value = editState();
     }
     void refreshFormAvailability();
+    void loadBody();
   },
   { immediate: true },
 );
 
+watch(
+  () =>
+    isShape.value
+      ? shapeStore.getById(props.targetId)?.geojson
+      : mapobjStore.getById(props.targetId)?.detail,
+  () => {
+    if (!props.isOpen || updateBusy.value || editState() !== initialEditState.value) return;
+    loadTarget();
+    initialEditState.value = editState();
+    void loadBody();
+  },
+);
+
 const saveMapObject = async (keepOpen = false): Promise<boolean> => {
+  if (bodyLoading.value || bodyError.value) return false;
   if (props.targetId === "" || activeObjectLayer.value === "") {
     emit("message", "所属レイヤを選択してください。");
     return false;
   }
-  if (!isShape.value && (activeObjectName.value === "" || activeObjectDetail.value === "")) {
-    emit("message", "マーカー名と内容の両方に入力が必要です。");
+  if (!isShape.value && activeObjectName.value.trim() === "") {
+    emit("message", "マーカー名を入力してください。");
+    return false;
+  }
+  if (inputRestricted.value && protectedState() !== initialProtectedState.value) {
+    emit("message", "入力が制限されています。編集を開き直してください。");
     return false;
   }
   let updatePayload: MapObjectUpdatePayload;
@@ -180,14 +297,15 @@ const saveMapObject = async (keepOpen = false): Promise<boolean> => {
     }
     nextGeoJson.properties = {
       ...nextGeoJson.properties,
-      memo: activeObjectDetail.value,
+      memo: displayedBody(),
       style: nextStyle,
     };
     const updatedShape = await shapeStore.updateShape(
       props.targetId,
       activeObjectName.value,
       activeObjectLayer.value,
-      nextGeoJson,
+      inputRestricted.value ? undefined : nextGeoJson,
+      ...(bodyEdit() ? ([bodyEdit()] as const) : []),
     );
     if (!updatedShape) {
       emit("message", "図形情報を更新できませんでした。");
@@ -208,8 +326,9 @@ const saveMapObject = async (keepOpen = false): Promise<boolean> => {
     const updatedMarker = await mapobjStore.updateMapObject(
       props.targetId,
       activeObjectName.value,
-      activeObjectDetail.value,
+      displayedBody(),
       activeObjectLayer.value,
+      ...(bodyEdit() ? ([bodyEdit()] as const) : []),
     );
     if (!updatedMarker) {
       emit("message", "マーカー情報を更新できませんでした。");
@@ -233,6 +352,7 @@ const saveMapObject = async (keepOpen = false): Promise<boolean> => {
   } else {
     loadTarget();
     initialEditState.value = editState();
+    await loadBody();
   }
   return true;
 };
@@ -300,8 +420,9 @@ const formSaved = (object: MapObjectData | ShapeData) => {
 };
 
 function insertMarkdown(text: string) {
+  if (inputRestricted.value) return;
   const textareaElm = detailTextarea.value;
-  if (!textareaElm) return;
+  if (!textareaElm || bodyLoading.value || bodyError.value || bodyInfo.value?.sync_required) return;
   textareaElm.focus();
 
   const startPos = textareaElm.selectionStart;
@@ -340,7 +461,7 @@ defineExpose({ insertUploadedMarkdown });
           :maxlength="isShape ? 80 : undefined"
           v-model="activeObjectName"
         />
-        <select class="select-elm-editform" v-model="activeObjectLayer">
+        <select class="select-elm-editform" :value="activeObjectLayer" @change="selectObjectLayer">
           <option v-for="[id, obj] in layerList" :key="id" :value="obj.id">
             {{ obj.name }}
           </option>
@@ -349,11 +470,20 @@ defineExpose({ insertUploadedMarkdown });
       <div v-if="isShape" class="shape-style-row">
         <label>
           色
-          <input v-model="activeShapeColor" type="color" aria-label="図形色" />
+          <input
+            :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
+            v-model="activeShapeColor"
+            type="color"
+            aria-label="図形色"
+          />
         </label>
         <label>
           線種
-          <select v-model="activeShapeLineType" class="shape-line-select">
+          <select
+            :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
+            v-model="activeShapeLineType"
+            class="shape-line-select"
+          >
             <option v-for="option in lineTypeOptions" :key="option.value" :value="option.value">
               {{ option.label }}
             </option>
@@ -361,7 +491,11 @@ defineExpose({ insertUploadedMarkdown });
         </label>
         <label v-if="isPolyline">
           矢印
-          <select v-model="activeShapeArrowType" class="shape-line-select">
+          <select
+            :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
+            v-model="activeShapeArrowType"
+            class="shape-line-select"
+          >
             <option v-for="option in arrowTypeOptions" :key="option.value" :value="option.value">
               {{ option.label }}
             </option>
@@ -369,14 +503,21 @@ defineExpose({ insertUploadedMarkdown });
         </label>
         <label class="shape-weight-label">
           太さ
-          <input v-model.number="activeShapeWeight" type="range" min="1" max="10" step="1" />
+          <input
+            :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
+            v-model.number="activeShapeWeight"
+            type="range"
+            min="1"
+            max="10"
+            step="1"
+          />
           <output>{{ activeShapeWeight }}px</output>
         </label>
       </div>
       <div class="textarea-row">
         <label class="detail-label" for="detail">
           {{ isShape ? "メモ（Markdown）" : "マーカーの内容" }}
-          <span class="free-input-label">自由入力</span>
+          <span class="free-input-label">{{ inputRestricted ? "入力制限中" : "自由入力" }}</span>
         </label>
         <div class="markdown-editor">
           <textarea
@@ -386,13 +527,15 @@ defineExpose({ insertUploadedMarkdown });
             id="detail"
             name="detail"
             aria-describedby="detail-input-help"
-            placeholder="## マークダウンで記述"
+            :readonly="inputRestricted || !!bodyInfo?.sync_required || !!bodyError"
+            :disabled="bodyLoading"
+            :placeholder="inputRestricted ? '入力が制限されています。' : '## マークダウンで記述'"
             :maxlength="isShape ? 10000 : undefined"
             v-model="activeObjectDetail"
           ></textarea>
           <button
             type="button"
-            :disabled="updateBusy"
+            :disabled="updateBusy || bodyLoading || !!bodyError"
             @click="updateMapObject()"
             class="btn-update"
           >
@@ -400,7 +543,8 @@ defineExpose({ insertUploadedMarkdown });
           </button>
           <div class="input-tools">
             <button
-              @click="emit('openImageUpload')"
+              :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
+              @click="!inputRestricted && emit('openImageUpload')"
               class="btn-function-image-editor"
               title="ファイルの追加"
             >
@@ -411,7 +555,8 @@ defineExpose({ insertUploadedMarkdown });
               />
             </button>
             <button
-              @click="emit('openImageList')"
+              :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
+              @click="!inputRestricted && emit('openImageList')"
               class="btn-function-image-editor"
               title="ファイル一覧"
             >
@@ -422,6 +567,7 @@ defineExpose({ insertUploadedMarkdown });
               />
             </button>
             <button
+              :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
               @click="insertMarkdown('## ')"
               class="btn-function-image-editor"
               title="## を挿入"
@@ -433,6 +579,7 @@ defineExpose({ insertUploadedMarkdown });
               />
             </button>
             <button
+              :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
               @click="insertMarkdown('### ')"
               class="btn-function-image-editor"
               title="### を挿入"
@@ -444,6 +591,7 @@ defineExpose({ insertUploadedMarkdown });
               />
             </button>
             <button
+              :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
               @click="insertMarkdown('- ')"
               class="btn-function-image-editor"
               title="- を挿入"
@@ -455,6 +603,7 @@ defineExpose({ insertUploadedMarkdown });
               />
             </button>
             <button
+              :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
               @click="insertMarkdown('1. ')"
               class="btn-function-image-editor"
               title="1. を挿入"
@@ -466,6 +615,7 @@ defineExpose({ insertUploadedMarkdown });
               />
             </button>
             <button
+              :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
               @click="insertMarkdown('**')"
               class="btn-function-image-editor"
               title="** を挿入"
@@ -477,6 +627,7 @@ defineExpose({ insertUploadedMarkdown });
               />
             </button>
             <button
+              :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
               @click="insertMarkdown('[ Title ]( URL )')"
               class="btn-function-image-editor"
               title="[ Title ]( URL )を挿入"
@@ -484,6 +635,7 @@ defineExpose({ insertUploadedMarkdown });
               <img :src="`${assetsUrl}link_24.png`" class="input-tools-img" alt="link_24.png" />
             </button>
             <button
+              :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
               @click="insertMarkdown(':::details タイトル\n非表示にする内容\n:::')"
               class="btn-function-image-editor"
               title=":::details を挿入"
@@ -491,6 +643,7 @@ defineExpose({ insertUploadedMarkdown });
               <img :src="`${assetsUrl}more_24.png`" class="input-tools-img" alt="more_24.png" />
             </button>
             <button
+              :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
               @click="insertMarkdown(':::note タイトル\n内容\n:::')"
               class="btn-function-image-editor"
               title=":::note を挿入"
@@ -498,6 +651,7 @@ defineExpose({ insertUploadedMarkdown });
               <img :src="`${assetsUrl}info_24.png`" class="input-tools-img" alt="info_24.png" />
             </button>
             <button
+              :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
               @click="insertMarkdown(':::warning タイトル\n内容\n:::')"
               class="btn-function-image-editor"
               title=":::warning を挿入"
@@ -511,8 +665,24 @@ defineExpose({ insertUploadedMarkdown });
           </div>
         </div>
         <div id="detail-input-help" class="input-help">
+          <p v-if="bodyError" role="alert">{{ bodyError }}</p>
+          <p v-if="bodyInfo?.sync_required">
+            本文・メモと回答の対応確認が必要です。回答一覧の「編集」から確認してください。
+          </p>
+          <details
+            v-if="bodyInfo && !bodyInfo.sync_required && bodyInfo.managed_markdown"
+            class="managed-answers"
+          >
+            <summary>フォーム回答からの内容（回答一覧から編集）</summary>
+            <pre>{{ bodyInfo.managed_markdown }}</pre>
+          </details>
+          <p v-if="inputRestricted">
+            <strong>入力が制限されています。</strong
+            >名前と所属レイヤを変更できます。内容・メモはフォームから登録してください。
+            <span v-if="isShape">図形の頂点は地図上で編集できます。</span>
+          </p>
           <p>ここに直接入力した内容は、<strong>フォーム回答の分析対象にはなりません</strong>。</p>
-          <p>
+          <p v-if="!bodyInfo">
             フォーム回答から追記された文章を直接編集しても、分析用の回答データは変更されません。
           </p>
           <p v-if="formAvailable">
@@ -525,7 +695,7 @@ defineExpose({ insertUploadedMarkdown });
       </div>
       <div class="btn-commit-row" :class="{ 'has-form-input': formAvailable }">
         <button
-          :disabled="updateBusy"
+          :disabled="updateBusy || bodyLoading || !!bodyError"
           @click="isFormSettingsOpen = true"
           class="btn-standard btn-form-settings"
         >
@@ -535,13 +705,18 @@ defineExpose({ insertUploadedMarkdown });
           v-if="formAvailable"
           type="button"
           class="btn-standard btn-form-settings btn-form-answer"
-          :disabled="updateBusy"
+          :disabled="updateBusy || bodyLoading || !!bodyError"
           @click="openFormInput"
         >
           フォームで回答を登録
         </button>
       </div>
-      <button type="button" class="close-button" :disabled="updateBusy" @click="emit('close')">
+      <button
+        type="button"
+        class="close-button"
+        :disabled="updateBusy || bodyLoading || !!bodyError"
+        @click="emit('close')"
+      >
         閉じる
       </button>
     </div>
@@ -572,6 +747,12 @@ defineExpose({ insertUploadedMarkdown });
 </template>
 
 <style scoped>
+.managed-answers pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 16vh;
+  overflow: auto;
+}
 .free-input-label {
   display: inline-block;
   margin-left: 8px;

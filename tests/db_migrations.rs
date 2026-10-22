@@ -48,7 +48,7 @@ async fn migrations_create_schema_and_record_versions() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 18);
+    assert_eq!(migration_count, 20);
 
     let live_location_table_count: i64 = sqlx::query_scalar(
         r#"
@@ -167,7 +167,7 @@ async fn migrations_are_idempotent() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 18);
+    assert_eq!(migration_count, 20);
 }
 
 #[tokio::test]
@@ -250,7 +250,7 @@ async fn migrations_record_versions_for_existing_schema() {
     .await
     .expect("migration rows should be returned");
 
-    assert_eq!(rows.len(), 18);
+    assert_eq!(rows.len(), 20);
     assert_eq!(rows[0].get::<i64, _>("version"), 1);
     assert_eq!(rows[0].get::<String, _>("name"), "create_initial_schema");
     assert_eq!(rows[1].get::<i64, _>("version"), 2);
@@ -474,6 +474,7 @@ async fn common_form_upgrade_preserves_legacy_config_answers_and_markdown() {
         DROP INDEX idx_shape_form_managed_layer;
         ALTER TABLE marker_form_config_model DROP COLUMN managed_layer_id;
         ALTER TABLE shape_form_config_model DROP COLUMN managed_layer_id;
+        ALTER TABLE layer_model DROP COLUMN restrict_free_text;
         ALTER TABLE layer_model DROP COLUMN common_form_version;
         ALTER TABLE layer_model DROP COLUMN common_form_id;
         ALTER TABLE layer_model DROP COLUMN form_binding_revision;
@@ -487,6 +488,12 @@ async fn common_form_upgrade_preserves_legacy_config_answers_and_markdown() {
         ALTER TABLE shape_form_submission_model DROP COLUMN form_snapshot;
         DROP TABLE common_form_revision_model;
         DROP TABLE common_form_model;
+        ALTER TABLE marker_form_submission_model DROP COLUMN revision;
+        ALTER TABLE marker_form_submission_model DROP COLUMN edited_at;
+        ALTER TABLE shape_form_submission_model DROP COLUMN revision;
+        ALTER TABLE shape_form_submission_model DROP COLUMN edited_at;
+        ALTER TABLE marker_info_model DROP COLUMN form_body_parts;
+        ALTER TABLE shape_model DROP COLUMN form_body_parts;
         DELETE FROM schema_migrations WHERE version >= 16;
         "#,
     )
@@ -505,6 +512,16 @@ async fn common_form_upgrade_preserves_legacy_config_answers_and_markdown() {
         "#).execute(&pool).await.unwrap();
     run_migrations(&pool).await.unwrap();
     run_migrations(&pool).await.unwrap();
+    let restricted: bool =
+        sqlx::query_scalar("SELECT restrict_free_text FROM layer_model WHERE id=$1")
+            .bind(&layer)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        !restricted,
+        "existing layer remains unrestricted after upgrade"
+    );
     let row: (String, String, Option<String>, Option<String>) = sqlx::query_as(
         r#"
         SELECT submitted_values,rendered_markdown,source_form,form_snapshot
@@ -532,6 +549,20 @@ async fn common_form_upgrade_preserves_legacy_config_answers_and_markdown() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        18
+        20
     );
+}
+
+#[tokio::test]
+async fn answer_edit_upgrade_keeps_legacy_rows_and_starts_revision_one() {
+    let pool = common::test_pool().await;
+    let user = common::create_test_user(&pool, "answer-upgrade").await;
+    let layer = common::master_layer_id(&pool, &user).await;
+    sqlx::raw_sql("ALTER TABLE marker_form_submission_model DROP COLUMN revision; ALTER TABLE marker_form_submission_model DROP COLUMN edited_at; ALTER TABLE shape_form_submission_model DROP COLUMN revision; ALTER TABLE shape_form_submission_model DROP COLUMN edited_at; ALTER TABLE marker_info_model DROP COLUMN form_body_parts; ALTER TABLE shape_model DROP COLUMN form_body_parts; DELETE FROM schema_migrations WHERE version=20;").execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES('legacy-edit-marker',$1,$2,'既存対象',35,139,'既存本文',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)").bind(&user).bind(&layer).execute(&pool).await.unwrap();
+    sqlx::raw_sql("INSERT INTO marker_form_submission_model(id,marker_id,submitted_values,rendered_markdown,create_at) VALUES('legacy-edit-answer','legacy-edit-marker','{}','旧回答',CURRENT_TIMESTAMP);").execute(&pool).await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    let row:(i64,bool,String,bool)=sqlx::query_as("SELECT s.revision,s.edited_at IS NULL,m.detail,m.form_body_parts IS NULL FROM marker_form_submission_model s JOIN marker_info_model m ON m.id=s.marker_id WHERE s.id='legacy-edit-answer'").fetch_one(&pool).await.unwrap();
+    assert_eq!(row, (1, true, "既存本文".into(), true));
 }

@@ -33,6 +33,7 @@ export const useLayersStore = defineStore("layers", {
             user_id: layersData[key]["user_id"],
             name: layersData[key]["layer_name"],
             is_master: layersData[key]["is_master"],
+            restrict_free_text: !!layersData[key]["restrict_free_text"],
             marker_icon_id: layersData[key]["marker_icon_id"],
             marker_icon_filename: layersData[key]["marker_icon_filename"],
           });

@@ -1,5 +1,6 @@
 import { mount, flushPromises } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import Input from "../MapObjectFormInputModal.vue";
 import FormAnswersModal from "@/components/map-object/FormAnswersModal.vue";
 const api = vi.hoisted(() => ({ post: vi.fn(), get: vi.fn(), isAxiosError: vi.fn(() => false) }));
 vi.mock("@/axiosClient", () => ({ default: api }));
@@ -386,4 +387,42 @@ it("CSVと地図それぞれの横に説明を置き、地図の対象範囲を�
   await flushPromises();
   expect(w.get('[aria-label="地図で確認について"]').attributes("aria-expanded")).toBe("false");
   w.unmount();
+});
+
+it("一覧と詳細の編集から同じ回答を開き、保存後は基準日時を更新して再取得する", async () => {
+  api.get.mockResolvedValue({
+    data: { ...row.form_snapshot, revision: 1, values: row.submitted_values },
+  });
+  api.post.mockImplementation(async (url: string) => ({
+    data: url.endsWith("options") ? options : { ...result, editing_supported: true },
+  }));
+  const wrapper = await open();
+  await button(wrapper, "編集").trigger("click");
+  expect(wrapper.getComponent(Input).props()).toMatchObject({
+    answerId: "answer",
+    targetId: "target",
+    targetType: "marker",
+    isOpen: true,
+  });
+  wrapper.getComponent(Input).vm.$emit("close");
+  await flushPromises();
+  await button(wrapper, "詳細を見る").trigger("click");
+  await button(wrapper, "回答を編集").trigger("click");
+  expect(wrapper.getComponent(Input).props("answerId")).toBe("answer");
+  const object = { id: "target", detail: "更新後" };
+  const listener = vi.fn();
+  window.addEventListener("geocode-answer-updated", listener);
+  wrapper.getComponent(Input).vm.$emit("saved", object);
+  await flushPromises();
+  expect(wrapper.findComponent(Input).exists()).toBe(false);
+  expect(listener).toHaveBeenCalledOnce();
+  expect(api.post.mock.calls.at(-1)![1]).not.toHaveProperty("as_of");
+  expect(wrapper.text()).toContain("回答を更新しました。");
+  window.removeEventListener("geocode-answer-updated", listener);
+  wrapper.unmount();
+});
+it("編集API未対応のバックエンドでは編集操作を表示しない", async () => {
+  const wrapper = await open();
+  expect(wrapper.findAll("button").some((b) => b.text() === "編集")).toBe(false);
+  wrapper.unmount();
 });

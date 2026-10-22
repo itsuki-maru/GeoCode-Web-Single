@@ -119,7 +119,7 @@ export function createPrintPreview(
     if (event.target instanceof Element && event.target.closest(".leaflet-popup-pane")) resetWait();
   };
   map.on("popupopen popupclose", resetWait);
-  for (const event of ["load", "error", "toggle", "scroll"])
+  for (const event of ["load", "error", "toggle", "scroll", "change"])
     mapElement.addEventListener(event, popupChanged, true);
   const watchLayer = ({ layer }: { layer: any }) => {
     markChanged();
@@ -353,7 +353,7 @@ export function createPrintPreview(
     map.off("popupopen popupclose", resetWait);
     map.off("measurementselectionchange measurementlabelmove", resetWait);
     map.off("objectloadingchange", resetWait);
-    for (const event of ["load", "error", "toggle", "scroll"])
+    for (const event of ["load", "error", "toggle", "scroll", "change"])
       mapElement.removeEventListener(event, popupChanged, true);
     for (const layer of watchedLayers) {
       layer.off("loading load tileloadstart tileload tileerror", markChanged);

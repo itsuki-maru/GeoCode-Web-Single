@@ -42,6 +42,8 @@ pub struct Layer {
     pub key: String,
     pub layer_name: String,
     pub is_master: bool,
+    #[serde(default)]
+    pub restrict_free_text: bool,
     pub common_form: Option<SourceForm>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -56,6 +58,8 @@ pub struct Marker {
     pub latitude: f64,
     pub longitude: f64,
     pub detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_parts: Option<Vec<BodyPart>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -68,6 +72,8 @@ pub struct Shape {
     pub shape_type: String,
     pub name: Option<String>,
     pub geojson: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_parts: Option<Vec<BodyPart>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -115,6 +121,15 @@ pub struct Submission {
     pub form_snapshot: Option<Value>,
     pub source_form: Option<SourceForm>,
     pub rendered_markdown: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edited_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub source_order: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum BodyPart {
+    Text { text: String },
+    Answer { key: String },
 }

@@ -1,3 +1,5 @@
+pub(crate) mod answer_edit;
+pub use answer_edit::{get_handler as answer_edit_get_handler, update_handler as answer_edit_update_handler};
 mod owner_input;
 pub use owner_input::{
     get_marker_input_handler, get_shape_input_handler, submit_marker_input_handler,
@@ -653,7 +655,7 @@ async fn persist_submission(
     owner_input: bool,
 ) -> Result<JsonValue, AppError> {
     let now = Utc::now().naive_utc();
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = super::answer_sqlite::begin_write(pool).await?;
 
     let current = sqlx::query_as::<
         _,
@@ -779,6 +781,8 @@ async fn persist_submission(
         .await?;
     }
 
+    let document = answer_edit::document(&mut tx, &form.owner_id, "marker", &form.marker_id).await?;
+    let answer_id = Uuid::now_v7().to_string();
     sqlx::query(
         r#"
         INSERT INTO marker_form_submission_model (
@@ -790,7 +794,7 @@ async fn persist_submission(
         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
     )
-    .bind(&Uuid::now_v7().to_string())
+    .bind(&answer_id)
     .bind(&form.marker_id)
     .bind(&SqlJson(submitted_values))
     .bind(&rendered_markdown)
@@ -816,6 +820,7 @@ async fn persist_submission(
     .await?
     .ok_or(AppError::NotFound)?;
 
+    answer_edit::append_parts(&mut tx, &form.owner_id, "marker", &form.marker_id, document.parts, &answer_id).await?;
     tx.commit().await?;
     Ok(updated)
 }
@@ -830,7 +835,7 @@ async fn persist_shape_submission(
     owner_input: bool,
 ) -> Result<JsonValue, AppError> {
     let now = Utc::now().naive_utc();
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = super::answer_sqlite::begin_write(pool).await?;
     let current = sqlx::query_as::<
         _,
         (
@@ -990,6 +995,8 @@ async fn persist_shape_submission(
         .await?;
     }
 
+    let document = answer_edit::document(&mut tx, &form.owner_id, "shape", &form.shape_id).await?;
+    let answer_id = Uuid::now_v7().to_string();
     sqlx::query(
         r#"
         INSERT INTO shape_form_submission_model (
@@ -1012,7 +1019,7 @@ async fn persist_shape_submission(
         )
         "#,
     )
-    .bind(&Uuid::now_v7().to_string())
+    .bind(&answer_id)
     .bind(&form.shape_id)
     .bind(&SqlJson(submitted_values))
     .bind(&rendered_markdown)
@@ -1039,6 +1046,7 @@ async fn persist_shape_submission(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or(AppError::NotFound)?;
+    answer_edit::append_parts(&mut tx, &form.owner_id, "shape", &form.shape_id, document.parts, &answer_id).await?;
     tx.commit().await?;
     Ok(updated)
 }

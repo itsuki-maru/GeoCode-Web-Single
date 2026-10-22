@@ -24,6 +24,7 @@ function applyMarkerUpdateFromParent(payload) {
     longitude: Number(payload.longitude),
   };
   markersFromAxum[markerId] = nextRecord;
+  syncMarkerInputRestriction(marker, nextRecord);
   marker.setLatLng([nextRecord.latitude, nextRecord.longitude]);
 
   const wasPopupOpen = typeof marker.isPopupOpen === "function" && marker.isPopupOpen();
@@ -34,7 +35,16 @@ function applyMarkerUpdateFromParent(payload) {
       ? `<div class="custom-tooltip">${escapeHtml(nextRecord.marker_name)}</div>`
       : `<div class="custom-tooltip">No Name</div>`,
   );
-  if (nextRecord.detail) {
+  if (typeof popupContent !== "undefined") {
+    marker.bindPopup(
+      popupContent.render({
+        kind: "marker",
+        id: markerId,
+        name: nextRecord.marker_name,
+        body: nextRecord.detail,
+      }),
+    );
+  } else if (nextRecord.detail) {
     const mdText = `# ${nextRecord.marker_name}\n\n${nextRecord.detail}`;
     const cleanHtml = filterXSS(marked.parse(mdText), xssOptions);
     marker.bindPopup(`<div class="md-detail-contents">${renderIframe(cleanHtml)}</div>`);
@@ -46,7 +56,7 @@ function applyMarkerUpdateFromParent(payload) {
   if (markerElement) {
     markerElement.id = markerKey;
   }
-  if (wasPopupOpen && nextRecord.detail) {
+  if (wasPopupOpen && (nextRecord.detail || typeof popupContent !== "undefined")) {
     marker.openPopup();
   }
   return true;
@@ -144,7 +154,21 @@ window.addEventListener("message", function (event) {
   if (event.source === window.parent && (allowOrigins.includes(event.origin) || isSameOrigin)) {
     const messageData = event.data;
     if (!messageData || typeof messageData !== "object") return;
-    if (messageData.type === "printStateRequest" && !editorEntryProfile.isMobile) {
+    if (messageData.type === "layerInputPolicies") {
+      let changed = false;
+      for (const [id, restricted] of Object.entries(messageData.policies || {})) {
+        if (layersFromAxum[id] && typeof restricted === "boolean") {
+          changed ||= layersFromAxum[id].restrict_free_text !== restricted;
+          layersFromAxum[id].restrict_free_text = restricted;
+        }
+      }
+      if (changed) {
+        clearShapeGeometryEditing();
+        closeShapeNameEditor();
+        for (const [key, marker] of Object.entries(markers))
+          syncMarkerInputRestriction(marker, markersFromAxum[key.slice(7)]);
+      }
+    } else if (messageData.type === "printStateRequest" && !editorEntryProfile.isMobile) {
       const center = map.getCenter();
       window.parent.postMessage(
         {

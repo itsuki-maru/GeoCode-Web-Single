@@ -46,6 +46,8 @@ export interface InitialMapView {
 }
 
 interface MapBootstrapBase {
+  popupBodies?: import("./common/popup-content").PopupBodies;
+  popupAnalysis?: Record<string, string>;
   tileOverlays?: import("./common/tile-overlays").TileOverlayRecord[];
   layers: Record<string, LayerRecord>;
   markers: Record<string, MarkerRecord>;

@@ -61,6 +61,17 @@ const setup = () => {
   return { runtime, leaflet, data, marker, shape, cluster, visible, handlers };
 };
 describe("回答値の地図表示", () => {
+  it("keeps analysis separate from selectable bodies in owner popups", () => {
+    const s = setup();
+    (s.runtime as any).popupContent = { setAnalysis: vi.fn() };
+    installAnswerAnalysis(s.runtime, s.data, s.leaflet, vi.fn());
+    expect((s.runtime as any).popupContent.setAnalysis).toHaveBeenCalledWith(
+      "shape:same",
+      expect.stringContaining("使用した回答"),
+    );
+    expect(s.shape.shapeMemo).toBe("元のメモ");
+    expect(s.marker.bindPopup).not.toHaveBeenCalled();
+  });
   it("マーカーと同じIDの図形を別々に色分けし、安全な分析値と既存本文を残す", () => {
     const s = setup();
     const analysis = installAnswerAnalysis(s.runtime, s.data, s.leaflet, vi.fn());

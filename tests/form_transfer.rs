@@ -24,6 +24,11 @@ fn fixture() -> Value {
 fn app(pool: &Pool, user: &str) -> Router {
     Router::new()
         .route(
+            "/answer/{kind}/{id}",
+            get(project::handler::marker_forms::answer_edit_get_handler)
+                .put(project::handler::marker_forms::answer_edit_update_handler),
+        )
+        .route(
             "/forms/{id}",
             put(project::handler::marker_forms::update_common_form_handler),
         )
@@ -175,6 +180,21 @@ async fn transfer_recreates_another_owners_forms_history_and_latest_answers() {
         .execute(&pool)
         .await
         .unwrap();
+    let defaults: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM layer_model WHERE user_id=$1 AND restrict_free_text=true",
+    )
+    .bind(dbid(&owner))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(defaults, 0, "older v3 input defaults to unrestricted");
+    sqlx::query(
+        "UPDATE layer_model SET restrict_free_text=true WHERE user_id=$1 AND is_master=false",
+    )
+    .bind(dbid(&owner))
+    .execute(&pool)
+    .await
+    .unwrap();
     let package = export(&sender, &master(&pool, &owner).await, "").await;
     assert_eq!(package["version"], 3);
     assert_eq!(package["layers"].as_array().unwrap().len(), 5);
@@ -194,6 +214,24 @@ async fn transfer_recreates_another_owners_forms_history_and_latest_answers() {
     let receiver = app(&pool, &recipient);
     assert_eq!(upload(&receiver, &package).await, StatusCode::OK);
     let copied = export(&receiver, &master(&pool, &recipient).await, "").await;
+    let restrictions: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM layer_model WHERE user_id=$1 AND restrict_free_text=true",
+    )
+    .bind(dbid(&recipient))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(restrictions, 4);
+    assert!(
+        copied["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|l| l["restrict_free_text"] == true)
+            .count()
+            >= 4
+    );
+
     for collection in [
         "markers",
         "shapes",
@@ -601,6 +639,17 @@ async fn postgres_export_can_be_recreated_in_sqlite() {
     let app = app(&pool, &user);
     assert_eq!(upload(&app, &package).await, StatusCode::OK);
     let copy = export(&app, &master(&pool, &user).await, "").await;
+    let restricted_count = |p: &Value| {
+        p["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|l| l["restrict_free_text"] == true)
+            .count()
+    };
+    assert!(restricted_count(&package) > 0);
+    assert_eq!(restricted_count(&copy), restricted_count(&package));
+
     for collection in [
         "markers",
         "shapes",
@@ -683,4 +732,120 @@ async fn transfer_preserves_latest_when_timezones_and_submicrosecond_times_colla
         let page = answers(app,json!({"mode":"latest","common_form_id":form,"target_type":"marker","target_id":target})).await;
         assert_eq!(page["rows"][0]["submitted_values"]["n"], 1);
     }
+}
+
+#[tokio::test]
+async fn corrected_answers_and_body_bindings_survive_transfer_with_fresh_ids() {
+    let pool = common::test_pool().await;
+    let user = common::create_test_user(&pool, "edited-transfer")
+        .await
+        .to_string();
+    let recipient = common::create_test_user(&pool, "edited-recipient")
+        .await
+        .to_string();
+    let sender = app(&pool, &user);
+    assert_eq!(upload(&sender, &fixture()).await, StatusCode::OK);
+    let target = named_id(&pool, "marker_info_model", "marker_name", "管理対象", &user).await;
+    let records: Vec<(String,String)>=sqlx::query_as("SELECT id,rendered_markdown FROM marker_form_submission_model WHERE marker_id=$1 ORDER BY create_at,id").bind(dbid(&target)).fetch_all(&pool).await.unwrap();
+    let body = format!(
+        "移行する自由記述\n{}",
+        records.iter().map(|(_, m)| m.as_str()).collect::<String>()
+    );
+    sqlx::query("UPDATE marker_info_model SET detail=$1 WHERE id=$2")
+        .bind(&body)
+        .bind(dbid(&target))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let answer = records.first().unwrap().0.clone();
+    let (status, bytes) = request(
+        &sender,
+        "GET",
+        &format!("/answer/marker/{answer}"),
+        "application/json",
+        vec![],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let edit: Value = serde_json::from_slice(&bytes).unwrap();
+    let mut values = edit["values"].clone();
+    values["n"] = json!("9007199254740993");
+    let submission = json!({"revision":edit["revision"],"values":values});
+    let body = format!(
+        "--EDIT\r\nContent-Disposition: form-data; name=\"submission\"\r\n\r\n{submission}\r\n--EDIT--\r\n"
+    );
+    let (status, bytes) = request(
+        &sender,
+        "PUT",
+        &format!("/answer/marker/{answer}"),
+        "multipart/form-data; boundary=EDIT",
+        body.into_bytes(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&bytes)
+    );
+    sqlx::query("UPDATE layer_model SET restrict_free_text=true WHERE id=(SELECT layer_id FROM marker_info_model WHERE id=$1)")
+        .bind(&target).execute(&pool).await.unwrap();
+    let package = export(&sender, &master(&pool, &user).await, "").await;
+    // The PostgreSQL cross-engine test consumes the edited SQLite export too.
+    std::fs::create_dir_all("target/transfer-tests").unwrap();
+    std::fs::write("target/transfer-tests/sqlite-cross-v3.json", package.to_string()).unwrap();
+    let exported = package["markers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["marker_name"] == "管理対象")
+        .unwrap();
+    assert!(exported["body_parts"].is_array());
+    assert!(!package.to_string().contains(&answer.to_string()));
+    let receiver = app(&pool, &recipient);
+    assert_eq!(upload(&receiver, &package).await, StatusCode::OK);
+    let copied = named_id(
+        &pool,
+        "marker_info_model",
+        "marker_name",
+        "管理対象",
+        &recipient,
+    )
+    .await;
+    let (copied_body, parts): (String, Value) =
+        sqlx::query_as("SELECT detail,form_body_parts FROM marker_info_model WHERE id=$1")
+            .bind(dbid(&copied))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(copied_body, exported["detail"].as_str().unwrap());
+    assert!(!parts.to_string().contains(&answer.to_string()));
+    let id: String = sqlx::query_scalar(
+        "SELECT id FROM marker_form_submission_model WHERE marker_id=$1 AND edited_at IS NOT NULL",
+    )
+    .bind(dbid(&copied))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (_, bytes) = request(
+        &receiver,
+        "GET",
+        &format!("/answer/marker/{id}"),
+        "application/json",
+        vec![],
+    )
+    .await;
+    let edit: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(edit["body_info"]["sync_required"], false);
+    assert_eq!(edit["values"]["n"].as_str(), Some("9007199254740993"));
+    let mut bad = package.clone();
+    let key = exported["key"].clone();
+    let target = bad["markers"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|m| m["key"] == key)
+        .unwrap();
+    target["body_parts"][0] = json!({"type":"answer","key":"missing"});
+    assert_eq!(upload(&receiver, &bad).await, StatusCode::BAD_REQUEST);
 }

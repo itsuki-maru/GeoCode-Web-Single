@@ -47,6 +47,7 @@ export function installAnswerAnalysis(
       ? `使用した回答: ${target.answered_at}`
       : "選択フォームの該当回答なし";
     const html = `<section class="answer-analysis-value"><strong>${escapeHtml(text)}</strong><br>${escapeHtml(date)}</section>`;
+    runtime.popupContent?.setAnalysis(key, html);
     if (kind === "marker") {
       layer.setIcon(
         leaflet.divIcon({
@@ -59,7 +60,8 @@ export function installAnswerAnalysis(
       );
       const popup = layer.getPopup?.();
       const content = popup?.getContent?.();
-      layer.bindPopup(html + (typeof content === "string" ? content : ""));
+      if (!runtime.popupContent)
+        layer.bindPopup(html + (typeof content === "string" ? content : ""));
     } else {
       const style = { ...(layer.shapeStyle || {}), color: bucket.color, fillColor: bucket.color };
       if (layer.shapeType !== "polyline") Object.assign(style, { fill: true, fillOpacity: 0.3 });
@@ -67,7 +69,8 @@ export function installAnswerAnalysis(
       layer.setStyle?.(style);
       runtime.shapeNameLabelManager?.invalidate(layer);
       const markdownEscape = (s: string) => s.replace(/[\\`*_{}[\]<>()#+\-.!|]/g, "\\$&");
-      layer.shapeMemo = `### 分析に使用した回答\n\n${markdownEscape(text)}\n\n${markdownEscape(date)}\n\n---\n\n${layer.shapeMemo || ""}`;
+      if (!runtime.popupContent)
+        layer.shapeMemo = `### 分析に使用した回答\n\n${markdownEscape(text)}\n\n${markdownEscape(date)}\n\n---\n\n${layer.shapeMemo || ""}`;
     }
   }
   const cluster = runtime.visibleMarkerGroup;

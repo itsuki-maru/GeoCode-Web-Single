@@ -191,33 +191,25 @@ function completeCircleDrawing(targetLatLng) {
 
 // サーバーに新しい座標とIDを送信してデータを更新する関数
 // マーカー移動後の座標をサーバーへ反映する
-function updateServer(id, lat, lng) {
-  let url = `/marker/update-marker-latlng?marker_id=${id}&latitude=${lat}&longitude=${lng}`;
-  // ラジオボタンの状態を確認
-  let isEditMode = document.getElementById("editMode").checked;
-  // 編集モードでなければは何もしない
-  if (!isEditMode) {
-    return;
+async function updateServer(id, lat, lng) {
+  if (!document.getElementById("editMode").checked) return;
+  const record = markersFromAxum[id],
+    marker = markers[`marker-${id}`];
+  try {
+    if (isLayerInputRestricted(record?.layer_id)) throw new Error("入力が制限されています。");
+    const response = await fetchWithAuth(
+      `/marker/update-marker-latlng?marker_id=${id}&latitude=${lat}&longitude=${lng}`,
+      { method: "PUT" },
+    );
+    if (!response.ok) throw new Error("marker move failed");
+    if (record) {
+      record.latitude = lat;
+      record.longitude = lng;
+    }
+  } catch {
+    if (record && marker) marker.setLatLng([record.latitude, record.longitude]);
+    setDrawStatus("マーカーを移動できませんでした。入力制限を確認してください。", true);
   }
-
-  fetchWithAuth(url, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-    },
-  })
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error("Network response was not ok");
-      }
-      return response.json();
-    })
-    .then((data) => {
-      // 必要に応じて、サーバーからのレスポンスを処理する
-    })
-    .catch((error) => {
-      console.log("There was a problem with the fetch operation:", error.message);
-    });
 }
 
 function handleShapeDrawLatLng(latlng) {

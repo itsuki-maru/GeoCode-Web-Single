@@ -9,6 +9,8 @@ pub struct LayerObject {
     pub layer_name: String,
     pub is_master: bool,
     #[serde(default)]
+    pub restrict_free_text: bool,
+    #[serde(default)]
     pub marker_icon_id: Option<String>,
     #[serde(default)]
     pub marker_icon_filename: Option<String>,
@@ -67,6 +69,8 @@ pub struct LayerObjectFromRow {
     pub user_id: String,
     pub layer_name: String,
     pub is_master: bool,
+    #[serde(default)]
+    pub restrict_free_text: bool,
     #[serde(default)]
     pub marker_icon_id: Option<String>,
     #[serde(default)]

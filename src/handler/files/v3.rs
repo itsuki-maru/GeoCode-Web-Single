@@ -124,13 +124,15 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
     let mut target_keys = HashMap::new();
     let mut needed_forms = HashSet::new();
     let mut answer_order = Vec::new();
+    let mut answer_keys = HashMap::new();
+    let mut body_documents = HashMap::new();
     {
         let text = sql(
-            "SELECT id::text AS id,layer_name,is_master,common_form_id::text AS common_form_id,common_form_version,create_at::text AS created_at,update_at::text AS updated_at FROM layer_model WHERE user_id=$1 AND ($2::uuid IS NULL OR id=$2) ORDER BY id",
+            "SELECT id::text AS id,layer_name,is_master,restrict_free_text,common_form_id::text AS common_form_id,common_form_version,create_at::text AS created_at,update_at::text AS updated_at FROM layer_model WHERE user_id=$1 AND ($2::uuid IS NULL OR id=$2) ORDER BY id",
         );
         let mut rows = sqlx::query(&text)
             .bind(db_id(user)?)
-            .bind(scope.clone())
+            .bind(&scope)
             .fetch(&mut *tx);
         while let Some(row) = rows.try_next().await? {
             let key = format!("l{}", p.layers.len() + 1);
@@ -149,6 +151,7 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
                 key,
                 layer_name: row.try_get("layer_name")?,
                 is_master: row.try_get("is_master")?,
+                restrict_free_text: row.try_get("restrict_free_text")?,
                 common_form,
                 created_at: time(&row, "created_at")?,
                 updated_at: time(&row, "updated_at")?,
@@ -174,10 +177,10 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
             )
         };
         {
-            let text = sql(&format!("SELECT id::text AS id,layer_id::text AS layer_id,{data},{created}::text AS created_at,{updated}::text AS updated_at FROM {table} WHERE user_id=$1 AND ($2::uuid IS NULL OR layer_id=$2) ORDER BY id")).into_owned();
+            let text = sql(&format!("SELECT id::text AS id,layer_id::text AS layer_id,{data},form_body_parts,{created}::text AS created_at,{updated}::text AS updated_at FROM {table} WHERE user_id=$1 AND ($2::uuid IS NULL OR layer_id=$2) ORDER BY id")).into_owned();
             let mut rows = sqlx::query(&text)
                 .bind(db_id(user)?)
-                .bind(scope.clone())
+                .bind(&scope)
                 .fetch(&mut *tx);
             while let Some(row) = rows.try_next().await? {
                 let id: String = row.try_get("id")?;
@@ -192,6 +195,12 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
                     target_keys.len() + 1
                 );
                 target_keys.insert((kind.to_string(), id), key.clone());
+                if let Some(parts) = row.try_get::<Option<
+                    Json<Vec<super::super::marker_forms::answer_edit::BodyPart>>,
+                >, _>("form_body_parts")?
+                {
+                    body_documents.insert((kind.to_string(), key.clone()), parts.0);
+                }
                 if kind == "marker" {
                     let m = Marker {
                         key,
@@ -200,6 +209,7 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
                         latitude: row.try_get("latitude")?,
                         longitude: row.try_get("longitude")?,
                         detail: row.try_get("detail")?,
+                        body_parts: None,
                         created_at: time(&row, "created_at")?,
                         updated_at: time(&row, "updated_at")?,
                     };
@@ -212,6 +222,7 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
                         shape_type: row.try_get("shape_type")?,
                         name: row.try_get("name")?,
                         geojson: value(&row, "geojson")?,
+                        body_parts: None,
                         created_at: time(&row, "created_at")?,
                         updated_at: time(&row, "updated_at")?,
                     };
@@ -224,7 +235,7 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
             let text = sql(&format!("SELECT c.{kind}_id::text AS id,c.form_title,c.form_description,c.form_schema,c.source_form,c.managed_layer_id::text AS managed_layer_id,c.create_at::text AS created_at,c.update_at::text AS updated_at FROM {kind}_form_config_model c JOIN {table} o ON o.id=c.{kind}_id WHERE o.user_id=$1 AND ($2::uuid IS NULL OR o.layer_id=$2) ORDER BY c.{kind}_id")).into_owned();
             let mut rows = sqlx::query(&text)
                 .bind(db_id(user)?)
-                .bind(scope.clone())
+                .bind(&scope)
                 .fetch(&mut *tx);
             while let Some(row) = rows.try_next().await? {
                 let id: String = row.try_get("id")?;
@@ -263,10 +274,10 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
             }
         }
         {
-            let text = sql(&format!("SELECT s.id::text AS answer_id,s.{kind}_id::text AS id,s.submitted_values,s.form_snapshot,s.source_form,s.rendered_markdown,s.create_at::text AS created_at FROM {kind}_form_submission_model s JOIN {table} o ON o.id=s.{kind}_id WHERE o.user_id=$1 AND ($2::uuid IS NULL OR o.layer_id=$2) ORDER BY s.create_at,s.id")).into_owned();
+            let text = sql(&format!("SELECT s.id::text AS answer_id,s.{kind}_id::text AS id,s.submitted_values,s.form_snapshot,s.source_form,s.rendered_markdown,s.edited_at::text AS edited_at,s.create_at::text AS created_at FROM {kind}_form_submission_model s JOIN {table} o ON o.id=s.{kind}_id WHERE o.user_id=$1 AND ($2::uuid IS NULL OR o.layer_id=$2) ORDER BY s.create_at,s.id")).into_owned();
             let mut rows = sqlx::query(&text)
                 .bind(db_id(user)?)
-                .bind(scope.clone())
+                .bind(&scope)
                 .fetch(&mut *tx);
             while let Some(row) = rows.try_next().await? {
                 let id: String = row.try_get("id")?;
@@ -285,6 +296,10 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
                     kind.to_string(),
                     p.submissions.len(),
                 ));
+                answer_keys.insert(
+                    (kind.to_string(), row.try_get::<String, _>("answer_id")?),
+                    format!("a{order}"),
+                );
                 let s = Submission {
                     key: format!("a{order}"),
                     target: Target {
@@ -297,12 +312,53 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
                         .map(|v| v.0),
                     source_form,
                     rendered_markdown: row.try_get("rendered_markdown")?,
+                    edited_at: row
+                        .try_get::<Option<String>, _>("edited_at")?
+                        .map(|_| time(&row, "edited_at"))
+                        .transpose()?,
                     created_at: time(&row, "created_at")?,
                     source_order: order,
                 };
                 budget.add(&s)?;
                 p.submissions.push(s);
             }
+        }
+    }
+    let portable_parts = |kind: &str, key: &str| -> Result<Option<Vec<BodyPart>>, AppError> {
+        body_documents
+            .get(&(kind.to_string(), key.to_string()))
+            .map(|parts| {
+                parts
+                    .iter()
+                    .map(|part| {
+                        Ok(match part {
+                            super::super::marker_forms::answer_edit::BodyPart::Text { text } => {
+                                BodyPart::Text { text: text.clone() }
+                            },
+                            super::super::marker_forms::answer_edit::BodyPart::Answer { id } => {
+                                BodyPart::Answer {
+                                    key: answer_keys
+                                        .get(&(kind.to_string(), id.to_string()))
+                                        .cloned()
+                                        .ok_or_else(|| invalid("本文の回答参照が不正です。"))?,
+                                }
+                            },
+                        })
+                    })
+                    .collect::<Result<Vec<_>, AppError>>()
+            })
+            .transpose()
+    };
+    for m in &mut p.markers {
+        m.body_parts = portable_parts("marker", &m.key)?;
+        if let Some(parts) = &m.body_parts {
+            budget.add(parts)?;
+        }
+    }
+    for shape in &mut p.shapes {
+        shape.body_parts = portable_parts("shape", &shape.key)?;
+        if let Some(parts) = &shape.body_parts {
+            budget.add(parts)?;
         }
     }
     // One priority order across marker and shape answers, even when timestamps
@@ -448,8 +504,8 @@ pub(super) async fn import(pool: &Pool, user: &str, p: TransferPackage) -> Resul
         }
     }
     for l in &p.layers {
-        sqlx::query("INSERT INTO layer_model (id,user_id,layer_name,is_master,create_at,update_at,common_form_id,common_form_version,form_binding_revision) VALUES ($1,$2,$3,false,$4,$5,$6,$7,1)")
-            .bind(db_id(&layers[l.key.as_str()].to_string())?).bind(db_id(user)?).bind(&l.layer_name).bind(l.created_at.naive_utc()).bind(l.updated_at.naive_utc()).bind(l.common_form.as_ref().map(|s| db_id(&forms[s.form_key.as_str()].to_string())).transpose()?).bind(l.common_form.as_ref().map(|s| s.version)).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO layer_model (id,user_id,layer_name,is_master,create_at,update_at,common_form_id,common_form_version,form_binding_revision,restrict_free_text) VALUES ($1,$2,$3,false,$4,$5,$6,$7,1,$8)")
+            .bind(db_id(&layers[l.key.as_str()].to_string())?).bind(db_id(user)?).bind(&l.layer_name).bind(l.created_at.naive_utc()).bind(l.updated_at.naive_utc()).bind(l.common_form.as_ref().map(|s| db_id(&forms[s.form_key.as_str()].to_string())).transpose()?).bind(l.common_form.as_ref().map(|s| s.version)).bind(l.restrict_free_text).execute(&mut *tx).await?;
     }
     for m in &p.markers {
         let target = Target {
@@ -478,10 +534,60 @@ pub(super) async fn import(pool: &Pool, user: &str, p: TransferPackage) -> Resul
     ids.sort_unstable();
     let mut submissions: Vec<_> = p.submissions.iter().collect();
     submissions.sort_by_key(|s| s.source_order);
+    let mut answer_ids = HashMap::new();
     for (s, id) in submissions.into_iter().zip(ids) {
+        answer_ids.insert(s.key.clone(), id);
         let kind = &s.target.kind;
-        sqlx::query(&format!("INSERT INTO {kind}_form_submission_model (id,{kind}_id,submitted_values,rendered_markdown,create_at,source_form,form_snapshot) VALUES ($1,$2,$3,$4,$5,$6,$7)"))
-            .bind(db_id(&id.to_string())?).bind(db_id(&objects[&s.target].to_string())?).bind(Json(&s.submitted_values)).bind(&s.rendered_markdown).bind(s.created_at.naive_utc()).bind(source_db(&s.source_form,&forms)).bind(s.form_snapshot.as_ref().map(Json)).execute(&mut *tx).await?;
+        sqlx::query(&format!("INSERT INTO {kind}_form_submission_model (id,{kind}_id,submitted_values,rendered_markdown,create_at,source_form,form_snapshot,edited_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)"))
+            .bind(db_id(&id.to_string())?).bind(db_id(&objects[&s.target].to_string())?).bind(Json(&s.submitted_values)).bind(&s.rendered_markdown).bind(s.created_at.naive_utc()).bind(source_db(&s.source_form,&forms)).bind(s.form_snapshot.as_ref().map(Json)).bind(s.edited_at.map(|t|t.naive_utc())).execute(&mut *tx).await?;
+    }
+    for (target, parts) in p
+        .markers
+        .iter()
+        .map(|m| {
+            (
+                Target {
+                    kind: "marker".into(),
+                    key: m.key.clone(),
+                },
+                &m.body_parts,
+            )
+        })
+        .chain(p.shapes.iter().map(|s| {
+            (
+                Target {
+                    kind: "shape".into(),
+                    key: s.key.clone(),
+                },
+                &s.body_parts,
+            )
+        }))
+    {
+        if let Some(parts) = parts {
+            let rebound: Vec<_> = parts
+                .iter()
+                .map(|part| match part {
+                    BodyPart::Text { text } => {
+                        super::super::marker_forms::answer_edit::BodyPart::Text {
+                            text: text.clone(),
+                        }
+                    },
+                    BodyPart::Answer { key } => {
+                        super::super::marker_forms::answer_edit::BodyPart::Answer {
+                            id: answer_ids[key].to_string(),
+                        }
+                    },
+                })
+                .collect();
+            super::super::marker_forms::answer_edit::store_parts(
+                &mut tx,
+                user,
+                &target.kind,
+                &objects[&target].to_string(),
+                Some(&rebound),
+            )
+            .await?;
+        }
     }
     tx.commit().await?;
     Ok(())

@@ -76,6 +76,7 @@ pub struct AnswerMapData {
     pub markers: Vec<MarkerObject>,
     pub shapes: Vec<ShapeObject>,
     pub layers: Vec<LayerObject>,
+    pub popup_bodies: HashMap<String, Value>,
 }
 
 pub async fn load_answer_map(
@@ -183,6 +184,7 @@ pub async fn load_answer_map(
             l.user_id,
             l.layer_name,
             l.is_master,
+            l.restrict_free_text,
             l.marker_icon_id,
             i.uuid_filename AS marker_icon_filename
         FROM layer_model l
@@ -196,6 +198,23 @@ pub async fn load_answer_map(
     .bind(json!(layer_ids))
     .fetch_all(&mut *tx)
     .await?;
+    let popup_targets: Vec<_> = markers
+        .iter()
+        .map(|m| ("marker", m.id.clone(), m.detail.clone()))
+        .chain(shapes.iter().map(|s| {
+            (
+                "shape",
+                s.id.clone(),
+                s.geojson
+                    .pointer("/properties/memo")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+            )
+        }))
+        .collect();
+    let popup_bodies =
+        super::marker_forms::answer_edit::popup_bodies(&mut tx, user, &popup_targets).await?;
     tx.commit().await?;
     Ok(AnswerMapData {
         answer_count,
@@ -203,6 +222,7 @@ pub async fn load_answer_map(
         markers,
         shapes,
         layers,
+        popup_bodies,
     })
 }
 
@@ -248,6 +268,7 @@ pub async fn answer_map_handler(
         context.insert("layersFromAxum", &layers);
         context.insert("markersFromAxum", &markers);
         context.insert("shapesFromAxum", &data.shapes);
+        context.insert("popupBodies", &data.popup_bodies);
         context.insert("answerPreview", &json!({"answerCount":data.answer_count,"targetCount":data.target_count,"parentOrigin":request.parent_origin,"requestId":request.request_id,"query":q,"targets":targets}));
         Ok::<_,AppError>(())
     }.await;

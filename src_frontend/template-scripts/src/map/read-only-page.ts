@@ -1,5 +1,6 @@
 // @ts-nocheck -- この統合境界では Leaflet プラグイン間の型定義に互換性がないため、型チェックを省略する。
 import { createTileOverlayManager } from "./common/tile-overlays";
+import { createPopupContentRuntime } from "./common/popup-content";
 import { createLazyLayerObjects } from "./common/lazy-layer-objects";
 import type { PrintMapState } from "./common/print-state";
 import { readMapBootstrap } from "./bootstrap";
@@ -248,6 +249,38 @@ export function initializeReadOnlyMapPage(
     zoom: initialView.zoom,
   });
   map = mapRuntime.map as DynamicRecord;
+  const popupContent = isAnother
+    ? createPopupContentRuntime({
+        map,
+        sanitizeHtml: (html) => filterXSS(html, xssOptions),
+        analysis: bootstrap.popupAnalysis,
+        renderMarkdown: (text) => renderIframe(filterXSS(marked.parse(text), xssOptions)),
+        setupImages: setupDetailsLazyImages,
+        snapshot: isAnswerPreview ? bootstrap.popupBodies || {} : undefined,
+        answerMap: isAnswerPreview,
+        loadBody: async (kind, id) => {
+          let response = await fetch(`/${kind}/${id}/form/body`, {
+            credentials: "same-origin",
+            cache: "no-store",
+          });
+          if (response.status === 401) {
+            const renewed = await fetch("/account/refresh", {
+              method: "POST",
+              credentials: "same-origin",
+              headers: { "Content-Type": "application/json" },
+              body: "{}",
+            });
+            if (renewed.ok)
+              response = await fetch(`/${kind}/${id}/form/body`, {
+                credentials: "same-origin",
+                cache: "no-store",
+              });
+          }
+          if (!response.ok) throw Error("Popup request failed");
+          return response.json();
+        },
+      })
+    : undefined;
   if (isMobileAnswerMap) map.addControl(new MapUiVisibilityToggleControl!());
   if (!isPrint) installMjpegCameras(map);
   if (persistSettings) observeMapView(map);
@@ -320,6 +353,15 @@ export function initializeReadOnlyMapPage(
     },
   });
   const memo = createShapeMemoRuntime({
+    renderPopup: popupContent
+      ? (layer) =>
+          popupContent.render({
+            kind: "shape",
+            id: layer.shapeId,
+            name: layer.shapeName || "",
+            body: layer.shapeMemo || "",
+          })
+      : undefined,
     onShapeClick: (layer, event) => selection.select(layer, event),
     escapeHtml,
     getLeaflet: () => L,
@@ -417,6 +459,15 @@ export function initializeReadOnlyMapPage(
   if (isAnother) Object.keys(layers).forEach(groups.createMarkerGroupForLayer);
   const hydrateMarkers = (records) =>
     hydrateReadOnlyMarkers({
+      renderPopup: popupContent
+        ? (record) =>
+            popupContent.render({
+              kind: "marker",
+              id: String(record.id),
+              name: record.marker_name,
+              body: record.detail || "",
+            })
+        : undefined,
       onMarkerCreated: isAnother
         ? (marker) =>
             marker.on("add", () => {
@@ -735,6 +786,7 @@ export function initializeReadOnlyMapPage(
   }
 
   return {
+    popupContent,
     getPrintState: (): PrintMapState => {
       const center = map.getCenter();
       return {

@@ -2,6 +2,7 @@
 import { ref, watch, onBeforeUnmount } from "vue";
 import BaseModal from "@/components/common/BaseModal.vue";
 import apiClient from "@/axiosClient";
+import { baseUrl } from "@/setting";
 import { resizeImage } from "@/utils/form-image-resize";
 import type { MapObjectData, ShapeData } from "@/interface";
 interface Field {
@@ -16,14 +17,41 @@ interface InputConfig {
   form_title: string;
   form_description: string;
   form_schema: { fields: Field[] };
-  config_token: string;
+  config_token?: string;
+  revision?: number;
+  body_info?: {
+    body: string;
+    body_token: string;
+    managed_markdown: string;
+    sync_required: boolean;
+  };
   values: Record<string, unknown>;
 }
 const formId = `owner-form-input-${Math.random().toString(36).slice(2)}`;
-const props = defineProps<{ isOpen: boolean; targetType: "marker" | "shape"; targetId: string }>();
+const props = defineProps<{
+  isOpen: boolean;
+  targetType: "marker" | "shape";
+  targetId: string;
+  answerId?: string;
+}>();
 const emit = defineEmits<{ close: []; saved: [object: MapObjectData | ShapeData] }>();
 const config = ref<InputConfig | null>(null),
   values = ref<Record<string, string | boolean>>({});
+const imageActions = ref<Record<string, string>>({});
+const reconcileText = ref(""),
+  reconcileConfirmed = ref(false);
+const existingImage = (id: string): string => {
+  const value = config.value?.values[id];
+  const url = value && typeof value === "object" ? (value as { url?: unknown }).url : null;
+  if (typeof url !== "string") return "";
+  if (url.startsWith("/static/images/")) return baseUrl + url;
+  try {
+    const parsed = new URL(url);
+    return ["http:", "https:"].includes(parsed.protocol) ? parsed.href : "";
+  } catch {
+    return "";
+  }
+};
 const images = new Map<string, { blob: Blob; name: string }>();
 const imageStatus = ref<Record<string, string>>({});
 const preparing = ref(0),
@@ -34,12 +62,17 @@ const preparing = ref(0),
 let generation = 0,
   controller: AbortController | undefined;
 const imageVersions = new Map<string, number>();
-const endpoint = () => `/${props.targetType}/${props.targetId}/form`;
+const endpoint = () =>
+  props.answerId
+    ? `/form-answers/${props.targetType}/${props.answerId}`
+    : `/${props.targetType}/${props.targetId}/form`;
 const errorText = (error: unknown, fallback: string) => {
   if (apiClient.isAxiosError(error)) {
     const status = error.response?.status;
     if (status === 409)
-      return "フォームの設定が変更されました。再読み込みして入力内容を確認してください。";
+      return props.answerId
+        ? "回答または本文・メモが他で更新されました。入力内容を控えたうえで再読み込みしてください。"
+        : "フォームの設定が変更されました。再読み込みして入力内容を確認してください。";
     if (status === 404) return "対象またはフォームが見つかりません。編集画面を開き直してください。";
     return (
       (error.response?.data as { error?: string })?.error?.replace(/^validation error:\s*/, "") ||
@@ -62,10 +95,25 @@ const load = async () => {
   loading.value = true;
   try {
     const data = (
-      await apiClient.get<InputConfig>(endpoint() + "/input", { signal: controller.signal })
+      await apiClient.get<InputConfig>(endpoint() + (props.answerId ? "" : "/input"), {
+        signal: controller.signal,
+      })
     ).data;
     if (current !== generation || !props.isOpen) return;
+    if (
+      !Array.isArray(data?.form_schema?.fields) ||
+      !data.values ||
+      typeof data.values !== "object"
+    )
+      throw new Error("フォームの応答が不正です。");
     config.value = data;
+    reconcileText.value = "";
+    reconcileConfirmed.value = false;
+    imageActions.value = Object.fromEntries(
+      data.form_schema.fields
+        .filter((f) => f.type === "image")
+        .map((f) => [f.id, existingImage(f.id) ? "keep" : f.required ? "replace" : "remove"]),
+    );
     values.value = Object.fromEntries(
       data.form_schema.fields.map((f) => {
         const v = data.values[f.id];
@@ -80,7 +128,7 @@ const load = async () => {
   }
 };
 watch(
-  () => [props.isOpen, props.targetType, props.targetId] as const,
+  () => [props.isOpen, props.targetType, props.targetId, props.answerId] as const,
   () => {
     ++generation;
     controller?.abort();
@@ -101,6 +149,7 @@ const prepareImage = async (field: Field, event: Event) => {
   images.delete(field.id);
   imageStatus.value[field.id] = "";
   if (!file) return;
+  imageActions.value[field.id] = "replace";
   preparing.value++;
   imageStatus.value[field.id] = "画像を縮小しています…";
   try {
@@ -121,6 +170,10 @@ const prepareImage = async (field: Field, event: Event) => {
 };
 const submit = async () => {
   if (saving.value || loading.value || preparing.value || conflict.value || !config.value) return;
+  if (props.answerId && config.value.body_info?.sync_required && !reconcileConfirmed.value) {
+    message.value = "自由記述として残す内容を確認してください。";
+    return;
+  }
   const current = generation;
   saving.value = true;
   message.value = "";
@@ -132,12 +185,32 @@ const submit = async () => {
   );
   body.append(
     "submission",
-    JSON.stringify({ config_token: config.value.config_token, values: answers }),
+    JSON.stringify(
+      props.answerId
+        ? {
+            revision: config.value.revision,
+            values: answers,
+            image_actions: imageActions.value,
+            ...(config.value.body_info?.sync_required
+              ? {
+                  reconcile: {
+                    free_text: reconcileText.value,
+                    token: config.value.body_info.body_token,
+                  },
+                }
+              : {}),
+          }
+        : { config_token: config.value.config_token, values: answers },
+    ),
   );
-  for (const [id, image] of images) body.append(`image__${id}`, image.blob, image.name);
+  for (const [id, image] of images)
+    if (!props.answerId || imageActions.value[id] === "replace")
+      body.append(`image__${id}`, image.blob, image.name);
   try {
     const data = (
-      await apiClient.post<{ object: MapObjectData | ShapeData }>(endpoint() + "/submissions", body)
+      await (props.answerId
+        ? apiClient.put<{ object: MapObjectData | ShapeData }>(endpoint(), body)
+        : apiClient.post<{ object: MapObjectData | ShapeData }>(endpoint() + "/submissions", body))
     ).data;
     if (current === generation && props.isOpen) emit("saved", data.object);
   } catch (error) {
@@ -154,16 +227,22 @@ const submit = async () => {
 };
 </script>
 <template>
-  <BaseModal :isOpen="isOpen" :zIndex="20" :closeOnOverlayClick="false">
+  <BaseModal :isOpen="isOpen" :zIndex="answerId ? 40 : 20" :closeOnOverlayClick="false">
     <section
       class="form-input"
       role="dialog"
       aria-modal="true"
-      aria-label="フォームで回答を登録"
+      :aria-label="answerId ? 'フォーム回答の編集' : 'フォームで回答を登録'"
       :aria-busy="saving || loading"
     >
-      <h2>フォームで回答を登録</h2>
-      <p class="intro">回答を分析用データとして保存し、本文・メモにも追記します。</p>
+      <h2>{{ answerId ? "フォーム回答の編集" : "フォームで回答を登録" }}</h2>
+      <p class="intro">
+        {{
+          answerId
+            ? "投稿時の項目で回答を修正し、分析用データと本文・メモを更新します。回答件数は増えません。"
+            : "回答を分析用データとして保存し、本文・メモにも追記します。"
+        }}
+      </p>
       <p v-if="loading" role="status">フォームを読み込んでいます…</p>
       <p v-if="message" class="error" role="alert">{{ message }}</p>
       <button
@@ -175,6 +254,29 @@ const submit = async () => {
       >
         再読み込み
       </button>
+      <section v-if="answerId && config?.body_info?.sync_required" class="body-reconcile">
+        <p role="alert">
+          本文・メモと回答の対応を自動判定できません。自由記述として残す内容を確認してください。回答部分は投稿順で再構成します。
+        </p>
+        <details>
+          <summary>現在の本文・メモ</summary>
+          <pre>{{ config.body_info.body }}</pre>
+        </details>
+        <label
+          >自由記述として残す内容<textarea v-model="reconcileText" :disabled="saving || conflict" />
+        </label>
+        <details>
+          <summary>再生成するフォーム回答部分（今回の修正は保存時に反映）</summary>
+          <pre>{{ config.body_info.managed_markdown }}</pre>
+        </details>
+        <label
+          ><input
+            type="checkbox"
+            v-model="reconcileConfirmed"
+            :disabled="saving || conflict"
+          />自由記述として残す内容と回答部分を確認しました</label
+        >
+      </section>
       <form v-if="config" :id="formId" @submit.prevent="submit">
         <h3>{{ config.form_title }}</h3>
         <p v-if="config.form_description" class="description">{{ config.form_description }}</p>
@@ -230,16 +332,35 @@ const submit = async () => {
                 :required="f.required"
               />はい</label
             >
-            <template v-else-if="f.type === 'image'"
-              ><input
+            <template v-else-if="f.type === 'image'">
+              <template v-if="answerId">
+                <img
+                  v-if="existingImage(f.id) && imageActions[f.id] === 'keep'"
+                  :src="existingImage(f.id)"
+                  :alt="f.label"
+                  class="existing-image"
+                />
+                <select v-model="imageActions[f.id]" :aria-label="f.label + 'の画像操作'">
+                  <option value="keep" :disabled="!existingImage(f.id)">既存画像を保持</option>
+                  <option value="replace">画像を差し替え</option>
+                  <option value="remove" :disabled="f.required">回答から画像を削除</option>
+                </select>
+              </template>
+              <input
+                v-if="!answerId || imageActions[f.id] === 'replace'"
                 :id="`owner-form-${f.id}`"
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
-                :required="f.required"
+                :required="answerId ? imageActions[f.id] === 'replace' : f.required"
                 @change="prepareImage(f, $event)"
-              /><small>今回の回答に添付する画像を選択してください。過去の画像は保持されます。</small
-              ><span role="status">{{ imageStatus[f.id] }}</span></template
-            >
+              />
+              <small>{{
+                answerId
+                  ? "画像ファイル本体は削除しません。"
+                  : "今回の回答に添付する画像を選択してください。過去の画像は保持されます。"
+              }}</small>
+              <span role="status">{{ imageStatus[f.id] }}</span>
+            </template>
             <input
               v-else
               :id="`owner-form-${f.id}`"
@@ -262,15 +383,38 @@ const submit = async () => {
           class="btn-close btn-save"
           type="submit"
           :form="formId"
-          :disabled="saving || loading || !!preparing || conflict"
+          :disabled="
+            saving ||
+            loading ||
+            !!preparing ||
+            conflict ||
+            (!!answerId && !!config?.body_info?.sync_required && !reconcileConfirmed)
+          "
         >
-          {{ saving ? "保存中…" : "回答を保存" }}
+          {{ saving ? "保存中…" : answerId ? "回答を更新" : "回答を保存" }}
         </button>
       </div>
     </section>
   </BaseModal>
 </template>
 <style scoped>
+.body-reconcile {
+  padding: 12px;
+  margin: 12px 0;
+  border: 1px solid #b8892a;
+  border-radius: 8px;
+}
+.body-reconcile pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 25vh;
+  overflow: auto;
+}
+.existing-image {
+  display: block;
+  max-width: 160px;
+  max-height: 160px;
+}
 .form-input {
   width: min(800px, calc(100vw - 64px));
   max-height: calc(100dvh - 96px);

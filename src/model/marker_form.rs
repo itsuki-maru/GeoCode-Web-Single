@@ -67,6 +67,12 @@ pub struct ShapeFormConfigResponse {
 #[derive(Debug, Deserialize)]
 pub struct MarkerFormSubmissionRequest {
     #[serde(default)]
+    pub revision: Option<i64>,
+    #[serde(default)]
+    pub image_actions: HashMap<String, String>,
+    #[serde(default)]
+    pub reconcile: Option<AnswerBodyReconcile>,
+    #[serde(default)]
     pub config_token: Option<String>,
     #[serde(default)]
     pub password: Option<String>,
@@ -77,4 +83,11 @@ pub struct MarkerFormSubmissionRequest {
 #[derive(Debug, Serialize)]
 pub struct MarkerFormSubmissionResponse {
     pub message: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnswerBodyReconcile {
+    pub free_text: String,
+    pub token: String,
 }

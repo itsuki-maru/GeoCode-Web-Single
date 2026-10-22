@@ -63,12 +63,14 @@ export const useMapObjectStore = defineStore("mapobjects", {
       name: string,
       detail: string,
       layer_id: string,
+      bodyEdit?: { free_text: string; body_token: string },
     ): Promise<MapObjectData | null> {
       const updateURL = `${updateMapObjectUrl}${id}`;
       const payload = {
         name: name,
         detail: detail,
         layer_id: layer_id,
+        ...bodyEdit,
       };
 
       try {

@@ -18,6 +18,41 @@ pub(super) async fn begin_read(
     Ok(tx)
 }
 
+/// Reserve the writer before reading to avoid deferred-transaction upgrades.
+pub(super) async fn begin_write(
+    pool: &SqlitePool,
+) -> Result<Transaction<'static, Sqlite>, sqlx::Error> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    {
+        let mut handle = tx.lock_handle().await?;
+        handle.create_collation("answer_time", compare_times)?;
+    }
+    Ok(tx)
+}
+
+/// Match PostgreSQL JSONB equality, including equivalent JSON number spellings.
+pub(super) fn json_equal(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+    use serde_json::Value;
+    match (a, b) {
+        (Value::Number(a), Value::Number(b)) => {
+            let (a, b) = (a.to_string(), b.to_string());
+            a == b
+                || (decimal(&a).is_some()
+                    && decimal(&b).is_some()
+                    && compare_numbers(&a, &b) == Ordering::Equal)
+        },
+        (Value::Array(a), Value::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| json_equal(a, b))
+        },
+        (Value::Object(a), Value::Object(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .all(|(key, a)| b.get(key).is_some_and(|b| json_equal(a, b)))
+        },
+        _ => a == b,
+    }
+}
+
 fn timestamp(raw: &str) -> Option<NaiveDateTime> {
     DateTime::parse_from_rfc3339(raw)
         .ok()
