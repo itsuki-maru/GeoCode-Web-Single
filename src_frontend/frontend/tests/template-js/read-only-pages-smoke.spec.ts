@@ -6,6 +6,7 @@ import { JSDOM } from "jsdom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createReadOnlyMapRuntime } from "../../../template-scripts/src/map/common/map-runtime";
+import { createPopupContentRuntime } from "../../../template-scripts/src/map/common/popup-content";
 import * as baseModule from "../../../template-scripts/src/map/common/base";
 import * as contentActionsModule from "../../../template-scripts/src/map/common/content-actions";
 import * as contentModule from "../../../template-scripts/src/map/common/content";
@@ -18,6 +19,7 @@ import * as markerModule from "../../../template-scripts/src/map/common/marker";
 import { createReadOnlyShapeMeasurementDisplayRuntime } from "../../../template-scripts/src/map/common/shape-measurement-display";
 import { createReadOnlyShapeRestorationRuntime } from "../../../template-scripts/src/map/common/shape-restoration";
 import { initializeReadOnlyMapPage } from "../../../template-scripts/src/map/read-only-page";
+import { finishAnswerPreview } from "../../../template-scripts/src/map/answer-preview";
 import * as mjpegCameraModule from "../../../template-scripts/src/map/common/mjpeg-camera";
 import {
   createReadOnlyMarkerLayerControl,
@@ -240,6 +242,8 @@ interface SmokeLoadOptions {
   parentWindow?: { postMessage: ReturnType<typeof vi.fn> };
   currentPosition?: { latitude: number; longitude: number };
   lastMapView?: { latitude: number; longitude: number; zoom: number };
+  savedSettings?: Record<string, string>;
+  mobileAnswerMap?: boolean;
 }
 
 function readFrontendFile(relativePath: string) {
@@ -252,7 +256,7 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
     {
       pretendToBeVisual: true,
       runScripts: "outside-only",
-      url: "https://example.test/map",
+      url: `https://example.test/map${options.mobileAnswerMap ? "?map_ui=mobile" : ""}`,
     },
   );
   openWindows.push(dom);
@@ -268,6 +272,9 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
       mapViewPersistenceModule.LAST_MAP_VIEW_STORAGE_KEY,
       JSON.stringify(options.lastMapView),
     );
+  }
+  for (const [key, value] of Object.entries(options.savedSettings || {})) {
+    dom.window.localStorage.setItem(key, value);
   }
 
   const mapElement = dom.window.document.getElementById("map");
@@ -311,57 +318,65 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
   const readOnlyPageName = page.templateName.replace(/\.html$/, "");
   const usesTypeScriptReadOnlyEntry = [
     "map-anather",
+    "form-answer-map",
     "temporary-map",
     "temporary-map-mobile",
   ].includes(readOnlyPageName);
-  const bootstrap = readOnlyPageName === "map-anather"
-    ? {
-        initialView: {
-          latitude: page.globals.latitude,
-          longitude: page.globals.longitude,
-          zoom: page.globals.zoom,
-        },
-        isCluster: page.globals.isCluster,
-        layers: page.globals.layersFromAxum,
-        markers: page.globals.markersFromAxum,
-        page: readOnlyPageName,
-        shapes: page.globals.shapesFromAxum,
-        tileServers: page.globals.tileServers,
-      }
-    : usesTypeScriptReadOnlyEntry
+  const bootstrap =
+    readOnlyPageName === "map-anather" || readOnlyPageName === "form-answer-map"
       ? {
           initialView: {
             latitude: page.globals.latitude,
             longitude: page.globals.longitude,
             zoom: page.globals.zoom,
           },
-          isChecked: page.globals.isChecked,
-          isMapUiHidden: page.globals.initialIsMapUiHidden ?? false,
-          isMaster: false,
-          layers: page.globals.layers,
-          markers: page.globals.markersObj,
-          page: readOnlyPageName,
-          shapes: page.globals.shapesObj,
-          tileServers: page.globals.tileServers,
-        }
-      : {
-          page: readOnlyPageName,
-          selectedLayer: page.globals.layer,
-          isMaster: page.globals.is_master,
-          markerId: page.globals.markerId,
-          initialView: {
-            latitude: page.globals.latitude,
-            longitude: page.globals.longitude,
-            zoom: page.globals.zoom,
-          },
-          tileServers: page.globals.tileServers,
-          tileOverlays: [],
-          tileVisibilityAccountId: "smoke-test-account",
+          isCluster: page.globals.isCluster,
           layers: page.globals.layersFromAxum,
           markers: page.globals.markersFromAxum,
+          page: readOnlyPageName,
           shapes: page.globals.shapesFromAxum,
-        };
+          tileServers: page.globals.tileServers,
+          answerPreview: page.globals.answerPreview,
+        }
+      : usesTypeScriptReadOnlyEntry
+        ? {
+            initialView: {
+              latitude: page.globals.latitude,
+              longitude: page.globals.longitude,
+              zoom: page.globals.zoom,
+            },
+            isChecked: page.globals.isChecked,
+            isMapUiHidden: page.globals.initialIsMapUiHidden ?? false,
+            isMaster: false,
+            layers: page.globals.layers,
+            markers: page.globals.markersObj,
+            page: readOnlyPageName,
+            shapes: page.globals.shapesObj,
+            tileServers: page.globals.tileServers,
+          }
+        : {
+            page: readOnlyPageName,
+            selectedLayer: page.globals.layer,
+            isMaster: page.globals.is_master,
+            markerId: page.globals.markerId,
+            initialView: {
+              latitude: page.globals.latitude,
+              longitude: page.globals.longitude,
+              zoom: page.globals.zoom,
+            },
+            tileServers: page.globals.tileServers,
+            tileOverlays: [],
+            tileVisibilityAccountId: "smoke-test-account",
+            layers: page.globals.layersFromAxum,
+            markers: page.globals.markersFromAxum,
+            shapes: page.globals.shapesFromAxum,
+          };
+  Object.assign(bootstrap, {
+    tileOverlays: page.globals.tileOverlays || [],
+    tileVisibilityAccountId: "smoke-test-account",
+  });
   Object.assign(dom.window, page.globals, {
+    createPopupContentRuntime,
     makeSummaryDraggable,
     __GEOCODE_MAP_BOOTSTRAP__: bootstrap,
     addReadOnlyMapVisibilityControls,
@@ -403,6 +418,8 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
   vi.stubGlobal("document", dom.window.document);
   vi.stubGlobal("navigator", dom.window.navigator);
   vi.stubGlobal("L", (dom.window as unknown as { L: unknown }).L);
+  vi.stubGlobal("requestAnimationFrame", dom.window.requestAnimationFrame.bind(dom.window));
+  vi.stubGlobal("cancelAnimationFrame", dom.window.cancelAnimationFrame.bind(dom.window));
   // jsdom はレイアウトを計算しないため、実際のドラッグ処理は維持しつつ、
   // VM のウィンドウとインポート先の実行環境の両方に、ブラウザーの監視機能を補う。
   class SmokeResizeObserver {
@@ -416,10 +433,15 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
     const result = initializeReadOnlyMapPage(
       readOnlyPageName as
         | "map-anather"
+        | "form-answer-map"
         | "temporary-map"
         | "temporary-map-mobile",
     );
+    if (readOnlyPageName === "form-answer-map") {
+      finishAnswerPreview(result, bootstrap as any, (dom.window as any).L);
+    }
     Object.assign(dom.window, {
+      __templateSmokeRuntime: result,
       __templateSmokeMap: result.map,
       __templateSmokeMarkerCount: Object.keys(result.markers).length,
       __templateSmokeShapeLayers: result.shapeLayers,
@@ -437,18 +459,29 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
   return dom;
 }
 
-afterEach(() => {
+afterEach(async () => {
+  for (const dom of openWindows.splice(0)) {
+    // 復元直後の遅延描画を完了させてから、ページのunload処理を実行する。
+    await new Promise<void>((resolve) => dom.window.requestAnimationFrame(() => resolve()));
+    (dom.window as any).__templateSmokeShapeNameLabelManager?.destroy();
+    (dom.window as any).__templateSmokeMap?.remove();
+    dom.window.close();
+  }
   vi.unstubAllGlobals();
-  openWindows.splice(0).forEach((dom) => dom.window.close());
 });
 
 describe("各地図テンプレートJavaScriptのランタイム初期化", () => {
   it.each(pages)("$fileNameは1回の展開操作で住所候補を直接選択できる", async (page) => {
     const dom = smokeLoadPage(page);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ results: [{ address: "東京都新宿区", latitude: 35.69, longitude: 139.7 }] }),
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          results: [{ address: "東京都新宿区", latitude: 35.69, longitude: 139.7 }],
+        }),
+      }),
+    );
     const document = dom.window.document;
     document.querySelector<HTMLInputElement>("#code-input")!.value = "東京都新宿区";
     document.querySelector<HTMLButtonElement>("#code-search-btn")!.click();
@@ -472,7 +505,9 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
   it.each(pages)("$fileNameはCSIS利用表記をタイル切り替え後も維持する", (page) => {
     const dom = smokeLoadPage(page, { csis: true });
     const attribution = dom.window.document.querySelector(".leaflet-control-attribution")!;
-    const link = attribution.querySelector<HTMLAnchorElement>('a[href="https://geocode.csis.u-tokyo.ac.jp/"]');
+    const link = attribution.querySelector<HTMLAnchorElement>(
+      'a[href="https://geocode.csis.u-tokyo.ac.jp/"]',
+    );
     expect(link?.textContent).toBe("CSISシンプルジオコーディング実験を利用");
     expect(attribution.textContent).toContain("Test tiles");
     dom.window.eval(`
@@ -482,15 +517,24 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
     `);
     expect(attribution.textContent).toContain("Replacement tiles");
     expect(attribution.textContent).not.toContain("Test tiles");
-    expect(attribution.querySelectorAll('a[href="https://geocode.csis.u-tokyo.ac.jp/"]')).toHaveLength(1);
+    expect(
+      attribution.querySelectorAll('a[href="https://geocode.csis.u-tokyo.ac.jp/"]'),
+    ).toHaveLength(1);
   });
 
   it("埋め込みPC地図のCtrl+Pを親に通知し、長押しとモバイルでは通知しない", () => {
     for (const templateName of ["map.html", "map-mobile.html"]) {
       const parentWindow = { postMessage: vi.fn() };
-      const dom = smokeLoadPage(pages.find((page) => page.templateName === templateName)!, { parentWindow });
+      const dom = smokeLoadPage(pages.find((page) => page.templateName === templateName)!, {
+        parentWindow,
+      });
       const press = (extra = {}) => {
-        const event = new dom.window.KeyboardEvent("keydown", { key: "p", ctrlKey: true, cancelable: true, ...extra });
+        const event = new dom.window.KeyboardEvent("keydown", {
+          key: "p",
+          ctrlKey: true,
+          cancelable: true,
+          ...extra,
+        });
         dom.window.dispatchEvent(event);
         return event;
       };
@@ -500,7 +544,11 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
       expect(press().defaultPrevented).toBe(desktop);
       press({ ctrlKey: false, metaKey: true });
       expect(parentWindow.postMessage).toHaveBeenCalledTimes(desktop ? 2 : 0);
-      if (desktop) expect(parentWindow.postMessage).toHaveBeenLastCalledWith({ type: "printOpen" }, "https://example.test");
+      if (desktop)
+        expect(parentWindow.postMessage).toHaveBeenLastCalledWith(
+          { type: "printOpen" },
+          "https://example.test",
+        );
     }
   });
   it("モバイル共有地図の計測合計を複数計測ボタンの下の右上に表示する", () => {
@@ -529,21 +577,180 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
 
   const anotherMapPage = pages.find((page) => page.templateName === "map-anather.html")!;
 
+  const tileSettingsPage = (answerMap = false): SmokePage => ({
+    ...anotherMapPage,
+    templateName: answerMap ? "form-answer-map.html" : "map-anather.html",
+    globals: {
+      ...anotherMapPage.globals,
+      shapesFromAxum: [shapeRecord],
+      tileServers: {
+        ...tileServers,
+        "2": {
+          ...tileServers["1"],
+          label: "Alternate tiles",
+          layer_name: "alternate-tiles",
+          url: "https://alternate.example.test/{z}/{x}/{y}.png",
+        },
+      },
+      tileOverlays: ["flood", "rain", "new"].map((id) => ({
+        id,
+        name: id,
+        url: `https://${id}.example.test/{z}/{x}/{y}.png`,
+        attribution: id,
+        min_zoom: 0,
+        max_zoom: 18,
+        opacity: 0.5,
+        sort_order: 0,
+      })),
+      answerPreview: answerMap
+        ? {
+            parentOrigin: "https://example.test",
+            requestId: "answer-tiles",
+            query: { as_of: "2026-10-23T00:00:00Z" },
+            targets: ["marker:marker-1", "shape:shape-1"],
+            answerCount: 2,
+            targetCount: 2,
+          }
+        : undefined,
+    },
+  });
+
+  it.each(["2", "removed"])("全画面地図は保存した背景タイル%sを検証して復元する", (selected) => {
+    const dom = smokeLoadPage(tileSettingsPage(), {
+      savedSettings: { "geocode-web:selected-tile-server-id": selected },
+    });
+    const expected = selected === "2" ? "2" : "1";
+    expect(dom.window.document.querySelector<HTMLInputElement>(".tile-radio:checked")!.value).toBe(
+      expected,
+    );
+    const runtime = (dom.window as any).__templateSmokeRuntime;
+    expect(runtime.getPrintState().tileServerId).toBe(expected);
+    const urls: string[] = [];
+    runtime.map.eachLayer((layer: any) => {
+      if (layer._url) urls.push(layer._url);
+    });
+    expect(urls).toContain(
+      expected === "2" ? "https://alternate.example.test/{z}/{x}/{y}.png" : tileServers["1"].url,
+    );
+  });
+
+  it.each(["temporary-map.html", "temporary-map-mobile.html"])(
+    "%sは所有者向けの背景設定を読み込まない",
+    (templateName) => {
+      const shared = pages.find((page) => page.templateName === templateName)!;
+      const settings = tileSettingsPage().globals;
+      const savedSettings = {
+        "geocode-web:selected-tile-server-id": "2",
+        "geocode-web:tile-overlay-visibility:smoke-test-account": '{"flood":false}',
+      };
+      const dom = smokeLoadPage(
+        {
+          ...shared,
+          globals: {
+            ...shared.globals,
+            tileServers: settings.tileServers,
+            tileOverlays: settings.tileOverlays,
+          },
+        },
+        { savedSettings },
+      );
+      const state = (dom.window as any).__templateSmokeRuntime.getPrintState();
+      expect(state).toMatchObject({
+        tileServerId: "1",
+        overlays: { flood: true, rain: true, new: true },
+      });
+      for (const [key, value] of Object.entries(savedSettings)) {
+        expect(dom.window.localStorage.getItem(key)).toBe(value);
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "回答地図は背景だけを読み取り、操作後も通常地図の保存設定を変更しない（mobile=%s）",
+    (mobileAnswerMap) => {
+      const savedSettings = {
+        "geocode-web:selected-tile-server-id": "2",
+        "geocode-web:tile-overlay-visibility:smoke-test-account":
+          '{"flood":false,"rain":true,"removed":false}',
+        "geocode-web:tile-overlay-visibility:other-account": '{"flood":true,"rain":false}',
+        "geocode-web:marker-visible": "false",
+        "geocode-web:shape-layer-visible": "false",
+        "geocode-web:shape-name-visible": "false",
+      };
+      const dom = smokeLoadPage(tileSettingsPage(true), {
+        mobileAnswerMap,
+        savedSettings,
+        lastMapView: { latitude: 34, longitude: 135, zoom: 6 },
+      });
+      const runtime = (dom.window as any).__templateSmokeRuntime;
+      const initial = runtime.getPrintState();
+      expect(initial).toMatchObject({
+        tileServerId: "2",
+        overlays: { flood: false, rain: true, new: true },
+        markersVisible: true,
+        shapesVisible: true,
+        shapeNamesVisible: true,
+      });
+      expect(initial.view.longitude).toBeGreaterThan(139);
+      expect(initial.view.zoom).toBeGreaterThan(6);
+      expect(dom.window.document.body.classList.contains("map-mobile-controls")).toBe(
+        mobileAnswerMap,
+      );
+      const radio = dom.window.document.querySelector<HTMLInputElement>('.tile-radio[value="1"]')!;
+      radio.checked = true;
+      radio.dispatchEvent(new dom.window.Event("change"));
+      for (const name of ["flood", "rain"]) {
+        const label = [
+          ...dom.window.document.querySelectorAll(".leaflet-control-layers label"),
+        ].find((label) => label.textContent?.trim() === name)!;
+        label.querySelector<HTMLInputElement>("input")!.click();
+      }
+      runtime.map.setView([36, 140], 10);
+      expect(runtime.getPrintState()).toMatchObject({
+        tileServerId: "1",
+        overlays: { flood: true, rain: false, new: true },
+        view: { latitude: 36, longitude: 140, zoom: 10 },
+      });
+      for (const [key, value] of Object.entries(savedSettings)) {
+        expect(dom.window.localStorage.getItem(key)).toBe(value);
+      }
+      expect(
+        JSON.parse(
+          dom.window.localStorage.getItem(mapViewPersistenceModule.LAST_MAP_VIEW_STORAGE_KEY)!,
+        ),
+      ).toEqual({ latitude: 34, longitude: 135, zoom: 6 });
+    },
+  );
+
   it("PC地図は親画面からの要求に現在の印刷用状態を返す", () => {
     const dom = smokeLoadPage(pages.find((page) => page.templateName === "map.html")!);
     const post = vi.spyOn(dom.window, "postMessage").mockImplementation(() => {});
-    const request = (origin: string) => dom.window.dispatchEvent(new dom.window.MessageEvent("message", {
-      origin, source: dom.window, data: { type: "printStateRequest", requestId: "print-test" },
-    }));
+    const request = (origin: string) =>
+      dom.window.dispatchEvent(
+        new dom.window.MessageEvent("message", {
+          origin,
+          source: dom.window,
+          data: { type: "printStateRequest", requestId: "print-test" },
+        }),
+      );
     request("https://invalid.test");
     expect(post).not.toHaveBeenCalled();
     request("https://example.test");
-    expect(post).toHaveBeenCalledWith({
-      type: "printStateResult", requestId: "print-test", state: {
-        view: { latitude: 35.6812, longitude: 139.7671, zoom: 8 },
-        tileServerId: "1", overlays: {}, markersVisible: true, shapesVisible: true, shapeNamesVisible: true,
+    expect(post).toHaveBeenCalledWith(
+      {
+        type: "printStateResult",
+        requestId: "print-test",
+        state: {
+          view: { latitude: 35.6812, longitude: 139.7671, zoom: 8 },
+          tileServerId: "1",
+          overlays: {},
+          markersVisible: true,
+          shapesVisible: true,
+          shapeNamesVisible: true,
+        },
       },
-    }, "https://example.test");
+      "https://example.test",
+    );
   });
 
   it("map-anatherは保存された表示位置を復元する", () => {
@@ -599,7 +806,9 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
 
     expect(runtimeWindow.__templateSmokeMap).toBeInstanceOf(runtimeWindow.L.Map);
     expect(dom.window.document.querySelector(".leaflet-container")).not.toBeNull();
-    expect(dom.window.document.querySelector(".leaflet-control-attribution")?.textContent).not.toContain("CSIS");
+    expect(
+      dom.window.document.querySelector(".leaflet-control-attribution")?.textContent,
+    ).not.toContain("CSIS");
     expect(runtimeWindow.__templateSmokeMarkerCount).toBe(1);
     page.expectedControls.forEach((selector) => {
       expect(dom.window.document.querySelector(selector), selector).not.toBeNull();
@@ -722,6 +931,188 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
     expect(profile.modeDescription).toContain("入力モード");
   });
 
+  it.each(
+    [false, true].flatMap((restricted) =>
+      [pages[0], pages[1]].map((page) => ({ page, restricted, fileName: page.fileName })),
+    ),
+  )(
+    "$fileName（自由記述制限:$restricted）で頂点の追加・削除・移動ができる",
+    async ({ page, restricted }) => {
+      const dom = smokeLoadPage({
+        ...page,
+        globals: {
+          ...page.globals,
+          shapesFromAxum: [structuredClone(shapeRecord)],
+          layersFromAxum: {
+            ...layerRecords,
+            "layer-1": { ...layerRecords["layer-1"], restrict_free_text: restricted },
+          },
+        },
+      });
+      const requests: any[] = [];
+      const serverShape = structuredClone(shapeRecord);
+      Object.assign(dom.window, {
+        fetch: vi.fn(async (url, options) => {
+          requests.push({ url, options });
+          if (String(url).endsWith("/geometry")) {
+            const body = JSON.parse(options.body);
+            serverShape.geojson.geometry.coordinates = body.coordinates;
+            serverShape.shape_type = body.shape_type;
+            serverShape.geojson.properties.memo = "最新の本文とフォーム回答";
+          }
+          return { ok: true, status: 200, json: async () => structuredClone(serverShape) };
+        }),
+      });
+      new Script(`
+      drawnShapesGroup.addTo(map);
+      map.setView([35.68,139.765],18,{animate:false});
+      handleRadioChange({target:{value:"input"}});
+      const diagnosticShape=Array.from(searchableShapeLayers).find(layer=>layer.shapeId==="shape-1");
+      diagnosticShape.getElement().dispatchEvent(new MouseEvent("click",{bubbles:true,clientX:512,clientY:384}));
+      globalThis.__geometryDiagnostic={
+        restricted:isShapeInputRestricted(diagnosticShape),
+        inputSelected:geometryEditingShapeLayer===diagnosticShape,
+        inputHandles:shapeGeometryEditHandles.getLayers().length,
+      };
+      __geometryDiagnostic.added=tryAddShapeVertexAtLatLng({type:"click",latlng:L.latLng(35.68,139.765),originalEvent:new MouseEvent("click")});
+    `).runInContext(dom.getInternalVMContext());
+      await vi.waitFor(() =>
+        expect(requests.filter((r) => r.options?.method === "PUT")).toHaveLength(1),
+      );
+      await new Promise((r) => dom.window.setTimeout(r, 20));
+      new Script(`
+      __geometryDiagnostic.verticesAfterAdd=flattenShapeLatLngs(diagnosticShape.getLatLngs()).length;
+      handleRadioChange({target:{value:"edit"}});
+      diagnosticShape.getElement().dispatchEvent(new MouseEvent("click",{bubbles:true,clientX:512,clientY:384}));
+      __geometryDiagnostic.moveSelected=geometryEditingShapeLayer===diagnosticShape;
+      __geometryDiagnostic.moveHandles=shapeGeometryEditHandles.getLayers().length;
+      __geometryDiagnostic.draggable=shapeGeometryEditHandles.getLayers().every(handle=>handle.dragging.enabled());
+      const diagnosticHandle=shapeGeometryEditHandles.getLayers()[0];
+      diagnosticHandle.fire("dragstart");
+      diagnosticHandle.setLatLng(L.latLng(35.679,139.759));
+      diagnosticHandle.fire("drag");
+      diagnosticHandle.fire("dragend");
+    `).runInContext(dom.getInternalVMContext());
+      await vi.waitFor(() =>
+        expect(requests.filter((r) => r.options?.method === "PUT")).toHaveLength(2),
+      );
+      await vi.waitFor(() =>
+        expect(new Script("isShapeGeometrySaving").runInContext(dom.getInternalVMContext())).toBe(
+          false,
+        ),
+      );
+      expect((dom.window as any).__geometryDiagnostic).toMatchObject({
+        restricted,
+        inputSelected: true,
+        inputHandles: 3,
+        added: true,
+        verticesAfterAdd: 4,
+        moveSelected: true,
+        moveHandles: 4,
+        draggable: true,
+      });
+      const last = JSON.parse(requests.filter((r) => r.options?.method === "PUT")[1].options.body);
+      expect(last.coordinates[0][0]).toEqual([139.759, 35.679]);
+      expect(last).not.toHaveProperty("geojson");
+      expect(last).not.toHaveProperty("name");
+      new Script(`globalThis.__deleteVertex = (async()=>{
+        handleRadioChange({target:{value:"input"}});
+        activateShapeForVertexAdd(diagnosticShape);
+        await deleteShapeVertex(diagnosticShape,0);
+        return {vertices:flattenShapeLatLngs(diagnosticShape.getLatLngs()).length,memo:diagnosticShape.shapeMemo,minimumRejected:!(await deleteShapeVertex(diagnosticShape,0))};
+      })();`).runInContext(dom.getInternalVMContext());
+      expect(await (dom.window as any).__deleteVertex).toMatchObject({
+        vertices: 3,
+        memo: "最新の本文とフォーム回答",
+        minimumRejected: true,
+      });
+      expect(requests.filter((r) => r.options?.method === "PUT")).toHaveLength(3);
+    },
+  );
+
+  it.each([pages[0], pages[1]])(
+    "$fileNameの頂点保存が競合した場合は元の形状へ戻す",
+    async (page) => {
+      const dom = smokeLoadPage({
+        ...page,
+        globals: {
+          ...page.globals,
+          shapesFromAxum: [structuredClone(shapeRecord)],
+          layersFromAxum: {
+            ...layerRecords,
+            "layer-1": { ...layerRecords["layer-1"], restrict_free_text: true },
+          },
+        },
+      });
+      const fetch = vi.fn(async () => ({ ok: false, status: 409 }));
+      Object.assign(dom.window, { fetch });
+      new Script(`
+      drawnShapesGroup.addTo(map);
+      handleRadioChange({target:{value:"edit"}});
+      const conflictShape=Array.from(searchableShapeLayers).find(layer=>layer.shapeId==="shape-1");
+      selectShapeForGeometryEdit(conflictShape);
+      const conflictHandle=shapeGeometryEditHandles.getLayers()[0];
+      conflictHandle.fire("dragstart");conflictHandle.setLatLng(L.latLng(35.67,139.75));conflictHandle.fire("drag");conflictHandle.fire("dragend");
+    `).runInContext(dom.getInternalVMContext());
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() =>
+        expect(new Script("isShapeGeometrySaving").runInContext(dom.getInternalVMContext())).toBe(
+          false,
+        ),
+      );
+      const actual = new Script("JSON.stringify(conflictShape.toGeoJSON().geometry)").runInContext(
+        dom.getInternalVMContext(),
+      );
+      expect(JSON.parse(actual)).toEqual(shapeRecord.geojson.geometry);
+      expect(dom.window.document.querySelector("#draw-status")!.textContent).toContain(
+        "他の操作で形状が変更",
+      );
+    },
+  );
+  it.each([pages[0], pages[1]])(
+    "$fileNameのポップアップが本番Markdown処理で自由入力とフォーム回答を切り替える",
+    async (page) => {
+      const body = "自由\n\n**回答**";
+      const dom = smokeLoadPage({
+        ...page,
+        globals: {
+          ...page.globals,
+          markersFromAxum: { "marker-1": { ...markerRecords["marker-1"], detail: body } },
+        },
+      });
+      Object.assign(dom.window, {
+        fetch: vi.fn(async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            body,
+            free_text: "自由",
+            managed_markdown: "**回答**",
+            sync_required: false,
+          }),
+        })),
+      });
+      new Script(
+        'markers["marker-marker-1"].getPopup().setLatLng([35.68,139.76]).openOn(map);',
+      ).runInContext(dom.getInternalVMContext());
+      const select = dom.window.document.querySelector<HTMLSelectElement>(
+        ".popup-content-toolbar select",
+      )!;
+      await vi.waitFor(() => expect(select.options[0].disabled).toBe(false));
+      expect(select.value).toBe("normal");
+      select.value = "free";
+      select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+      expect(dom.window.document.querySelector(".popup-content-body")!.textContent?.trim()).toBe(
+        "自由",
+      );
+      select.value = "answers";
+      select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+      expect(dom.window.document.querySelector(".popup-content-body strong")!.textContent).toBe(
+        "回答",
+      );
+    },
+  );
+
   it.each([pages[0], pages[1]])("$fileNameがVue側で削除されたマーカーを完全に除去する", (page) => {
     const dom = smokeLoadPage({
       ...page,
@@ -841,7 +1232,8 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
         secondFocus: {
           firstVisible: false,
           secondVisible: true,
-          popupVisible: false,
+          // Empty content still exposes the content selector and an empty-state message.
+          popupVisible: true,
         },
         allVisibleWhenEnabled: true,
         noneVisibleAfterDisable: true,

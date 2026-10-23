@@ -49,13 +49,15 @@ export const useShapeStore = defineStore("shapes", {
       id: string,
       name: string,
       layerId: string,
-      geojson: ShapeGeoJson,
+      geojson?: ShapeGeoJson,
+      bodyEdit?: { free_text: string; body_token: string },
     ): Promise<ShapeData | null> {
       try {
         await apiClient.put(`${shapeUrl}${id}`, {
           name,
           layer_id: layerId,
           geojson,
+          ...bodyEdit,
         });
         const current = this.shapeList.get(id);
         if (current) {
@@ -63,7 +65,7 @@ export const useShapeStore = defineStore("shapes", {
             ...current,
             name: name.trim() || null,
             layer_id: layerId,
-            geojson,
+            geojson: geojson ?? current.geojson,
             updated_at: new Date().toISOString(),
           };
           this.shapeList.set(id, updated);

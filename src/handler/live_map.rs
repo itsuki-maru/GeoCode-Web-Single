@@ -73,7 +73,13 @@ struct LiveMapViewerClaims {
 
 pub(crate) async fn require_superuser(user_id: &str, pool: &SqlitePool) -> Result<(), AppError> {
     let allowed = sqlx::query_scalar::<_, bool>(
-        "SELECT is_superuser FROM user_model WHERE id = $1 AND is_locked = false",
+        r#"
+        SELECT
+            is_superuser
+        FROM user_model
+        WHERE id = $1
+            AND is_locked = false
+        "#,
     )
     .bind(user_id)
     .fetch_optional(pool)
@@ -177,7 +183,12 @@ async fn validate_members(
 ) -> Result<(), AppError> {
     for member in &payload.members {
         let allowed = sqlx::query_scalar::<_, bool>(
-            "SELECT can_share_live_location FROM user_model WHERE id = $1",
+            r#"
+            SELECT
+                can_share_live_location
+            FROM user_model
+            WHERE id = $1
+            "#,
         )
         .bind(&member.user_id)
         .fetch_optional(pool)
@@ -202,18 +213,31 @@ async fn sync_members(
         .iter()
         .map(|member| member.user_id.as_str())
         .collect();
-    let existing_ids =
-        sqlx::query_scalar::<_, String>("SELECT user_id FROM live_map_member WHERE map_id = $1")
-            .bind(map_id)
-            .fetch_all(&mut **transaction)
-            .await?;
+    let existing_ids = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT
+            user_id
+        FROM live_map_member
+        WHERE map_id = $1
+        "#,
+    )
+    .bind(map_id)
+    .fetch_all(&mut **transaction)
+    .await?;
     for user_id in existing_ids {
         if !selected_ids.contains(user_id.as_str()) {
-            sqlx::query("DELETE FROM live_map_member WHERE map_id = $1 AND user_id = $2")
-                .bind(map_id)
-                .bind(user_id)
-                .execute(&mut **transaction)
-                .await?;
+            sqlx::query(
+                r#"
+                DELETE
+                FROM live_map_member
+                WHERE map_id = $1
+                    AND user_id = $2
+                "#,
+            )
+            .bind(map_id)
+            .bind(user_id)
+            .execute(&mut **transaction)
+            .await?;
         }
     }
 
@@ -284,19 +308,31 @@ pub async fn update_live_location_permission_handler(
 ) -> Result<StatusCode, AppError> {
     require_superuser(&admin_id, &pool).await?;
     let mut transaction = pool.begin().await?;
-    let result = sqlx::query("UPDATE user_model SET can_share_live_location = $1 WHERE id = $2")
-        .bind(payload.enabled)
-        .bind(&user_id)
-        .execute(&mut *transaction)
-        .await?;
+    let result = sqlx::query(
+        r#"
+        UPDATE user_model
+        SET
+            can_share_live_location = $1
+        WHERE id = $2
+        "#,
+    )
+    .bind(payload.enabled)
+    .bind(&user_id)
+    .execute(&mut *transaction)
+    .await?;
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound);
     }
     if !payload.enabled {
-        sqlx::query("DELETE FROM live_location_session WHERE user_id = $1")
-            .bind(&user_id)
-            .execute(&mut *transaction)
-            .await?;
+        sqlx::query(
+            r#"
+            DELETE FROM live_location_session
+            WHERE user_id = $1
+            "#,
+        )
+        .bind(&user_id)
+        .execute(&mut *transaction)
+        .await?;
     }
     transaction.commit().await?;
     Ok(StatusCode::NO_CONTENT)
@@ -332,7 +368,8 @@ pub async fn create_live_map_handler(
             name,
             created_by,
             password_hash,
-            expires_at, use_tile_overlays
+            expires_at,
+            use_tile_overlays
         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
     )
@@ -481,11 +518,18 @@ pub async fn update_live_map_handler(
 }
 
 async fn get_map_access_version(pool: &SqlitePool, map_id: &str) -> Result<i64, AppError> {
-    sqlx::query_scalar::<_, i64>("SELECT access_version FROM live_map WHERE id = $1")
-        .bind(map_id)
-        .fetch_optional(pool)
-        .await?
-        .ok_or(AppError::NotFound)
+    sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT
+            access_version
+        FROM live_map
+        WHERE id = $1
+        "#,
+    )
+    .bind(map_id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or(AppError::NotFound)
 }
 
 pub async fn rotate_live_map_url_handler(
@@ -529,7 +573,15 @@ pub async fn revoke_live_map_handler(
     require_superuser(&admin_id, &pool).await?;
     let old_access_version = get_map_access_version(&pool, &map_id).await?;
     let result = sqlx::query(
-        "UPDATE live_map SET revoked_at = CURRENT_TIMESTAMP, access_version = access_version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND revoked_at IS NULL",
+        r#"
+        UPDATE live_map
+        SET
+            revoked_at = CURRENT_TIMESTAMP,
+            access_version = access_version + 1,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+            AND revoked_at IS NULL
+        "#,
     )
     .bind(&map_id)
     .execute(&pool)
@@ -695,11 +747,18 @@ async fn render_live_map(
         &super::live_camera::CameraConfig::from_env().available(),
     );
     context.insert("tileServers", &tile_servers);
-    let (owner, use_tile_overlays): (String, bool) =
-        sqlx::query_as("SELECT created_by, use_tile_overlays FROM live_map WHERE public_id=$1")
-            .bind(&public_id)
-            .fetch_one(pool)
-            .await?;
+    let (owner, use_tile_overlays): (String, bool) = sqlx::query_as(
+        r#"
+        SELECT
+            created_by,
+            use_tile_overlays
+        FROM live_map
+        WHERE public_id = $1
+        "#,
+    )
+    .bind(&public_id)
+    .fetch_one(pool)
+    .await?;
     let tiles = if use_tile_overlays {
         super::tile_overlays::selected_tiles(pool, &owner).await?
     } else {
@@ -866,11 +925,17 @@ pub async fn authenticate_live_map_handler(
         )
         .await;
     }
-    sqlx::query("DELETE FROM live_map_password_rate_limit WHERE map_id = $1 AND client_key = $2")
-        .bind(&map.id)
-        .bind(client_rate_limit_key(&headers))
-        .execute(&pool)
-        .await?;
+    sqlx::query(
+        r#"
+        DELETE FROM live_map_password_rate_limit
+        WHERE map_id = $1
+            AND client_key = $2
+        "#,
+    )
+    .bind(&map.id)
+    .bind(client_rate_limit_key(&headers))
+    .execute(&pool)
+    .await?;
     Ok(Response::builder()
         .status(StatusCode::SEE_OTHER)
         .header(

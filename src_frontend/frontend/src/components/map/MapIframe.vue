@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, ref, watch } from "vue";
 import type { MapObjectUpdatePayload } from "@/interface";
 
 const props = defineProps<{
   srcUrl: string;
   height: number;
   allowedOrigins: string;
+  inputPolicies?: Record<string, boolean>;
 }>();
 
 const emit = defineEmits<{
@@ -40,6 +41,13 @@ const postMessageToMap = (messageData: Record<string, unknown>): boolean => {
   iframe.contentWindow.postMessage(messageData, targetOrigin);
   return true;
 };
+
+// The parent owns layer state; legacy callers may omit policies.
+const syncInputPolicies = (): boolean => {
+  if (!props.inputPolicies) return false;
+  return postMessageToMap({ type: "layerInputPolicies", policies: { ...props.inputPolicies } });
+};
+watch(() => props.inputPolicies, syncInputPolicies, { deep: true });
 
 const reloadMapFrame = (): boolean => {
   const iframe = getMapIframe();
@@ -106,6 +114,7 @@ const handleIframeLoad = (event: Event): void => {
   )
     return;
   emit("mapLoaded", props.srcUrl);
+  syncInputPolicies();
   if (filteredObjectIds.value.markerIds !== null || filteredObjectIds.value.shapeIds !== null) {
     filterMapObjects(filteredObjectIds.value.markerIds, filteredObjectIds.value.shapeIds);
   }

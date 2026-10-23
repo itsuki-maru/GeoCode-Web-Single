@@ -13,6 +13,8 @@ const editorVirtualPrefix = "virtual:geocode-editor:";
 const templateScriptsDirectory = fileURLToPath(new URL("./", import.meta.url));
 
 export const editorCommonPrelude = `
+import { createPopupContentRuntime } from "/src/map/common/popup-content.ts";
+let popupContent;
 import { makeSummaryDraggable } from "/src/map/common/draggable-summary.ts";
 import { bindFloatingMeasurementLabels } from "/src/map/common/floating-measurement-labels.ts";
 import { renderCameraImage, installMjpegCameras } from "/src/map/common/mjpeg-camera.ts";
@@ -101,6 +103,7 @@ const {
   openShapeMemoPopup,
   renderShapeMemoPopupContent,
 } = createShapeMemoRuntime({
+  renderPopup: (layer) => popupContent.render({kind: "shape", id: layer.shapeId, name: layer.shapeName || "", body: layer.shapeMemo || ""}),
   escapeHtml,
   getLeaflet: () => L,
   getMap: () => map,
@@ -258,6 +261,8 @@ export default defineConfig({
     outDir: "dist",
     rollupOptions: {
       input: {
+        "form-answer-map-print": fileURLToPath(new URL("./src/entries/form-answer-map-print.ts", import.meta.url)),
+        "form-answer-map": fileURLToPath(new URL("./src/entries/form-answer-map.ts", import.meta.url)),
         "image-preview": fileURLToPath(
           new URL("./src/entries/image-preview.ts", import.meta.url),
         ),

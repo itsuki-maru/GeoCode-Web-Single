@@ -228,12 +228,16 @@ pub async fn cleanup(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         r#"
         DELETE FROM live_camera_viewer
         WHERE id IN (
-            SELECT v.id FROM live_camera_viewer v
-            JOIN live_camera_session c ON c.id=v.camera_id
-            WHERE v.expires_at<=CURRENT_TIMESTAMP
-            OR c.expires_at<=CURRENT_TIMESTAMP
+            SELECT
+                v.id
+            FROM live_camera_viewer v
+            JOIN live_camera_session c
+                ON c.id = v.camera_id
+            WHERE v.expires_at <= CURRENT_TIMESTAMP
+                OR c.expires_at <= CURRENT_TIMESTAMP
             LIMIT 1000
-        )"#,
+        )
+        "#,
     )
     .execute(pool)
     .await?;
@@ -244,7 +248,8 @@ pub async fn cleanup(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             SELECT id FROM live_camera_session
             WHERE expires_at<datetime('now','-1 day')
             LIMIT 1000
-        )"#,
+        )
+        "#,
     )
     .execute(pool)
     .await?;
@@ -283,12 +288,16 @@ pub async fn start(
     if config.provider == "cloudflare" {
         let allowed: bool = sqlx::query_scalar(
             r#"
-            SELECT EXISTS(SELECT 1 FROM live_location_session s
-            JOIN user_model u ON u.id=s.user_id
-            WHERE s.user_id=$1 AND s.session_id=$2
-            AND u.can_share_live_location AND NOT u.is_locked
-            AND julianday(s.received_at)>julianday('now')-($3/86400.0))
-        "#,
+            SELECT EXISTS(
+                SELECT 1 FROM live_location_session s
+                JOIN user_model u ON u.id=s.user_id
+                WHERE s.user_id=$1
+                AND s.session_id=$2
+                AND u.can_share_live_location
+                AND NOT u.is_locked
+                AND julianday(s.received_at)>julianday('now')-($3/86400.0)
+            )
+            "#,
         )
         .bind(&user)
         .bind(&location)
@@ -310,7 +319,7 @@ pub async fn start(
             OR EXISTS(SELECT 1 FROM live_camera_session
                 WHERE user_id=$2 AND id<>$1 AND expires_at>CURRENT_TIMESTAMP
                 AND created_at>datetime('now','-23 hours'))
-        "#,
+            "#,
         )
         .bind(input.id)
         .bind(&user)
@@ -526,14 +535,16 @@ pub async fn join(
         prune(&mut preflight, id).await?;
         let existing: bool = sqlx::query_scalar(
             r#"
-            SELECT EXISTS(
-                SELECT 1 FROM live_camera_viewer
-                WHERE id=$1
-                AND camera_id=$2
-                AND member_id=$3
-                AND key_hash=$4
-                AND access_version=$5
-                AND NOT failed
+            SELECT EXISTS (
+                SELECT
+                    1
+                FROM live_camera_viewer
+                WHERE id = $1
+                    AND camera_id = $2
+                    AND member_id = $3
+                    AND key_hash = $4
+                    AND access_version = $5
+                    AND NOT failed
             )
             "#,
         )
@@ -545,7 +556,13 @@ pub async fn join(
         .fetch_one(&mut *preflight)
         .await?;
         let count: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM live_camera_viewer WHERE camera_id=$1 AND NOT failed",
+            r#"
+            SELECT
+                count(*)
+            FROM live_camera_viewer
+            WHERE camera_id = $1
+                AND NOT failed
+            "#,
         )
         .bind(id)
         .fetch_one(&mut *preflight)
@@ -596,7 +613,7 @@ pub async fn join(
             AND member_id=$3
             AND key_hash=$4
             AND access_version=$5)
-            "#,
+        "#,
     )
     .bind(input.id)
     .bind(id)
@@ -608,7 +625,13 @@ pub async fn join(
 
     if !existing {
         let count: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM live_camera_viewer WHERE camera_id=$1 AND NOT failed",
+            r#"
+            SELECT
+                count(*)
+            FROM live_camera_viewer
+            WHERE camera_id = $1
+                AND NOT failed
+            "#,
         )
         .bind(id)
         .fetch_one(&mut *tx)
@@ -754,21 +777,51 @@ async fn exchange(
     prune(tx, c.id).await?;
     // 配信者が検出した失敗は、この配信に属する接続だけに反映する。
     for viewer_id in &input.failed_viewers {
-        sqlx::query("UPDATE live_camera_viewer SET failed=true WHERE camera_id=$1 AND id=$2")
-            .bind(c.id)
-            .bind(viewer_id)
-            .execute(&mut **tx)
-            .await?;
+        sqlx::query(
+            r#"
+            UPDATE live_camera_viewer
+            SET
+                failed=true
+            WHERE camera_id=$1
+                AND id=$2
+            "#,
+        )
+        .bind(c.id)
+        .bind(viewer_id)
+        .execute(&mut **tx)
+        .await?;
     }
-    let failed_peers: Vec<Uuid> =
-        sqlx::query_scalar("SELECT id FROM live_camera_viewer WHERE camera_id=$1 AND failed")
-            .bind(c.id)
-            .fetch_all(&mut **tx)
-            .await?;
-    sqlx::query("DELETE FROM live_camera_signal WHERE viewer_id IN (SELECT id FROM live_camera_viewer WHERE camera_id=$1 AND failed)")
-        .bind(c.id).execute(&mut **tx).await?;
+    let failed_peers: Vec<Uuid> = sqlx::query_scalar(
+        r#"
+        SELECT
+            id
+        FROM live_camera_viewer
+        WHERE camera_id = $1
+            AND failed
+        "#,
+    )
+    .bind(c.id)
+    .fetch_all(&mut **tx)
+    .await?;
+    sqlx::query(
+        r#"
+        DELETE
+        FROM live_camera_signal
+        WHERE viewer_id IN (SELECT id FROM live_camera_viewer WHERE camera_id=$1 AND failed)
+        "#,
+    )
+    .bind(c.id)
+    .execute(&mut **tx)
+    .await?;
     let peers: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM live_camera_viewer WHERE camera_id=$1 AND NOT failed ORDER BY id",
+        r#"
+        SELECT
+            id
+        FROM live_camera_viewer
+        WHERE camera_id = $1
+            AND NOT failed
+        ORDER BY id
+        "#,
     )
     .bind(c.id)
     .fetch_all(&mut **tx)
@@ -784,11 +837,17 @@ async fn exchange(
         if viewer.is_some_and(|id| id != msg.viewer_id) {
             return Err(AppError::Forbidden("Invalid signaling recipient".into()));
         }
-        let count: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM live_camera_signal WHERE viewer_id=$1")
-                .bind(msg.viewer_id)
-                .fetch_one(&mut **tx)
-                .await?;
+        let count: i64 = sqlx::query_scalar(
+            r#"
+            SELECT
+                count(*)
+            FROM live_camera_signal
+            WHERE viewer_id = $1
+            "#,
+        )
+        .bind(msg.viewer_id)
+        .fetch_one(&mut **tx)
+        .await?;
         if count >= 256 {
             return Err(AppError::TooManyRequests("signaling_queue_full".into()));
         }
@@ -945,7 +1004,6 @@ pub async fn leave(
             SELECT camera_id FROM live_camera_viewer
             WHERE id=$1 AND key_hash=$2
         )
-
         "#,
     )
     .bind(id)
@@ -954,9 +1012,20 @@ pub async fn leave(
     .await?;
 
     let query = if input.failed {
-        "UPDATE live_camera_viewer SET failed=true WHERE id=$1 AND key_hash=$2"
+        r#"
+        UPDATE live_camera_viewer
+        SET
+            failed = true
+        WHERE id = $1
+            AND key_hash = $2
+        "#
     } else {
-        "DELETE FROM live_camera_viewer WHERE id=$1 AND key_hash=$2 AND NOT failed"
+        r#"
+        DELETE FROM live_camera_viewer
+        WHERE id = $1
+            AND key_hash = $2
+            AND NOT failed
+        "#
     };
     sqlx::query(query)
         .bind(id)

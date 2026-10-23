@@ -197,4 +197,47 @@ describe("MapIframe", () => {
     expect(wrapper.emitted("userLocation")?.[0]).toEqual([position]);
     wrapper.unmount();
   });
+
+  it("Piniaなしで制限設定を受け取り、読み込み・変更・再読み込み時に地図へ通知する", async () => {
+    const wrapper = mount(MapIframe, {
+      attachTo: document.body,
+      props: {
+        srcUrl: "/map?layer=selected&is_master=false",
+        height: 80,
+        allowedOrigins: window.location.origin,
+        inputPolicies: { selected: true, other: false },
+      },
+    });
+    const frame = wrapper.get("iframe").element as HTMLIFrameElement;
+    const postMessage = vi.spyOn(frame.contentWindow!, "postMessage").mockImplementation(() => {});
+    await wrapper.get("iframe").trigger("load");
+    expect(postMessage).toHaveBeenLastCalledWith(
+      { type: "layerInputPolicies", policies: { selected: true, other: false } },
+      window.location.origin,
+    );
+    await wrapper.setProps({ inputPolicies: { selected: false, other: true } });
+    expect(postMessage).toHaveBeenLastCalledWith(
+      { type: "layerInputPolicies", policies: { selected: false, other: true } },
+      window.location.origin,
+    );
+    postMessage.mockClear();
+    await wrapper.get("iframe").trigger("load");
+    expect(postMessage).toHaveBeenCalledWith(
+      { type: "layerInputPolicies", policies: { selected: false, other: true } },
+      window.location.origin,
+    );
+    wrapper.unmount();
+  });
+
+  it("制限設定を省略した既存の呼び出しでは設定を送信しない", async () => {
+    const wrapper = mount(MapIframe, {
+      attachTo: document.body,
+      props: { srcUrl: "/map", height: 80, allowedOrigins: window.location.origin },
+    });
+    const frame = wrapper.get("iframe").element as HTMLIFrameElement;
+    const postMessage = vi.spyOn(frame.contentWindow!, "postMessage").mockImplementation(() => {});
+    await wrapper.get("iframe").trigger("load");
+    expect(postMessage).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
 });

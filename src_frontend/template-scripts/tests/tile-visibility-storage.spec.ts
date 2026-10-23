@@ -15,6 +15,19 @@ function storage(initial: string | null) {
 }
 
 describe("tile visibility storage", () => {
+  it("loads only valid IDs without cleaning or overwriting the saved state", () => {
+    const original = '{"a":false,"b":"false","deleted":true}';
+    const data = storage(original);
+    const set = vi.spyOn(data, "setItem");
+    const remove = vi.spyOn(data, "removeItem");
+    const state = createTileVisibilityStorage("user", () => data);
+    expect(state.load(["a", "b"])).toEqual({ a: false });
+    expect(state.load(["deleted"])).toEqual({ deleted: true });
+    expect(data.getItem()).toBe(original);
+    expect(set).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+  });
+
   it("prunes missing IDs and invalid values, including the last removed tile", () => {
     const data = storage('{"a":false,"b":"false","deleted":true}');
     const state = createTileVisibilityStorage("user", () => data);

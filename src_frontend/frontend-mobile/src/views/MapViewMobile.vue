@@ -26,7 +26,9 @@ import ProgressSpinner from "@/components/common/ProgressSpinner.vue";
 import UploadProgressModal from "@/components/common/UploadProgressModal.vue";
 import MessageModal from "@/components/common/MessageModal.vue";
 import ConfirmModal from "@/components/common/ConfirmModal.vue";
+import CommonFormsModal from "@/components/map-object/CommonFormsModal.vue";
 import MapToolbar from "@/components/map/MapToolbar.vue";
+import type { MapObjectData, ShapeData } from "@/interface";
 import MapIframe from "@/components/map/MapIframe.vue";
 import LiveLocationSharing from "@/components/location/LiveLocationSharing.vue";
 import FullScreenMapModal from "@/components/map/FullScreenMapModal.vue";
@@ -79,6 +81,9 @@ mapobjStore.clearMapObject();
 shapeStore.clearShapeList();
 
 const layerList = computed(() => layersStore.layersList);
+const layerInputPolicies = computed(() =>
+  Object.fromEntries([...layerList.value].map(([id, value]) => [id, !!value.restrict_free_text])),
+);
 
 // --- レイヤ管理 ---
 const activeLayer = ref("");
@@ -321,6 +326,7 @@ const isMessageModal = ref(false);
 const messageText = ref("");
 const showFunctionContent = ref(false);
 const isOpenToolbar = ref(false);
+const commonFormsOpen = ref(false);
 const isOpenEditModal = ref(false);
 const selectedObjectId = ref("");
 const selectedObjectType = ref<"marker" | "shape">("marker");
@@ -390,6 +396,47 @@ const closeEditModal = (): void => {
   selectedObjectId.value = "";
   isOpenEditModal.value = false;
 };
+
+const receiveAnswerUpdate = (event: Event) => {
+  const object = (event as CustomEvent<MapObjectData | ShapeData>).detail;
+  if (!object?.id) return;
+  let payload: MapObjectUpdatePayload;
+  if ("geojson" in object) {
+    if (!shapeStore.shapeList.has(object.id)) return;
+    shapeStore.shapeList.set(object.id, object);
+    payload = {
+      objectType: "shape",
+      id: object.id,
+      layerId: object.layer_id,
+      shapeType: object.shape_type,
+      name: object.name || "",
+      geojson: object.geojson,
+    };
+  } else {
+    if (!mapobjStore.mapObjectList.has(object.id)) return;
+    mapobjStore.mapObjectList.set(object.id, object);
+    payload = {
+      objectType: "marker",
+      id: object.id,
+      layerId: object.layer_id,
+      name: object.marker_name,
+      detail: object.detail,
+      latitude: object.latitude,
+      longitude: object.longitude,
+    };
+  }
+  void (async () => {
+    const updated = (await mapIframeRef.value?.updateMapObject(payload)) ?? false;
+    if (!updated) {
+      await reloadMapObjectFallback(payload);
+      return;
+    }
+    if (mapObjectQueryFormData.value.query1 || mapObjectQueryFormData.value.query2)
+      await handleMapObjectSearch(mapObjectQueryFormData.value);
+  })();
+};
+window.addEventListener("geocode-answer-updated", receiveAnswerUpdate);
+onUnmounted(() => window.removeEventListener("geocode-answer-updated", receiveAnswerUpdate));
 
 const handleMapObjectUpdated = async (
   payload: MapObjectUpdatePayload,
@@ -704,6 +751,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
     @openToolbar="isOpenToolbar = !isOpenToolbar"
   />
   <LiveLocationSharing ref="liveLocationSharingRef" />
+  <CommonFormsModal :isOpen="commonFormsOpen" @close="commonFormsOpen = false" />
 
   <!-- ツールバーボタン群 -->
   <transition>
@@ -758,6 +806,14 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
         </button>
         <button @click="openLayerListModal()" class="btn-function-image" title="レイヤ一覧">
           <img :src="`${assetsUrl}layer_add_24.png`" class="function-img" alt="layer_add_24.png" />
+        </button>
+        <button
+          type="button"
+          class="btn-function-image common-form-button"
+          title="共通フォーム作成・管理"
+          @click="commonFormsOpen = true"
+        >
+          <img :src="`${assetsUrl}form_24.png`" class="function-img" alt="共通フォーム作成・管理" />
         </button>
       </div>
     </div>
@@ -838,6 +894,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
   <MapIframe
     ref="mapIframeRef"
     :srcUrl="srcUrl"
+    :inputPolicies="layerInputPolicies"
     :allowedOrigins="allowedOriginsRef"
     @mapReloadRequested="onMapReloadRequested"
     @mapLoaded="onMapLoaded"
@@ -1083,13 +1140,13 @@ button:active {
 
 #function-btn-row {
   display: flex;
-  gap: 30px;
+  gap: clamp(8px, 4vw, 30px);
   text-align: center;
   justify-content: center;
   position: fixed;
   bottom: 14%;
   left: 50%;
-  width: 96%;
+  width: 93%;
   transform: translateX(-50%);
   background-color: transparent;
   padding-top: 20px;

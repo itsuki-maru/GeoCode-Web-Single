@@ -98,7 +98,13 @@ fn parse_expiration(value: &str) -> Result<chrono::NaiveDateTime, AppError> {
 async fn authorize_share(pool: &SqlitePool, token: &str, secret: &[u8]) -> Result<(), AppError> {
     let claims = decode_share_token(token, secret)?;
     let row = sqlx::query_as::<_, (Option<String>, String)>(
-        "SELECT password_hash, expiration FROM temporary_urls WHERE id = ?",
+        r#"
+        SELECT
+            password_hash,
+            expiration
+        FROM temporary_urls
+        WHERE id = ?
+        "#,
     )
     .bind(&claims.id)
     .fetch_optional(pool)
@@ -188,7 +194,9 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .unwrap();
-        sqlx::query("CREATE TABLE temporary_urls (id TEXT PRIMARY KEY, password_hash TEXT, expiration TEXT NOT NULL)")
+        sqlx::query(r#"
+        CREATE TABLE temporary_urls (id TEXT PRIMARY KEY, password_hash TEXT, expiration TEXT NOT NULL)
+        "#)
             .execute(&pool).await.unwrap();
         let future = (chrono::Utc::now() + chrono::Duration::minutes(10))
             .naive_utc()
@@ -215,34 +223,57 @@ mod tests {
             )
             .unwrap();
             assert!(authorize_share(&pool, &token, secret).await.is_ok());
-            sqlx::query("UPDATE temporary_urls SET password_hash = 'changed'")
-                .execute(&pool)
-                .await
-                .unwrap();
+            sqlx::query(
+                r#"
+                UPDATE temporary_urls
+                SET
+                    password_hash = 'changed'
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
             assert!(matches!(
                 authorize_share(&pool, &token, secret).await,
                 Err(AppError::Unauthorized(_))
             ));
-            sqlx::query("UPDATE temporary_urls SET password_hash = ?")
-                .bind(password)
+            sqlx::query(
+                r#"
+                UPDATE temporary_urls
+                SET
+                    password_hash = ?
+                "#,
+            )
+            .bind(password)
+            .execute(&pool)
+            .await
+            .unwrap();
+            for expiration in ["2000-01-01 00:00:00", "invalid-date"] {
+                sqlx::query(
+                    r#"
+                    UPDATE temporary_urls
+                    SET
+                        expiration = ?
+                    "#,
+                )
+                .bind(expiration)
                 .execute(&pool)
                 .await
                 .unwrap();
-            for expiration in ["2000-01-01 00:00:00", "invalid-date"] {
-                sqlx::query("UPDATE temporary_urls SET expiration = ?")
-                    .bind(expiration)
-                    .execute(&pool)
-                    .await
-                    .unwrap();
                 assert!(matches!(
                     authorize_share(&pool, &token, secret).await,
                     Err(AppError::Unauthorized(_))
                 ));
             }
-            sqlx::query("DELETE FROM temporary_urls")
-                .execute(&pool)
-                .await
-                .unwrap();
+            sqlx::query(
+                r#"
+                DELETE
+                FROM temporary_urls
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
             assert!(matches!(
                 authorize_share(&pool, &token, secret).await,
                 Err(AppError::Unauthorized(_))

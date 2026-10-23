@@ -9,6 +9,8 @@ pub struct LayerObject {
     pub layer_name: String,
     pub is_master: bool,
     #[serde(default)]
+    pub restrict_free_text: bool,
+    #[serde(default)]
     pub marker_icon_id: Option<String>,
     #[serde(default)]
     pub marker_icon_filename: Option<String>,
@@ -36,13 +38,23 @@ pub struct LayerCreatedResponse {
     pub message: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct LayerNameUpdatePayload {
     pub name: String,
     #[serde(default)]
     pub marker_icon_id: Option<String>,
     #[serde(default)]
     pub update_marker_icon: bool,
+    #[serde(default)]
+    pub update_common_form: bool,
+    #[serde(default)]
+    pub common_form_id: Option<String>,
+    #[serde(default)]
+    pub common_form_version: Option<i32>,
+    #[serde(default)]
+    pub form_binding_revision: Option<i64>,
+    #[serde(default)]
+    pub form_target_count: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -57,6 +69,8 @@ pub struct LayerObjectFromRow {
     pub user_id: String,
     pub layer_name: String,
     pub is_master: bool,
+    #[serde(default)]
+    pub restrict_free_text: bool,
     #[serde(default)]
     pub marker_icon_id: Option<String>,
     #[serde(default)]

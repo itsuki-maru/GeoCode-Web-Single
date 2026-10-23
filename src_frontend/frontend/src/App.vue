@@ -10,6 +10,7 @@ import MessageModal from "@/components/common/MessageModal.vue";
 
 const appInitStore = useApplicationInitStore();
 const appTitle = ref(appInitStore.appInitData.appTitle);
+const activeView = ref<{ openUserPrivacySettings?: () => void } | null>(null);
 
 // MapView.vueへのリダイレクト
 const router = useRouter();
@@ -173,6 +174,14 @@ onMounted(() => {
       <img :src="`${assetsUrl}link_24.png`" class="btn-img" alt="link_24.png" />
     </button>
     <button
+      type="button"
+      class="btn-memo-open-close"
+      title="ユーザー設定&#10;アカウントのプライバシー設定を変更します。"
+      @click="activeView?.openUserPrivacySettings?.()"
+    >
+      <img :src="`${assetsUrl}manage_accounts_24.png`" class="btn-img" alt="ユーザー設定" />
+    </button>
+    <button
       class="btn-memo-open-close"
       title="ログアウト&#10;アカウントを変更します。"
       v-on:click="loginRedirect"
@@ -181,7 +190,9 @@ onMounted(() => {
     </button>
   </div>
   <div class="main-content-zone">
-    <RouterView />
+    <RouterView v-slot="{ Component }">
+      <component :is="Component" ref="activeView" />
+    </RouterView>
 
     <!-- メモモーダル -->
     <transition>

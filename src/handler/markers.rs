@@ -4,7 +4,7 @@ use crate::model::{
     MarkerInfoUpdateJsonData, MarkerMoveRequestParams, MarkerObject, MarkerQuerySearchParams,
     MarkerReadQueryPrams, MessageApi, ReturningId,
 };
-use crate::utils::{check_ismaster_handler, ensure_owned_layer, vec_to_hashmap};
+use crate::utils::{check_ismaster_handler, vec_to_hashmap};
 use axum::{
     Json,
     extract::{Extension, Path, Query},
@@ -40,7 +40,8 @@ pub async fn marker_get_handler(
                 detail,
                 update_at
             FROM marker_info_model
-            WHERE user_id = $1 AND layer_id = $2
+            WHERE user_id = $1
+                AND layer_id = $2
             "#,
             user_id,
             params.layer,
@@ -90,7 +91,8 @@ pub async fn create_marker_handler(
 
     match (params.layer_id, params.latitude, params.longitude) {
         (Some(layer_id), Some(latitude), Some(longitude)) => {
-            ensure_owned_layer(&pool, &user_id, &layer_id).await?;
+            let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+            super::layer_forms::ensure_owned(&mut tx, &user_id, &layer_id).await?;
             let blank_text = "".to_string();
             let new_id = query_as!(
                 ReturningId,
@@ -106,8 +108,19 @@ pub async fn create_marker_handler(
                     create_at,
                     update_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                RETURNING id
+                VALUES (
+                    $1,
+                    $2,
+                    $3,
+                    $4,
+                    $5,
+                    $6,
+                    $7,
+                    $8,
+                    $9
+                )
+                RETURNING
+                    id
                 "#,
                 new_marker_id,
                 user_id,
@@ -119,13 +132,16 @@ pub async fn create_marker_handler(
                 now,
                 now,
             )
-            .fetch_one(&pool)
+            .fetch_one(&mut *tx)
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "database error.");
                 AppError::Sqlx(e)
             })?;
 
+            super::layer_forms::sync_object(&mut tx, &user_id, "marker", &new_marker_id, &layer_id)
+                .await?;
+            tx.commit().await?;
             Ok(Json(MarkerCreatedResponse {
                 id: new_id.id,
                 message: "Marker Created.".to_string(),
@@ -146,6 +162,15 @@ pub async fn update_marker_position_handler(
 
     match (params.marker_id, params.latitude, params.longitude) {
         (Some(marker_id), Some(latitude), Some(longitude)) => {
+            let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+            let (layer_id, old_lat, old_lon): (String, f64, f64) = sqlx::query_as("SELECT layer_id, latitude, longitude FROM marker_info_model WHERE id=$1 AND user_id=$2")
+                .bind(&marker_id).bind(&user_id).fetch_optional(&mut *tx).await?.ok_or(AppError::NotFound)?;
+            let restricted =
+                super::layer_input_policy::restricted(&mut tx, &user_id, &layer_id).await?;
+            super::layer_input_policy::reject_change(
+                restricted,
+                old_lat != latitude || old_lon != longitude,
+            )?;
             let query_result = query!(
                 r#"
                 UPDATE marker_info_model
@@ -153,7 +178,8 @@ pub async fn update_marker_position_handler(
                     latitude = $1,
                     longitude = $2,
                     update_at = $3
-                WHERE id = $4 AND user_id = $5
+                WHERE id = $4
+                    AND user_id = $5
                 "#,
                 latitude,
                 longitude,
@@ -161,7 +187,7 @@ pub async fn update_marker_position_handler(
                 marker_id,
                 user_id,
             )
-            .execute(&pool)
+            .execute(&mut *tx)
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "database error.");
@@ -170,6 +196,7 @@ pub async fn update_marker_position_handler(
 
             let affected_rows = query_result.rows_affected();
             if affected_rows > 0 {
+                tx.commit().await?;
                 Ok(Json(MessageApi {
                     message: "Update Ok.".to_string(),
                 }))
@@ -190,10 +217,41 @@ pub async fn update_marker_info_handler(
     Path(marker_id): Path<String>,
     Json(payload): Json<MarkerInfoUpdateJsonData>,
 ) -> Result<Json<MessageApi>, AppError> {
+    let mut tx = super::answer_sqlite::begin_write(&pool).await?;
+    let (previous_layer, previous_detail): (String, String) =
+        sqlx::query_as("SELECT layer_id, detail FROM marker_info_model WHERE id=$1 AND user_id=$2")
+            .bind(&marker_id)
+            .bind(&user_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or(AppError::NotFound)?;
     // 現在時刻を取得
     let now = Utc::now().naive_utc();
 
-    ensure_owned_layer(&pool, &user_id, &payload.layer_id).await?;
+    if payload.name.trim().is_empty() {
+        return Err(AppError::Validation(
+            "マーカー名を入力してください。".into(),
+        ));
+    }
+    let detail = super::marker_forms::answer_edit::normal_body(
+        &mut tx,
+        &user_id,
+        "marker",
+        &marker_id,
+        &payload.detail,
+        payload.free_text.as_deref(),
+        payload.body_token.as_deref(),
+    )
+    .await?;
+    let source_restricted =
+        super::layer_input_policy::restricted(&mut tx, &user_id, &previous_layer).await?;
+    let target_restricted =
+        super::layer_input_policy::restricted(&mut tx, &user_id, &payload.layer_id).await?;
+    super::layer_input_policy::reject_change(
+        source_restricted || target_restricted,
+        previous_detail != detail,
+    )?;
+    super::layer_forms::ensure_owned(&mut tx, &user_id, &payload.layer_id).await?;
 
     let query_result = query!(
         r#"
@@ -207,12 +265,12 @@ pub async fn update_marker_info_handler(
         "#,
         payload.name,
         payload.layer_id,
-        payload.detail,
+        detail,
         now,
         marker_id,
         user_id,
     )
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "database error.");
@@ -221,6 +279,17 @@ pub async fn update_marker_info_handler(
 
     let affected_rows = query_result.rows_affected();
     if affected_rows > 0 {
+        if previous_layer != payload.layer_id {
+            super::layer_forms::sync_object(
+                &mut tx,
+                &user_id,
+                "marker",
+                &marker_id,
+                &payload.layer_id,
+            )
+            .await?;
+        }
+        tx.commit().await?;
         Ok(Json(MessageApi {
             message: "Update Ok.".to_string(),
         }))
@@ -235,6 +304,7 @@ pub async fn delete_marker_handler(
     Extension(pool): Extension<SqlitePool>,
     Path(marker_id): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let query_result = query!(
         r#"
         DELETE FROM marker_info_model
@@ -243,7 +313,7 @@ pub async fn delete_marker_handler(
         marker_id,
         user_id
     )
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "database error.");
@@ -252,6 +322,7 @@ pub async fn delete_marker_handler(
 
     let affected_rows = query_result.rows_affected();
     if affected_rows > 0 {
+        tx.commit().await?;
         Ok(Json(MarkerDeleteResponse {
             message: "Marker successfully deleted.".to_string(),
         }))

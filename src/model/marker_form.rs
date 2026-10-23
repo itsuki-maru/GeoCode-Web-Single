@@ -23,6 +23,8 @@ pub struct MarkerFormSchema {
 
 #[derive(Debug, Deserialize)]
 pub struct MarkerFormConfigUpdate {
+    #[serde(default)]
+    pub source_form: Option<serde_json::Value>,
     pub enabled: bool,
     pub form_title: String,
     #[serde(default)]
@@ -36,7 +38,10 @@ pub struct MarkerFormConfigUpdate {
 
 #[derive(Debug, Serialize)]
 pub struct MarkerFormConfigResponse {
+    pub managed_layer_id: Option<String>,
     pub marker_id: String,
+    #[serde(default)]
+    pub source_form: Option<serde_json::Value>,
     pub enabled: bool,
     pub form_title: String,
     pub form_description: String,
@@ -47,7 +52,10 @@ pub struct MarkerFormConfigResponse {
 
 #[derive(Debug, Serialize)]
 pub struct ShapeFormConfigResponse {
+    pub managed_layer_id: Option<String>,
     pub shape_id: String,
+    #[serde(default)]
+    pub source_form: Option<serde_json::Value>,
     pub enabled: bool,
     pub form_title: String,
     pub form_description: String,
@@ -59,6 +67,14 @@ pub struct ShapeFormConfigResponse {
 #[derive(Debug, Deserialize)]
 pub struct MarkerFormSubmissionRequest {
     #[serde(default)]
+    pub revision: Option<i64>,
+    #[serde(default)]
+    pub image_actions: HashMap<String, String>,
+    #[serde(default)]
+    pub reconcile: Option<AnswerBodyReconcile>,
+    #[serde(default)]
+    pub config_token: Option<String>,
+    #[serde(default)]
     pub password: Option<String>,
     #[serde(default)]
     pub values: HashMap<String, serde_json::Value>,
@@ -67,4 +83,11 @@ pub struct MarkerFormSubmissionRequest {
 #[derive(Debug, Serialize)]
 pub struct MarkerFormSubmissionResponse {
     pub message: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnswerBodyReconcile {
+    pub free_text: String,
+    pub token: String,
 }

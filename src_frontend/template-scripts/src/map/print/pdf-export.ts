@@ -209,6 +209,15 @@ export async function generateMapPdf(
           svg.replaceWith(img);
         });
         clone.querySelectorAll(EXCLUDED).forEach((node) => node.remove());
+        clone
+          .querySelectorAll<HTMLElement>(".geocode-content-popup .popup-content-toolbar")
+          .forEach((node) => (node.style.display = "none"));
+        clone
+          .querySelectorAll<HTMLElement>(".geocode-content-popup .popup-content-print-label")
+          .forEach((node) => {
+            node.style.display = "block";
+            node.style.fontSize = "12px";
+          });
         await Promise.all([...clone.querySelectorAll("img")].map((img) => img.decode()));
         checkAbort(signal);
       },

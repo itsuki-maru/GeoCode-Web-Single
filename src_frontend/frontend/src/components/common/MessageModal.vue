@@ -4,10 +4,12 @@ import BaseModal from "./BaseModal.vue";
 defineProps<{
   isOpen: boolean;
   message: string;
+  confirmLabel?: string;
 }>();
 
 const emit = defineEmits<{
   close: [];
+  confirm: [];
 }>();
 </script>
 
@@ -22,6 +24,9 @@ const emit = defineEmits<{
       </div>
       <div class="message-btn-close">
         <button @click="emit('close')">閉じる</button>
+        <button v-if="confirmLabel" type="button" @click="emit('confirm')">
+          {{ confirmLabel }}
+        </button>
       </div>
     </div>
   </BaseModal>
@@ -42,6 +47,10 @@ const emit = defineEmits<{
 }
 
 .message-btn-close {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 16px;
   text-align: center;
 }
 

@@ -58,6 +58,19 @@ function setup(accountId?: string, initiallyVisible = true) {
 beforeEach(() => localStorage.clear());
 
 describe("tile overlays", () => {
+  it("applies inherited visibility before adding tiles and keeps later changes local", () => {
+    localStorage.setItem("geocode-web:tile-overlay-visibility:owner", '{"a":false}');
+    const page = setup();
+    page.manager.sync([tile("a"), tile("b")], { a: false, b: true });
+    expect(page.layers[0].addTo).not.toHaveBeenCalled();
+    expect(page.manager.getVisibility()).toEqual({ a: false, b: true });
+    page.layers[0].addTo(page.map);
+    page.map.removeLayer(page.layers[1]);
+    page.manager.sync([tile("a"), tile("b"), tile("c")], { a: false, b: true });
+    expect(page.manager.getVisibility()).toEqual({ a: true, b: false, c: true });
+    expect(localStorage.getItem("geocode-web:tile-overlay-visibility:owner")).toBe('{"a":false}');
+  });
+
   it("adds unchecked shared tiles without persisting viewer choices", () => {
     const page = setup(undefined, false);
     page.manager.sync([tile("a")]);

@@ -46,6 +46,8 @@ export interface InitialMapView {
 }
 
 interface MapBootstrapBase {
+  popupBodies?: import("./common/popup-content").PopupBodies;
+  popupAnalysis?: Record<string, string>;
   tileOverlays?: import("./common/tile-overlays").TileOverlayRecord[];
   layers: Record<string, LayerRecord>;
   markers: Record<string, MarkerRecord>;
@@ -63,6 +65,17 @@ export interface EditableMapBootstrap extends MapBootstrapBase {
 }
 
 export interface AnotherMapBootstrap extends MapBootstrapBase {
+  answerPreview?:
+    | {
+        answerCount: number;
+        targetCount: number;
+        parentOrigin: string;
+        requestId: string;
+        analysis?: import("./answer-analysis").AnswerAnalysis;
+        query?: Record<string, unknown>;
+        targets?: string[];
+      }
+    | false;
   tileVisibilityAccountId?: string;
   initialView: InitialMapView;
   isCluster: boolean;
@@ -80,4 +93,14 @@ export interface TemporaryMapBootstrap extends MapBootstrapBase {
   shapes: Record<string, ShapeRecord>;
 }
 
-export type MapBootstrap = AnotherMapBootstrap | EditableMapBootstrap | TemporaryMapBootstrap;
+export interface FormAnswerMapBootstrap
+  extends Omit<AnotherMapBootstrap, "page" | "answerPreview"> {
+  page: "form-answer-map";
+  answerPreview: Exclude<AnotherMapBootstrap["answerPreview"], false | undefined>;
+}
+
+export type MapBootstrap =
+  | AnotherMapBootstrap
+  | FormAnswerMapBootstrap
+  | EditableMapBootstrap
+  | TemporaryMapBootstrap;

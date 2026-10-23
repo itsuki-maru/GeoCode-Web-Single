@@ -1,3 +1,13 @@
+pub(crate) mod answer_edit;
+pub use answer_edit::{
+    get_handler as answer_edit_get_handler, update_handler as answer_edit_update_handler,
+};
+mod owner_input;
+pub use owner_input::{
+    get_marker_input_handler, get_shape_input_handler, submit_marker_input_handler,
+    submit_shape_input_handler,
+};
+
 use crate::config::CONFIG;
 use crate::error::AppError;
 use crate::model::{
@@ -16,7 +26,7 @@ use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::{NaiveDate, Utc};
 use image::{GenericImageView, ImageReader, codecs::jpeg::JpegEncoder};
 use serde_json::{Value as JsonValue, json};
-use sqlx::{FromRow, sqlite::SqlitePool, types::Json as SqlJson};
+use sqlx::{FromRow, SqlitePool, types::Json as SqlJson};
 use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 use std::path::PathBuf;
@@ -33,15 +43,17 @@ const MAX_INPUT_IMAGE_DIMENSION: u32 = 4_096;
 const MAX_STORED_IMAGE_DIMENSION: u32 = 1_600;
 const MAX_STORED_IMAGE_BYTES: usize = 1_500_000;
 const MAX_THUMBNAIL_BYTES: usize = 300_000;
-const MAX_SUBMISSIONS_PER_MINUTE: i64 = 30;
+const MAX_SUBMISSIONS_PER_MINUTE: i32 = 30;
 const SHAPE_MEMO_MAX_LENGTH: usize = 10_000;
 const JPEG_QUALITIES: &[u8] = &[82, 76, 70, 64, 58, 52];
 const THUMBNAIL_QUALITIES: &[u8] = &[78, 70, 62, 54, 46];
 
 #[derive(Debug, FromRow)]
 struct OwnerFormRow {
+    managed_layer_id: Option<String>,
     marker_id: String,
     marker_name: String,
+    source_form: Option<JsonValue>,
     public_id: Option<String>,
     enabled: Option<bool>,
     form_title: Option<String>,
@@ -54,6 +66,7 @@ struct OwnerFormRow {
 struct PublicFormRow {
     marker_id: String,
     owner_id: String,
+    source_form: Option<JsonValue>,
     public_id: String,
     enabled: bool,
     form_title: String,
@@ -64,8 +77,10 @@ struct PublicFormRow {
 
 #[derive(Debug, FromRow)]
 struct ShapeOwnerFormRow {
+    managed_layer_id: Option<String>,
     shape_id: String,
     shape_name: Option<String>,
+    source_form: Option<JsonValue>,
     public_id: Option<String>,
     enabled: Option<bool>,
     form_title: Option<String>,
@@ -78,6 +93,7 @@ struct ShapeOwnerFormRow {
 struct ShapePublicFormRow {
     shape_id: String,
     owner_id: String,
+    source_form: Option<JsonValue>,
     public_id: String,
     enabled: bool,
     form_title: String,
@@ -118,17 +134,57 @@ pub async fn update_marker_form_config_handler(
     Path(marker_id): Path<String>,
     Json(payload): Json<MarkerFormConfigUpdate>,
 ) -> Result<Json<MarkerFormConfigResponse>, AppError> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     validate_config(&payload)?;
-    let current = fetch_owner_form(&pool, &user_id, &marker_id).await?;
+    let current = fetch_owner_form(&mut *tx, &user_id, &marker_id).await?;
+    if current.managed_layer_id.is_some()
+        && (current.source_form != payload.source_form
+            || current.form_title.as_deref() != Some(payload.form_title.as_str())
+            || current.form_description.as_deref() != Some(payload.form_description.as_str())
+            || current.form_schema.as_ref().map(|v| &v.0) != Some(&payload.form_schema)
+            || !matches!(payload.password_mode.as_str(), "" | "keep"))
+    {
+        return Err(AppError::Validation("このフォームはレイヤで管理されています。個別に変更するにはレイヤ設定を解除するか、所属レイヤを変更してください。".into()));
+    }
+
+    validate_source(&mut *tx, &user_id, &payload, &current.source_form).await?;
+    validate_field_identity(
+        current.form_schema.as_ref().map(|s| &s.0),
+        &payload.form_schema,
+    )?;
     let existing_hash = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT password_hash FROM marker_form_config_model WHERE marker_id = $1",
+        r#"
+        SELECT
+            password_hash
+        FROM marker_form_config_model
+        WHERE marker_id = $1
+        "#,
     )
     .bind(&marker_id)
-    .fetch_optional(&pool)
+    .fetch_optional(&mut *tx)
     .await?
     .flatten();
 
-    let password_hash = resolve_password_hash(&payload, existing_hash).await?;
+    let mut password_hash = resolve_password_hash(&payload, existing_hash).await?;
+    if payload.source_form != current.source_form
+        && matches!(payload.password_mode.as_str(), "" | "keep")
+    {
+        if let Some(id) = payload
+            .source_form
+            .as_ref()
+            .and_then(|v| v.get("id"))
+            .and_then(JsonValue::as_str)
+            .filter(|s| Uuid::parse_str(s).is_ok())
+        {
+            password_hash = sqlx::query_scalar(
+                "SELECT password_hash FROM common_form_model WHERE id=$1 AND user_id=$2",
+            )
+            .bind(&id)
+            .bind(&user_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        }
+    }
     let public_id = current
         .public_id
         .unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -145,9 +201,10 @@ pub async fn update_marker_form_config_handler(
             form_schema,
             password_hash,
             create_at,
-            update_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+            update_at, source_form
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9)
         ON CONFLICT (marker_id) DO UPDATE SET
+            source_form = EXCLUDED.source_form,
             enabled = EXCLUDED.enabled,
             form_title = EXCLUDED.form_title,
             form_description = EXCLUDED.form_description,
@@ -157,16 +214,18 @@ pub async fn update_marker_form_config_handler(
         "#,
     )
     .bind(&marker_id)
-    .bind(public_id)
-    .bind(payload.enabled)
-    .bind(payload.form_title.trim())
-    .bind(payload.form_description.trim())
-    .bind(SqlJson(&payload.form_schema))
-    .bind(password_hash)
-    .bind(now)
-    .execute(&pool)
+    .bind(&public_id)
+    .bind(&payload.enabled)
+    .bind(&payload.form_title.trim())
+    .bind(&payload.form_description.trim())
+    .bind(&SqlJson(&payload.form_schema))
+    .bind(&password_hash)
+    .bind(&now)
+    .bind(&payload.source_form)
+    .execute(&mut *tx)
     .await?;
 
+    tx.commit().await?;
     let row = fetch_owner_form(&pool, &user_id, &marker_id).await?;
     Ok(Json(owner_response(row)))
 }
@@ -177,7 +236,8 @@ pub async fn rotate_marker_form_url_handler(
     Extension(pool): Extension<SqlitePool>,
     Path(marker_id): Path<String>,
 ) -> Result<Json<MarkerFormConfigResponse>, AppError> {
-    fetch_owner_form(&pool, &user_id, &marker_id).await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    fetch_owner_form(&mut *tx, &user_id, &marker_id).await?;
     let result = sqlx::query(
         r#"
         UPDATE marker_form_config_model
@@ -188,13 +248,14 @@ pub async fn rotate_marker_form_url_handler(
     .bind(Uuid::new_v4().to_string())
     .bind(Utc::now().naive_utc())
     .bind(&marker_id)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await?;
     if result.rows_affected() == 0 {
         return Err(AppError::Validation(
             "フォーム設定を保存してからURLを再発行してください。".into(),
         ));
     }
+    tx.commit().await?;
     let row = fetch_owner_form(&pool, &user_id, &marker_id).await?;
     Ok(Json(owner_response(row)))
 }
@@ -205,6 +266,10 @@ pub async fn public_marker_form_get_handler(
     Extension(tera): Extension<Arc<Mutex<Tera>>>,
     Path(public_id): Path<String>,
 ) -> Result<Response, AppError> {
+    let public_id = match Uuid::parse_str(&public_id) {
+        Ok(public_id) => public_id.to_string(),
+        Err(_) => return render_marker_form_not_found(&tera).await,
+    };
     let row = match fetch_public_form(&pool, &public_id).await {
         Ok(row) if row.enabled => row,
         Ok(_) | Err(AppError::NotFound) => return render_marker_form_not_found(&tera).await,
@@ -215,6 +280,7 @@ pub async fn public_marker_form_get_handler(
     context.insert("form_title", &row.form_title);
     context.insert("form_description", &row.form_description);
     context.insert("form_schema", &row.form_schema.0);
+    context.insert("config_token", &owner_input::marker_token(&row));
     context.insert("submission_path", &format!("/forms/{}", row.public_id));
     context.insert("is_password_protected", &row.password_hash.is_some());
     let tera = tera.lock().await;
@@ -231,9 +297,8 @@ pub async fn get_shape_form_config_handler(
     Extension(pool): Extension<SqlitePool>,
     Path(shape_id): Path<String>,
 ) -> Result<Json<ShapeFormConfigResponse>, AppError> {
-    Ok(Json(shape_owner_response(
-        fetch_shape_owner_form(&pool, &user_id, &shape_id).await?,
-    )))
+    let row = fetch_shape_owner_form(&pool, &user_id, &shape_id).await?;
+    Ok(Json(shape_owner_response(row)))
 }
 
 /// 図形所有者が送信した設定を検証し、入力フォーム設定とパスワードを保存する。
@@ -243,45 +308,90 @@ pub async fn update_shape_form_config_handler(
     Path(shape_id): Path<String>,
     Json(payload): Json<MarkerFormConfigUpdate>,
 ) -> Result<Json<ShapeFormConfigResponse>, AppError> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     validate_config(&payload)?;
-    let current = fetch_shape_owner_form(&pool, &user_id, &shape_id).await?;
+    let current = fetch_shape_owner_form(&mut *tx, &user_id, &shape_id).await?;
+    if current.managed_layer_id.is_some()
+        && (current.source_form != payload.source_form
+            || current.form_title.as_deref() != Some(payload.form_title.as_str())
+            || current.form_description.as_deref() != Some(payload.form_description.as_str())
+            || current.form_schema.as_ref().map(|v| &v.0) != Some(&payload.form_schema)
+            || !matches!(payload.password_mode.as_str(), "" | "keep"))
+    {
+        return Err(AppError::Validation("このフォームはレイヤで管理されています。個別に変更するにはレイヤ設定を解除するか、所属レイヤを変更してください。".into()));
+    }
+
+    validate_source(&mut *tx, &user_id, &payload, &current.source_form).await?;
+    validate_field_identity(
+        current.form_schema.as_ref().map(|s| &s.0),
+        &payload.form_schema,
+    )?;
     let existing_hash = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT password_hash FROM shape_form_config_model WHERE shape_id = $1",
+        r#"
+        SELECT
+            password_hash
+        FROM shape_form_config_model
+        WHERE shape_id = $1
+        "#,
     )
     .bind(&shape_id)
-    .fetch_optional(&pool)
+    .fetch_optional(&mut *tx)
     .await?
     .flatten();
-    let password_hash = resolve_password_hash(&payload, existing_hash).await?;
+    let mut password_hash = resolve_password_hash(&payload, existing_hash).await?;
+    if payload.source_form != current.source_form
+        && matches!(payload.password_mode.as_str(), "" | "keep")
+    {
+        if let Some(id) = payload
+            .source_form
+            .as_ref()
+            .and_then(|v| v.get("id"))
+            .and_then(JsonValue::as_str)
+            .filter(|s| Uuid::parse_str(s).is_ok())
+        {
+            password_hash = sqlx::query_scalar(
+                "SELECT password_hash FROM common_form_model WHERE id=$1 AND user_id=$2",
+            )
+            .bind(&id)
+            .bind(&user_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        }
+    }
     let public_id = current
         .public_id
         .unwrap_or_else(|| Uuid::new_v4().to_string());
     let now = Utc::now().naive_utc();
+
     sqlx::query(
         r#"
         INSERT INTO shape_form_config_model (
             shape_id, public_id, enabled, form_title, form_description,
-            form_schema, password_hash, create_at, update_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+            form_schema, password_hash, create_at, update_at, source_form
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9)
         ON CONFLICT (shape_id) DO UPDATE SET
-            enabled = excluded.enabled,
-            form_title = excluded.form_title,
-            form_description = excluded.form_description,
-            form_schema = excluded.form_schema,
-            password_hash = excluded.password_hash,
-            update_at = excluded.update_at
+            source_form = EXCLUDED.source_form,
+            enabled = EXCLUDED.enabled,
+            form_title = EXCLUDED.form_title,
+            form_description = EXCLUDED.form_description,
+            form_schema = EXCLUDED.form_schema,
+            password_hash = EXCLUDED.password_hash,
+            update_at = EXCLUDED.update_at
         "#,
     )
     .bind(&shape_id)
-    .bind(public_id)
-    .bind(payload.enabled)
-    .bind(payload.form_title.trim())
-    .bind(payload.form_description.trim())
-    .bind(SqlJson(&payload.form_schema))
-    .bind(password_hash)
-    .bind(now)
-    .execute(&pool)
+    .bind(&public_id)
+    .bind(&payload.enabled)
+    .bind(&payload.form_title.trim())
+    .bind(&payload.form_description.trim())
+    .bind(&SqlJson(&payload.form_schema))
+    .bind(&password_hash)
+    .bind(&now)
+    .bind(&payload.source_form)
+    .execute(&mut *tx)
     .await?;
+
+    tx.commit().await?;
     Ok(Json(shape_owner_response(
         fetch_shape_owner_form(&pool, &user_id, &shape_id).await?,
     )))
@@ -293,20 +403,28 @@ pub async fn rotate_shape_form_url_handler(
     Extension(pool): Extension<SqlitePool>,
     Path(shape_id): Path<String>,
 ) -> Result<Json<ShapeFormConfigResponse>, AppError> {
-    fetch_shape_owner_form(&pool, &user_id, &shape_id).await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    fetch_shape_owner_form(&mut *tx, &user_id, &shape_id).await?;
     let result = sqlx::query(
-        "UPDATE shape_form_config_model SET public_id = $1, update_at = $2 WHERE shape_id = $3",
+        r#"
+        UPDATE shape_form_config_model
+        SET
+            public_id = $1,
+            update_at = $2
+        WHERE shape_id = $3
+        "#,
     )
     .bind(Uuid::new_v4().to_string())
     .bind(Utc::now().naive_utc())
     .bind(&shape_id)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await?;
     if result.rows_affected() == 0 {
         return Err(AppError::Validation(
             "フォーム設定を保存してからURLを再発行してください。".into(),
         ));
     }
+    tx.commit().await?;
     Ok(Json(shape_owner_response(
         fetch_shape_owner_form(&pool, &user_id, &shape_id).await?,
     )))
@@ -318,9 +436,10 @@ pub async fn public_shape_form_get_handler(
     Extension(tera): Extension<Arc<Mutex<Tera>>>,
     Path(public_id): Path<String>,
 ) -> Result<Response, AppError> {
-    if Uuid::parse_str(&public_id).is_err() {
-        return render_marker_form_not_found(&tera).await;
-    }
+    let public_id = match Uuid::parse_str(&public_id) {
+        Ok(public_id) => public_id.to_string(),
+        Err(_) => return render_marker_form_not_found(&tera).await,
+    };
     let row = match fetch_shape_public_form(&pool, &public_id).await {
         Ok(row) if row.enabled => row,
         Ok(_) | Err(AppError::NotFound) => return render_marker_form_not_found(&tera).await,
@@ -330,6 +449,7 @@ pub async fn public_shape_form_get_handler(
     context.insert("form_title", &row.form_title);
     context.insert("form_description", &row.form_description);
     context.insert("form_schema", &row.form_schema.0);
+    context.insert("config_token", &owner_input::shape_token(&row));
     context.insert(
         "submission_path",
         &format!("/shape-forms/{}", row.public_id),
@@ -373,6 +493,13 @@ pub async fn submit_marker_form_handler(
     }
     check_rate_limit(&pool, &form.marker_id).await?;
     let (payload, uploaded_images) = parse_marker_form_multipart(&mut multipart).await?;
+    if payload
+        .config_token
+        .as_ref()
+        .is_some_and(|token| token != &owner_input::marker_token(&form))
+    {
+        return Err(AppError::Conflict);
+    }
     verify_submission_password(form.password_hash.as_deref(), payload.password.as_deref()).await?;
 
     let schema = &form.form_schema.0;
@@ -388,6 +515,7 @@ pub async fn submit_marker_form_handler(
         &submitted_values,
         &rendered_markdown,
         &prepared_images,
+        false,
     )
     .await;
     if let Err(error) = result {
@@ -412,18 +540,27 @@ pub async fn submit_shape_form_handler(
     }
     check_shape_rate_limit(&pool, &form.shape_id).await?;
     let (payload, uploaded_images) = parse_marker_form_multipart(&mut multipart).await?;
+    if payload
+        .config_token
+        .as_ref()
+        .is_some_and(|token| token != &owner_input::shape_token(&form))
+    {
+        return Err(AppError::Conflict);
+    }
     verify_submission_password(form.password_hash.as_deref(), payload.password.as_deref()).await?;
     let schema = &form.form_schema.0;
     validate_submission_keys(schema, &payload.values)?;
     validate_uploaded_image_keys(schema, &uploaded_images)?;
     let (submitted_values, rendered_markdown, prepared_images) =
         build_submission(schema, &payload.values, &uploaded_images, &form.form_title).await?;
+
     if let Err(error) = persist_shape_submission(
         &pool,
         &form,
         &submitted_values,
         &rendered_markdown,
         &prepared_images,
+        false,
     )
     .await
     {
@@ -457,6 +594,7 @@ async fn build_submission(
             process_non_image_field_value(field, value)?,
         );
     }
+
     let mut prepared_images = Vec::new();
     for field in schema
         .fields
@@ -482,6 +620,7 @@ async fn build_submission(
         );
         prepared_images.push(prepared);
     }
+
     let mut stored_values = serde_json::Map::new();
     let mut sections = Vec::new();
     for field in &schema.fields {
@@ -515,32 +654,63 @@ async fn persist_submission(
     submitted_values: &JsonValue,
     rendered_markdown: &str,
     prepared_images: &[PreparedImage],
-) -> Result<(), AppError> {
+    owner_input: bool,
+) -> Result<JsonValue, AppError> {
     let now = Utc::now().naive_utc();
-    let mut tx = pool.begin().await?;
+    let mut tx = super::answer_sqlite::begin_write(pool).await?;
 
-    // SQLiteの書き込みロックを先に取得し、同時投稿による容量上限の超過を防ぐ。
-    let owner_locked = sqlx::query("UPDATE user_model SET id = id WHERE id = $1")
-        .bind(&form.owner_id)
-        .execute(&mut *tx)
-        .await?;
-    if owner_locked.rows_affected() == 0 {
-        return Err(AppError::NotFound);
-    }
-
-    let still_enabled = sqlx::query_scalar::<_, bool>(
-        "SELECT enabled FROM marker_form_config_model WHERE marker_id = $1",
+    let current = sqlx::query_as::<
+        _,
+        (
+            bool,
+            String,
+            String,
+            String,
+            SqlJson<MarkerFormSchema>,
+            Option<String>,
+            Option<JsonValue>,
+        ),
+    >(
+        r#"
+        SELECT
+            enabled,
+            public_id,
+            form_title,
+            form_description,
+            form_schema,
+            password_hash,
+            source_form
+        FROM marker_form_config_model
+        WHERE marker_id = $1
+        "#,
     )
     .bind(&form.marker_id)
     .fetch_optional(&mut *tx)
     .await?
-    .unwrap_or(false);
-    if !still_enabled {
+    .ok_or(AppError::NotFound)?;
+    if !owner_input && !current.0 {
         return Err(AppError::NotFound);
     }
+    if (owner_input && current.0 != form.enabled)
+        || current.1 != form.public_id
+        || current.2 != form.form_title
+        || current.3 != form.form_description
+        || current.4.0 != form.form_schema.0
+        || current.5 != form.password_hash
+        || current.6 != form.source_form
+    {
+        return Err(AppError::Conflict);
+    }
+
+    // 所有者単位で直列化し、同時投稿による容量上限の超過を防ぐ。
 
     let current_bytes = sqlx::query_scalar::<_, i64>(
-        "SELECT COALESCE(SUM(stored_bytes), 0) FROM marker_form_image_model WHERE owner_id = $1",
+        r#"
+        SELECT
+            COALESCE(SUM(stored_bytes), 0)
+        FROM marker_form_image_model
+        WHERE owner_id = $1
+        "#,
     )
     .bind(&form.owner_id)
     .fetch_one(&mut *tx)
@@ -564,15 +734,26 @@ async fn persist_submission(
         sqlx::query(
             r#"
             INSERT INTO image_model (
-                id, user_id, filename, uuid_filename, create_at
-            ) VALUES ($1, $2, $3, $4, $5)
+                id,
+                user_id,
+                filename,
+                uuid_filename,
+                create_at
+            )
+            VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                $5
+            )
             "#,
         )
         .bind(&image.id)
         .bind(&form.owner_id)
         .bind(&image.filename)
         .bind(&image.unique_filename)
-        .bind(now)
+        .bind(&now)
         .execute(&mut *tx)
         .await?;
 
@@ -581,52 +762,78 @@ async fn persist_submission(
         sqlx::query(
             r#"
             INSERT INTO marker_form_image_model (
-                image_id, owner_id, stored_bytes, create_at
-            ) VALUES ($1, $2, $3, $4)
+                image_id,
+                owner_id,
+                stored_bytes,
+                create_at
+            )
+            VALUES (
+                $1,
+                $2,
+                $3,
+                $4
+            )
             "#,
         )
         .bind(&image.id)
         .bind(&form.owner_id)
-        .bind(stored_bytes)
-        .bind(now)
+        .bind(&stored_bytes)
+        .bind(&now)
         .execute(&mut *tx)
         .await?;
     }
 
+    let document =
+        answer_edit::document(&mut tx, &form.owner_id, "marker", &form.marker_id).await?;
+    let answer_id = Uuid::now_v7().to_string();
     sqlx::query(
         r#"
         INSERT INTO marker_form_submission_model (
-            id, marker_id, submitted_values, rendered_markdown, create_at
-        ) VALUES ($1, $2, $3, $4, $5)
+            id,
+            marker_id,
+            submitted_values,
+            rendered_markdown,
+            create_at, source_form, form_snapshot
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
     )
-    .bind(Uuid::now_v7().to_string())
+    .bind(&answer_id)
     .bind(&form.marker_id)
-    .bind(SqlJson(submitted_values))
-    .bind(rendered_markdown)
-    .bind(now)
+    .bind(&SqlJson(submitted_values))
+    .bind(&rendered_markdown)
+    .bind(&now)
+    .bind(&form.source_form)
+    .bind(&json!({"form_title": form.form_title, "form_description": form.form_description, "form_schema": form.form_schema.0}))
     .execute(&mut *tx)
     .await?;
 
-    let updated = sqlx::query(
+    let updated = sqlx::query_scalar::<_, JsonValue>(
         r#"
         UPDATE marker_info_model
         SET detail = detail || $1, update_at = $2
         WHERE id = $3 AND user_id = $4
+        RETURNING json_object('id',id,'user_id',user_id,'layer_id',layer_id,'marker_name',marker_name,'latitude',latitude,'longitude',longitude,'detail',detail,'create_at',create_at,'update_at',update_at)
         "#,
     )
     .bind(rendered_markdown)
     .bind(now)
     .bind(&form.marker_id)
     .bind(&form.owner_id)
-    .execute(&mut *tx)
-    .await?;
-    if updated.rows_affected() == 0 {
-        return Err(AppError::NotFound);
-    }
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
 
+    answer_edit::append_parts(
+        &mut tx,
+        &form.owner_id,
+        "marker",
+        &form.marker_id,
+        document.parts,
+        &answer_id,
+    )
+    .await?;
     tx.commit().await?;
-    Ok(())
+    Ok(updated)
 }
 
 /// 容量確認、画像保存、回答履歴登録、図形メモ追記を1つのDBトランザクションで処理する。
@@ -636,35 +843,69 @@ async fn persist_shape_submission(
     submitted_values: &JsonValue,
     rendered_markdown: &str,
     prepared_images: &[PreparedImage],
-) -> Result<(), AppError> {
+    owner_input: bool,
+) -> Result<JsonValue, AppError> {
     let now = Utc::now().naive_utc();
-    let mut tx = pool.begin().await?;
-    let owner_locked = sqlx::query("UPDATE user_model SET id = id WHERE id = $1")
-        .bind(&form.owner_id)
-        .execute(&mut *tx)
-        .await?;
-    if owner_locked.rows_affected() == 0 {
-        return Err(AppError::NotFound);
-    }
-    let still_enabled = sqlx::query_scalar::<_, bool>(
-        "SELECT enabled FROM shape_form_config_model WHERE shape_id = $1",
+    let mut tx = super::answer_sqlite::begin_write(pool).await?;
+    let current = sqlx::query_as::<
+        _,
+        (
+            bool,
+            String,
+            String,
+            String,
+            SqlJson<MarkerFormSchema>,
+            Option<String>,
+            Option<JsonValue>,
+        ),
+    >(
+        r#"
+        SELECT
+            enabled,
+            public_id,
+            form_title,
+            form_description,
+            form_schema,
+            password_hash,
+            source_form
+        FROM shape_form_config_model
+        WHERE shape_id = $1
+        "#,
     )
     .bind(&form.shape_id)
     .fetch_optional(&mut *tx)
     .await?
-    .unwrap_or(false);
-    if !still_enabled {
+    .ok_or(AppError::NotFound)?;
+    if !owner_input && !current.0 {
         return Err(AppError::NotFound);
     }
-    let (shape_type, mut geojson) = sqlx::query_as::<_, (String, SqlJson<JsonValue>)>(
-        "SELECT shape_type, geojson FROM shape_model WHERE id = $1 AND user_id = $2",
+    if (owner_input && current.0 != form.enabled)
+        || current.1 != form.public_id
+        || current.2 != form.form_title
+        || current.3 != form.form_description
+        || current.4.0 != form.form_schema.0
+        || current.5 != form.password_hash
+        || current.6 != form.source_form
+    {
+        return Err(AppError::Conflict);
+    }
+
+    let (shape_type, mut geojson) = sqlx::query_as::<_, (String, JsonValue)>(
+        r#"
+        SELECT
+            shape_type,
+            geojson
+        FROM shape_model
+        WHERE id = $1
+            AND user_id = $2
+        "#,
     )
     .bind(&form.shape_id)
     .bind(&form.owner_id)
     .fetch_optional(&mut *tx)
     .await?
-    .map(|(shape_type, geojson)| (shape_type, geojson.0))
     .ok_or(AppError::NotFound)?;
+
     let feature = geojson
         .as_object_mut()
         .ok_or_else(|| AppError::Validation("保存されている図形情報が不正です。".into()))?;
@@ -689,7 +930,12 @@ async fn persist_shape_submission(
     validate_shape_geojson(&shape_type, &geojson)?;
 
     let current_bytes = sqlx::query_scalar::<_, i64>(
-        "SELECT COALESCE(SUM(stored_bytes), 0) FROM marker_form_image_model WHERE owner_id = $1",
+        r#"
+        SELECT
+            COALESCE(SUM(stored_bytes), 0)
+        FROM marker_form_image_model
+        WHERE owner_id = $1
+        "#,
     )
     .bind(&form.owner_id)
     .fetch_one(&mut *tx)
@@ -706,58 +952,127 @@ async fn persist_shape_submission(
             "入力フォームから保存できる画像容量の上限を超えています。".into(),
         ));
     }
+
     write_prepared_images(prepared_images).await?;
     for image in prepared_images {
         sqlx::query(
-            "INSERT INTO image_model (id, user_id, filename, uuid_filename, create_at) VALUES ($1, $2, $3, $4, $5)",
+            r#"
+            INSERT INTO image_model (
+                id,
+                user_id,
+                filename,
+                uuid_filename,
+                create_at
+            )
+            VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                $5
+            )
+            "#,
         )
         .bind(&image.id)
         .bind(&form.owner_id)
         .bind(&image.filename)
         .bind(&image.unique_filename)
-        .bind(now)
+        .bind(&now)
         .execute(&mut *tx)
         .await?;
         let stored_bytes = i64::try_from(image.bytes.len().saturating_add(image.thumb_bytes.len()))
             .map_err(|_| AppError::InternalServerError)?;
         sqlx::query(
-            "INSERT INTO marker_form_image_model (image_id, owner_id, stored_bytes, create_at) VALUES ($1, $2, $3, $4)",
+            r#"
+            INSERT INTO marker_form_image_model (
+                image_id,
+                owner_id,
+                stored_bytes,
+                create_at
+            )
+            VALUES (
+                $1,
+                $2,
+                $3,
+                $4
+            )
+            "#,
         )
         .bind(&image.id)
         .bind(&form.owner_id)
-        .bind(stored_bytes)
-        .bind(now)
+        .bind(&stored_bytes)
+        .bind(&now)
         .execute(&mut *tx)
         .await?;
     }
+
+    let document = answer_edit::document(&mut tx, &form.owner_id, "shape", &form.shape_id).await?;
+    let answer_id = Uuid::now_v7().to_string();
     sqlx::query(
-        "INSERT INTO shape_form_submission_model (id, shape_id, submitted_values, rendered_markdown, create_at) VALUES ($1, $2, $3, $4, $5)",
+        r#"
+        INSERT INTO shape_form_submission_model (
+            id,
+            shape_id,
+            submitted_values,
+            rendered_markdown,
+            create_at,
+            source_form,
+            form_snapshot
+        )
+        VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7
+        )
+        "#,
     )
-    .bind(Uuid::now_v7().to_string())
+    .bind(&answer_id)
     .bind(&form.shape_id)
-    .bind(SqlJson(submitted_values))
-    .bind(rendered_markdown)
-    .bind(now)
+    .bind(&SqlJson(submitted_values))
+    .bind(&rendered_markdown)
+    .bind(&now)
+    .bind(&form.source_form)
+    .bind(&json!({"form_title": form.form_title, "form_description": form.form_description, "form_schema": form.form_schema.0}))
     .execute(&mut *tx)
     .await?;
-    let updated = sqlx::query(
-        "UPDATE shape_model SET geojson = $1, updated_at = $2 WHERE id = $3 AND user_id = $4",
+    let updated = sqlx::query_scalar::<_, JsonValue>(
+        r#"
+        UPDATE shape_model
+        SET
+            geojson = $1,
+            updated_at = $2
+        WHERE id = $3
+            AND user_id = $4
+        RETURNING json_object('id',id,'user_id',user_id,'layer_id',layer_id,'name',name,'shape_type',shape_type,'geojson',json(geojson),'created_at',created_at,'updated_at',updated_at)
+        "#,
     )
     .bind(SqlJson(&geojson))
     .bind(now)
     .bind(&form.shape_id)
     .bind(&form.owner_id)
-    .execute(&mut *tx)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    answer_edit::append_parts(
+        &mut tx,
+        &form.owner_id,
+        "shape",
+        &form.shape_id,
+        document.parts,
+        &answer_id,
+    )
     .await?;
-    if updated.rows_affected() == 0 {
-        return Err(AppError::NotFound);
-    }
     tx.commit().await?;
-    Ok(())
+    Ok(updated)
 }
+
 /// 指定ユーザーが所有するマーカーと、その入力フォーム設定をデータベースから取得する。
-async fn fetch_owner_form(
-    pool: &SqlitePool,
+async fn fetch_owner_form<'e>(
+    executor: impl sqlx::Executor<'e, Database = sqlx::Sqlite>,
     user_id: &str,
     marker_id: &str,
 ) -> Result<OwnerFormRow, AppError> {
@@ -766,6 +1081,8 @@ async fn fetch_owner_form(
         SELECT
             m.id AS marker_id,
             m.marker_name,
+            c.managed_layer_id,
+            c.source_form,
             c.public_id,
             c.enabled,
             c.form_title,
@@ -777,9 +1094,9 @@ async fn fetch_owner_form(
         WHERE m.id = $1 AND m.user_id = $2
         "#,
     )
-    .bind(marker_id)
-    .bind(user_id)
-    .fetch_optional(pool)
+    .bind(&marker_id)
+    .bind(&user_id)
+    .fetch_optional(executor)
     .await?
     .ok_or(AppError::NotFound)
 }
@@ -791,6 +1108,7 @@ async fn fetch_public_form(pool: &SqlitePool, public_id: &str) -> Result<PublicF
         SELECT
             c.marker_id,
             m.user_id AS owner_id,
+            c.source_form,
             c.public_id,
             c.enabled,
             c.form_title,
@@ -802,7 +1120,7 @@ async fn fetch_public_form(pool: &SqlitePool, public_id: &str) -> Result<PublicF
         WHERE c.public_id = $1
         "#,
     )
-    .bind(public_id)
+    .bind(&public_id)
     .fetch_optional(pool)
     .await?
     .ok_or(AppError::NotFound)
@@ -812,6 +1130,8 @@ async fn fetch_public_form(pool: &SqlitePool, public_id: &str) -> Result<PublicF
 fn owner_response(row: OwnerFormRow) -> MarkerFormConfigResponse {
     let public_path = row.public_id.map(|id| format!("/forms/{id}"));
     MarkerFormConfigResponse {
+        managed_layer_id: row.managed_layer_id,
+        source_form: row.source_form,
         marker_id: row.marker_id,
         enabled: row.enabled.unwrap_or(false),
         form_title: row.form_title.unwrap_or(row.marker_name),
@@ -823,14 +1143,14 @@ fn owner_response(row: OwnerFormRow) -> MarkerFormConfigResponse {
 }
 
 /// 指定ユーザーが所有する図形と、その入力フォーム設定を取得する。
-async fn fetch_shape_owner_form(
-    pool: &SqlitePool,
+async fn fetch_shape_owner_form<'e>(
+    executor: impl sqlx::Executor<'e, Database = sqlx::Sqlite>,
     user_id: &str,
     shape_id: &str,
 ) -> Result<ShapeOwnerFormRow, AppError> {
     sqlx::query_as::<_, ShapeOwnerFormRow>(
         r#"
-        SELECT s.id AS shape_id, s.name AS shape_name, c.public_id, c.enabled,
+        SELECT s.id AS shape_id, s.name AS shape_name, c.managed_layer_id, c.public_id, c.source_form, c.enabled,
                c.form_title, c.form_description, c.form_schema,
                (c.password_hash IS NOT NULL) AS is_password_protected
         FROM shape_model s
@@ -838,9 +1158,9 @@ async fn fetch_shape_owner_form(
         WHERE s.id = $1 AND s.user_id = $2
         "#,
     )
-    .bind(shape_id)
-    .bind(user_id)
-    .fetch_optional(pool)
+    .bind(&shape_id)
+    .bind(&user_id)
+    .fetch_optional(executor)
     .await?
     .ok_or(AppError::NotFound)
 }
@@ -852,14 +1172,14 @@ async fn fetch_shape_public_form(
 ) -> Result<ShapePublicFormRow, AppError> {
     sqlx::query_as::<_, ShapePublicFormRow>(
         r#"
-        SELECT c.shape_id, s.user_id AS owner_id, c.public_id, c.enabled,
+        SELECT c.shape_id, s.user_id AS owner_id, c.public_id, c.source_form, c.enabled,
                c.form_title, c.form_description, c.form_schema, c.password_hash
         FROM shape_form_config_model c
         JOIN shape_model s ON s.id = c.shape_id
         WHERE c.public_id = $1
         "#,
     )
-    .bind(public_id)
+    .bind(&public_id)
     .fetch_optional(pool)
     .await?
     .ok_or(AppError::NotFound)
@@ -868,6 +1188,8 @@ async fn fetch_shape_public_form(
 /// 未設定時の既定値を補い、図形フォーム設定APIのレスポンスへ変換する。
 fn shape_owner_response(row: ShapeOwnerFormRow) -> ShapeFormConfigResponse {
     ShapeFormConfigResponse {
+        managed_layer_id: row.managed_layer_id,
+        source_form: row.source_form,
         shape_id: row.shape_id,
         enabled: row.enabled.unwrap_or(false),
         form_title: row
@@ -881,7 +1203,7 @@ fn shape_owner_response(row: ShapeOwnerFormRow) -> ShapeFormConfigResponse {
 }
 
 /// フォーム全体の項目数、ID重複、画像項目数などの設定内容を検証する。
-fn validate_config(payload: &MarkerFormConfigUpdate) -> Result<(), AppError> {
+pub(crate) fn validate_config(payload: &MarkerFormConfigUpdate) -> Result<(), AppError> {
     if payload.form_title.trim().is_empty() || payload.form_title.chars().count() > 100 {
         return Err(AppError::Validation(
             "フォーム名は1〜100文字で入力してください。".into(),
@@ -1028,24 +1350,19 @@ async fn verify_submission_password(
 
 /// 図形フォーム用の固定時間枠カウンターを更新する。
 async fn check_shape_rate_limit(pool: &SqlitePool, shape_id: &str) -> Result<(), AppError> {
-    let attempt_count = sqlx::query_scalar::<_, i64>(
+    let attempt_count = sqlx::query_scalar::<_, i32>(
         r#"
         INSERT INTO shape_form_rate_limit_model (shape_id, window_started_at, attempt_count)
         VALUES ($1, $2, 1)
-        ON CONFLICT (shape_id) DO UPDATE SET
-            attempt_count = CASE
-                WHEN shape_form_rate_limit_model.window_started_at <= excluded.window_started_at - 60
-                THEN 1 ELSE shape_form_rate_limit_model.attempt_count + 1
-            END,
-            window_started_at = CASE
-                WHEN shape_form_rate_limit_model.window_started_at <= excluded.window_started_at - 60
-                THEN excluded.window_started_at ELSE shape_form_rate_limit_model.window_started_at
-            END
-        RETURNING attempt_count
+        ON CONFLICT (shape_id)
+        DO UPDATE SET attempt_count = CASE WHEN julianday(shape_form_rate_limit_model.window_started_at) <= julianday(EXCLUDED.window_started_at) - 60.0 / 86400.0 THEN 1 ELSE shape_form_rate_limit_model.attempt_count + 1 END,
+        window_started_at = CASE WHEN julianday(shape_form_rate_limit_model.window_started_at) <= julianday(EXCLUDED.window_started_at) - 60.0 / 86400.0 THEN EXCLUDED.window_started_at ELSE shape_form_rate_limit_model.window_started_at END
+        RETURNING
+            attempt_count
         "#,
     )
-    .bind(shape_id)
-    .bind(Utc::now().timestamp())
+    .bind(&shape_id)
+    .bind(&Utc::now().naive_utc())
     .fetch_one(pool)
     .await?;
     if attempt_count > MAX_SUBMISSIONS_PER_MINUTE {
@@ -1056,29 +1373,21 @@ async fn check_shape_rate_limit(pool: &SqlitePool, shape_id: &str) -> Result<(),
     Ok(())
 }
 
-/// DB上の固定時間枠カウンターを更新し、全プロセスで投稿回数を共有制限する。
+/// DB上の固定時間枠カウンターを更新し、全サーバーで投稿回数を共有制限する。
 async fn check_rate_limit(pool: &SqlitePool, marker_id: &str) -> Result<(), AppError> {
-    let attempt_count = sqlx::query_scalar::<_, i64>(
+    let attempt_count = sqlx::query_scalar::<_, i32>(
         r#"
-        INSERT INTO marker_form_rate_limit_model (
-            marker_id, window_started_at, attempt_count
-        ) VALUES ($1, $2, 1)
-        ON CONFLICT (marker_id) DO UPDATE SET
-            attempt_count = CASE
-                WHEN marker_form_rate_limit_model.window_started_at <= EXCLUDED.window_started_at - 60
-                THEN 1
-                ELSE marker_form_rate_limit_model.attempt_count + 1
-            END,
-            window_started_at = CASE
-                WHEN marker_form_rate_limit_model.window_started_at <= EXCLUDED.window_started_at - 60
-                THEN EXCLUDED.window_started_at
-                ELSE marker_form_rate_limit_model.window_started_at
-            END
-        RETURNING attempt_count
+        INSERT INTO marker_form_rate_limit_model ( marker_id, window_started_at, attempt_count )
+        VALUES ($1, $2, 1)
+        ON CONFLICT (marker_id)
+        DO UPDATE SET attempt_count = CASE WHEN julianday(marker_form_rate_limit_model.window_started_at) <= julianday(EXCLUDED.window_started_at) - 60.0 / 86400.0 THEN 1 ELSE marker_form_rate_limit_model.attempt_count + 1 END,
+        window_started_at = CASE WHEN julianday(marker_form_rate_limit_model.window_started_at) <= julianday(EXCLUDED.window_started_at) - 60.0 / 86400.0 THEN EXCLUDED.window_started_at ELSE marker_form_rate_limit_model.window_started_at END
+        RETURNING
+            attempt_count
         "#,
     )
-    .bind(marker_id)
-    .bind(Utc::now().timestamp())
+    .bind(&marker_id)
+    .bind(&Utc::now().naive_utc())
     .fetch_one(pool)
     .await?;
 
@@ -1089,6 +1398,7 @@ async fn check_rate_limit(pool: &SqlitePool, marker_id: &str) -> Result<(), AppE
     }
     Ok(())
 }
+
 /// multipart/form-dataから回答JSONと画像を読み取り、形式とサイズを検証する。
 async fn parse_marker_form_multipart(
     multipart: &mut Multipart,
@@ -1315,6 +1625,10 @@ fn process_non_image_field_value(
             )));
         }
     }
+    if field.field_type == "number" {
+        let number: f64 = raw.parse().map_err(|_| AppError::BadRequest)?;
+        return Ok((json!(number), Some(raw.to_string())));
+    }
     if field.field_type == "date" {
         NaiveDate::parse_from_str(raw, "%Y-%m-%d").map_err(|_| {
             AppError::Validation(format!("{}には正しい日付を入力してください。", field.label))
@@ -1326,6 +1640,7 @@ fn process_non_image_field_value(
         Some(escape_markdown(raw)),
     ))
 }
+
 /// 必須項目が未入力の場合に返すバリデーションエラーを生成する。
 fn required_error(field: &MarkerFormField) -> AppError {
     AppError::Validation(format!("{}は必須項目です。", field.label))
@@ -1409,7 +1724,7 @@ fn prepare_image_blocking(bytes: &[u8], filename: &str) -> Result<PreparedImage,
         "サムネイル画像の変換に失敗しました。",
     )?;
 
-    let upload_id = Uuid::now_v7();
+    let upload_id = Uuid::now_v7().to_string();
     let upload_id_string = upload_id.to_string();
     let sub_dir = &upload_id_string[0..5];
     let dir_path = PathBuf::from(&CONFIG.upload_file_path).join(sub_dir);
@@ -1487,6 +1802,7 @@ async fn write_bytes(path: &PathBuf, bytes: &[u8]) -> Result<(), AppError> {
         .await
         .map_err(|_| AppError::InternalServerError)
 }
+
 /// トランザクション失敗時などに、準備済みの通常画像とサムネイルを削除する。
 async fn cleanup_images(images: &[PreparedImage]) {
     for image in images {
@@ -1547,6 +1863,12 @@ mod tests {
             .expect("number field should accept a JSON number");
         assert_eq!(stored, value);
         assert_eq!(rendered.as_deref(), Some("20260801"));
+        let (stored, _) =
+            process_non_image_field_value(&field("amount", "number"), &json!("12.5")).unwrap();
+        assert_eq!(stored, json!(12.5));
+        let (stored, _) =
+            process_non_image_field_value(&field("amount", "number"), &json!("")).unwrap();
+        assert!(stored.is_null());
     }
 
     #[test]
@@ -1565,4 +1887,373 @@ mod tests {
         assert!(prepared.bytes.len() <= MAX_STORED_IMAGE_BYTES);
         assert!(prepared.thumb_bytes.len() <= MAX_THUMBNAIL_BYTES);
     }
+}
+
+#[derive(serde::Serialize, FromRow)]
+pub struct CommonForm {
+    #[sqlx(default)]
+    pub is_password_protected: bool,
+    #[sqlx(default)]
+    pub managed_layer_count: i64,
+    #[sqlx(default)]
+    pub managed_target_count: i64,
+    #[sqlx(default)]
+    pub applied_target_count: i64,
+    pub id: String,
+    pub version: i32,
+    pub form_title: String,
+    pub form_description: String,
+    pub form_schema: SqlJson<MarkerFormSchema>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct CommonFormUpdate {
+    #[serde(default)]
+    pub expected_managed_count: Option<i64>,
+    #[serde(default)]
+    pub expected_applied_count: Option<i64>,
+    pub version: Option<i32>,
+    #[serde(flatten)]
+    pub config: MarkerFormConfigUpdate,
+}
+
+fn validate_field_identity(
+    old: Option<&MarkerFormSchema>,
+    new: &MarkerFormSchema,
+) -> Result<(), AppError> {
+    if let Some(old) = old {
+        for field in &new.fields {
+            if old
+                .fields
+                .iter()
+                .any(|previous| previous.id == field.id && previous.field_type != field.field_type)
+            {
+                return Err(AppError::Validation(
+                    "種類を変更する項目は削除し、新しい項目として追加してください。".into(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn validate_source<'e>(
+    executor: impl sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    user_id: &str,
+    config: &MarkerFormConfigUpdate,
+    current_source: &Option<JsonValue>,
+) -> Result<(), AppError> {
+    if let Some(source) = &config.source_form {
+        let id = source
+            .get("id")
+            .and_then(JsonValue::as_str)
+            .and_then(|id| Uuid::parse_str(id).ok())
+            .map(|id| id.to_string())
+            .ok_or(AppError::BadRequest)?;
+        let version = source
+            .get("version")
+            .and_then(JsonValue::as_i64)
+            .and_then(|v| i32::try_from(v).ok())
+            .ok_or(AppError::BadRequest)?;
+        let (schema, deleted) = sqlx::query_as::<_, (SqlJson<MarkerFormSchema>, bool)>(
+            r#"
+            SELECT
+                r.form_schema,
+                f.deleted
+            FROM common_form_revision_model r
+            JOIN common_form_model f
+                ON f.id = r.form_id
+            WHERE f.id = $1
+                AND f.user_id = $2
+                AND r.version = $3
+            "#,
+        )
+        .bind(&id)
+        .bind(&user_id)
+        .bind(&version)
+        .fetch_optional(executor)
+        .await?
+        .ok_or(AppError::NotFound)?;
+        if deleted && current_source != &config.source_form {
+            return Err(AppError::NotFound);
+        }
+        validate_field_identity(Some(&schema.0), &config.form_schema)?;
+    }
+    Ok(())
+}
+
+pub async fn list_common_forms_handler(
+    Extension(user_id): Extension<String>,
+    Extension(pool): Extension<SqlitePool>,
+) -> Result<Json<Vec<CommonForm>>, AppError> {
+    Ok(Json(
+        sqlx::query_as::<_, CommonForm>(
+            r#"
+        SELECT
+            id,
+            version,
+            form_title,
+            form_description,
+            form_schema,
+            (password_hash IS NOT NULL) AS is_password_protected
+        FROM common_form_model
+        WHERE user_id = $1
+            AND NOT deleted
+        ORDER BY update_at DESC, id
+        "#,
+        )
+        .bind(&user_id)
+        .fetch_all(&pool)
+        .await?,
+    ))
+}
+
+pub async fn get_common_form_handler(
+    Extension(user_id): Extension<String>,
+    Extension(pool): Extension<SqlitePool>,
+    Path(id): Path<String>,
+) -> Result<Json<CommonForm>, AppError> {
+    let mut tx = pool.begin().await?;
+    let mut form=sqlx::query_as::<_,CommonForm>("SELECT id,version,form_title,form_description,form_schema,(password_hash IS NOT NULL) AS is_password_protected FROM common_form_model WHERE id=$1 AND user_id=$2 AND NOT deleted").bind(&id).bind(&user_id).fetch_optional(&mut *tx).await?.ok_or(AppError::NotFound)?;
+    let (layers, managed, applied) = super::layer_forms::usage(&mut tx, &user_id, &id).await?;
+    form.managed_layer_count = layers;
+    form.managed_target_count = managed;
+    form.applied_target_count = applied;
+    tx.commit().await?;
+    Ok(Json(form))
+}
+
+pub async fn create_common_form_handler(
+    Extension(user_id): Extension<String>,
+    Extension(pool): Extension<SqlitePool>,
+    Json(payload): Json<CommonFormUpdate>,
+) -> Result<Json<CommonForm>, AppError> {
+    validate_config(&payload.config)?;
+    if payload.config.form_schema.fields.is_empty() {
+        return Err(AppError::Validation("入力項目を追加してください。".into()));
+    }
+    let id = Uuid::new_v4().to_string();
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    sqlx::query(
+        r#"
+        INSERT INTO common_form_model (
+            id,
+            user_id,
+            form_title,
+            form_description,
+            form_schema,
+            create_at,
+            update_at
+        )
+        VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $6
+        )
+        "#,
+    )
+    .bind(&id)
+    .bind(&user_id)
+    .bind(&payload.config.form_title.trim())
+    .bind(&payload.config.form_description.trim())
+    .bind(&SqlJson(&payload.config.form_schema))
+    .bind(&Utc::now().naive_utc())
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO common_form_revision_model (
+            form_id,
+            version,
+            form_schema
+        )
+        VALUES (
+            $1,
+            1,
+            $2
+        )
+        "#,
+    )
+    .bind(&id)
+    .bind(&SqlJson(&payload.config.form_schema))
+    .execute(&mut *tx)
+    .await?;
+    let password_hash = resolve_password_hash(&payload.config, None).await?;
+    sqlx::query("UPDATE common_form_model SET password_hash=$1 WHERE id=$2")
+        .bind(password_hash)
+        .bind(&id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    get_common_form_handler(Extension(user_id), Extension(pool), Path(id)).await
+}
+
+pub async fn update_common_form_handler(
+    Extension(user_id): Extension<String>,
+    Extension(pool): Extension<SqlitePool>,
+    Path(id): Path<String>,
+    Json(payload): Json<CommonFormUpdate>,
+) -> Result<Json<CommonForm>, AppError> {
+    validate_config(&payload.config)?;
+    if payload.config.form_schema.fields.is_empty() {
+        return Err(AppError::Validation("入力項目を追加してください。".into()));
+    }
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let current = sqlx::query_as::<_, CommonForm>(
+        r#"
+        SELECT
+            id,
+            version,
+            form_title,
+            form_description,
+            form_schema,
+            (password_hash IS NOT NULL) AS is_password_protected
+        FROM common_form_model
+        WHERE id = $1
+            AND user_id = $2
+            AND NOT deleted
+        "#,
+    )
+    .bind(&id)
+    .bind(&user_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    if payload.version != Some(current.version) {
+        return Err(AppError::Conflict);
+    }
+    let revisions = sqlx::query_scalar::<_, SqlJson<MarkerFormSchema>>(
+        r#"
+        SELECT
+            form_schema
+        FROM common_form_revision_model
+        WHERE form_id = $1
+        "#,
+    )
+    .bind(&id)
+    .fetch_all(&mut *tx)
+    .await?;
+    for revision in revisions {
+        validate_field_identity(Some(&revision.0), &payload.config.form_schema)?;
+        for field in &payload.config.form_schema.fields {
+            if revision.0.fields.iter().any(|f| f.id == field.id)
+                && !current
+                    .form_schema
+                    .0
+                    .fields
+                    .iter()
+                    .any(|f| f.id == field.id)
+            {
+                return Err(AppError::Validation(
+                    "削除済みの項目IDは再利用できません。".into(),
+                ));
+            }
+        }
+    }
+    let (_, managed, applied) = super::layer_forms::usage(&mut tx, &user_id, &id).await?;
+    let password_changed = matches!(payload.config.password_mode.as_str(), "set" | "clear");
+    if (managed > 0 && payload.expected_managed_count != Some(managed))
+        || (password_changed && applied > 0 && payload.expected_applied_count != Some(applied))
+    {
+        return Err(AppError::Conflict);
+    }
+    let old_hash: Option<String> =
+        sqlx::query_scalar("SELECT password_hash FROM common_form_model WHERE id=$1")
+            .bind(&id)
+            .fetch_one(&mut *tx)
+            .await?;
+    let next_hash = resolve_password_hash(&payload.config, old_hash).await?;
+    let next_version = current.version.checked_add(1).ok_or(AppError::Conflict)?;
+    sqlx::query(
+        r#"
+        UPDATE common_form_model
+        SET
+            version = $1,
+            form_title = $2,
+            form_description = $3,
+            form_schema = $4,
+            update_at = $5
+        WHERE id = $6
+        "#,
+    )
+    .bind(&next_version)
+    .bind(&payload.config.form_title.trim())
+    .bind(&payload.config.form_description.trim())
+    .bind(&SqlJson(&payload.config.form_schema))
+    .bind(&Utc::now().naive_utc())
+    .bind(&id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO common_form_revision_model (
+            form_id,
+            version,
+            form_schema
+        )
+        VALUES (
+            $1,
+            $2,
+            $3
+        )
+        "#,
+    )
+    .bind(&id)
+    .bind(&next_version)
+    .bind(&SqlJson(&payload.config.form_schema))
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("UPDATE common_form_model SET password_hash=$1 WHERE id=$2")
+        .bind(next_hash)
+        .bind(&id)
+        .execute(&mut *tx)
+        .await?;
+    super::layer_forms::propagate(&mut tx, &user_id, &id, password_changed).await?;
+    tx.commit().await?;
+    get_common_form_handler(Extension(user_id), Extension(pool), Path(id)).await
+}
+
+pub async fn delete_common_form_handler(
+    Extension(user_id): Extension<String>,
+    Extension(pool): Extension<SqlitePool>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let used: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM layer_model WHERE common_form_id=$1 AND user_id=$2)",
+    )
+    .bind(&id)
+    .bind(&user_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if used {
+        return Err(AppError::Validation(
+            "レイヤで使用中の共通フォームです。レイヤ設定を解除してから削除してください。".into(),
+        ));
+    }
+    let result = sqlx::query(
+        r#"
+        UPDATE common_form_model
+        SET
+            deleted = TRUE,
+            update_at = $1
+        WHERE id = $2
+            AND user_id = $3
+            AND NOT deleted
+        "#,
+    )
+    .bind(Utc::now().naive_utc())
+    .bind(&id)
+    .bind(&user_id)
+    .execute(&mut *tx)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
 }

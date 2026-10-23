@@ -213,6 +213,7 @@
         <script>
             window.__GEOCODE_MARKER_FORM__ = {
                 schema: {{ form_schema | json_encode_for_html | safe }},
+                configToken: {{ config_token | default(value="") | json_encode_for_html | safe }},
                 submissionPath: {{ submission_path | json_encode_for_html | safe }},
                 isPasswordProtected: {{ is_password_protected | json_encode_for_html | safe }},
             };

@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "markers": [
+    {
+      "marker_name": "旧形式マーカー",
+      "latitude": 35.0,
+      "longitude": 139.0,
+      "detail": "旧形式の本文 ![画像](/images/legacy.png)",
+      "layer": {
+        "layer_name": "旧形式レイヤ",
+        "is_master": false
+      }
+    }
+  ],
+  "shapes": [
+    {
+      "shape_type": "circle",
+      "name": "旧形式図形",
+      "geojson": {
+        "type": "Feature",
+        "properties": {
+          "radius": 100.0
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            139.0,
+            35.0
+          ]
+        }
+      },
+      "layer": {
+        "layer_name": "旧形式レイヤ",
+        "is_master": false
+      }
+    }
+  ]
+}

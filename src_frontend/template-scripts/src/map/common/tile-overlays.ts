@@ -65,10 +65,10 @@ export function createTileOverlayManager(
         else map.removeLayer(entry.layer);
       }
     },
-    sync(records: TileOverlayRecord[]): boolean {
+    sync(records: TileOverlayRecord[], initialVisibility?: Record<string, boolean>): boolean {
       if (!Array.isArray(records)) return false;
       const wanted = new Set(records.map((r) => r.id));
-      const savedVisibility = storage?.reconcile([...wanted]) || {};
+      const savedVisibility = initialVisibility ?? storage?.reconcile([...wanted]) ?? {};
       for (const [id, entry] of active) {
         if (!wanted.has(id)) {
           active.delete(id);

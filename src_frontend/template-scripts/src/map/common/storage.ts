@@ -16,6 +16,26 @@ interface StorageDependencies {
   warn?: (message: string, error: unknown) => void;
 }
 
+const defaultTileServerId = (tileServers: TileServers): string | undefined =>
+  tileServers["1"] ? "1" : Object.keys(tileServers)[0];
+
+// 初期表示だけ引き継ぐ画面でも、保存を有効にせず選択を読み込めるようにする。
+export function loadSelectedTileServerId(
+  tileServers: TileServers,
+  {
+    getStorage = () => window.localStorage,
+    warn = (message, error) => console.warn(message, error),
+  }: StorageDependencies = {},
+): string | undefined {
+  try {
+    const savedTileServerId = getStorage().getItem(STORAGE_KEYS.selectedTileServer);
+    if (savedTileServerId && tileServers[savedTileServerId]) return savedTileServerId;
+  } catch (error) {
+    warn("Failed to restore selected tile server:", error);
+  }
+  return defaultTileServerId(tileServers);
+}
+
 export function createMapStorage(
   tileServers: TileServers,
   {
@@ -48,24 +68,11 @@ export function createMapStorage(
     isTileServerSelectionPersistenceEnabled = true;
   };
 
-  const getDefaultTileServerId = (): string | undefined => {
-    if (tileServers["1"]) return "1";
-    return Object.keys(tileServers)[0];
-  };
+  const getDefaultTileServerId = (): string | undefined => defaultTileServerId(tileServers);
 
   const getInitialTileServerId = (): string | undefined => {
-    const defaultTileServerId = getDefaultTileServerId();
-    if (!isTileServerSelectionPersistenceEnabled) return defaultTileServerId;
-
-    try {
-      const savedTileServerId = getStorage().getItem(STORAGE_KEYS.selectedTileServer);
-      if (savedTileServerId && tileServers[savedTileServerId]) {
-        return savedTileServerId;
-      }
-    } catch (error) {
-      warn("Failed to restore selected tile server:", error);
-    }
-    return defaultTileServerId;
+    if (!isTileServerSelectionPersistenceEnabled) return getDefaultTileServerId();
+    return loadSelectedTileServerId(tileServers, { getStorage, warn });
   };
 
   const saveSelectedTileServerId = (tileServerId: string): void => {

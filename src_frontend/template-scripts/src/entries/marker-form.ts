@@ -37,6 +37,7 @@ export function initializeMarkerForm(): void {
       imageFiles,
       bootstrap.submissionPath,
       bootstrap.isPasswordProtected,
+      bootstrap.configToken,
     );
   });
 }
@@ -195,6 +196,7 @@ async function submitMarkerForm(
   imageFiles: Map<string, PreparedImage>,
   submissionPath: string,
   isPasswordProtected: boolean,
+  configToken?: string,
 ): Promise<void> {
   event.preventDefault();
   if (!elements.form.reportValidity()) return;
@@ -212,6 +214,7 @@ async function submitMarkerForm(
       "submission",
       JSON.stringify({
         password: passwordInput?.value ?? null,
+        config_token: configToken,
         values: collectValues(schema),
       }),
     );
@@ -221,6 +224,10 @@ async function submitMarkerForm(
 
     const response = await fetch(submissionPath, { method: "POST", body: formData });
     const body = (await response.json().catch(() => ({}))) as SubmissionResponse;
+    if (response.status === 409)
+      throw new Error(
+        "フォームの設定が変更されました。画面を再読み込みして、入力内容を確認してから送信してください。",
+      );
     if (!response.ok) throw new Error(body.error || "送信に失敗しました。");
 
     showCompletion(elements.form, body.message || "送信が完了しました。");

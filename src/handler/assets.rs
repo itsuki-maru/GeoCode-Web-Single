@@ -105,7 +105,8 @@ pub async fn serve_image_file(
             let is_private_user_db = query_as!(
                 IsPrivateUser,
                 r#"
-                SELECT is_private
+                SELECT
+                    is_private
                 FROM user_model
                 WHERE id = $1
                 "#,
@@ -225,9 +226,7 @@ pub async fn serve_marker_icon_file(
     let icon_exists = sqlx::query_scalar::<_, bool>(
         r#"
         SELECT EXISTS (
-            SELECT 1
-            FROM marker_icon_model
-            WHERE uuid_filename = $1
+            SELECT 1 FROM marker_icon_model WHERE uuid_filename = $1
         )
         "#,
     )

@@ -3,6 +3,7 @@ interface ShapeMemoGeoJson {
 }
 
 interface ShapeMemoLayer {
+  shapeId?: string;
   getTooltip?(): ShapeMemoTooltip | null;
   on(eventName: string, listener: (event?: ShapeMemoLayerEvent) => void): void;
   shapeMemo?: unknown;
@@ -34,6 +35,7 @@ interface ShapeMemoLeaflet {
 }
 
 interface ShapeMemoDependencies {
+  renderPopup?(layer: ShapeMemoLayer): string;
   onShapeClick?(layer: ShapeMemoLayer, event: unknown): boolean;
   escapeHtml(value: string): string;
   getLeaflet(): ShapeMemoLeaflet;
@@ -61,6 +63,7 @@ export function getShapeMemoFromGeoJson(geojson: unknown): string {
 }
 
 export function createShapeMemoRuntime({
+  renderPopup,
   onShapeClick,
   escapeHtml,
   getLeaflet,
@@ -88,7 +91,9 @@ export function createShapeMemoRuntime({
   ): boolean => {
     if (!layer || !latLng) return false;
 
-    const popupContent = renderShapeMemoPopupContent(layer.shapeName, layer.shapeMemo);
+    const popupContent = renderPopup
+      ? renderPopup(layer)
+      : renderShapeMemoPopupContent(layer.shapeName, layer.shapeMemo);
     if (!popupContent) return false;
 
     const popup = getLeaflet().popup().setLatLng(latLng).setContent(popupContent).openOn(getMap());

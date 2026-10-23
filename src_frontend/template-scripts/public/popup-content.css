@@ -1,0 +1,61 @@
+.geocode-content-popup .popup-content-toolbar {
+  margin: 0 18px 10px 0;
+  color: #64748b;
+  font-size: 12px;
+}
+.geocode-content-popup .popup-content-toolbar label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.geocode-content-popup .popup-content-toolbar select {
+  box-sizing: border-box;
+  width: auto;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 4px 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background-color: #f8fafc;
+  color: #334155;
+  font: inherit;
+  line-height: 1.4;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.geocode-content-popup .popup-content-toolbar select:focus-visible {
+  outline: 2px solid #597ba7;
+  outline-offset: 2px;
+}
+.leaflet-popup-content .geocode-content-popup .popup-content-note {
+  margin: 6px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #64748b;
+}
+.geocode-content-popup .popup-content-note:empty,
+.geocode-content-popup .popup-content-analysis:empty,
+.geocode-content-popup .popup-content-print-label {
+  display: none;
+}
+.geocode-content-popup .popup-content-title {
+  margin: 0 0 8px;
+}
+.geocode-content-popup .popup-content-body {
+  margin-top: 0;
+  padding-top: 0;
+}
+.leaflet-popup-content .geocode-content-popup .popup-content-body > :first-child {
+  margin-top: 0;
+}
+@media print {
+  .geocode-content-popup .popup-content-toolbar {
+    display: none;
+  }
+  .geocode-content-popup .popup-content-print-label {
+    display: block;
+    font-size: 12px;
+    color: #64748b;
+  }
+}

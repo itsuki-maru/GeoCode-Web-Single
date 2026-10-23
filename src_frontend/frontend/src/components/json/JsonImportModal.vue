@@ -72,6 +72,11 @@ const importJsonData = async (): Promise<void> => {
     isJsonSendNow.value = false;
     return;
   }
+  if (fileObj.size > 20 * 1024 * 1024) {
+    emit("message", "JSONファイルは20MiB以内にしてください。");
+    isJsonSendNow.value = false;
+    return;
+  }
   payload.append("upload_file", fileObj);
 
   try {
@@ -81,7 +86,10 @@ const importJsonData = async (): Promise<void> => {
     mapobjStore.initList();
     clearJson();
   } catch (error) {
-    emit("message", "インポートに失敗しました。データ形式が正しくありません。");
+    const message = apiClient.isAxiosError(error)
+      ? (error.response?.data as { error?: string })?.error
+      : undefined;
+    emit("message", message ?? "インポートに失敗しました。データ形式を確認してください。");
   } finally {
     isJsonSendNow.value = false;
   }
@@ -101,6 +109,9 @@ const clearJson = (): void => {
     <div class="json-import-content">
       <h2 class="modal-h2">データのインポート（JSON）</h2>
       <p class="upload-lead">エクスポート済みの JSON ファイルを 1 件選択してインポートします。</p>
+      <p>
+        version 3は20MiB、旧形式は5MiBまでです。画像は参照のみで、取り込み後の公開は無効になります。
+      </p>
 
       <div class="upload-panel">
         <label for="jsonfile" class="file-picker-card">

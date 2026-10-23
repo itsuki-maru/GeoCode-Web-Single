@@ -314,7 +314,8 @@ defineExpose({ copiedLayer, fetchCurrentSharedUrl });
 .table-sticky-layerlist {
   display: block;
   overflow-y: auto;
-  height: 35vh;
+  max-height: 28vh;
+  max-height: 28dvh;
 }
 
 .table-sticky-layerlist thead th {

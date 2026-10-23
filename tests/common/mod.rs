@@ -55,6 +55,42 @@ pub async fn test_pool() -> SqlitePool {
     pool
 }
 
+pub async fn file_test_pool() -> (SqlitePool, PathBuf) {
+    init_test_env();
+    let path = PathBuf::from("target").join(format!("answers-{}.sqlite", uuid::Uuid::new_v4()));
+    let options = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(&path)
+        .create_if_missing(true)
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+        .busy_timeout(std::time::Duration::from_secs(5));
+    let pool = SqlitePoolOptions::new()
+        .max_connections(4)
+        .connect_with(options)
+        .await
+        .unwrap();
+    run_migrations(&pool).await.unwrap();
+    (pool, path)
+}
+
+pub async fn close_file_test_pool(pool: SqlitePool, path: PathBuf) {
+    pool.close().await;
+    drop(pool);
+    // SQLiteワーカースレッドによる物理接続の解放を待つ（Windows）。
+    for _ in 0..100 {
+        match std::fs::remove_file(&path) {
+            Ok(()) => return,
+            Err(error)
+                if error.kind() == std::io::ErrorKind::PermissionDenied
+                    || error.raw_os_error() == Some(32) =>
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            },
+            Err(error) => panic!("temporary database cleanup failed: {error}"),
+        }
+    }
+    panic!("temporary database remained locked");
+}
+
 pub async fn create_test_user(pool: &SqlitePool, username: &str) -> String {
     let hashed_password =
         hash("password123", DEFAULT_COST).expect("test password should hash successfully");

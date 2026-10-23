@@ -45,6 +45,10 @@ pub struct MarkerInfoUpdateJsonData {
     pub name: String,
     pub detail: String,
     pub layer_id: String,
+    #[serde(default)]
+    pub free_text: Option<String>,
+    #[serde(default)]
+    pub body_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

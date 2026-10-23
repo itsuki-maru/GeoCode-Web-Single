@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="ja">
+    <head>
+        <meta name="geocoder-csis" content="{{ geocoderCsis | default(value=false) }}" />
+        <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+
+        <script>
+            L_NO_TOUCH = false;
+            L_DISABLE_3D = false;
+        </script>
+
+        <style>
+            html,
+            body {
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                overflow: hidden;
+                padding: 0;
+            }
+        </style>
+        <style>
+            #map {
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                right: 0;
+                left: 0;
+            }
+        </style>
+        <script src="/assets/marked.min.js"></script>
+        <script src="/assets/leaflet.js"></script>
+        <script src="/assets/xss.min.js"></script>
+        <link rel="stylesheet" href="/assets/leaflet.css" />
+        <link rel="stylesheet" href="/assets/map-compat.css" />
+        <link rel="stylesheet" href="/assets/map-controls.css" />
+        <!-- Leaflet.markercluster の読み込み -->
+        <script src="/assets/leaflet.markercluster.js"></script>
+        <link rel="stylesheet" href="/assets/MarkerCluster.css" />
+        <link rel="stylesheet" href="/assets/MarkerCluster.Default.css" />
+        <link rel="stylesheet" href="/assets/github.css" />
+        <meta
+            name="viewport"
+            content="width=device-width,
+                initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+        />
+        <style>
+            #map_f7ef1184c39fa762ecccbe60c42f012d {
+                position: relative;
+                width: 100%;
+                height: 100%;
+                left: 0%;
+                top: 0%;
+            }
+
+            .leaflet-container {
+                font-size: 1rem;
+            }
+
+            body.map-mobile-controls #map .temporary-map-hideable-ui.is-hidden {
+                display: none;
+            }
+
+            .layer-object-load-state {
+                display: block;
+                max-width: 240px;
+                white-space: normal;
+                color: #475569;
+                font-size: 11px;
+                font-weight: normal;
+            }
+
+            .layer-object-load-state[data-state="error"] {
+                color: #b91c1c;
+            }
+
+            /* 下の操作ボタンを確保し、レイヤ一覧だけを残りの高さに収める。 */
+            #map .leaflet-top.leaflet-right {
+                display: flex;
+                flex-direction: column;
+                align-items: flex-end;
+                max-height: calc(100% - 40px);
+            }
+
+            #map .leaflet-top.leaflet-right > .leaflet-control {
+                flex-shrink: 0;
+            }
+
+            #map .leaflet-top.leaflet-right > .leaflet-control-layers-expanded {
+                display: flex;
+                flex-direction: column;
+                flex-shrink: 1;
+                min-height: 0;
+            }
+
+            #map .leaflet-top.leaflet-right > .leaflet-control-layers-expanded > .leaflet-control-layers-list {
+                min-height: 0;
+                overflow-y: auto;
+                overscroll-behavior: contain;
+            }
+
+            .leaflet-popup {
+                min-width: 500px;
+                max-width: 750px;
+            }
+            /* マークダウンコンテンツ（detail）のスタイル */
+            .md-detail-contents {
+                width: 476px;
+                min-width: 450px;
+                max-width: 700px;
+                max-height: 500px;
+                overflow-y: auto;
+                margin-top: 8%;
+                padding-top: 3%;
+                padding-right: 6%;
+            }
+
+            .md-detail-contents video {
+                width: 100%;
+                max-width: 100%;
+                height: auto;
+            }
+
+            /* カスタムツールチップ */
+            .custom-tooltip {
+                font-size: 14px;
+                color: black;
+                background-color: white;
+            }
+
+            /* モード説明部分のスタイル */
+            #map .leaflet-bottom.leaflet-left .nowcast-status {
+                margin-bottom: calc(5vh + 40px);
+            }
+
+            .mode-desc-container {
+                z-index: 1000;
+                position: absolute;
+                bottom: 10px;
+                left: 10px;
+                background-color: white;
+                padding: 5px;
+                border-radius: 5px;
+            }
+
+            .leaflet-overlay-pane .leaflet-interactive {
+                cursor: default;
+            }
+
+            .shape-name-tooltip {
+                background: transparent;
+                border: none;
+                border-radius: 0;
+                box-shadow: none;
+                color: #7f1d1d;
+                cursor: pointer;
+                font-size: 12px;
+                font-weight: bold;
+                pointer-events: auto;
+                padding: 0;
+            }
+
+            .shape-name-tooltip::before {
+                display: none;
+            }
+
+            .shape-name-label {
+                display: inline-block;
+                min-width: 1.5em;
+                min-height: 1.2em;
+            }
+
+            .shape-name-label.is-empty {
+                min-width: 1.5em;
+            }
+
+            .shape-name-editor-popup.leaflet-popup {
+                margin-bottom: 20px;
+                min-width: 0 !important;
+                max-width: 240px !important;
+            }
+
+            .shape-name-editor-popup .leaflet-popup-content-wrapper {
+                border-radius: 10px;
+                min-width: 0;
+                padding: 0;
+            }
+
+            .shape-name-editor-popup .leaflet-popup-content {
+                margin: 0;
+                width: auto !important;
+            }
+
+            .shape-name-editor {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                min-width: 0;
+                width: 210px;
+                padding: 10px;
+            }
+
+            .shape-name-editor-title {
+                font-size: 12px;
+                font-weight: bold;
+            }
+
+            .shape-name-editor-input {
+                border: 1px solid #b7c3d0;
+                border-radius: 6px;
+                font-size: 13px;
+                padding: 6px 8px;
+            }
+
+            .shape-name-editor-actions {
+                display: flex;
+                gap: 6px;
+                justify-content: flex-end;
+            }
+
+            .shape-name-editor-button {
+                border: 0.5px solid #9aa7b6;
+                background: white;
+                border-radius: 6px;
+                font-size: 12px;
+                padding: 4px 10px;
+            }
+
+            .shape-name-editor-button:hover {
+                background: #f4f6f8;
+            }
+
+            .shape-measure-marker {
+                background: transparent;
+                border: none;
+            }
+
+            #measurement-selection-toggle-btn:not(.is-hidden) {
+                display: block;
+                width: 100%;
+            }
+
+            #map .measurement-selection-summary {
+                margin-bottom: calc(5vh + 40px);
+                padding: 10px 14px;
+                background: rgba(255, 255, 255, 0.96);
+                color: #172b4d;
+                border: 2px solid rgba(0, 0, 0, 0.2);
+                border-radius: 6px;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+                font-size: 14px;
+                line-height: 1.6;
+                max-width: calc(100vw - 40px);
+            }
+
+            .measurement-selection-summary[hidden] {
+                display: none;
+            }
+            .measurement-selection-summary > :first-child {
+                font-weight: bold;
+            }
+
+            .shape-measure-label {
+                background: rgba(255, 255, 255, 0.96);
+                border: 1px solid #d0d7de;
+                border-radius: 999px;
+                box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+                color: #0f172a;
+                display: inline-block;
+                font-size: 11px;
+                font-weight: 600;
+                line-height: 1.2;
+                padding: 2px 7px;
+                pointer-events: none;
+                transform: translate(-50%, -50%);
+                white-space: nowrap;
+            }
+
+            .shape-measure-label--summary {
+                border-radius: 10px;
+                box-shadow: 0 3px 10px rgba(15, 23, 42, 0.14);
+                font-size: 12px;
+                padding: 5px 8px;
+                transform: translate(-50%, 8px);
+            }
+
+            .shape-measure-label--summary-polyline {
+                transform: translate(-50%, 26px);
+            }
+
+            .shape-measure-label--summary-circle {
+                transform: translate(-50%, 36px);
+            }
+
+            .shape-measure-label--summary-rectangle {
+                transform: translate(-50%, 24px);
+            }
+
+            .shape-measure-label-line + .shape-measure-label-line {
+                margin-top: 2px;
+            }
+
+            .search-zone {
+                background-color: white; /* 背景色をWhiteにする */
+                padding: 5px 5px 5px 5px;
+            }
+            .custom-search {
+                width: 100%;
+            }
+            .search-input {
+                font-size: 14px;
+                text-align: center;
+                margin-bottom: 10px;
+                border: 0.5px solid;
+                border-radius: 5px;
+            }
+            .marker-search-input {
+                margin-bottom: 0;
+            }
+            #code-search-btn {
+                border: 0.5px solid;
+                font-size: 15px;
+                border-radius: 5px;
+            }
+
+            summary {
+                list-style: none; /* デフォルトの矢印を非表示 */
+                cursor: pointer;
+                font-size: 18px;
+            }
+
+            summary::-webkit-details-marker {
+                display: none; /* ChromeなどWebkit系ブラウザ対応 */
+            }
+
+            details > summary {
+                position: relative;
+                padding-left: 1.5em;
+            }
+
+            details > summary::before {
+                content: "▶"; /* 未展開時のアイコン */
+                position: absolute;
+                left: 0;
+                top: 0;
+                transform: rotate(0deg);
+                transition: transform 0.2s ease;
+            }
+
+            details[open] > summary::before {
+                transform: rotate(90deg); /* 展開時に90度矢印を下に変更 */
+            }
+
+            .box.note {
+                border-left: 4px solid #4caf50;
+                background: #e8f5e9;
+                padding: 0.5em;
+                margin: 1em 0;
+            }
+
+            .box.warning {
+                border-left: 4px solid #f44336;
+                background: #ffebee;
+                padding: 0.5em;
+                margin: 1em 0;
+            }
+        </style>
+        <title>GeoCode-Web</title>
+        <style>
+            @media (max-width: 700px) {
+                .answer-preview .leaflet-popup { min-width: 0; max-width: calc(100vw - 40px); }
+                .answer-preview .leaflet-popup-content { width: auto !important; max-width: calc(100vw - 80px); }
+                .answer-preview .md-detail-contents { width: auto; min-width: 0; max-width: 100%; box-sizing: border-box; max-height: 45dvh; overflow-wrap: anywhere; }
+            }
+            .answer-preview.map-mobile-controls .leaflet-popup {
+                width: 400px;
+                min-width: 0;
+                max-width: 400px;
+            }
+            .answer-preview.map-mobile-controls .leaflet-popup-content {
+                width: auto !important;
+                max-width: none;
+            }
+        </style>
+        <style>
+            .answer-preview .answer-analysis-value { border-left: 4px solid #555; padding: 8px; background: #f5f5f5; overflow-wrap: anywhere; }
+        </style>
+        <link rel="stylesheet" href="/assets/popup-content.css" />
+    </head>
+    <body class="answer-preview">
+        <div class="folium-map" id="map"></div>
+    </body>
+    <script>
+        window.__GEOCODE_MAP_BOOTSTRAP__ = {
+            page: "form-answer-map",
+            popupBodies: {{ popupBodies | json_encode_for_html | safe }},
+            answerPreview: {{ answerPreview | default(value=false) | json_encode_for_html | safe }},
+            isCluster: {{ is_cluster }},
+            initialView: {
+                latitude: {{ latitude }},
+                longitude: {{ longitude }},
+                zoom: {{ zoom }},
+            },
+            tileServers: {{ tileServers | json_encode_for_html | safe }},
+            tileOverlays: {{ tileOverlays | json_encode_for_html | safe }},
+            tileVisibilityAccountId: {{ tileVisibilityAccountId | json_encode_for_html | safe }},
+            layers: {{ layersFromAxum | json_encode_for_html | safe }},
+            markers: {{ markersFromAxum | json_encode_for_html | safe }},
+            shapes: {{ shapesFromAxum | json_encode_for_html | safe }},
+        };
+    </script>
+    <script type="module" src="/assets/template-form-answer-map.js"></script>
+</html>

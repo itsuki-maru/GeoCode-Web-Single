@@ -55,7 +55,14 @@ pub async fn sync(
         return Ok(());
     };
     let valid = sqlx::query_scalar::<_, String>(
-        "SELECT id FROM layer_model WHERE id IN (SELECT value FROM json_each($1)) AND user_id=$2 AND NOT is_master",
+        r#"
+        SELECT
+            id
+        FROM layer_model
+        WHERE id IN (SELECT value FROM json_each($1))
+            AND user_id=$2
+            AND NOT is_master
+        "#,
     )
     .bind(serde_json::json!(ids).to_string())
     .bind(admin_id)
@@ -66,20 +73,40 @@ pub async fn sync(
             "自分が所有する master 以外のレイヤを選択してください。".into(),
         ));
     }
-    sqlx::query("DELETE FROM live_map_layer WHERE map_id=$1")
-        .bind(map_id)
-        .execute(&mut **transaction)
-        .await?;
-    sqlx::query("UPDATE live_map SET layers_configured_by=$2 WHERE id=$1")
-        .bind(map_id)
-        .bind(admin_id)
-        .execute(&mut **transaction)
-        .await?;
-    sqlx::query("INSERT INTO live_map_layer(map_id, layer_id) SELECT $1, value FROM json_each($2)")
-        .bind(map_id)
-        .bind(serde_json::json!(ids).to_string())
-        .execute(&mut **transaction)
-        .await?;
+    sqlx::query(
+        r#"
+        DELETE FROM live_map_layer
+        WHERE map_id = $1
+        "#,
+    )
+    .bind(map_id)
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        r#"
+        UPDATE live_map
+        SET
+            layers_configured_by = $2
+        WHERE id = $1
+        "#,
+    )
+    .bind(map_id)
+    .bind(admin_id)
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO live_map_layer(map_id, layer_id)
+        SELECT
+            $1,
+            value
+        FROM json_each($2)
+        "#,
+    )
+    .bind(map_id)
+    .bind(serde_json::json!(ids).to_string())
+    .execute(&mut **transaction)
+    .await?;
     Ok(())
 }
 
@@ -112,7 +139,10 @@ pub async fn published(pool: &SqlitePool, public_id: &str) -> Result<PublishedLa
         WHERE m.public_id=$1 AND m.revoked_at IS NULL AND julianday(m.expires_at)>julianday('now')
         ORDER BY l.layer_name, l.id
         "#,
-    ).bind(public_id).fetch_all(&mut *tx).await?;
+    )
+    .bind(public_id)
+    .fetch_all(&mut *tx)
+    .await?;
     let ids: Vec<String> = layers.iter().map(|l| l.id.clone()).collect();
     let markers = sqlx::query_as::<_, MarkerObjectFromRow>(
         r#"

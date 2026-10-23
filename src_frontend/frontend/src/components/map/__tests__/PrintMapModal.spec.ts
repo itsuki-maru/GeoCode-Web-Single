@@ -1,10 +1,14 @@
-import { mount } from "@vue/test-utils";
+import { mount, flushPromises } from "@vue/test-utils";
+import apiClient from "@/axiosClient";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import PrintMapModal from "../PrintMapModal.vue";
 
 vi.mock("@/router/urls", () => ({ mapAnatherLayerUrl: "http://localhost:3000/map-another" }));
+vi.mock("@/axiosClient", () => ({ default: { get: vi.fn() } }));
 let wrapper: ReturnType<typeof mount> | undefined;
 beforeEach(() => {
+  vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(() => {});
+  vi.mocked(apiClient.get).mockResolvedValue({ data: {} });
   vi.useFakeTimers();
   HTMLDialogElement.prototype.showModal = vi.fn();
   HTMLDialogElement.prototype.close = vi.fn();
@@ -16,6 +20,59 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("印刷モーダルの地図連携", () => {
+  it("回答地図は専用POSTを使用し、認証更新・要求ID・再試行を維持する", async () => {
+    const snapshot = { state: { view: { zoom: 12 } }, bootstrap: { markers: { a: { id: "a" } } } };
+    wrapper = mount(PrintMapModal, {
+      props: {
+        layerIds: null,
+        answerPrint: { action: "http://localhost:3000/form-answers/map-print", snapshot },
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    const frame = wrapper.get("iframe").element as HTMLIFrameElement;
+    expect(frame.getAttribute("src")).toBeNull();
+    const form = wrapper.get("form");
+    const session = () => (form.get('input[name="request_id"]').element as HTMLInputElement).value;
+    const oldSession = session();
+    const native = new URL(form.attributes("action")!);
+    const send = (data: any) =>
+      window.dispatchEvent(
+        new MessageEvent("message", { origin: native.origin, source: frame.contentWindow, data }),
+      );
+    send({
+      type: "native-form-auth-error",
+      requestId: native.searchParams.get("native_request_id"),
+      error: "token_expired",
+    });
+    await flushPromises();
+    expect(apiClient.get).toHaveBeenCalled();
+    expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(2);
+    const post = vi.spyOn(frame.contentWindow!, "postMessage");
+    send({ type: "printReady", requestId: "old" });
+    expect(post).not.toHaveBeenCalled();
+    send({ type: "printReady", requestId: oldSession });
+    expect(post).toHaveBeenCalledWith(
+      { type: "printInitialize", requestId: oldSession, snapshot },
+      native.origin,
+    );
+    send({ type: "printError", requestId: oldSession });
+    await wrapper.vm.$nextTick();
+    await wrapper.get(".print-loading button").trigger("click");
+    await flushPromises();
+    expect(session()).not.toBe(oldSession);
+    expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(3);
+    const fresh = wrapper.get("iframe").element as HTMLIFrameElement;
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        origin: native.origin,
+        source: fresh.contentWindow,
+        data: { type: "printInitialized", requestId: oldSession },
+      }),
+    );
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".print-loading").exists()).toBe(true);
+  });
   it("ヘッダーからの印刷キーは準備完了後だけ転送し、長押しを抑止する", () => {
     wrapper = mount(PrintMapModal, { props: { layerIds: null }, attachTo: document.body });
     const frame = wrapper.get("iframe").element as HTMLIFrameElement;

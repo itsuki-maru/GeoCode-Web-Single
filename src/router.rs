@@ -1,3 +1,9 @@
+use crate::handler::answer_map::answer_map_handler;
+use crate::handler::answer_map_filter::filter_handler;
+use crate::handler::form_answers::{
+    answer_options_handler, check_csv_handler, download_answers_handler, export_answers_handler,
+    search_answers_handler,
+};
 use crate::handler::tile_overlays;
 use axum::{
     Router,
@@ -53,9 +59,11 @@ use crate::handler::live_map::{
 };
 use crate::handler::map::{map_another_get_handler, map_get_handler, query_map_objects_handler};
 use crate::handler::marker_forms::{
-    get_marker_form_config_handler, get_shape_form_config_handler, public_marker_form_get_handler,
-    public_shape_form_get_handler, rotate_marker_form_url_handler, rotate_shape_form_url_handler,
-    submit_marker_form_handler, submit_shape_form_handler, update_marker_form_config_handler,
+    create_common_form_handler, delete_common_form_handler, get_common_form_handler,
+    get_marker_form_config_handler, get_shape_form_config_handler, list_common_forms_handler,
+    public_marker_form_get_handler, public_shape_form_get_handler, rotate_marker_form_url_handler,
+    rotate_shape_form_url_handler, submit_marker_form_handler, submit_shape_form_handler,
+    update_common_form_handler, update_marker_form_config_handler,
     update_shape_form_config_handler,
 };
 use crate::handler::marker_icons::{
@@ -71,7 +79,8 @@ use crate::handler::onetime_url::{
     temporary_map_get_handler,
 };
 use crate::handler::shapes::{
-    create_shape_handler, delete_shape_handler, shapes_get_handler, update_shape_handler,
+    create_shape_handler, delete_shape_handler, shapes_get_handler, update_shape_geometry_handler,
+    update_shape_handler,
 };
 use crate::handler::tiles::proxy_tile_handler;
 use crate::handler::totp::{
@@ -121,6 +130,24 @@ pub fn build_router(
 
     // アクセストークンによる認可を要する
     let mut secured_routes = Router::new()
+        .route(
+            "/shape/{shape_id}/geometry",
+            put(update_shape_geometry_handler),
+        )
+        .route(
+            "/shape/{id}/form/body",
+            get(crate::handler::marker_forms::answer_edit::shape_body_handler),
+        )
+        .route(
+            "/marker/{id}/form/body",
+            get(crate::handler::marker_forms::answer_edit::marker_body_handler),
+        )
+        .route(
+            "/form-answers/{kind}/{answer_id}",
+            get(crate::handler::marker_forms::answer_edit::get_handler)
+                .put(crate::handler::marker_forms::answer_edit::update_handler)
+                .layer(DefaultBodyLimit::max(6 * 1024 * 1024)),
+        )
         .route("/tile-overlays", get(tile_overlays::user_list))
         .route("/tile-overlays/{id}", put(tile_overlays::user_select))
         .route(
@@ -150,8 +177,35 @@ pub fn build_router(
             delete(delete_marker_icon_handler),
         )
         .route("/layer/read/all", get(get_all_layers_handler))
+        .route(
+            "/layer/{layer_id}/input-policy",
+            put(crate::handler::layer_input_policy::update_handler),
+        )
         .route("/layer/delete/{layer_id}", delete(delete_layer_handler))
         .route("/layer/update/{layer_id}", put(update_layername_handler))
+        .route(
+            "/layer/{layer_id}/form",
+            get(crate::handler::layer_forms::get_handler),
+        )
+        .route(
+            "/common-forms",
+            get(list_common_forms_handler).post(create_common_form_handler),
+        )
+        .route(
+            "/common-forms/{id}",
+            get(get_common_form_handler)
+                .put(update_common_form_handler)
+                .delete(delete_common_form_handler),
+        )
+        .route("/form-answers/options", post(answer_options_handler))
+        .route("/form-answers/search", post(search_answers_handler))
+        .route("/form-answers/map-filter", post(filter_handler))
+        .route(
+            "/form-answers/map-csv-check",
+            post(crate::handler::answer_map_csv::check_handler),
+        )
+        .route("/form-answers/csv", post(export_answers_handler))
+        .route("/form-answers/csv-check", post(check_csv_handler))
         .route("/marker", post(create_marker_handler))
         .route("/marker/read/all", get(marker_get_handler))
         .route("/marker/delete/{marker_id}", delete(delete_marker_handler))
@@ -170,6 +224,24 @@ pub fn build_router(
         .route(
             "/marker/{marker_id}/form/rotate-url",
             post(rotate_marker_form_url_handler),
+        )
+        .route(
+            "/marker/{marker_id}/form/input",
+            get(crate::handler::marker_forms::get_marker_input_handler),
+        )
+        .route(
+            "/marker/{marker_id}/form/submissions",
+            post(crate::handler::marker_forms::submit_marker_input_handler)
+                .layer(DefaultBodyLimit::max(6 * 1024 * 1024)),
+        )
+        .route(
+            "/shape/{shape_id}/form/input",
+            get(crate::handler::marker_forms::get_shape_input_handler),
+        )
+        .route(
+            "/shape/{shape_id}/form/submissions",
+            post(crate::handler::marker_forms::submit_shape_input_handler)
+                .layer(DefaultBodyLimit::max(6 * 1024 * 1024)),
         )
         .route("/marker/read/query", get(query_marker_handler))
         .route("/map-objects/read/query", get(query_map_objects_handler))
@@ -279,17 +351,36 @@ pub fn build_router(
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .layer(CookieValidator);
 
+    let native_form_routes = Router::new()
+        .route(
+            "/form-answers/map-csv-download",
+            post(crate::handler::answer_map_csv::download_handler),
+        )
+        .route("/form-answers/map", post(answer_map_handler))
+        .route(
+            "/form-answers/map-print",
+            post(crate::handler::answer_map::answer_map_print_handler),
+        )
+        .route("/form-answers/download", post(download_answers_handler))
+        .layer(DefaultBodyLimit::max(1024 * 1024))
+        .layer(CookieValidator)
+        .layer(axum::middleware::from_fn(
+            crate::middleware::native_form_auth::notify_auth_error,
+        ));
+
     let image_upload_route = Router::new()
         .route("/images/upload", post(upload_image_handler))
         .layer(DefaultBodyLimit::max(105 * 1024 * 1024))
         .layer(CookieValidator);
+
     let marker_icon_upload_route = Router::new()
         .route("/marker-icons/upload", post(upload_marker_icon_handler))
         .layer(DefaultBodyLimit::max(6 * 1024 * 1024))
         .layer(CookieValidator);
+
     let import_route = Router::new()
         .route("/file/import", post(import_json_handler))
-        .layer(DefaultBodyLimit::max(6 * 1024 * 1024))
+        .layer(DefaultBodyLimit::max(21 * 1024 * 1024))
         .layer(CookieValidator);
 
     // アクセストークン不要
@@ -370,6 +461,7 @@ pub fn build_router(
     // 最終的なAPIルート
     Router::new()
         .merge(secured_routes)
+        .merge(native_form_routes)
         .merge(not_secured_routes)
         .merge(public_form_routes)
         .merge(image_upload_route)

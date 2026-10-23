@@ -213,6 +213,7 @@ async fn shape_form_appends_markdown_without_changing_geometry() {
         Extension(pool.clone()),
         Path(shape_id.clone()),
         Json(MarkerFormConfigUpdate {
+            source_form: None,
             enabled: true,
             form_title: "経路報告".into(),
             form_description: String::new(),
@@ -299,6 +300,7 @@ async fn owner_can_enable_form_and_public_user_can_only_append() {
     assert!(initial.public_path.is_none());
 
     let config = MarkerFormConfigUpdate {
+        source_form: None,
         enabled: true,
         form_title: "現地報告".into(),
         form_description: "状況を入力してください".into(),
@@ -580,4 +582,467 @@ async fn owner_can_enable_form_and_public_user_can_only_append() {
 
     let _ = std::fs::remove_file(&image_path);
     let _ = std::fs::remove_file(&thumb_path);
+}
+
+#[tokio::test]
+async fn common_forms_are_owned_copied_and_preserve_submission_definitions() {
+    let pool = common::test_pool().await;
+    use geocode_web_single::handler::marker_forms::*;
+    common::init_test_env();
+    let owner = common::create_test_user(&pool, "common-owner").await;
+    let other = common::create_test_user(&pool, "common-other").await;
+    let layer = common::master_layer_id(&pool, &owner).await;
+    let marker = insert_marker(&pool, &owner, &layer).await;
+    let shape = insert_shape(&pool, &owner, &layer).await;
+    let config = |source: Option<Value>, label: &str| -> MarkerFormConfigUpdate {
+        serde_json::from_value(json!({"source_form": source, "enabled": true,
+            "form_title": "観測", "form_description": "説明", "password_mode": "keep",
+            "form_schema": {"fields": [{"id":"amount", "label":label, "type":"number", "required":false, "choices":[]}]}})).unwrap()
+    };
+    let created = create_common_form_handler(
+        Extension(owner.clone()),
+        Extension(pool.clone()),
+        Json(CommonFormUpdate {
+            expected_managed_count: None,
+            expected_applied_count: None,
+            version: None,
+            config: config(None, "値"),
+        }),
+    )
+    .await
+    .unwrap()
+    .0;
+    let id = created.id;
+    assert_eq!(created.version, 1);
+    assert!(
+        list_common_forms_handler(Extension(other.clone()), Extension(pool.clone()))
+            .await
+            .unwrap()
+            .0
+            .is_empty()
+    );
+    assert!(
+        get_common_form_handler(
+            Extension(other.clone()),
+            Extension(pool.clone()),
+            Path(id.clone())
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        update_common_form_handler(
+            Extension(other.clone()),
+            Extension(pool.clone()),
+            Path(id.clone()),
+            Json(CommonFormUpdate {
+                expected_managed_count: None,
+                expected_applied_count: None,
+                version: Some(1),
+                config: config(None, "変更")
+            })
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        delete_common_form_handler(
+            Extension(other.clone()),
+            Extension(pool.clone()),
+            Path(id.clone())
+        )
+        .await
+        .is_err()
+    );
+    let source = Some(json!({"id":id,"version":1}));
+    assert!(
+        update_marker_form_config_handler(
+            Extension(other.clone()),
+            Extension(pool.clone()),
+            Path(marker.clone()),
+            Json(config(source.clone(), "値"))
+        )
+        .await
+        .is_err()
+    );
+    // A template owned by a different user cannot be attached to one's own object.
+    let other_layer = common::master_layer_id(&pool, &other).await;
+    let other_marker = insert_marker(&pool, &other, &other_layer).await;
+    assert!(
+        update_marker_form_config_handler(
+            Extension(other.clone()),
+            Extension(pool.clone()),
+            Path(other_marker.clone()),
+            Json(config(source.clone(), "値"))
+        )
+        .await
+        .is_err()
+    );
+    let marker_config = update_marker_form_config_handler(
+        Extension(owner.clone()),
+        Extension(pool.clone()),
+        Path(marker.clone()),
+        Json(config(source.clone(), "値")),
+    )
+    .await
+    .unwrap()
+    .0;
+    let shape_config = update_shape_form_config_handler(
+        Extension(owner.clone()),
+        Extension(pool.clone()),
+        Path(shape.clone()),
+        Json(config(source.clone(), "値")),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(marker_config.form_schema.fields[0].id, "amount");
+    assert_eq!(shape_config.form_schema.fields[0].id, "amount");
+    let marker_public: String = marker_config
+        .public_path
+        .as_ref()
+        .unwrap()
+        .trim_start_matches("/forms/")
+        .parse()
+        .unwrap();
+    let shape_public: String = shape_config
+        .public_path
+        .as_ref()
+        .unwrap()
+        .trim_start_matches("/shape-forms/")
+        .parse()
+        .unwrap();
+    let app = Router::new()
+        .route(
+            "/forms/{public_id}",
+            get(public_marker_form_get_handler).post(submit_marker_form_handler),
+        )
+        .route(
+            "/shape-forms/{public_id}",
+            get(public_shape_form_get_handler).post(submit_shape_form_handler),
+        )
+        .layer(Extension(build_tera_extension().unwrap()))
+        .layer(Extension(pool.clone()));
+    assert_eq!(
+        post_form(
+            &app,
+            &marker_public,
+            json!({"values":{"amount":"12.5"}}),
+            None
+        )
+        .await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        post_shape_form(&app, &shape_public, json!({"values":{"amount":"8"}})).await,
+        StatusCode::OK
+    );
+    let updated = update_common_form_handler(
+        Extension(owner.clone()),
+        Extension(pool.clone()),
+        Path(id.clone()),
+        Json(CommonFormUpdate {
+            expected_managed_count: None,
+            expected_applied_count: None,
+            version: Some(1),
+            config: config(None, "測定値"),
+        }),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(updated.version, 2);
+    assert_eq!(updated.form_schema.0.fields[0].id, "amount");
+    assert!(
+        update_common_form_handler(
+            Extension(owner.clone()),
+            Extension(pool.clone()),
+            Path(id.clone()),
+            Json(CommonFormUpdate {
+                expected_managed_count: None,
+                expected_applied_count: None,
+                version: Some(1),
+                config: config(None, "競合")
+            })
+        )
+        .await
+        .is_err()
+    );
+    let mut wrong_type = config(None, "型変更");
+    wrong_type.form_schema.fields[0].field_type = "text".into();
+    assert!(
+        update_common_form_handler(
+            Extension(owner.clone()),
+            Extension(pool.clone()),
+            Path(id.clone()),
+            Json(CommonFormUpdate {
+                expected_managed_count: None,
+                expected_applied_count: None,
+                version: Some(2),
+                config: wrong_type
+            })
+        )
+        .await
+        .is_err()
+    );
+    let target = get_marker_form_config_handler(
+        Extension(owner.clone()),
+        Extension(pool.clone()),
+        Path(marker.clone()),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(target.form_schema.fields[0].label, "値");
+    // A local edit keeps the field ID, URL, and source version; earlier answers keep their original definition.
+    let edited = update_marker_form_config_handler(
+        Extension(owner.clone()),
+        Extension(pool.clone()),
+        Path(marker.clone()),
+        Json(config(source.clone(), "対象独自の値")),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(edited.public_path, marker_config.public_path);
+    assert_eq!(edited.source_form, source);
+    assert_eq!(
+        post_form(
+            &app,
+            &marker_public,
+            json!({"values":{"amount":"20"}}),
+            None
+        )
+        .await,
+        StatusCode::OK
+    );
+    let snapshots: Vec<Value> = sqlx::query_scalar("SELECT form_snapshot FROM marker_form_submission_model WHERE marker_id = $1 ORDER BY create_at, id").bind(&marker).fetch_all(&pool).await.unwrap();
+    assert_eq!(snapshots[0]["form_schema"]["fields"][0]["label"], "値");
+    assert_eq!(
+        snapshots[1]["form_schema"]["fields"][0]["label"],
+        "対象独自の値"
+    );
+    for (table, column, target_id) in [
+        ("marker_form_submission_model", "marker_id", marker.clone()),
+        ("shape_form_submission_model", "shape_id", shape.clone()),
+    ] {
+        let rows: Vec<(Value, Value, Value)> = sqlx::query_as(&format!(
+            "SELECT source_form, form_snapshot, submitted_values FROM {table} WHERE {column} = $1"
+        ))
+        .bind(&target_id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        for (stored_source, snapshot, values) in rows {
+            assert_eq!(stored_source, source.clone().unwrap());
+            assert_eq!(snapshot["form_schema"]["fields"][0]["type"], "number");
+            assert!(values["amount"].is_number());
+            assert!(snapshot.get("password_hash").is_none());
+        }
+    }
+    assert_eq!(
+        delete_common_form_handler(
+            Extension(owner.clone()),
+            Extension(pool.clone()),
+            Path(id.clone())
+        )
+        .await
+        .unwrap(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(
+        list_common_forms_handler(Extension(owner.clone()), Extension(pool.clone()))
+            .await
+            .unwrap()
+            .0
+            .is_empty()
+    );
+    assert!(
+        get_common_form_handler(
+            Extension(owner.clone()),
+            Extension(pool.clone()),
+            Path(id.clone())
+        )
+        .await
+        .is_err()
+    );
+    let new_marker = insert_marker(&pool, &owner, &layer).await;
+    assert!(
+        update_marker_form_config_handler(
+            Extension(owner.clone()),
+            Extension(pool.clone()),
+            Path(new_marker.clone()),
+            Json(config(source.clone(), "値"))
+        )
+        .await
+        .is_err()
+    );
+    // Previously applied copies remain editable and accept answers after the template is deleted.
+    let _ = update_shape_form_config_handler(
+        Extension(owner.clone()),
+        Extension(pool.clone()),
+        Path(shape.clone()),
+        Json(config(source, "値")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        post_shape_form(&app, &shape_public, json!({"values":{"amount":"9"}})).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM marker_form_submission_model WHERE marker_id = $1"
+        )
+        .bind(&marker)
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn concurrent_definition_changes_reject_posts_and_versions_are_atomic() {
+    use geocode_web_single::handler::marker_forms::*;
+    let (pool, path) = common::file_test_pool().await;
+    let owner = common::create_test_user(&pool, "form-race").await;
+    let layer = common::master_layer_id(&pool, &owner).await;
+    let marker = insert_marker(&pool, &owner, &layer).await;
+    let shape = insert_shape(&pool, &owner, &layer).await;
+    let config = |label: &str| {
+        serde_json::from_value::<MarkerFormConfigUpdate>(json!({
+            "enabled":true,"form_title":"競合確認","form_schema":{"fields":[
+                {"id":"amount","label":label,"type":"number"}
+            ]}
+        }))
+        .unwrap()
+    };
+    let form = create_common_form_handler(
+        Extension(owner.clone()),
+        Extension(pool.clone()),
+        Json(CommonFormUpdate {
+            expected_managed_count: None,
+            expected_applied_count: None,
+            version: None,
+            config: config("値"),
+        }),
+    )
+    .await
+    .unwrap()
+    .0;
+    let (a, b) = tokio::join!(
+        update_common_form_handler(
+            Extension(owner.clone()),
+            Extension(pool.clone()),
+            Path(form.id.clone()),
+            Json(CommonFormUpdate {
+                expected_managed_count: None,
+                expected_applied_count: None,
+                version: Some(1),
+                config: config("変更A")
+            })
+        ),
+        update_common_form_handler(
+            Extension(owner.clone()),
+            Extension(pool.clone()),
+            Path(form.id.clone()),
+            Json(CommonFormUpdate {
+                expected_managed_count: None,
+                expected_applied_count: None,
+                version: Some(1),
+                config: config("変更B")
+            })
+        )
+    );
+    assert!(matches!(
+        (a, b),
+        (Ok(_), Err(geocode_web_single::error::AppError::Conflict))
+            | (Err(geocode_web_single::error::AppError::Conflict), Ok(_))
+    ));
+    let app = Router::new()
+        .route(
+            "/forms/{public_id}",
+            get(public_marker_form_get_handler).post(submit_marker_form_handler),
+        )
+        .route(
+            "/shape-forms/{public_id}",
+            get(public_shape_form_get_handler).post(submit_shape_form_handler),
+        )
+        .layer(Extension(pool.clone()));
+    for (kind, target) in [("marker", &marker), ("shape", &shape)] {
+        let public_path = if kind == "marker" {
+            update_marker_form_config_handler(
+                Extension(owner.clone()),
+                Extension(pool.clone()),
+                Path(target.clone()),
+                Json(config("変更前")),
+            )
+            .await
+            .unwrap()
+            .0
+            .public_path
+            .unwrap()
+        } else {
+            update_shape_form_config_handler(
+                Extension(owner.clone()),
+                Extension(pool.clone()),
+                Path(target.clone()),
+                Json(config("変更前")),
+            )
+            .await
+            .unwrap()
+            .0
+            .public_path
+            .unwrap()
+        };
+        let (content_type, body) = multipart_body(&json!({"values":{"amount":"12"}}), None);
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (resume_tx, resume_rx) = tokio::sync::oneshot::channel();
+        let stream = futures_util::stream::once(async move {
+            started_tx.send(()).unwrap();
+            resume_rx.await.unwrap();
+            Ok::<_, std::io::Error>(body)
+        });
+        let request = Request::builder()
+            .method("POST")
+            .uri(public_path)
+            .header(header::CONTENT_TYPE, content_type)
+            .body(Body::from_stream(stream))
+            .unwrap();
+        let task = tokio::spawn(app.clone().oneshot(request));
+        tokio::time::timeout(std::time::Duration::from_secs(5), started_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        if kind == "marker" {
+            let _ = update_marker_form_config_handler(
+                Extension(owner.clone()),
+                Extension(pool.clone()),
+                Path(target.clone()),
+                Json(config("変更後")),
+            )
+            .await
+            .unwrap();
+        } else {
+            let _ = update_shape_form_config_handler(
+                Extension(owner.clone()),
+                Extension(pool.clone()),
+                Path(target.clone()),
+                Json(config("変更後")),
+            )
+            .await
+            .unwrap();
+        }
+        resume_tx.send(()).unwrap();
+        assert_eq!(task.await.unwrap().unwrap().status(), StatusCode::CONFLICT);
+        let count: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM {kind}_form_submission_model"
+        ))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 0);
+    }
+    common::close_file_test_pool(pool, path).await;
 }

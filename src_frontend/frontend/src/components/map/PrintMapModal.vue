@@ -1,16 +1,23 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from "vue";
+import { onMounted, onBeforeUnmount, ref, nextTick } from "vue";
 import { mapAnatherLayerUrl } from "@/router/urls";
+import { submitAuthenticatedForm } from "@/utils/authenticated-form";
 
-const props = defineProps<{ layerIds: string[] | null }>();
+const props = defineProps<{
+  layerIds: string[] | null;
+  answerPrint?: { action: string; snapshot: Record<string, unknown> };
+}>();
 const emit = defineEmits<{ close: [] }>();
 const dialog = ref<HTMLDialogElement | null>(null);
 const frame = ref<HTMLIFrameElement | null>(null);
 const error = ref("");
 const initialized = ref(false);
 const frameKey = ref(0);
-const printUrl = `${mapAnatherLayerUrl}?print=1`;
+const nativeForm = ref<HTMLFormElement | null>(null);
+const frameName = `answer-print-${Math.random().toString(36).slice(2)}`;
+const printUrl = props.answerPrint?.action || `${mapAnatherLayerUrl}?print=1`;
 const printOrigin = new URL(printUrl, window.location.href).origin;
+const windowOrigin = window.location.origin;
 let state: Record<string, unknown> | null = null;
 let ready = false;
 let requestId = "";
@@ -18,16 +25,51 @@ let timer: number | undefined;
 let sourceWindow: Window | null = null;
 let sourceOrigin = "";
 let previousFocus: HTMLElement | null = null;
+let disposeNative: (() => void) | undefined;
+const sessionId = ref("");
 
 const fail = (message: string) => {
   window.clearTimeout(timer);
   error.value = message;
+  disposeNative?.();
 };
 const sendState = () => {
   if (!ready || !state || error.value) return;
-  frame.value?.contentWindow?.postMessage({ type: "printInitialize", state }, printOrigin);
+  try {
+    frame.value?.contentWindow?.postMessage(
+      props.answerPrint
+        ? {
+            type: "printInitialize",
+            requestId: sessionId.value,
+            snapshot: props.answerPrint.snapshot,
+          }
+        : { type: "printInitialize", state },
+      printOrigin,
+    );
+  } catch {
+    fail("印刷データを転送できませんでした。対象を絞って再試行してください。");
+  }
 };
 const requestState = () => {
+  if (props.answerPrint) {
+    state = props.answerPrint.snapshot;
+    sessionId.value = `print-${Date.now()}-${frameKey.value}`;
+    const attempt = sessionId.value;
+    window.clearTimeout(timer);
+    timer = window.setTimeout(
+      () => fail("印刷プレビューを読み込めませんでした。再試行してください。"),
+      60000,
+    );
+    void nextTick().then(() => {
+      if (!nativeForm.value || !frame.value || sessionId.value !== attempt) return;
+      try {
+        disposeNative = submitAuthenticatedForm(nativeForm.value, frame.value, fail);
+      } catch {
+        fail("印刷画面を取得できませんでした。再試行してください。");
+      }
+    });
+    return;
+  }
   const source = document.getElementById("map-iframe") as HTMLIFrameElement | null;
   if (!source?.contentWindow) {
     fail("現在の地図を取得できません。地図の読み込み後に開き直してください。");
@@ -56,10 +98,12 @@ const receive = (event: MessageEvent) => {
     return;
   }
   if (event.source !== frame.value?.contentWindow || event.origin !== printOrigin) return;
+  if (props.answerPrint && event.data.requestId !== sessionId.value) return;
   if (event.data.type === "printReady") {
     ready = true;
     sendState();
   } else if (event.data.type === "printInitialized") {
+    disposeNative?.();
     window.clearTimeout(timer);
     initialized.value = true;
     frame.value?.focus();
@@ -73,6 +117,7 @@ const retry = () => {
   state = null;
   ready = false;
   frameKey.value++;
+  disposeNative?.();
   requestState();
 };
 const handlePrintKey = (event: KeyboardEvent) => {
@@ -86,7 +131,12 @@ const handlePrintKey = (event: KeyboardEvent) => {
     return;
   event.preventDefault();
   if (event.repeat || !initialized.value || error.value) return;
-  frame.value?.contentWindow?.postMessage({ type: "printExecute" }, printOrigin);
+  frame.value?.contentWindow?.postMessage(
+    props.answerPrint
+      ? { type: "printExecute", requestId: sessionId.value }
+      : { type: "printExecute" },
+    printOrigin,
+  );
 };
 onMounted(() => {
   previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -96,6 +146,7 @@ onMounted(() => {
   requestState();
 });
 onBeforeUnmount(() => {
+  disposeNative?.();
   window.clearTimeout(timer);
   window.removeEventListener("message", receive);
   window.removeEventListener("keydown", handlePrintKey);
@@ -119,11 +170,23 @@ onBeforeUnmount(() => {
       <iframe
         :key="frameKey"
         ref="frame"
-        :src="printUrl"
+        :src="answerPrint ? undefined : printUrl"
+        :name="frameName"
         title="地図の印刷プレビュー"
         allow="web-share"
         :class="{ 'is-loading': !initialized || error }"
       ></iframe>
+      <form
+        v-if="answerPrint"
+        ref="nativeForm"
+        :action="printUrl"
+        :target="frameName"
+        method="post"
+        hidden
+      >
+        <input name="parent_origin" type="hidden" :value="windowOrigin" />
+        <input name="request_id" type="hidden" :value="sessionId" />
+      </form>
       <div v-if="!initialized || error" class="print-loading" role="status">
         <p>{{ error || "印刷プレビューを準備しています…" }}</p>
         <button v-if="error" type="button" @click="retry">再試行</button>

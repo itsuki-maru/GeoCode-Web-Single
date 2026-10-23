@@ -127,33 +127,61 @@ async function persistShapeGeometryEdit(layer, snapshot, options = {}) {
   closeShapeVertexDeletePopup();
   setShapeGeometryHandlesEnabled(false);
   try {
-    const nextGeoJson = buildShapeGeoJson(
-      layer,
-      nextShapeType,
-      layer.shapeStyle || getDefaultShapeStyle(nextShapeType),
-    );
-    await persistShapeMetadata(
-      layer,
-      normalizeShapeName(layer.shapeName || ""),
-      targetLayerId,
-      nextGeoJson,
-      options.shapeType || null,
-    );
-    applyShapeRecord(layer, {
-      id: layer.shapeId,
-      layer_id: targetLayerId,
-      shape_type: nextShapeType,
-      name: layer.shapeName || "",
-      geojson: nextGeoJson,
-    });
-    updateShapeNameLabel(layer, layer.shapeName || "");
+    let saved;
+    if (layer.shapeType === "circle") {
+      const nextGeoJson = buildShapeGeoJson(
+        layer,
+        nextShapeType,
+        layer.shapeStyle || getDefaultShapeStyle(nextShapeType),
+      );
+      await persistShapeMetadata(
+        layer,
+        normalizeShapeName(layer.shapeName || ""),
+        targetLayerId,
+        nextGeoJson,
+        options.shapeType || null,
+      );
+      saved = {
+        id: layer.shapeId,
+        layer_id: targetLayerId,
+        shape_type: nextShapeType,
+        name: layer.shapeName || "",
+        geojson: nextGeoJson,
+      };
+    } else {
+      const response = await fetchWithAuth(`/shape/${layer.shapeId}/geometry`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          base_shape_type: layer.shapeType,
+          base_geometry: layer.options?.shapeRecord?.geojson?.geometry,
+          shape_type: nextShapeType,
+          coordinates: layer.toGeoJSON().geometry.coordinates,
+        }),
+      });
+      if (!response.ok) {
+        const error = new Error("shape geometry update failed");
+        error.status = response.status;
+        throw error;
+      }
+      saved = await response.json();
+      if (saved?.id !== layer.shapeId || !saved?.geojson || saved.shape_type !== nextShapeType)
+        throw new Error("invalid shape response");
+    }
+    applyShapeRecord(layer, saved);
+    updateShapeNameLabel(layer, saved.name || "");
     refreshShapeMeasurementMarkers(layer);
     setDrawStatus(options.successMessage || "図形編集: 位置を保存しました。");
   } catch (_error) {
     restoreShapeGeometry(layer, snapshot);
     updateShapeNameLabel(layer, layer.shapeName || "");
     refreshShapeMeasurementMarkers(layer);
-    setDrawStatus("図形編集: 保存に失敗したため元の形状へ戻しました。", true);
+    setDrawStatus(
+      _error?.status === 409
+        ? "図形編集: 他の操作で形状が変更されています。地図を再読み込みしてください。"
+        : "図形編集: 保存に失敗したため元の形状へ戻しました。",
+      true,
+    );
   } finally {
     isShapeGeometrySaving = false;
     if (
@@ -412,6 +440,10 @@ function rebuildShapeGeometryHandles(layer) {
 
 // 移動モードでクリックされた図形を編集対象として選択する
 function selectShapeForGeometryEdit(layer) {
+  if (layer?.shapeType === "circle" && isShapeInputRestricted(layer)) {
+    setDrawStatus("入力が制限されています。名前と所属レイヤのみ変更できます。", true);
+    return false;
+  }
   if (
     currentMapMode !== "edit" ||
     activeDrawMode ||
@@ -479,6 +511,10 @@ function getShapeDragEventLatLng(event) {
 
 // 円本体のドラッグを開始する
 function startCircleShapeDrag(layer, leafletEvent) {
+  if (isShapeInputRestricted(layer)) {
+    setDrawStatus("入力が制限されています。名前と所属レイヤのみ変更できます。", true);
+    return false;
+  }
   if (
     layer?.shapeType !== "circle" ||
     currentMapMode !== "edit" ||

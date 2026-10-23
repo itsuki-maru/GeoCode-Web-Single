@@ -75,11 +75,15 @@ pub async fn selected_tiles(
 ) -> Result<Vec<TileOverlay>, AppError> {
     Ok(sqlx::query_as::<_, TileOverlay>(
         r#"
-        SELECT t.* FROM tile_overlay_model t
+        SELECT
+            t.*
+        FROM tile_overlay_model t
         JOIN user_tile_overlay_model u
-        ON u.tile_overlay_id = t.id
-        WHERE u.user_id = $1 AND t.enabled
-        ORDER BY t.sort_order, t.name, t.id"#,
+            ON u.tile_overlay_id = t.id
+        WHERE u.user_id = $1
+            AND t.enabled
+        ORDER BY t.sort_order, t.name, t.id
+        "#,
     )
     .bind(user_id)
     .fetch_all(pool)
@@ -93,7 +97,12 @@ pub async fn admin_list(
     require_superuser(&user, &pool).await?;
     Ok(Json(
         sqlx::query_as::<_, TileOverlay>(
-            "SELECT * FROM tile_overlay_model ORDER BY sort_order, name, id",
+            r#"
+            SELECT
+                *
+            FROM tile_overlay_model
+            ORDER BY sort_order, name, id
+            "#,
         )
         .fetch_all(&pool)
         .await?,
@@ -110,18 +119,18 @@ pub async fn admin_create(
     Ok(Json(
         sqlx::query_as::<_, TileOverlay>(
             r#"
-        INSERT INTO tile_overlay_model (
-            id,
-            name,
-            url,
-            attribution,
-            min_zoom,
-            max_zoom,
-            opacity,
-            sort_order,
-            enabled
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *
-        "#,
+            INSERT INTO tile_overlay_model (
+                id,
+                name,
+                url,
+                attribution,
+                min_zoom,
+                max_zoom,
+                opacity,
+                sort_order,
+                enabled
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *
+            "#,
         )
         .bind(Uuid::now_v7().to_string())
         .bind(input.name.trim())
@@ -149,17 +158,19 @@ pub async fn admin_update(
         r#"
         UPDATE tile_overlay_model
         SET
-          name=$2,
-          url=$3,
-          attribution=$4,
-          min_zoom=$5,
-          max_zoom=$6,
-          opacity=$7,
-          sort_order=$8,
-          enabled=$9,
-          updated_at=CURRENT_TIMESTAMP
-        WHERE id=$1
-        RETURNING *"#,
+            name = $2,
+            url = $3,
+            attribution = $4,
+            min_zoom = $5,
+            max_zoom = $6,
+            opacity = $7,
+            sort_order = $8,
+            enabled = $9,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        RETURNING
+            *
+        "#,
     )
     .bind(id)
     .bind(input.name.trim())
@@ -182,10 +193,15 @@ pub async fn admin_delete(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_superuser(&user, &pool).await?;
-    sqlx::query("DELETE FROM tile_overlay_model WHERE id=$1")
-        .bind(id)
-        .execute(&pool)
-        .await?;
+    sqlx::query(
+        r#"
+        DELETE FROM tile_overlay_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .execute(&pool)
+    .await?;
     Ok(Json(serde_json::json!({"message":"Deleted"})))
 }
 
@@ -210,9 +226,9 @@ pub async fn user_list(
     .await?;
     let selected = sqlx::query_scalar(
         r#"
-            SELECT tile_overlay_id
-            FROM user_tile_overlay_model WHERE user_id=$1
-            "#,
+        SELECT tile_overlay_id
+        FROM user_tile_overlay_model WHERE user_id=$1
+        "#,
     )
     .bind(&user)
     .fetch_all(&pool)
@@ -238,16 +254,28 @@ pub async fn user_select(
         // 定義を確認する前に SQLite の書き込みロックを取得し、
         // 選択処理と無効化・削除を順番に実行して、読み取りから書き込みへの切り替えを避ける。
         let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-        let enabled: Option<bool> =
-            sqlx::query_scalar("SELECT enabled FROM tile_overlay_model WHERE id=$1")
-                .bind(&id)
-                .fetch_optional(&mut *tx)
-                .await?;
+        let enabled: Option<bool> = sqlx::query_scalar(
+            r#"
+            SELECT
+                enabled
+            FROM tile_overlay_model
+            WHERE id=$1
+            "#,
+        )
+        .bind(&id)
+        .fetch_optional(&mut *tx)
+        .await?;
         if enabled != Some(true) {
             return Err(AppError::NotFound);
         }
         sqlx::query(
-            "INSERT INTO user_tile_overlay_model (user_id, tile_overlay_id) VALUES($1, $2) ON CONFLICT DO NOTHING",
+            r#"
+            INSERT INTO user_tile_overlay_model (
+                user_id,
+                tile_overlay_id
+            ) VALUES($1, $2)
+            ON CONFLICT DO NOTHING
+            "#,
         )
         .bind(&user)
         .bind(&id)
@@ -255,11 +283,17 @@ pub async fn user_select(
         .await?;
         tx.commit().await?;
     } else {
-        sqlx::query("DELETE FROM user_tile_overlay_model WHERE user_id=$1 AND tile_overlay_id=$2")
-            .bind(&user)
-            .bind(id)
-            .execute(&pool)
-            .await?;
+        sqlx::query(
+            r#"
+            DELETE FROM user_tile_overlay_model
+            WHERE user_id = $1
+                AND tile_overlay_id = $2
+            "#,
+        )
+        .bind(&user)
+        .bind(id)
+        .execute(&pool)
+        .await?;
     }
     Ok(Json(selected_tiles(&pool, &user).await?))
 }

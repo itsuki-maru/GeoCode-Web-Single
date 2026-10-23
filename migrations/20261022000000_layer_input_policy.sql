@@ -1,0 +1,1 @@
+ALTER TABLE layer_model ADD COLUMN restrict_free_text BOOLEAN NOT NULL DEFAULT FALSE;

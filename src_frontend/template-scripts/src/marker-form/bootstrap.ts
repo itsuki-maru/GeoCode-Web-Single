@@ -23,6 +23,7 @@ export function readMarkerFormBootstrap(): MarkerFormBootstrap {
     throw new Error("Marker form bootstrap data is missing");
   }
   if (
+    (value.configToken !== undefined && typeof value.configToken !== "string") ||
     typeof value.submissionPath !== "string" ||
     typeof value.isPasswordProtected !== "boolean" ||
     !isRecord(value.schema) ||

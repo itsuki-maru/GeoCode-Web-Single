@@ -26,7 +26,10 @@ async fn require_superuser(user_id: String, pool: &SqlitePool) -> Result<(), App
     let super_user_exists = query_as!(
         IsSuperuser,
         r#"
-        SELECT is_superuser FROM user_model WHERE id = $1
+        SELECT
+            is_superuser
+        FROM user_model
+        WHERE id = $1
         "#,
         user_id,
     )
