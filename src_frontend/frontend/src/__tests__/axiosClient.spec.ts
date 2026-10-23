@@ -177,3 +177,33 @@ describe("所有者フォームの認証更新", () => {
     expect(state.requestHandler?.(original).headers).not.toHaveProperty("Content-Type");
   });
 });
+
+describe("JSON取込の認証更新", () => {
+  it("期限切れでも同じmultipartとIdempotency-Keyで再送する", async () => {
+    const body = new FormData();
+    body.append("upload_file", new Blob(['{"n":9007199254740993}']), "export.json");
+    const original = {
+      url: "/file/import",
+      method: "post",
+      data: body,
+      headers: {
+        "Idempotency-Key": "6b2656ed-dc86-45b2-8654-e980d44a330d",
+        "X-Import-Account": "a634024e-ffaf-477e-8a66-50887cc56350",
+      },
+    };
+    state.post.mockResolvedValue({ data: {} });
+    state.request.mockResolvedValue({ data: "saved" });
+    await expect(
+      state.responseHandler?.({
+        response: { status: 401, data: { error: "token_expired" } },
+        config: original,
+      }),
+    ).resolves.toEqual({ data: "saved" });
+    expect(state.request).toHaveBeenCalledWith(original);
+    expect(original.data).toBe(body);
+    const retried = state.requestHandler?.(original);
+    expect(retried.headers["Idempotency-Key"]).toBe(original.headers["Idempotency-Key"]);
+    expect(retried.headers["X-Import-Account"]).toBe(original.headers["X-Import-Account"]);
+    expect(retried.headers).not.toHaveProperty("Content-Type");
+  });
+});

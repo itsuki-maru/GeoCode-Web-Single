@@ -18,6 +18,12 @@ pub enum AppError {
     BadGateway,
     #[error("conflict")]
     Conflict,
+    #[error(
+        "同じ取り込み要求IDに異なるJSONファイルが指定されています。新しい取り込みとして実行してください。"
+    )]
+    IdempotencyConflict,
+    #[error("ログイン中のアカウントが変わりました。画面を再読み込みしてから再試行してください。")]
+    ImportAccountConflict,
     #[error("unauthorized error: {0}")]
     Unauthorized(String),
     #[error("forbidden: {0}")]
@@ -41,7 +47,9 @@ impl AppError {
             AppError::NotFound => StatusCode::NOT_FOUND,
             AppError::InternalServerError => StatusCode::INTERNAL_SERVER_ERROR,
             AppError::BadGateway => StatusCode::BAD_GATEWAY,
-            AppError::Conflict => StatusCode::CONFLICT,
+            AppError::Conflict
+            | AppError::IdempotencyConflict
+            | AppError::ImportAccountConflict => StatusCode::CONFLICT,
             AppError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             AppError::Forbidden(_) => StatusCode::FORBIDDEN,
             AppError::Sqlx(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -57,6 +65,8 @@ impl AppError {
             | AppError::PayloadTooLarge(_)
             | AppError::Unauthorized(_)
             | AppError::Forbidden(_)
+            | AppError::IdempotencyConflict
+            | AppError::ImportAccountConflict
             | AppError::TooManyRequests(_) => self.to_string(),
 
             // 内部エラーは隠す

@@ -1,6 +1,7 @@
 use axum::{
     Json,
     extract::{Extension, Multipart, Path, Query},
+    http::HeaderMap,
     response::Response,
 };
 use std::collections::{HashMap, HashSet};
@@ -19,6 +20,7 @@ use crate::model::transfer::{LEGACY_LIMIT, TRANSFER_LIMIT, TransferPackage};
 use crate::model::{ImportMarkers, ImportPackage, ReturningId};
 use crate::shape_validation::validate_shape_geojson;
 
+mod idempotency;
 mod v3;
 mod validation;
 
@@ -188,8 +190,10 @@ fn multipart_error(error: axum::extract::multipart::MultipartError) -> AppError 
 pub async fn import_json_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
+    headers: HeaderMap,
     mut payload: Multipart,
 ) -> Result<Json<MessageApi>, AppError> {
+    idempotency::verify_account(&headers, &user_id)?;
     // 現在時刻を取得
     let now = Utc::now().naive_utc();
 
@@ -219,6 +223,12 @@ pub async fn import_json_handler(
                     "JSONファイルは1件だけ指定してください。",
                 ));
             }
+            let request = idempotency::ImportRequest::from_headers(&headers, &bytes)?;
+            if idempotency::is_completed(&pool, &user_id, request.as_ref()).await? {
+                return Ok(Json(MessageApi {
+                    message: "Upload Ok.".into(),
+                }));
+            }
             let content = String::from_utf8(bytes).map_err(|_| AppError::BadRequest)?;
             let envelope: serde_json::Value =
                 serde_json::from_str(&content).map_err(|_| AppError::BadRequest)?;
@@ -226,7 +236,7 @@ pub async fn import_json_handler(
                 let package: TransferPackage = serde_json::from_value(envelope).map_err(|e| {
                     AppError::Validation(format!("version 3のデータ形式が不正です: {e}"))
                 })?;
-                v3::import(&pool, &user_id, package).await?;
+                v3::import(&pool, &user_id, package, request.as_ref()).await?;
                 return Ok(Json(MessageApi {
                     message: "Upload Ok.".into(),
                 }));
@@ -238,6 +248,12 @@ pub async fn import_json_handler(
             }
             let import_package = normalize_import_package(&content)?;
             let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+            if idempotency::is_completed(&mut *tx, &user_id, request.as_ref()).await? {
+                tx.rollback().await?;
+                return Ok(Json(MessageApi {
+                    message: "Upload Ok.".into(),
+                }));
+            }
 
             let mut imported_layer_names = HashSet::new();
             for marker in &import_package.markers {
@@ -415,6 +431,7 @@ pub async fn import_json_handler(
                 .await?;
             }
 
+            idempotency::record_completion(&mut *tx, &user_id, request.as_ref()).await?;
             tx.commit().await?;
             return Ok(Json(MessageApi {
                 message: "Upload Ok.".to_string(),

@@ -906,7 +906,7 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   padding: 1em;
   background: #444;
-  border-radius: 10px;
+  border-radius: 2px;
 }
 .fullscreen-close-btn {
   z-index: 102;

@@ -489,6 +489,13 @@ CREATE TABLE IF NOT EXISTS live_map_password_rate_limit (
             "../../migrations/20261023000000_answer_editing.sql"
         )],
     },
+    Migration {
+        version: 21,
+        name: "json_import_receipts",
+        statements: &[include_str!(
+            "../../migrations/20261023120000_json_import_receipts.sql"
+        )],
+    },
 ];
 
 // データベース接続の確立

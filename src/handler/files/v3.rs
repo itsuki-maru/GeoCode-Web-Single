@@ -1,4 +1,7 @@
-use super::validation::{invalid, validate};
+use super::{
+    idempotency::{self, ImportRequest},
+    validation::{invalid, validate},
+};
 use crate::{error::AppError, model::transfer::*};
 use chrono::{DateTime, NaiveDateTime, SubsecRound, Utc};
 use futures_util::TryStreamExt;
@@ -456,7 +459,12 @@ fn source_db(source: &Option<SourceForm>, forms: &HashMap<&str, Uuid>) -> Option
         .map(|s| Json(json!({"id":forms[s.form_key.as_str()],"version":s.version})))
 }
 
-pub(super) async fn import(pool: &Pool, user: &str, p: TransferPackage) -> Result<(), AppError> {
+pub(super) async fn import(
+    pool: &Pool,
+    user: &str,
+    p: TransferPackage,
+    request: Option<&ImportRequest>,
+) -> Result<(), AppError> {
     validate(&p)?;
     let mut tx = write_transaction(pool).await?;
     sqlx::query(&sql("SELECT id FROM user_model WHERE id=$1 FOR UPDATE"))
@@ -464,6 +472,10 @@ pub(super) async fn import(pool: &Pool, user: &str, p: TransferPackage) -> Resul
         .fetch_optional(&mut *tx)
         .await?
         .ok_or(AppError::NotFound)?;
+    if idempotency::is_completed(&mut *tx, user, request).await? {
+        tx.rollback().await?;
+        return Ok(());
+    }
     let forms: HashMap<_, _> = p
         .common_forms
         .iter()
@@ -589,6 +601,7 @@ pub(super) async fn import(pool: &Pool, user: &str, p: TransferPackage) -> Resul
             .await?;
         }
     }
+    idempotency::record_completion(&mut *tx, user, request).await?;
     tx.commit().await?;
     Ok(())
 }
