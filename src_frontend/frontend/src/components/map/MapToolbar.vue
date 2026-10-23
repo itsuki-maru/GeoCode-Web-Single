@@ -284,6 +284,7 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
 .btn-head-image-search {
   box-sizing: border-box;
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   width: 40px;
@@ -326,13 +327,16 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
 
 .right-btn-header-zone {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: flex-end;
+  width: max-content;
   margin-left: 0;
 }
 
 .right-btn-header-zone .select-elm {
   box-sizing: border-box;
+  flex: 0 0 auto;
   width: auto;
   max-width: 130px;
   height: 40px;
@@ -356,12 +360,13 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
 
 .search-box {
   box-sizing: border-box;
+  flex: 0 0 150px;
   font-size: 18px;
-  width: 20%;
+  width: 150px;
   height: 40px;
   text-align: center;
   border-radius: 11px;
-  margin-right: 1%;
+  margin-right: 10px;
 }
 
 .search-box:focus {
@@ -370,39 +375,15 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
   box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
 }
 
-#search-textbox1 {
-  margin-right: 2%;
-}
-
 @media (orientation: portrait) {
   .header-btn-zone {
     align-items: flex-start;
-    justify-content: flex-start;
     flex-wrap: nowrap;
     margin-bottom: 0;
   }
 
   .left-btn-header-zone {
-    margin-right: 12px;
     padding-bottom: 7px;
-  }
-
-  .right-btn-header-zone {
-    flex: 0 0 auto;
-    justify-content: flex-start;
-    width: max-content;
-    margin-left: 0;
-  }
-
-  .btn-head-image,
-  .btn-head-image-search,
-  .right-btn-header-zone .select-elm {
-    flex: 0 0 auto;
-  }
-
-  .search-box {
-    flex: 0 0 150px;
-    width: 150px;
   }
 }
 </style>
