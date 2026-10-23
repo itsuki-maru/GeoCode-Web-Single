@@ -7,13 +7,13 @@ export function createTileVisibilityStorage(
 ) {
   const key = `geocode-web:tile-overlay-visibility:${accountId}`;
   let validIds = new Set<string>();
-  const read = (): Visibility => {
+  const read = (ids = validIds): Visibility => {
     try {
       const value: unknown = JSON.parse(getStorage().getItem(key) || "{}");
       if (!value || typeof value !== "object" || Array.isArray(value)) return {};
       return Object.fromEntries(
         Object.entries(value).filter(
-          ([id, visible]) => validIds.has(id) && typeof visible === "boolean",
+          ([id, visible]) => ids.has(id) && typeof visible === "boolean",
         ),
       );
     } catch {
@@ -29,6 +29,9 @@ export function createTileVisibilityStorage(
     }
   };
   return {
+    load(ids: string[]): Visibility {
+      return read(new Set(ids));
+    },
     reconcile(ids: string[]): Visibility {
       validIds = new Set(ids);
       const value = read();

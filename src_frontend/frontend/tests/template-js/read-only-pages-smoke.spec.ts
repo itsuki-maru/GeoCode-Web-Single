@@ -19,6 +19,7 @@ import * as markerModule from "../../../template-scripts/src/map/common/marker";
 import { createReadOnlyShapeMeasurementDisplayRuntime } from "../../../template-scripts/src/map/common/shape-measurement-display";
 import { createReadOnlyShapeRestorationRuntime } from "../../../template-scripts/src/map/common/shape-restoration";
 import { initializeReadOnlyMapPage } from "../../../template-scripts/src/map/read-only-page";
+import { finishAnswerPreview } from "../../../template-scripts/src/map/answer-preview";
 import * as mjpegCameraModule from "../../../template-scripts/src/map/common/mjpeg-camera";
 import {
   createReadOnlyMarkerLayerControl,
@@ -241,6 +242,8 @@ interface SmokeLoadOptions {
   parentWindow?: { postMessage: ReturnType<typeof vi.fn> };
   currentPosition?: { latitude: number; longitude: number };
   lastMapView?: { latitude: number; longitude: number; zoom: number };
+  savedSettings?: Record<string, string>;
+  mobileAnswerMap?: boolean;
 }
 
 function readFrontendFile(relativePath: string) {
@@ -253,7 +256,7 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
     {
       pretendToBeVisual: true,
       runScripts: "outside-only",
-      url: "https://example.test/map",
+      url: `https://example.test/map${options.mobileAnswerMap ? "?map_ui=mobile" : ""}`,
     },
   );
   openWindows.push(dom);
@@ -269,6 +272,9 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
       mapViewPersistenceModule.LAST_MAP_VIEW_STORAGE_KEY,
       JSON.stringify(options.lastMapView),
     );
+  }
+  for (const [key, value] of Object.entries(options.savedSettings || {})) {
+    dom.window.localStorage.setItem(key, value);
   }
 
   const mapElement = dom.window.document.getElementById("map");
@@ -312,11 +318,12 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
   const readOnlyPageName = page.templateName.replace(/\.html$/, "");
   const usesTypeScriptReadOnlyEntry = [
     "map-anather",
+    "form-answer-map",
     "temporary-map",
     "temporary-map-mobile",
   ].includes(readOnlyPageName);
   const bootstrap =
-    readOnlyPageName === "map-anather"
+    readOnlyPageName === "map-anather" || readOnlyPageName === "form-answer-map"
       ? {
           initialView: {
             latitude: page.globals.latitude,
@@ -329,6 +336,7 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
           page: readOnlyPageName,
           shapes: page.globals.shapesFromAxum,
           tileServers: page.globals.tileServers,
+          answerPreview: page.globals.answerPreview,
         }
       : usesTypeScriptReadOnlyEntry
         ? {
@@ -363,6 +371,10 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
             markers: page.globals.markersFromAxum,
             shapes: page.globals.shapesFromAxum,
           };
+  Object.assign(bootstrap, {
+    tileOverlays: page.globals.tileOverlays || [],
+    tileVisibilityAccountId: "smoke-test-account",
+  });
   Object.assign(dom.window, page.globals, {
     createPopupContentRuntime,
     makeSummaryDraggable,
@@ -406,6 +418,8 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
   vi.stubGlobal("document", dom.window.document);
   vi.stubGlobal("navigator", dom.window.navigator);
   vi.stubGlobal("L", (dom.window as unknown as { L: unknown }).L);
+  vi.stubGlobal("requestAnimationFrame", dom.window.requestAnimationFrame.bind(dom.window));
+  vi.stubGlobal("cancelAnimationFrame", dom.window.cancelAnimationFrame.bind(dom.window));
   // jsdom はレイアウトを計算しないため、実際のドラッグ処理は維持しつつ、
   // VM のウィンドウとインポート先の実行環境の両方に、ブラウザーの監視機能を補う。
   class SmokeResizeObserver {
@@ -417,9 +431,17 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
   vi.stubGlobal("ResizeObserver", SmokeResizeObserver);
   if (usesTypeScriptReadOnlyEntry) {
     const result = initializeReadOnlyMapPage(
-      readOnlyPageName as "map-anather" | "temporary-map" | "temporary-map-mobile",
+      readOnlyPageName as
+        | "map-anather"
+        | "form-answer-map"
+        | "temporary-map"
+        | "temporary-map-mobile",
     );
+    if (readOnlyPageName === "form-answer-map") {
+      finishAnswerPreview(result, bootstrap as any, (dom.window as any).L);
+    }
     Object.assign(dom.window, {
+      __templateSmokeRuntime: result,
       __templateSmokeMap: result.map,
       __templateSmokeMarkerCount: Object.keys(result.markers).length,
       __templateSmokeShapeLayers: result.shapeLayers,
@@ -437,9 +459,15 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
   return dom;
 }
 
-afterEach(() => {
+afterEach(async () => {
+  for (const dom of openWindows.splice(0)) {
+    // 復元直後の遅延描画を完了させてから、ページのunload処理を実行する。
+    await new Promise<void>((resolve) => dom.window.requestAnimationFrame(() => resolve()));
+    (dom.window as any).__templateSmokeShapeNameLabelManager?.destroy();
+    (dom.window as any).__templateSmokeMap?.remove();
+    dom.window.close();
+  }
   vi.unstubAllGlobals();
-  openWindows.splice(0).forEach((dom) => dom.window.close());
 });
 
 describe("各地図テンプレートJavaScriptのランタイム初期化", () => {
@@ -548,6 +576,151 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
   });
 
   const anotherMapPage = pages.find((page) => page.templateName === "map-anather.html")!;
+
+  const tileSettingsPage = (answerMap = false): SmokePage => ({
+    ...anotherMapPage,
+    templateName: answerMap ? "form-answer-map.html" : "map-anather.html",
+    globals: {
+      ...anotherMapPage.globals,
+      shapesFromAxum: [shapeRecord],
+      tileServers: {
+        ...tileServers,
+        "2": {
+          ...tileServers["1"],
+          label: "Alternate tiles",
+          layer_name: "alternate-tiles",
+          url: "https://alternate.example.test/{z}/{x}/{y}.png",
+        },
+      },
+      tileOverlays: ["flood", "rain", "new"].map((id) => ({
+        id,
+        name: id,
+        url: `https://${id}.example.test/{z}/{x}/{y}.png`,
+        attribution: id,
+        min_zoom: 0,
+        max_zoom: 18,
+        opacity: 0.5,
+        sort_order: 0,
+      })),
+      answerPreview: answerMap
+        ? {
+            parentOrigin: "https://example.test",
+            requestId: "answer-tiles",
+            query: { as_of: "2026-10-23T00:00:00Z" },
+            targets: ["marker:marker-1", "shape:shape-1"],
+            answerCount: 2,
+            targetCount: 2,
+          }
+        : undefined,
+    },
+  });
+
+  it.each(["2", "removed"])("全画面地図は保存した背景タイル%sを検証して復元する", (selected) => {
+    const dom = smokeLoadPage(tileSettingsPage(), {
+      savedSettings: { "geocode-web:selected-tile-server-id": selected },
+    });
+    const expected = selected === "2" ? "2" : "1";
+    expect(dom.window.document.querySelector<HTMLInputElement>(".tile-radio:checked")!.value).toBe(
+      expected,
+    );
+    const runtime = (dom.window as any).__templateSmokeRuntime;
+    expect(runtime.getPrintState().tileServerId).toBe(expected);
+    const urls: string[] = [];
+    runtime.map.eachLayer((layer: any) => {
+      if (layer._url) urls.push(layer._url);
+    });
+    expect(urls).toContain(
+      expected === "2" ? "https://alternate.example.test/{z}/{x}/{y}.png" : tileServers["1"].url,
+    );
+  });
+
+  it.each(["temporary-map.html", "temporary-map-mobile.html"])(
+    "%sは所有者向けの背景設定を読み込まない",
+    (templateName) => {
+      const shared = pages.find((page) => page.templateName === templateName)!;
+      const settings = tileSettingsPage().globals;
+      const savedSettings = {
+        "geocode-web:selected-tile-server-id": "2",
+        "geocode-web:tile-overlay-visibility:smoke-test-account": '{"flood":false}',
+      };
+      const dom = smokeLoadPage(
+        {
+          ...shared,
+          globals: {
+            ...shared.globals,
+            tileServers: settings.tileServers,
+            tileOverlays: settings.tileOverlays,
+          },
+        },
+        { savedSettings },
+      );
+      const state = (dom.window as any).__templateSmokeRuntime.getPrintState();
+      expect(state).toMatchObject({
+        tileServerId: "1",
+        overlays: { flood: true, rain: true, new: true },
+      });
+      for (const [key, value] of Object.entries(savedSettings)) {
+        expect(dom.window.localStorage.getItem(key)).toBe(value);
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "回答地図は背景だけを読み取り、操作後も通常地図の保存設定を変更しない（mobile=%s）",
+    (mobileAnswerMap) => {
+      const savedSettings = {
+        "geocode-web:selected-tile-server-id": "2",
+        "geocode-web:tile-overlay-visibility:smoke-test-account":
+          '{"flood":false,"rain":true,"removed":false}',
+        "geocode-web:tile-overlay-visibility:other-account": '{"flood":true,"rain":false}',
+        "geocode-web:marker-visible": "false",
+        "geocode-web:shape-layer-visible": "false",
+        "geocode-web:shape-name-visible": "false",
+      };
+      const dom = smokeLoadPage(tileSettingsPage(true), {
+        mobileAnswerMap,
+        savedSettings,
+        lastMapView: { latitude: 34, longitude: 135, zoom: 6 },
+      });
+      const runtime = (dom.window as any).__templateSmokeRuntime;
+      const initial = runtime.getPrintState();
+      expect(initial).toMatchObject({
+        tileServerId: "2",
+        overlays: { flood: false, rain: true, new: true },
+        markersVisible: true,
+        shapesVisible: true,
+        shapeNamesVisible: true,
+      });
+      expect(initial.view.longitude).toBeGreaterThan(139);
+      expect(initial.view.zoom).toBeGreaterThan(6);
+      expect(dom.window.document.body.classList.contains("map-mobile-controls")).toBe(
+        mobileAnswerMap,
+      );
+      const radio = dom.window.document.querySelector<HTMLInputElement>('.tile-radio[value="1"]')!;
+      radio.checked = true;
+      radio.dispatchEvent(new dom.window.Event("change"));
+      for (const name of ["flood", "rain"]) {
+        const label = [
+          ...dom.window.document.querySelectorAll(".leaflet-control-layers label"),
+        ].find((label) => label.textContent?.trim() === name)!;
+        label.querySelector<HTMLInputElement>("input")!.click();
+      }
+      runtime.map.setView([36, 140], 10);
+      expect(runtime.getPrintState()).toMatchObject({
+        tileServerId: "1",
+        overlays: { flood: true, rain: false, new: true },
+        view: { latitude: 36, longitude: 140, zoom: 10 },
+      });
+      for (const [key, value] of Object.entries(savedSettings)) {
+        expect(dom.window.localStorage.getItem(key)).toBe(value);
+      }
+      expect(
+        JSON.parse(
+          dom.window.localStorage.getItem(mapViewPersistenceModule.LAST_MAP_VIEW_STORAGE_KEY)!,
+        ),
+      ).toEqual({ latitude: 34, longitude: 135, zoom: 6 });
+    },
+  );
 
   it("PC地図は親画面からの要求に現在の印刷用状態を返す", () => {
     const dom = smokeLoadPage(pages.find((page) => page.templateName === "map.html")!);

@@ -1,5 +1,6 @@
 // @ts-nocheck -- この統合境界では Leaflet プラグイン間の型定義に互換性がないため、型チェックを省略する。
 import { createTileOverlayManager } from "./common/tile-overlays";
+import { createTileVisibilityStorage } from "./common/tile-visibility-storage";
 import { createPopupContentRuntime } from "./common/popup-content";
 import { createLazyLayerObjects } from "./common/lazy-layer-objects";
 import type { PrintMapState } from "./common/print-state";
@@ -56,7 +57,11 @@ import {
 import { createReadOnlyShapeRestorationRuntime } from "./common/shape-restoration";
 import { createShapeStyleCore } from "./common/shape-style";
 import { createShapeViewportRuntime } from "./common/shape-viewport";
-import { createMapStorage, createTileChangeHandler } from "./common/storage";
+import {
+  createMapStorage,
+  createTileChangeHandler,
+  loadSelectedTileServerId,
+} from "./common/storage";
 import {
   createMeasurementVisibilityControl,
   createTooltipVisibilityControl,
@@ -286,9 +291,14 @@ export function initializeReadOnlyMapPage(
   if (persistSettings) observeMapView(map);
   bounds = mapRuntime.bounds;
   tileLayer = mapRuntime.tileLayer as DynamicRecord;
-  if (isPrint && tileServers[printState.tileServerId]) {
+  const initialTileServerId = isPrint
+    ? printState.tileServerId
+    : isAnother
+      ? loadSelectedTileServerId(tileServers)
+      : undefined;
+  if (initialTileServerId && tileServers[initialTileServerId]) {
     const radio = Array.from(document.querySelectorAll<HTMLInputElement>(".tile-radio")).find(
-      (input) => input.value === printState.tileServerId,
+      (input) => input.value === initialTileServerId,
     );
     if (radio) {
       radio.checked = true;
@@ -727,7 +737,14 @@ export function initializeReadOnlyMapPage(
     temporaryBootstrap?.isOverlayTile ?? true,
     isMobile ? { onControlAdded: registerHideableMapControl } : undefined,
   );
-  tileOverlayManager.sync(bootstrap.tileOverlays || []);
+  const tileOverlays = bootstrap.tileOverlays || [];
+  const initialTileVisibility =
+    isAnswerPreview && !isPrint && bootstrap.tileVisibilityAccountId
+      ? createTileVisibilityStorage(bootstrap.tileVisibilityAccountId).load(
+          tileOverlays.map((tile) => tile.id),
+        )
+      : undefined;
+  tileOverlayManager.sync(tileOverlays, initialTileVisibility);
   if (isPrint) tileOverlayManager.setVisibility(printState.overlays);
 
   let objectLoader: ReturnType<typeof createLazyLayerObjects> | undefined;

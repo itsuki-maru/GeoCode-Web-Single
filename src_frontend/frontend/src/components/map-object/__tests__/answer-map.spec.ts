@@ -285,6 +285,8 @@ describe("回答地図の非同期絞り込み", () => {
   it("絞り込みエリアを開閉しても入力条件とiframeを再作成しない", async () => {
     const w = await open();
     await ready(w);
+    expect(w.get('[role="dialog"]').attributes("aria-label")).toBe("地図で分析・検索・出力");
+    expect(w.get("header strong").text()).toBe("地図で分析・検索・出力");
     await w.get('[aria-label="共通フォーム"]').setValue(query.common_form_id);
     await flushPromises();
     await click(w, "条件を追加");

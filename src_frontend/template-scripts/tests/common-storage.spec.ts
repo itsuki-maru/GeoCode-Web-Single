@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createMapStorage,
   createTileChangeHandler,
+  loadSelectedTileServerId,
 } from "../src/map/common/storage";
 import type { TileServerRecord } from "../src/map/types";
 
@@ -49,6 +50,27 @@ describe("map common storage", () => {
   it("falls back to the first available tile server", () => {
     const storage = createMapStorage({ "7": tileServers["2"]! });
     expect(storage.getDefaultTileServerId()).toBe("7");
+  });
+
+  it("loads the selected tile without enabling writes and rejects missing selections", () => {
+    const data = {
+      getItem: vi.fn(() => "2"),
+      setItem: vi.fn(),
+    } as unknown as Storage;
+    expect(loadSelectedTileServerId(tileServers, { getStorage: () => data })).toBe("2");
+    expect(data.setItem).not.toHaveBeenCalled();
+    vi.mocked(data.getItem).mockReturnValue("removed");
+    expect(loadSelectedTileServerId(tileServers, { getStorage: () => data })).toBe("1");
+    const warn = vi.fn();
+    expect(
+      loadSelectedTileServerId(tileServers, {
+        getStorage: () => {
+          throw new Error("denied");
+        },
+        warn,
+      }),
+    ).toBe("1");
+    expect(warn).toHaveBeenCalledOnce();
   });
 
   it("reads and writes map visibility settings", () => {

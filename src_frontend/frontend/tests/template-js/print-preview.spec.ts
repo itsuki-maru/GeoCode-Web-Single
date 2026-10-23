@@ -129,9 +129,11 @@ beforeEach(() => {
       throw new Error("テスト用の取得 API にはグループの絞り込みが必要です。");
     if (url.pathname === "/marker/read/all") {
       return new Response(
-        JSON.stringify(Object.fromEntries(
-          Object.entries(bootstrap.markers).filter(([, marker]) => marker.layer_id === layerId),
-        )),
+        JSON.stringify(
+          Object.fromEntries(
+            Object.entries(bootstrap.markers).filter(([, marker]) => marker.layer_id === layerId),
+          ),
+        ),
       );
     }
     if (url.pathname === "/shapes") {
@@ -210,9 +212,12 @@ describe("印刷プレビューと実際のLeaflet", () => {
   it("ポップアップ画像の読み込み・失敗を反映し、閉じた詳細の画像は待たない", async () => {
     preview = createPrintPreview(state, vi.fn());
     await finishObjectLoads();
-    L.popup({ autoPan: false }).setLatLng([35.68, 139.76]).setContent(
-      '<img id="popup-image" src="/popup.png"><details><img src="/hidden.png"></details>',
-    ).openOn(preview.map);
+    L.popup({ autoPan: false })
+      .setLatLng([35.68, 139.76])
+      .setContent(
+        '<img id="popup-image" src="/popup.png"><details><img src="/hidden.png"></details>',
+      )
+      .openOn(preview.map);
     finishImages();
     const img = document.getElementById("popup-image") as HTMLImageElement;
     const hidden = document.querySelector(".leaflet-popup-content details img")!;
@@ -237,6 +242,8 @@ describe("印刷プレビューと実際のLeaflet", () => {
   });
 
   it("現在の位置・背景・選択レイヤを引き継ぎ、印刷操作で保存設定を変更しない", async () => {
+    localStorage.setItem("geocode-web:selected-tile-server-id", "1");
+    localStorage.setItem("geocode-web:tile-overlay-visibility:print-test", '{"flood":true}');
     const before = { ...localStorage };
     const watchPosition = vi.fn();
     Object.defineProperty(navigator, "geolocation", {
@@ -410,9 +417,11 @@ describe("印刷プレビューと実際のLeaflet", () => {
 
   it("グループの取得中・取得失敗時は出力を止め、再試行の成功後に印刷できる", async () => {
     let failMarkers!: (response: Response) => void;
-    fetchData.mockReturnValueOnce(new Promise<Response>((resolve) => {
-      failMarkers = resolve;
-    }));
+    fetchData.mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        failMarkers = resolve;
+      }),
+    );
     const print = vi.spyOn(window, "print").mockImplementation(() => {});
     preview = createPrintPreview(state, vi.fn());
     const button = document.getElementById("print-submit") as HTMLButtonElement;

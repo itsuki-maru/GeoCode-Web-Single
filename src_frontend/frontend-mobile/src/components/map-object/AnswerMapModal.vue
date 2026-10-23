@@ -657,12 +657,12 @@ onBeforeUnmount(() => {
     class="answer-map-overlay overlay-fullscreen-map"
     role="dialog"
     aria-modal="true"
-    aria-label="回答を地図で確認"
+    aria-label="地図で分析・検索・出力"
   >
     <button type="button" class="fullscreen-close-btn" @click="emit('close')">閉じる</button>
     <div class="content-fullscreen-map">
       <header>
-        <strong>回答を地図で確認</strong
+        <strong>地図で分析・検索・出力</strong
         ><span v-if="!loading && !error">{{ summary }}（一致回答{{ answerCount }}件）</span>
         <button
           v-if="printEnabled"
@@ -1090,8 +1090,15 @@ button:disabled {
   font-size: 13px;
 }
 @media (min-width: 701px) {
+  .answer-map-overlay:not(.answer-map-mobile-layout) .filter-sidebar {
+    transition:
+      flex-basis 0.2s ease,
+      visibility 0.2s;
+  }
   .answer-map-overlay:not(.answer-map-mobile-layout) .filters-closed .filter-sidebar {
-    display: none;
+    flex-basis: 0;
+    overflow: hidden;
+    visibility: hidden;
   }
 }
 .answer-map-mobile-layout .filter-actions > button {
