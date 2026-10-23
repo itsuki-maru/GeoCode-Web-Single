@@ -56,6 +56,7 @@ let getMarkers: (id: string) => Promise<{ data: Record<string, ReturnType<typeof
 let getShapes: (id: string) => Promise<{ data: ReturnType<typeof shape>[] }>;
 
 const updateFrame = vi.fn();
+const reloadFrame = vi.fn();
 const frame = defineComponent({
   name: "MapIframe",
   props: ["srcUrl", "height", "allowedOrigins", "inputPolicies"],
@@ -63,7 +64,7 @@ const frame = defineComponent({
   setup(_, { expose }) {
     expose({
       filterMapObjects: vi.fn(),
-      reloadMapFrame: () => true,
+      reloadMapFrame: reloadFrame,
       updateMapObject: updateFrame,
     });
     return () => null;
@@ -88,6 +89,7 @@ const changeLayer = async (id: string) => {
 
 beforeEach(() => {
   updateFrame.mockReset().mockResolvedValue(true);
+  reloadFrame.mockReset().mockReturnValue(true);
   setActivePinia(createPinia());
   localStorage.clear();
   layerResponse = Promise.resolve({ data: layers });
@@ -273,5 +275,78 @@ describe("selected layer startup", () => {
     );
     await flushPromises();
     expect(useMapObjectStore().mapObjectList.has("hidden")).toBe(false);
+  });
+
+  it.each(["master", "a"])(
+    "JSON取込後は選択中の %s の範囲で両一覧と同じURLの地図を更新する",
+    async (selected) => {
+      localStorage.setItem(LAST_ACTIVE_LAYER_STORAGE_KEY, selected);
+      mountView();
+      await flushPromises();
+      const initialRequests = dataRequests().length;
+      getMarkers = async () => ({ data: { fresh: marker("fresh") } });
+      getShapes = async () => ({ data: [shape("fresh")] });
+      wrapper!.getComponent({ name: "JsonImportModal" }).vm.$emit("imported");
+      await flushPromises();
+      expect(dataRequests()).toHaveLength(initialRequests + 2);
+      for (const [url] of dataRequests().slice(initialRequests)) {
+        const params = new URL(url, window.location.origin).searchParams;
+        expect(params.get("is_master")).toBe(String(selected === "master"));
+        expect(params.get("layer") ?? params.get("layer_id")).toBe(selected);
+      }
+      expect(api.get.mock.calls.filter(([url]) => url === getLayersUrl)).toHaveLength(2);
+      expect([...useMapObjectStore().mapObjectList.keys()]).toEqual(["fresh"]);
+      expect([...useShapeStore().shapeList.keys()]).toEqual(["fresh"]);
+      expect(reloadFrame).toHaveBeenCalledTimes(1);
+      expect(wrapper!.getComponent({ name: "MapToolbar" }).props("activeLayer")).toBe(selected);
+      expect(wrapper!.getComponent({ name: "MessageModal" }).props("message")).toBe(
+        "データのインポートが完了しました。",
+      );
+    },
+  );
+
+  it("JSON取込後の再取得失敗を取込失敗にせず、表示の再試行だけで回復する", async () => {
+    mountView();
+    await flushPromises();
+    getShapes = async () => {
+      throw new Error("offline");
+    };
+    const modal = wrapper!.getComponent({ name: "JsonImportModal" });
+    modal.vm.$emit("imported");
+    await flushPromises();
+    expect(modal.props("syncFailed")).toBe(true);
+    expect(wrapper!.getComponent({ name: "MessageModal" }).props("message")).toContain(
+      "インポートは完了しましたが",
+    );
+    expect(frameComponent().props("srcUrl")).toBe("");
+    getShapes = async () => ({ data: [shape("recovered")] });
+    modal.vm.$emit("retrySync");
+    await flushPromises();
+    expect(modal.props("syncFailed")).toBe(false);
+    expect([...useShapeStore().shapeList.keys()]).toEqual(["recovered"]);
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("JSON送信終了の通知で表示同期中のスピナーを消さない", async () => {
+    mountView();
+    await flushPromises();
+    frameComponent().vm.$emit("mapLoaded", frameComponent().props("srcUrl"));
+    await flushPromises();
+    const pending = deferred<{ data: ReturnType<typeof shape>[] }>();
+    getShapes = () => pending.promise;
+    const modal = wrapper!.getComponent({ name: "JsonImportModal" });
+    modal.vm.$emit("showProgress", true);
+    modal.vm.$emit("imported");
+    modal.vm.$emit("showProgress", false);
+    await flushPromises();
+    expect(spinner()).toBe(true);
+    expect(modal.props("syncBusy")).toBe(true);
+    pending.resolve({ data: [shape("fresh")] });
+    await flushPromises();
+    expect(modal.props("syncBusy")).toBe(false);
+    expect(spinner()).toBe(true);
+    frameComponent().vm.$emit("mapLoaded", frameComponent().props("srcUrl"));
+    await flushPromises();
+    expect(spinner()).toBe(false);
   });
 });

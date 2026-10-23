@@ -112,6 +112,8 @@ pub fn build_router(
             header::ACCEPT,
             header::ORIGIN,
             HeaderName::from_str("X-Requested-With").unwrap(),
+            HeaderName::from_static("idempotency-key"),
+            HeaderName::from_static("x-import-account"),
         ])
         .allow_credentials(true)
         .expose_headers(vec![header::CONTENT_TYPE]);

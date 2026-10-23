@@ -841,7 +841,6 @@ h2 {
   margin: 0 0 12px;
   padding: 10px 12px;
   border-left: 3px solid #7890b6;
-  border-radius: 4px;
   background: #edf4ff;
   color: #334155;
   font-size: 0.875rem;

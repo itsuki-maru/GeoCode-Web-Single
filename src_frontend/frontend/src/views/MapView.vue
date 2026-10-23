@@ -93,6 +93,9 @@ const { isMapObjectTableOpen, toggleMapObjectTable } = useMapObjectTableVisibili
 // --- 選択中レイヤの管理 ---
 const activeLayer = ref("");
 const masterLayerId = ref("");
+const jsonImportAccountId = computed(
+  () => layersStore.layersList.get(masterLayerId.value)?.user_id ?? "",
+);
 const srcUrl = ref("");
 const pendingLayerMapUrl = ref<string | null>(null);
 const isMapFrameLoading = ref(false);
@@ -445,6 +448,9 @@ const isNewLayerModal = ref(false);
 const showImageUploadModal = ref(false);
 const showImageListModal = ref(false);
 const showJsonUploadModal = ref(false);
+const jsonImportRequestBusy = ref(false);
+const jsonImportSyncBusy = ref(false);
+const jsonImportSyncRequired = ref(false);
 const jsonExportBusy = ref(false);
 const isQRCodeGenModal = ref(false);
 const isOnetimeSettingModal = ref(false);
@@ -648,7 +654,35 @@ const handleOnetimeInvalidated = async (): Promise<void> => {
   await onetimeSettingRef.value?.fetchCurrentSharedUrl();
 };
 
-// --- JSON のエクスポート ---
+// --- JSON の入出力 ---
+const syncJsonImportView = async (): Promise<void> => {
+  if (jsonImportSyncBusy.value || disposed) return;
+  jsonImportSyncBusy.value = true;
+  const selectedLayerId = activeLayer.value;
+  const isMaster = selectedLayerId === masterLayerId.value;
+  try {
+    const results = await Promise.allSettled([
+      layersStore.initList(),
+      reloadMap(`${baseUrl}/map?layer=${selectedLayerId}&is_master=${isMaster}`, true, true),
+    ]);
+    if (disposed) return;
+    const synchronized = results.every((result) => result.status === "fulfilled" && result.value);
+    jsonImportSyncRequired.value = !synchronized;
+    showMessage(
+      synchronized
+        ? "データのインポートが完了しました。"
+        : "インポートは完了しましたが、画面の更新に失敗しました。再取り込みせずに表示を再更新してください。",
+    );
+  } finally {
+    jsonImportSyncBusy.value = false;
+  }
+};
+
+const handleJsonImported = (): void => {
+  jsonImportSyncRequired.value = true;
+  void syncJsonImportView();
+};
+
 const getLayerForId = (layer_id: string): string => {
   const layerObj = layersStore.getById(layer_id);
   return layerObj ? layerObj.name : "Layer Name Get Error";
@@ -1035,16 +1069,23 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
 
   <JsonImportModal
     :isOpen="showJsonUploadModal"
+    :accountScope="jsonImportAccountId"
+    :syncBusy="jsonImportSyncBusy"
+    :syncFailed="jsonImportSyncRequired && !jsonImportSyncBusy"
     @close="showJsonUploadModal = false"
     @message="showMessage"
-    @showProgress="showProgressModal = $event"
+    @showProgress="jsonImportRequestBusy = $event"
+    @imported="handleJsonImported"
+    @retrySync="syncJsonImportView"
   />
 
   <UserPrivacySetting ref="userSettingModalRef" />
 
   <MessageModal :isOpen="isMessageModal" :message="messageText" @close="closeMessage" />
 
-  <ProgressSpinner :isOpen="showProgressModal || isMapFrameLoading" />
+  <ProgressSpinner
+    :isOpen="showProgressModal || isMapFrameLoading || jsonImportRequestBusy || jsonImportSyncBusy"
+  />
   <UploadProgressModal :isOpen="uploadProgressState.isOpen" :progress="uploadProgressState" />
 </template>
 

@@ -1,30 +1,40 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import BaseModal from "@/components/common/BaseModal.vue";
-import { importJsonUrl } from "@/router/urls";
-import { useLayersStore } from "@/stores/layers";
-import { useMapObjectStore } from "@/stores/mapobjects";
+import { authCheckUrl, importJsonUrl } from "@/router/urls";
 import apiClient from "@/axiosClient";
+import {
+  beginJsonImport,
+  completeJsonImport,
+  type JsonImportAttempt,
+} from "@/utils/json-import-attempt";
 
-defineProps<{
+const props = defineProps<{
   isOpen: boolean;
+  accountScope: string;
+  syncBusy?: boolean;
+  syncFailed?: boolean;
 }>();
 
 const emit = defineEmits<{
   close: [];
   message: [text: string];
   showProgress: [show: boolean];
+  imported: [];
+  retrySync: [];
 }>();
 
-const layersStore = useLayersStore();
-const mapobjStore = useMapObjectStore();
 const isJsonSendNow = ref(false);
 const fileInputRef = ref<HTMLInputElement | null>(null);
+const selectedFile = ref<File | null>(null);
 const selectedFileName = ref("");
 const selectedFileSize = ref<number | null>(null);
 const selectedMimeType = ref("");
 
-const isImportReady = computed(() => selectedFileName.value !== "" && !isJsonSendNow.value);
+const isImportReady = computed(
+  () =>
+    selectedFile.value !== null && !!props.accountScope && !isJsonSendNow.value && !props.syncBusy,
+);
 
 const formatFileSize = (size: number | null): string => {
   if (size === null) return "-";
@@ -45,6 +55,7 @@ const onJsonSelect = (): void => {
 
   const fileObj = element.files[0];
   if (fileObj) {
+    selectedFile.value = fileObj;
     selectedFileName.value = fileObj.name;
     selectedFileSize.value = fileObj.size;
     selectedMimeType.value = fileObj.type;
@@ -52,50 +63,52 @@ const onJsonSelect = (): void => {
 };
 
 const importJsonData = async (): Promise<void> => {
-  if (isJsonSendNow.value === true) {
-    return;
-  } else {
-    isJsonSendNow.value = true;
-  }
-
-  const payload = new FormData();
-  const element = fileInputRef.value;
-  if (!element || element.value === "" || element.value === null) {
-    emit("message", "JSONファイルを選択してください。");
-    isJsonSendNow.value = false;
-    return;
-  }
-
-  const file = element.files!;
-  const fileObj = file[0];
+  if (isJsonSendNow.value || props.syncBusy) return;
+  const fileObj = selectedFile.value;
   if (!fileObj) {
-    isJsonSendNow.value = false;
+    emit("message", "JSONファイルを選択してください。");
     return;
   }
   if (fileObj.size > 20 * 1024 * 1024) {
     emit("message", "JSONファイルは20MiB以内にしてください。");
-    isJsonSendNow.value = false;
     return;
   }
+  isJsonSendNow.value = true;
+  const accountScope = props.accountScope;
+  const payload = new FormData();
   payload.append("upload_file", fileObj);
 
+  let attempt: JsonImportAttempt;
   try {
-    await apiClient.post(importJsonUrl, payload);
-    emit("message", "データのインポートが完了しました。");
-    layersStore.initList();
-    mapobjStore.initList();
-    clearJson();
+    attempt = await beginJsonImport(accountScope, fileObj);
+    const account = await apiClient.get<{ id: string }>(authCheckUrl);
+    if (account.data.id !== accountScope || props.accountScope !== accountScope) {
+      throw new Error("アカウントが変わりました。画面を再読み込みしてから取り込んでください。");
+    }
+    await apiClient.post(importJsonUrl, payload, {
+      headers: { "Idempotency-Key": attempt.key, "X-Import-Account": accountScope },
+    });
   } catch (error) {
     const message = apiClient.isAxiosError(error)
       ? (error.response?.data as { error?: string })?.error
-      : undefined;
-    emit("message", message ?? "インポートに失敗しました。データ形式を確認してください。");
+      : error instanceof Error
+        ? error.message
+        : undefined;
+    emit(
+      "message",
+      message ?? "インポート結果を確認できませんでした。同じファイルで再試行してください。",
+    );
+    return;
   } finally {
     isJsonSendNow.value = false;
   }
+  completeJsonImport(attempt);
+  clearJson();
+  emit("imported");
 };
 
 const clearJson = (): void => {
+  selectedFile.value = null;
   selectedFileName.value = "";
   selectedFileSize.value = null;
   selectedMimeType.value = "";
@@ -112,6 +125,15 @@ const clearJson = (): void => {
       <p>
         version 3は20MiB、旧形式は5MiBまでです。画像は参照のみで、取り込み後の公開は無効になります。
       </p>
+      <p>
+        結果を確認できない場合は同じファイルで再試行できます。成功後の再取り込みではコピーが増えます。
+      </p>
+      <div v-if="syncFailed" class="sync-retry" role="status">
+        <p>インポートは完了しています。再取り込みせずに画面の表示だけを更新できます。</p>
+        <button type="button" :disabled="syncBusy || isJsonSendNow" @click="emit('retrySync')">
+          表示を再更新
+        </button>
+      </div>
 
       <div class="upload-panel">
         <label for="jsonfile" class="file-picker-card">
@@ -124,6 +146,7 @@ const clearJson = (): void => {
           accept=".json,application/json"
           id="jsonfile"
           class="file-input"
+          :disabled="isJsonSendNow"
           @change="onJsonSelect"
         />
 
@@ -158,7 +181,7 @@ const clearJson = (): void => {
           <button
             type="button"
             class="btn-secondary"
-            :disabled="!selectedFileName"
+            :disabled="!selectedFileName || isJsonSendNow"
             @click.prevent="clearJson()"
           >
             選択をクリア

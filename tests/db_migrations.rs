@@ -48,7 +48,7 @@ async fn migrations_create_schema_and_record_versions() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 20);
+    assert_eq!(migration_count, 21);
 
     let live_location_table_count: i64 = sqlx::query_scalar(
         r#"
@@ -167,7 +167,7 @@ async fn migrations_are_idempotent() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 20);
+    assert_eq!(migration_count, 21);
 }
 
 #[tokio::test]
@@ -250,7 +250,7 @@ async fn migrations_record_versions_for_existing_schema() {
     .await
     .expect("migration rows should be returned");
 
-    assert_eq!(rows.len(), 20);
+    assert_eq!(rows.len(), 21);
     assert_eq!(rows[0].get::<i64, _>("version"), 1);
     assert_eq!(rows[0].get::<String, _>("name"), "create_initial_schema");
     assert_eq!(rows[1].get::<i64, _>("version"), 2);
@@ -488,6 +488,7 @@ async fn common_form_upgrade_preserves_legacy_config_answers_and_markdown() {
         ALTER TABLE shape_form_submission_model DROP COLUMN form_snapshot;
         DROP TABLE common_form_revision_model;
         DROP TABLE common_form_model;
+        DROP TABLE json_import_receipt_model;
         ALTER TABLE marker_form_submission_model DROP COLUMN revision;
         ALTER TABLE marker_form_submission_model DROP COLUMN edited_at;
         ALTER TABLE shape_form_submission_model DROP COLUMN revision;
@@ -549,7 +550,7 @@ async fn common_form_upgrade_preserves_legacy_config_answers_and_markdown() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        20
+        21
     );
 }
 
@@ -565,4 +566,172 @@ async fn answer_edit_upgrade_keeps_legacy_rows_and_starts_revision_one() {
     run_migrations(&pool).await.unwrap();
     let row:(i64,bool,String,bool)=sqlx::query_as("SELECT s.revision,s.edited_at IS NULL,m.detail,m.form_body_parts IS NULL FROM marker_form_submission_model s JOIN marker_info_model m ON m.id=s.marker_id WHERE s.id='legacy-edit-answer'").fetch_one(&pool).await.unwrap();
     assert_eq!(row, (1, true, "既存本文".into(), true));
+}
+
+async fn assert_receipt_constraints(pool: &SqlitePool) {
+    let first = common::create_test_user(pool, "receipt-first").await;
+    let second = common::create_test_user(pool, "receipt-second").await;
+    let request = uuid::Uuid::new_v4().to_string();
+    let hash = vec![7_u8; 32];
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
+            .fetch_one(pool)
+            .await
+            .unwrap(),
+        1
+    );
+    for user in [&first, &second] {
+        sqlx::query("INSERT INTO json_import_receipt_model(user_id,request_id,payload_sha256) VALUES($1,$2,$3)")
+            .bind(user).bind(&request).bind(&hash).execute(pool).await.unwrap();
+    }
+    assert!(sqlx::query("INSERT INTO json_import_receipt_model(user_id,request_id,payload_sha256) VALUES($1,$2,$3)")
+        .bind(&first).bind(&request).bind(&hash).execute(pool).await.is_err());
+    for bytes in [vec![0_u8; 31], vec![0_u8; 33]] {
+        assert!(sqlx::query("INSERT INTO json_import_receipt_model(user_id,request_id,payload_sha256) VALUES($1,$2,$3)")
+            .bind(&first).bind(uuid::Uuid::new_v4().to_string()).bind(bytes).execute(pool).await.is_err());
+    }
+    // SQLite's type affinity alone does not enforce BLOB: reject 32-char TEXT too.
+    assert!(sqlx::query("INSERT INTO json_import_receipt_model(user_id,request_id,payload_sha256) VALUES($1,$2,$3)")
+        .bind(&first).bind(uuid::Uuid::new_v4().to_string()).bind("x".repeat(32)).execute(pool).await.is_err());
+    assert!(sqlx::query("INSERT INTO json_import_receipt_model(user_id,request_id,payload_sha256) VALUES($1,$2,$3)")
+        .bind(uuid::Uuid::new_v4().to_string()).bind(uuid::Uuid::new_v4().to_string()).bind(&hash).execute(pool).await.is_err());
+    let rows: Vec<(String, i64, bool)> = sqlx::query_as("SELECT typeof(payload_sha256),length(payload_sha256),completed_at IS NOT NULL FROM json_import_receipt_model")
+        .fetch_all(pool).await.unwrap();
+    assert_eq!(rows, vec![("blob".into(), 32, true); 2]);
+    sqlx::query("DELETE FROM user_model WHERE id=$1")
+        .bind(&first)
+        .execute(pool)
+        .await
+        .unwrap();
+    let owners: Vec<String> = sqlx::query_scalar("SELECT user_id FROM json_import_receipt_model")
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    assert_eq!(owners, vec![second]);
+}
+
+#[tokio::test]
+async fn runtime_and_sqlx_migrations_create_the_same_constrained_receipt_schema() {
+    let runtime = common::test_pool().await;
+    let cli = memory_pool().await;
+    sqlx::migrate::Migrator::new(std::path::Path::new("./migrations"))
+        .await
+        .unwrap()
+        .run(&cli)
+        .await
+        .unwrap();
+    let schema = "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name='json_import_receipt_model' ORDER BY type,name";
+    let runtime_schema: Vec<(String, String, String, Option<String>)> =
+        sqlx::query_as(schema).fetch_all(&runtime).await.unwrap();
+    let cli_schema: Vec<(String, String, String, Option<String>)> =
+        sqlx::query_as(schema).fetch_all(&cli).await.unwrap();
+    assert!(!runtime_schema.is_empty());
+    assert_eq!(runtime_schema, cli_schema);
+    assert_receipt_constraints(&runtime).await;
+    assert_receipt_constraints(&cli).await;
+}
+
+#[tokio::test]
+async fn receipt_upgrade_from_version_twenty_preserves_data_and_is_repeatable() {
+    let pool = common::test_pool().await;
+    let user = common::create_test_user(&pool, "receipt-upgrade").await;
+    let master = common::master_layer_id(&pool, &user).await;
+    sqlx::query("INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES('existing-marker',$1,$2,'既存対象',35,139,'保持する本文',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
+        .bind(&user).bind(&master).execute(&pool).await.unwrap();
+    sqlx::raw_sql(
+        "DROP TABLE json_import_receipt_model; DELETE FROM schema_migrations WHERE version=21;",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let before: Vec<(i64, String, String)> =
+        sqlx::query_as("SELECT version,name,applied_at FROM schema_migrations ORDER BY version")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(before.len(), 20);
+    run_migrations(&pool).await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    let after: Vec<(i64, String, String)> =
+        sqlx::query_as("SELECT version,name,applied_at FROM schema_migrations ORDER BY version")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(after.len(), 21);
+    assert_eq!(&after[..20], before);
+    let detail: String =
+        sqlx::query_scalar("SELECT detail FROM marker_info_model WHERE id='existing-marker'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(detail, "保持する本文");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM json_import_receipt_model")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_receipt_constraints(&pool).await;
+}
+
+#[tokio::test]
+async fn receipt_upgrade_preserves_receipts_when_sql_was_applied_before_runtime_migration() {
+    let pool = common::test_pool().await;
+    let user = common::create_test_user(&pool, "receipt-preapplied").await;
+    let master = common::master_layer_id(&pool, &user).await;
+    sqlx::query("INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES('preapplied-marker',$1,$2,'既存対象',35,139,'先行適用前の本文',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
+        .bind(&user).bind(&master).execute(&pool).await.unwrap();
+    sqlx::raw_sql(
+        "DROP TABLE json_import_receipt_model; DELETE FROM schema_migrations WHERE version=21;",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(include_str!(
+        "../migrations/20261023120000_json_import_receipts.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let request = uuid::Uuid::new_v4().to_string();
+    let hash = vec![19_u8; 32];
+    sqlx::query("INSERT INTO json_import_receipt_model(user_id,request_id,payload_sha256,completed_at) VALUES($1,$2,$3,'2026-10-23 01:02:03')")
+        .bind(&user).bind(&request).bind(&hash).execute(&pool).await.unwrap();
+    let receipt_query =
+        "SELECT user_id,request_id,payload_sha256,completed_at FROM json_import_receipt_model";
+    let before: Vec<(String, String, Vec<u8>, String)> = sqlx::query_as(receipt_query)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    run_migrations(&pool).await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    let after: Vec<(String, String, Vec<u8>, String)> = sqlx::query_as(receipt_query)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(after, before);
+    let versions: Vec<i64> =
+        sqlx::query_scalar("SELECT version FROM schema_migrations WHERE version=21")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(versions, vec![21]);
+    let total: i64 = sqlx::query_scalar("SELECT count(*) FROM schema_migrations")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(total, 21);
+    let detail: String =
+        sqlx::query_scalar("SELECT detail FROM marker_info_model WHERE id='preapplied-marker'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(detail, "先行適用前の本文");
+    let layer: String =
+        sqlx::query_scalar("SELECT layer_id FROM marker_info_model WHERE id='preapplied-marker'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(layer, master);
 }
