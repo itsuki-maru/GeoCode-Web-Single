@@ -259,6 +259,7 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
 .btn-head-image {
   box-sizing: border-box;
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   width: 53px;
@@ -327,7 +328,7 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  margin-left: -100px;
+  margin-left: 0;
 }
 
 .right-btn-header-zone .select-elm {
