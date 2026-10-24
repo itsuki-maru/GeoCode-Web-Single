@@ -478,6 +478,33 @@ const imageUrl = (row: Answer, field: Field) => {
               {{ pending ? "変更を反映" : "更新" }}
             </button>
           </div>
+          <div class="result-actions">
+            <strong>{{ total }}件</strong>
+            <span class="result-action">
+              <button :disabled="busy || !applied" @click="exportCsv">CSV出力</button>
+              <button
+                type="button"
+                class="help-button"
+                aria-label="一覧とCSVについて"
+                :aria-expanded="usageHelpOpen"
+                @click="usageHelpOpen = !usageHelpOpen"
+              >
+                ?
+              </button>
+            </span>
+            <span class="result-action">
+              <button :disabled="busy || !applied || !total" @click="openMap">地図で確認</button>
+              <button
+                type="button"
+                class="help-button"
+                aria-label="地図で確認について"
+                :aria-expanded="mapHelpOpen"
+                @click="mapHelpOpen = !mapHelpOpen"
+              >
+                ?
+              </button>
+            </span>
+          </div>
         </div>
         <p v-if="target" class="scope-note">
           この対象の回答を表示しています：{{ rows[0]?.target_name || "選択中の地図オブジェクト" }}
@@ -613,29 +640,6 @@ const imageUrl = (row: Answer, field: Field) => {
           </fieldset>
         </form>
         <p v-if="message" role="status">{{ message }}</p>
-        <div class="result-actions">
-          <strong>{{ total }}件</strong
-          ><button :disabled="busy || !applied" @click="exportCsv">CSV出力</button>
-          <button
-            type="button"
-            class="help-button"
-            aria-label="一覧とCSVについて"
-            :aria-expanded="usageHelpOpen"
-            @click="usageHelpOpen = !usageHelpOpen"
-          >
-            ?
-          </button>
-          <button :disabled="busy || !applied || !total" @click="openMap">地図で確認</button>
-          <button
-            type="button"
-            class="help-button"
-            aria-label="地図で確認について"
-            :aria-expanded="mapHelpOpen"
-            @click="mapHelpOpen = !mapHelpOpen"
-          >
-            ?
-          </button>
-        </div>
         <div v-if="mapHelpOpen" class="usage-help">
           <p>
             一覧の全ページの該当対象を地図に表示します（重複を除き最大10,000件）。位置・名前などは現在の情報です。
@@ -901,7 +905,6 @@ button:disabled {
   box-shadow: 0 2px 2px #0003;
 }
 .condition-heading,
-.result-actions,
 .pagination {
   display: flex;
   align-items: center;
@@ -1107,11 +1110,29 @@ dd {
   gap: 12px;
   margin: 8px 0 16px;
 }
-.list-toolbar label {
-  flex: 1 1 240px;
+.list-toolbar > label {
+  flex: 0 1 auto;
+  max-width: 100%;
 }
-.toolbar-actions {
-  display: contents;
+.list-toolbar button {
+  white-space: nowrap;
+}
+.toolbar-actions,
+.result-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-width: 0;
+}
+.result-actions strong {
+  white-space: nowrap;
+}
+.result-action {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 6px;
 }
 .search-form {
   background: #eef1f5;
@@ -1221,20 +1242,12 @@ button {
     grid-template-columns: minmax(0, 1fr) minmax(66px, 0.7fr) minmax(0, 1.2fr);
     gap: 6px;
   }
-  .list-toolbar {
-    display: grid;
-    grid-template-columns: minmax(100px, 1fr) max-content;
-    gap: 6px;
+  .list-toolbar,
+  .toolbar-actions,
+  .result-actions {
+    gap: 8px;
   }
-  .list-toolbar label {
-    min-width: 0;
-  }
-  .toolbar-actions {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 6px;
-  }
-  .list-toolbar button {
+  .list-toolbar button:not(.help-button) {
     padding: 8px 6px;
     font-size: 12px;
   }
