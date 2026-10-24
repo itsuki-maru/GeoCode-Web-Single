@@ -1167,7 +1167,7 @@ summary {
   white-space: nowrap;
 }
 .table-scroll {
-  max-height: 43dvh;
+  max-height: 48dvh;
 }
 th {
   position: sticky;
