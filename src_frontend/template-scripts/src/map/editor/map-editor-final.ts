@@ -178,6 +178,8 @@ window.addEventListener("message", function (event) {
             view: { latitude: center.lat, longitude: center.lng, zoom: map.getZoom() },
             tileServerId: document.querySelector(".tile-radio:checked")?.value || "1",
             overlays: tileOverlayManager.getVisibility(),
+            clusteringEnabled: markerClustering.getEnabled(),
+            clusteringAllowed: markerClustering.isAllowed(),
             markersVisible: map.hasLayer(markersClusterGroup),
             shapesVisible: map.hasLayer(drawnShapesGroup),
             shapeNamesVisible: map.hasLayer(shapeNameVisibilityLayer),

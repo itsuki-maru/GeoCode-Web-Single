@@ -31,6 +31,7 @@ import {
   markerOptionsForLayer,
 } from "./common/marker";
 import { createReadOnlyMarkerLayerControl, hydrateReadOnlyMarkers } from "./common/marker-layers";
+import { installMarkerClustering } from "./common/marker-clustering";
 import { installReadOnlyOverlayHandlers } from "./common/overlay-events";
 import {
   addReadOnlyMapVisibilityControls,
@@ -327,8 +328,9 @@ export function initializeReadOnlyMapPage(
   const shapeLayers: DynamicRecord = {};
   const markers: DynamicRecord = {};
   const layerNames: Record<string, string> = {};
-  const visibleMarkerGroup =
-    isAnother && !bootstrap.isCluster ? L.featureGroup() : L.markerClusterGroup();
+  const clusteringAllowed =
+    !isAnother || (bootstrap.isCluster !== false && printState?.clusteringAllowed !== false);
+  const visibleMarkerGroup = clusteringAllowed ? L.markerClusterGroup() : L.featureGroup();
   if (isTemporary || (printState?.markersVisible ?? storage.getInitialMarkerVisibility()))
     visibleMarkerGroup.addTo(map);
   const drawnShapesGroup = isAnother ? L.featureGroup() : undefined;
@@ -735,6 +737,17 @@ export function initializeReadOnlyMapPage(
     visibleMarkerGroup,
   });
 
+  const markerClustering = isAnother
+    ? installMarkerClustering({
+        leaflet: L,
+        map,
+        markerGroup: visibleMarkerGroup,
+        control: visibilityControl,
+        allowed: clusteringAllowed,
+        initialEnabled: printState?.clusteringEnabled ?? true,
+      })
+    : undefined;
+
   const tileOverlayManager = createTileOverlayManager(
     L,
     map,
@@ -816,6 +829,8 @@ export function initializeReadOnlyMapPage(
         view: { latitude: center.lat, longitude: center.lng, zoom: map.getZoom() },
         tileServerId: document.querySelector<HTMLInputElement>(".tile-radio:checked")?.value || "1",
         overlays: tileOverlayManager.getVisibility(),
+        clusteringEnabled: markerClustering?.getEnabled() ?? true,
+        clusteringAllowed,
         markersVisible: map.hasLayer(visibleMarkerGroup),
         shapesVisible: map.hasLayer(shapeVisibilityLayer),
         shapeNamesVisible: map.hasLayer(shapeNameVisibilityLayer),

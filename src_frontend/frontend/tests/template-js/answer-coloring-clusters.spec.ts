@@ -121,6 +121,118 @@ function assertCluster(group: any, count: number) {
 }
 
 describe("実Leafletで色分け後も通常のクラスタースタイルを維持する", () => {
+  it("連続ズームとアニメーション中の解除でマーカーが消失しない", () => {
+    fixture(9);
+    const runtime = initializeReadOnlyMapPage("form-answer-map");
+    dispose = () => runtime.map.remove();
+    const group = runtime.visibleMarkerGroup;
+    runtime.map.setZoom(15, { animate: false });
+    vi.advanceTimersByTime(400);
+    const input = document.querySelector<HTMLInputElement>(".marker-clustering-control input")!;
+    input.click();
+    const markers = group.getLayers();
+    for (const zoom of [14, 16, 14, 15]) runtime.map.setZoom(zoom, { animate: false });
+    expect(input.checked).toBe(true);
+    input.click();
+    vi.advanceTimersByTime(1000);
+    expect(input.checked).toBe(false);
+    expect(group.getLayers()).toHaveLength(9);
+    expect(group.options.disableClusteringAtZoom).toBe(15);
+    for (const marker of markers) {
+      expect(group.getVisibleParent(marker)).toBe(marker);
+      expect(marker.getElement()).not.toBeNull();
+      expect(marker.getElement().style.opacity).not.toBe("0");
+    }
+  });
+
+  it("クラスタ解除・再クラスタ化でも分類色と回答・凡例の絞り込みを維持する", () => {
+    const f = fixture(100);
+    const runtime = initializeReadOnlyMapPage("form-answer-map");
+    dispose = () => runtime.map.remove();
+    const group = runtime.visibleMarkerGroup;
+    const original = group.options.iconCreateFunction;
+    installAnswerColoring(runtime, L).apply(f.coloring);
+    runtime.setAnswerTargets(f.keys.slice(0, 10));
+    runtime.setLegendHiddenTargets([f.keys[0]]);
+    const markers = group.getLayers();
+    expect(markers).toHaveLength(9);
+    runtime.map.setZoom(15, { animate: false });
+    vi.advanceTimersByTime(400);
+    const input = document.querySelector<HTMLInputElement>(".marker-clustering-control input")!;
+    input.click();
+    for (const marker of markers) expect(group.getVisibleParent(marker)).toBe(marker);
+    expect(runtime.getPrintState().clusteringEnabled).toBe(false);
+    expect(runtime.getPrintState().clusteringAllowed).toBe(true);
+    expect(runtime.markers["marker-m1"].options.icon.options.html).toContain("#d73027");
+    runtime.setLegendHiddenTargets([f.keys[0], f.keys[1]]);
+    expect(group.getLayers()).toHaveLength(8);
+    runtime.map.setZoom(14, { animate: false });
+    vi.advanceTimersByTime(400);
+    expect(input.checked).toBe(true);
+    expect(input.disabled).toBe(true);
+    assertCluster(group, 8);
+    expect(group.options.iconCreateFunction).toBe(original);
+    expect(group.getLayers()).not.toContain(runtime.markers["marker-m0"]);
+    expect(group.getLayers()).not.toContain(runtime.markers["marker-m1"]);
+    expect(runtime.visibleMarkerGroup).toBe(group);
+  });
+
+  it("印刷プレビューへ手動解除を引き継ぎ、縮小後は再クラスタ化する", () => {
+    const f = fixture(9);
+    const preview = createPrintPreview(
+      {
+        ...f.state,
+        view: { ...f.state.view, zoom: 15 },
+        clusteringEnabled: false,
+        clusteringAllowed: true,
+      },
+      vi.fn(),
+      "form-answer-map",
+    );
+    dispose = preview.dispose;
+    let group: any;
+    preview.map.eachLayer((layer: any) => {
+      if (layer instanceof L.MarkerClusterGroup) group = layer;
+    });
+    const input = document.querySelector<HTMLInputElement>(".marker-clustering-control input")!;
+    expect(input.checked).toBe(false);
+    expect(input.disabled).toBe(false);
+    expect(group.options.disableClusteringAtZoom).toBe(15);
+    for (const marker of group.getLayers()) expect(group.getVisibleParent(marker)).toBe(marker);
+    preview.map.setZoom(14, { animate: false });
+    vi.advanceTimersByTime(400);
+    expect(input.checked).toBe(true);
+    expect(input.disabled).toBe(true);
+    assertCluster(group, 9);
+    preview.map.setZoom(15, { animate: false });
+    vi.advanceTimersByTime(400);
+    expect(input.checked).toBe(true);
+    expect(input.disabled).toBe(false);
+  });
+
+  it.each([
+    [false, true],
+    [true, false],
+  ])("印刷はbootstrap=%s・引継ぎ設定=%sの固定OFFを優先する", (bootstrapAllowed, printAllowed) => {
+    const f = fixture(9);
+    (window.__GEOCODE_MAP_BOOTSTRAP__ as any).isCluster = bootstrapAllowed;
+    const preview = createPrintPreview(
+      { ...f.state, clusteringEnabled: true, clusteringAllowed: printAllowed },
+      vi.fn(),
+      "form-answer-map",
+    );
+    dispose = preview.dispose;
+    const input = document.querySelector<HTMLInputElement>(".marker-clustering-control input")!;
+    for (const zoom of [15, 14, 16]) {
+      preview.map.setZoom(zoom, { animate: false });
+      vi.advanceTimersByTime(400);
+      expect(input.checked).toBe(false);
+      expect(input.disabled).toBe(true);
+      expect(document.querySelector(".marker-cluster")).toBeNull();
+      expect(document.querySelectorAll(".leaflet-marker-icon")).toHaveLength(9);
+    }
+  });
+
   it.each([9, 10, 99, 100])(
     "%i件の境界で色分け・再適用・解除後も元の生成関数と40pxを維持する",
     (count) => {

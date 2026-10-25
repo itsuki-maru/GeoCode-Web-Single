@@ -19,6 +19,7 @@ import { makeSummaryDraggable } from "/src/map/common/draggable-summary.ts";
 import { bindFloatingMeasurementLabels } from "/src/map/common/floating-measurement-labels.ts";
 import { renderCameraImage, installMjpegCameras } from "/src/map/common/mjpeg-camera.ts";
 import { createTileOverlayManager } from "/src/map/common/tile-overlays.ts";
+import { installMarkerClustering } from "/src/map/common/marker-clustering.ts";
 import { createLayerBulkToggleControl, extractYouTubeId } from "/src/map/common/base.ts";
 import { installMapContentActions, resolveSameOriginContentUrl } from "/src/map/common/content-actions.ts";
 import { createNestedTokenizer, isLocalhost, isPDF, isValidCoordinate, renderIframe, setupDetailsLazyImages } from "/src/map/common/content.ts";

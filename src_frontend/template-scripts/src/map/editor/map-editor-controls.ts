@@ -181,6 +181,13 @@ const shapeLayersControl = L.control.layers(null, shapeLayerOverlays, {
   collapsed: false,
 });
 shapeLayersControl.addTo(map);
+const markerClustering = installMarkerClustering({
+  leaflet: L,
+  map,
+  markerGroup: markersClusterGroup,
+  control: shapeLayersControl,
+  allowed: window.__GEOCODE_MAP_BOOTSTRAP__.isCluster !== false,
+});
 const tileOverlayManager = createTileOverlayManager(
   L,
   map,

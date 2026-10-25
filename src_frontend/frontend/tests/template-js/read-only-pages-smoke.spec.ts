@@ -16,6 +16,7 @@ import * as mapObjectFocusModule from "../../../template-scripts/src/map/common/
 import * as mapViewPersistenceModule from "../../../template-scripts/src/map/common/map-view-persistence";
 import { createReadOnlyLayerGroupRuntime } from "../../../template-scripts/src/map/common/layer-groups";
 import * as markerModule from "../../../template-scripts/src/map/common/marker";
+import { installMarkerClustering } from "../../../template-scripts/src/map/common/marker-clustering";
 import { createReadOnlyShapeMeasurementDisplayRuntime } from "../../../template-scripts/src/map/common/shape-measurement-display";
 import { createReadOnlyShapeRestorationRuntime } from "../../../template-scripts/src/map/common/shape-restoration";
 import { initializeReadOnlyMapPage } from "../../../template-scripts/src/map/read-only-page";
@@ -391,6 +392,7 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
     createReadOnlyMapRuntime,
     createTooltipVisibilityControl,
     createTileOverlayManager,
+    installMarkerClustering,
     hydrateReadOnlyMarkers,
     installReadOnlyOverlayHandlers,
     ...baseModule,
@@ -452,7 +454,7 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
   const entryName = page.templateName === "map-mobile.html" ? "map-mobile" : "map";
   const implementationSource = editorRuntimeSource(entryName);
   new Script(
-    `"use strict";\n${implementationSource}\nglobalThis.__templateSmokeMap = map;\nglobalThis.__templateSmokeMarkerCount = Object.keys(markers).length;`,
+    `"use strict";\n${implementationSource}\nglobalThis.__templateSmokeMap = map;\nglobalThis.__templateSmokeMarkerCount = Object.keys(markers).length;\nglobalThis.__templateSmokeMarkerGroup = markersClusterGroup;`,
     { filename: page.fileName },
   ).runInContext(context);
 
@@ -471,6 +473,124 @@ afterEach(async () => {
 });
 
 describe("各地図テンプレートJavaScriptのランタイム初期化", () => {
+  const clusteringPages = [
+    ...pages.filter((page) =>
+      ["map.html", "map-mobile.html", "map-anather.html"].includes(page.templateName),
+    ),
+    {
+      ...pages.find((page) => page.templateName === "map-anather.html")!,
+      templateName: "form-answer-map.html",
+    },
+  ];
+  const clusteringPage = (page: SmokePage, isCluster = true): SmokePage => ({
+    ...page,
+    globals: {
+      ...page.globals,
+      isCluster,
+      latitude: 35.6812,
+      longitude: 139.7671,
+      zoom: 14,
+      markersFromAxum: {
+        ...markerRecords,
+        "marker-2": { ...markerRecords["marker-1"], id: "marker-2", marker_name: "Second marker" },
+      },
+      answerPreview:
+        page.templateName === "form-answer-map.html"
+          ? {
+              parentOrigin: "https://example.test",
+              requestId: "cluster-test",
+              query: {},
+              targets: ["marker:marker-1", "marker:marker-2"],
+              answerCount: 2,
+              targetCount: 2,
+            }
+          : undefined,
+    },
+  });
+
+  it.each(clusteringPages)(
+    "$templateNameは15以上で解除でき、縮小後は再クラスタ化する",
+    async (page) => {
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue({
+            ok: true,
+            json: async () => ({
+              markers: clusteringPage(page).globals.markersFromAxum,
+              shapes: [],
+            }),
+          }),
+      );
+      const dom = smokeLoadPage(clusteringPage(page));
+      const document = dom.window.document;
+      const map = (dom.window as any).__templateSmokeMap;
+      const group =
+        (dom.window as any).__templateSmokeMarkerGroup ??
+        (dom.window as any).__templateSmokeRuntime.visibleMarkerGroup;
+      const input = document.querySelector<HTMLInputElement>(".marker-clustering-control input")!;
+      // The answer entry fits its targets after initialization; start this check
+      // at the zoom boundary rather than depending on that initial fit.
+      map.setZoom(14, { animate: false });
+      const layerLabel = [...document.querySelectorAll("label")].find(
+        (label) => label.textContent?.trim() === "Test Layer",
+      );
+      const layerInput = layerLabel?.querySelector<HTMLInputElement>("input");
+      if (layerInput && !layerInput.checked) layerInput.click();
+      const markers = group.getLayers();
+      expect(markers).toHaveLength(2);
+      expect(input.checked).toBe(true);
+      expect(input.disabled).toBe(true);
+      map.setZoom(15, { animate: false });
+      expect(input.disabled).toBe(false);
+      input.click();
+      await vi.waitFor(() => expect(group.options.disableClusteringAtZoom).toBe(15));
+      expect(group.getLayers()).toEqual(expect.arrayContaining(markers));
+      for (const marker of markers) expect(group.getVisibleParent(marker)).toBe(marker);
+      map.setZoom(14, { animate: false });
+      expect(input.checked).toBe(true);
+      expect(input.disabled).toBe(true);
+      await vi.waitFor(() => expect(group.options.disableClusteringAtZoom).toBeNull());
+      expect(group.getVisibleParent(markers[0]).getChildCount()).toBe(2);
+      map.setZoom(15, { animate: false });
+      expect(input.checked).toBe(true);
+      expect(input.disabled).toBe(false);
+      map.removeLayer(group);
+      input.click();
+      await vi.waitFor(() => expect(group.options.disableClusteringAtZoom).toBe(15));
+      expect(map.hasLayer(group)).toBe(false);
+      expect(group.getLayers()).toEqual(expect.arrayContaining(markers));
+    },
+  );
+
+  it.each(
+    clusteringPages.filter((page) =>
+      ["map-anather.html", "form-answer-map.html"].includes(page.templateName),
+    ),
+  )("$templateNameはis_cluster=falseを全ズームで優先する", (page) => {
+    const dom = smokeLoadPage(clusteringPage(page, false));
+    const input = dom.window.document.querySelector<HTMLInputElement>(
+      ".marker-clustering-control input",
+    )!;
+    const runtime = (dom.window as any).__templateSmokeRuntime;
+    for (const zoom of [15, 14, 16, 13]) {
+      runtime.map.setZoom(zoom, { animate: false });
+      expect(input.checked).toBe(false);
+      expect(input.disabled).toBe(true);
+      expect(runtime.getPrintState().clusteringAllowed).toBe(false);
+      expect(runtime.getPrintState().clusteringEnabled).toBe(false);
+    }
+  });
+
+  it.each(pages.filter((page) => page.templateName.startsWith("temporary-map")))(
+    "$templateNameにはクラスタ切替を追加しない",
+    (page) => {
+      const dom = smokeLoadPage(page);
+      expect(dom.window.document.querySelector(".marker-clustering-control")).toBeNull();
+    },
+  );
+
   it.each(pages)("$fileNameは1回の展開操作で住所候補を直接選択できる", async (page) => {
     const dom = smokeLoadPage(page);
     vi.stubGlobal(
@@ -744,11 +864,24 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
           view: { latitude: 35.6812, longitude: 139.7671, zoom: 8 },
           tileServerId: "1",
           overlays: {},
+          clusteringEnabled: true,
+          clusteringAllowed: true,
           markersVisible: true,
           shapesVisible: true,
           shapeNamesVisible: true,
         },
       },
+      "https://example.test",
+    );
+    (dom.window as any).__templateSmokeMap.setZoom(15, { animate: false });
+    dom.window.document
+      .querySelector<HTMLInputElement>(".marker-clustering-control input")!
+      .click();
+    request("https://example.test");
+    expect(post).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({ clusteringEnabled: false, clusteringAllowed: true }),
+      }),
       "https://example.test",
     );
   });

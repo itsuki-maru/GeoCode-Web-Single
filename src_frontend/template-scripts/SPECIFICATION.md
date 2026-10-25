@@ -34,6 +34,7 @@ template-scripts/
 | `map-runtime`、`base`、`page-controls` | 初期地図、基本操作、コントロール |
 | `layer-groups`、`marker-layers`、`overlay-events` | レイヤ構築、表示同期 |
 | `marker`、`map-object-focus` | マーカー表示、位置情報、対象への移動 |
+| `marker-clustering` | 通常・別画面・回答地図のクラスタ切替、ズーム制約、固定OFF設定 |
 | `search` | 検索、対象絞り込み、表示再構築 |
 | `shape-*` | 図形スタイル、矢印、復元、メモ、計測、表示範囲 |
 | `content*`、`markdown-*` | Markdown・埋め込み、サニタイズ、ファイル操作 |
