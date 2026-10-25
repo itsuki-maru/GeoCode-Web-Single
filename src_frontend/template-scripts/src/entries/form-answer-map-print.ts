@@ -23,7 +23,15 @@ const receive = (event: MessageEvent) => {
   try {
     const snapshot = event.data.snapshot;
     window.__GEOCODE_MAP_BOOTSTRAP__ = snapshot.bootstrap;
-    createPrintPreview(snapshot.state, () => send("printClose"), "form-answer-map", session);
+    if (snapshot.coloring)
+      createPrintPreview(
+        snapshot.state,
+        () => send("printClose"),
+        "form-answer-map",
+        session,
+        snapshot.coloring,
+      );
+    else createPrintPreview(snapshot.state, () => send("printClose"), "form-answer-map", session);
     send("printInitialized");
   } catch {
     send("printError");

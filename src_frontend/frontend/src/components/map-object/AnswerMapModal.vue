@@ -3,6 +3,23 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import apiClient from "@/axiosClient";
 import { submitAuthenticatedForm } from "@/utils/authenticated-form";
 import PrintMapModal from "../map/PrintMapModal.vue";
+import AnswerColoringPanel from "./AnswerColoringPanel.vue";
+import SaveMapPresetModal from "./SaveMapPresetModal.vue";
+import SavedMapPresetsModal from "./SavedMapPresetsModal.vue";
+import {
+  clonePresetDraft,
+  deserializePresetConditions,
+  validatePresetDraft,
+  type MapPresetDraft,
+  type SavedMapPreset,
+} from "@/utils/answer-map-presets";
+import {
+  createColorRuleRequest,
+  serializeAnswerConditions,
+  validateColorTargets,
+  type AnswerColorSpecification,
+  type AnswerColoring,
+} from "@/utils/answer-coloring";
 
 const props = defineProps<{
   isOpen: boolean;
@@ -83,9 +100,48 @@ interface AppliedMapFilter {
   common_form_id: string | null;
   conditions: Record<string, unknown>[];
 }
-let pending: { id: string; result: Result; summary: string; filter: AppliedMapFilter } | undefined;
+let pending:
+  | {
+      id: string;
+      result: Result;
+      summary: string;
+      filter: AppliedMapFilter;
+      colorSpecification: AnswerColorSpecification | null;
+    }
+  | undefined;
 let appliedId = "";
 let appliedFilter: AppliedMapFilter = { common_form_id: null, conditions: [] };
+let appliedResult: Result | undefined;
+let appliedColorSpecification: AnswerColorSpecification | null = null;
+const coloringActive = ref(false),
+  appliedForm = ref("");
+const colorFormConstraint = computed(() =>
+  typeof baseQuery.value.common_form_id === "string"
+    ? baseQuery.value.common_form_id
+    : appliedForm.value,
+);
+const coloringPanel = ref<InstanceType<typeof AnswerColoringPanel> | null>(null);
+const filterPanel = ref<HTMLDetailsElement | null>(null);
+const presetDraft = shallowRef<MapPresetDraft | null>(null);
+const presetsOpen = ref(false),
+  restoringPreset = ref(false),
+  presetRestoreError = ref(""),
+  presetNotice = ref("");
+const presetModalOpen = computed(() => presetDraft.value !== null || presetsOpen.value);
+let presetSequence = 0,
+  presetController: AbortController | undefined;
+const closePresets = () => {
+  presetSequence++;
+  presetController?.abort();
+  presetsOpen.value = false;
+  restoringPreset.value = false;
+  presetRestoreError.value = "";
+};
+const stopPresets = () => {
+  closePresets();
+  presetDraft.value = null;
+  presetNotice.value = "";
+};
 const csvPreparing = ref(false),
   csvQuery = ref("");
 const csvForm = ref<HTMLFormElement | null>(null),
@@ -169,7 +225,9 @@ const endpoint = computed(() => {
 let disposeNativeRequest: (() => void) | undefined;
 const csvAction = computed(() => endpoint.value.replace(/\/map-filter$/, "/map-csv-download"));
 const csvCheckAction = computed(() => endpoint.value.replace(/\/map-filter$/, "/map-csv-check"));
+const presetEndpoint = computed(() => endpoint.value.replace(/\/map-filter$/, "/map-presets"));
 const stop = () => {
+  stopPresets();
   stopCsv();
   printSnapshot.value = null;
   preparingPrint.value = false;
@@ -187,6 +245,7 @@ const submit = async () => {
   if (!props.isOpen || !props.query) return;
   stop();
   const current = ++epoch;
+  appliedResult = undefined;
   scopeReady.value = false;
   loading.value = true;
   error.value = "";
@@ -230,35 +289,155 @@ const messageError = (
     if (data && typeof data === "object" && "error" in data && typeof data.error === "string")
       return data.error;
   }
+  if (e instanceof Error && /[ぁ-んァ-ヶ一-龠]/.test(e.message)) return e.message;
   return fallback;
 };
-const fetchResult = async (optionsOnly: boolean, reset = false) => {
-  if (!scopeReady.value || !props.isOpen) return;
+const canOpenPresets = () =>
+  props.isOpen &&
+  scopeReady.value &&
+  !loading.value &&
+  !error.value &&
+  !busy.value &&
+  !preparingPrint.value &&
+  !csvPreparing.value &&
+  !printSnapshot.value &&
+  !presetModalOpen.value;
+const saveFilter = () => {
+  if (!canOpenPresets()) return;
+  filterError.value = "";
+  try {
+    presetDraft.value = clonePresetDraft({
+      kind: "filter",
+      definition: {
+        common_form_id: selectedForm.value || null,
+        conditions: serializeAnswerConditions(rows.value, fields.value),
+      },
+    });
+  } catch (cause) {
+    filterError.value = messageError(cause, "保存する条件を確認してください。");
+  }
+};
+const saveColoring = (specification: AnswerColorSpecification) => {
+  if (!canOpenPresets()) return;
+  filterError.value = "";
+  try {
+    presetDraft.value = clonePresetDraft({ kind: "coloring", definition: specification });
+  } catch (cause) {
+    filterError.value = messageError(cause, "保存する条件を確認してください。");
+  }
+};
+const openPresets = () => {
+  if (!canOpenPresets()) return;
+  presetRestoreError.value = "";
+  presetsOpen.value = true;
+};
+const presetSaved = () => {
+  presetDraft.value = null;
+  presetNotice.value = "検索条件を保存しました。";
+};
+const restorePreset = async (preset: SavedMapPreset) => {
+  if (!props.isOpen || !presetsOpen.value || restoringPreset.value || busy.value) return;
+  const seq = ++presetSequence,
+    current = epoch;
+  presetController?.abort();
+  presetController = new AbortController();
+  restoringPreset.value = true;
+  presetRestoreError.value = "";
+  try {
+    if (preset.schema_version !== 1) throw Error("この検索条件の形式には対応していません。");
+    validatePresetDraft(preset);
+    const formId = preset.definition.common_form_id;
+    if (
+      formId &&
+      typeof baseQuery.value.common_form_id === "string" &&
+      baseQuery.value.common_form_id !== formId
+    )
+      throw Error("現在の一覧と共通フォームが異なるため呼び出せません。");
+    if (preset.kind === "coloring") {
+      if (!coloringPanel.value) throw Error("色分けの入力欄が見つかりません。");
+      preset.definition.rules.forEach((rule) =>
+        createColorRuleRequest(
+          baseQuery.value,
+          appliedFilter,
+          preset.definition.common_form_id,
+          rule,
+        ),
+      );
+    } else if (appliedColorSpecification) {
+      appliedColorSpecification.rules.forEach((rule) =>
+        createColorRuleRequest(
+          baseQuery.value,
+          preset.definition,
+          appliedColorSpecification!.common_form_id,
+          rule,
+        ),
+      );
+    }
+    // This lookup never goes through loadOptions/loadFields: both clear the current draft first.
+    const data = (
+      await apiClient.post<Result>(
+        endpoint.value,
+        {
+          query: baseQuery.value,
+          targets: initialTargets.value,
+          common_form_id: formId,
+          conditions: [],
+          options_only: true,
+        },
+        { signal: presetController.signal, timeout: 60000 },
+      )
+    ).data;
+    if (!props.isOpen || !presetsOpen.value || current !== epoch || seq !== presetSequence) return;
+    if (!Array.isArray(data.forms) || !Array.isArray(data.fields)) throw Error("Invalid response");
+    if (formId && !data.forms.some((form) => form.id === formId))
+      throw Error(
+        "保存した共通フォームが現在の対象範囲にありません。一覧の条件を確認してください。",
+      );
+    if (preset.kind === "filter") {
+      const restored = deserializePresetConditions(
+        preset.definition.conditions,
+        data.fields,
+        () => ++nextId,
+      );
+      selectedForm.value = formId || "";
+      rows.value = restored;
+      fields.value = data.fields;
+      if (filterPanel.value) filterPanel.value.open = true;
+    } else {
+      coloringPanel.value!.restoreDraft(preset.definition, data.fields);
+    }
+    forms.value = data.forms;
+    overflow.value = data.forms_overflow;
+    filtersOpen.value = true;
+    filterError.value = "";
+    presetNotice.value = "検索条件を呼び出しました。実行ボタンで地図に反映します。";
+    closePresets();
+  } catch (cause) {
+    if (props.isOpen && presetsOpen.value && current === epoch && seq === presetSequence)
+      presetRestoreError.value = messageError(
+        cause,
+        "検索条件を呼び出せませんでした。現在の入力を維持しています。再試行してください。",
+      );
+  } finally {
+    if (seq === presetSequence) restoringPreset.value = false;
+  }
+};
+const fetchResult = async (
+  optionsOnly: boolean,
+  reset = false,
+  colorChange?: { specification: AnswerColorSpecification | null },
+) => {
+  if (!scopeReady.value || !props.isOpen || presetModalOpen.value) return;
+  if (
+    colorChange &&
+    (busy.value || preparingPrint.value || csvPreparing.value || printSnapshot.value)
+  )
+    return;
   filterError.value = "";
   let conditions: Record<string, unknown>[] = [];
-  if (!reset) {
+  if (!reset && !colorChange) {
     try {
-      conditions = rows.value.map((row) => {
-        const f = selected(row);
-        if (!f) throw Error("入力項目を選択してください。");
-        let value: unknown = null,
-          upper: unknown = null;
-        if (!noValue(row)) {
-          if (f.field_type === "select" || f.field_type === "radio") {
-            if (!row.selected.length) throw Error("選択値を指定してください。");
-            value = row.selected;
-          } else if (f.field_type === "checkbox") value = row.value === "true";
-          else {
-            if (!row.value.trim()) throw Error("条件の値を入力してください。");
-            value = row.value.trim();
-          }
-          if (row.op === "between") {
-            if (!row.upper.trim()) throw Error("範囲の終了値を入力してください。");
-            upper = row.upper.trim();
-          }
-        }
-        return { field_id: f.id, field_type: f.field_type, op: row.op, value, upper };
-      });
+      conditions = serializeAnswerConditions(rows.value, fields.value);
     } catch (e) {
       filterError.value = (e as Error).message;
       return;
@@ -274,27 +453,46 @@ const fetchResult = async (optionsOnly: boolean, reset = false) => {
     seq = ++sequence,
     id = requestId.value;
   busy.value = true;
-  const requestedFilter: AppliedMapFilter = {
-    common_form_id: reset ? null : selectedForm.value || null,
-    conditions: optionsOnly ? [] : JSON.parse(JSON.stringify(conditions)),
-  };
+  const requestedFilter: AppliedMapFilter = colorChange
+    ? JSON.parse(JSON.stringify(appliedFilter))
+    : {
+        common_form_id: reset ? null : selectedForm.value || null,
+        conditions: optionsOnly ? [] : JSON.parse(JSON.stringify(conditions)),
+      };
+  const requestedColors: AnswerColorSpecification | null = JSON.parse(
+    JSON.stringify(colorChange ? colorChange.specification : appliedColorSpecification),
+  );
   try {
-    const data = (
-      await apiClient.post<Result>(
-        endpoint.value,
-        {
-          query: baseQuery.value,
-          targets: initialTargets.value,
-          ...requestedFilter,
-          options_only: optionsOnly,
-        },
-        { signal: controller.signal, timeout: 60000 },
-      )
-    ).data;
+    // Validate all requests before doing any work, including the shared 20-condition limit.
+    const colorRequests =
+      !optionsOnly &&
+      requestedColors?.rules.map((rule) =>
+        createColorRuleRequest(
+          baseQuery.value,
+          requestedFilter,
+          requestedColors.common_form_id,
+          rule,
+        ),
+      );
+    const data: Result =
+      colorChange && appliedResult
+        ? JSON.parse(JSON.stringify(appliedResult))
+        : (
+            await apiClient.post<Result>(
+              endpoint.value,
+              {
+                query: baseQuery.value,
+                targets: initialTargets.value,
+                ...requestedFilter,
+                options_only: optionsOnly,
+              },
+              { signal: controller.signal, timeout: 60000 },
+            )
+          ).data;
     if (!props.isOpen || current !== epoch || seq !== sequence || id !== requestId.value) return;
     if (!Array.isArray(data.forms) || !Array.isArray(data.fields) || !Array.isArray(data.targets))
       throw Error("Invalid response");
-    meta(data);
+    if (!colorChange) meta(data);
     if (optionsOnly) {
       busy.value = false;
       return;
@@ -310,6 +508,37 @@ const fetchResult = async (optionsOnly: boolean, reset = false) => {
       data.answer_count < 0
     )
       throw Error("Invalid response");
+    let coloring: AnswerColoring | null = null;
+    if (requestedColors && colorRequests) {
+      coloring = {
+        version: 1,
+        rules: requestedColors.rules.map(({ id, label, color }) => ({ id, label, color })),
+        targets: {},
+      };
+      const allowed = new Set(data.targets);
+      // Sequential requests avoid multiplying the database load for large target sets.
+      for (let index = 0; index < colorRequests.length; index++) {
+        const classified = (
+          await apiClient.post<Result>(
+            endpoint.value,
+            {
+              ...colorRequests[index],
+              targets: initialTargets.value,
+            },
+            { signal: controller.signal, timeout: 60000 },
+          )
+        ).data;
+        if (!props.isOpen || current !== epoch || seq !== sequence || id !== requestId.value)
+          return;
+        validateColorTargets(classified.targets, new Set(initialTargets.value));
+        if (classified.target_count !== classified.targets.length)
+          throw Error("色分けの件数が不正です。");
+        for (const key of classified.targets) {
+          if (allowed.has(key) && coloring.targets[key] === undefined)
+            coloring.targets[key] = requestedColors.rules[index]!.id;
+        }
+      }
+    }
     const formLabel = forms.value.find((f) => f.id === selectedForm.value)?.label || "";
     const conditionLabels = rows.value.map(
       (row) =>
@@ -319,13 +548,21 @@ const fetchResult = async (optionsOnly: boolean, reset = false) => {
       id: `${id}:${seq}`,
       result: data,
       filter: requestedFilter,
-      summary:
-        reset || !selectedForm.value
+      colorSpecification: requestedColors,
+      summary: colorChange
+        ? applied.value
+        : reset || !selectedForm.value
           ? "一覧と同じ範囲"
           : [formLabel, ...conditionLabels].join(" ／ "),
     };
     frame.value?.contentWindow?.postMessage(
-      { type: "answer-map-filter", requestId: id, updateId: pending.id, targets: data.targets },
+      {
+        type: "answer-map-filter",
+        requestId: id,
+        updateId: pending.id,
+        targets: data.targets,
+        coloring,
+      },
       new URL(props.action, window.location.href).origin,
     );
     ackTimeout = setTimeout(() => {
@@ -343,6 +580,8 @@ const fetchResult = async (optionsOnly: boolean, reset = false) => {
     filterError.value = messageError(e);
   }
 };
+const applyColoring = (specification: AnswerColorSpecification | null) =>
+  void fetchResult(false, false, { specification });
 const loadOptions = () => {
   rows.value = [];
   fields.value = [];
@@ -426,6 +665,9 @@ const onMessage = (event: MessageEvent) => {
     applied.value = "一覧と同じ範囲";
     appliedId = "";
     appliedFilter = { common_form_id: null, conditions: [] };
+    appliedColorSpecification = null;
+    coloringActive.value = false;
+    appliedForm.value = "";
     frame.value?.contentWindow?.postMessage(
       {
         type: "answer-map-print-enable",
@@ -443,6 +685,14 @@ const onMessage = (event: MessageEvent) => {
     ) {
       baseQuery.value = data.query;
       initialTargets.value = data.targets;
+      appliedResult = {
+        forms: [],
+        fields: [],
+        forms_overflow: false,
+        targets: [...data.targets],
+        target_count: data.targetCount,
+        answer_count: data.answerCount,
+      };
       scopeReady.value = true;
       void fetchResult(true);
     }
@@ -466,6 +716,10 @@ const onMessage = (event: MessageEvent) => {
     renderableCount.value = data.renderable;
     applied.value = pending.summary;
     appliedFilter = pending.filter;
+    appliedResult = pending.result;
+    appliedForm.value = appliedFilter.common_form_id || "";
+    appliedColorSpecification = pending.colorSpecification;
+    coloringActive.value = appliedColorSpecification !== null;
     appliedId = data.updateId;
     pending = undefined;
     busy.value = false;
@@ -538,7 +792,8 @@ const exportCsv = () => {
     !visibleCount.value ||
     preparingPrint.value ||
     printSnapshot.value ||
-    csvPreparing.value
+    csvPreparing.value ||
+    presetModalOpen.value
   )
     return;
   stopCsv();
@@ -578,7 +833,8 @@ const openPrint = () => {
     !visibleCount.value ||
     preparingPrint.value ||
     csvPreparing.value ||
-    printSnapshot.value
+    printSnapshot.value ||
+    presetModalOpen.value
   )
     return;
   preparingPrint.value = true;
@@ -599,6 +855,10 @@ const openPrint = () => {
   }, 15000);
 };
 const onKey = (e: KeyboardEvent) => {
+  if (props.isOpen && presetModalOpen.value) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") e.preventDefault();
+    return;
+  }
   if (printSnapshot.value) return;
   if (
     props.isOpen &&
@@ -654,8 +914,15 @@ onBeforeUnmount(() => {
     aria-modal="true"
     aria-label="地図で分析・検索・出力"
   >
-    <button type="button" class="fullscreen-close-btn" @click="emit('close')">閉じる</button>
-    <div class="content-fullscreen-map">
+    <button
+      type="button"
+      class="fullscreen-close-btn"
+      :disabled="presetModalOpen"
+      @click="emit('close')"
+    >
+      閉じる
+    </button>
+    <div class="content-fullscreen-map" :inert="presetModalOpen">
       <header>
         <strong>地図で分析・検索・出力</strong
         ><span v-if="!loading && !error">{{ summary }}（一致回答{{ answerCount }}件）</span>
@@ -691,6 +958,22 @@ onBeforeUnmount(() => {
         >
           {{ csvPreparing ? "CSV準備中…" : "CSV出力" }}
         </button>
+        <button
+          type="button"
+          :disabled="
+            loading ||
+            !!error ||
+            busy ||
+            !scopeReady ||
+            preparingPrint ||
+            csvPreparing ||
+            !!printSnapshot ||
+            presetModalOpen
+          "
+          @click="openPresets"
+        >
+          保存した検索条件
+        </button>
       </header>
       <div class="answer-map-body" :class="{ 'filters-closed': !filtersOpen }">
         <aside
@@ -699,9 +982,11 @@ onBeforeUnmount(() => {
           class="filter-sidebar"
           aria-label="地図の絞り込み"
         >
-          <details class="filter-panel" open>
+          <details ref="filterPanel" class="filter-panel" open>
             <summary>地図上で絞り込み</summary>
-            <fieldset :disabled="busy || !scopeReady || preparingPrint || csvPreparing">
+            <fieldset
+              :disabled="busy || !scopeReady || preparingPrint || csvPreparing || presetModalOpen"
+            >
               <div class="filter-actions">
                 <label
                   >共通フォーム
@@ -727,6 +1012,7 @@ onBeforeUnmount(() => {
                 <button class="btn-close filter-submit" type="button" @click="fetchResult(false)">
                   絞り込み実行
                 </button>
+                <button class="btn-close" type="button" @click="saveFilter">検索条件を保存</button>
               </div>
               <div v-for="row in rows" :key="row.id" class="condition-row">
                 <select v-model="row.key" aria-label="入力項目" @change="resetRow(row)">
@@ -806,12 +1092,34 @@ onBeforeUnmount(() => {
               絞り込みを使用するには地図を開き直してください。
             </p>
           </details>
+          <AnswerColoringPanel
+            ref="coloringPanel"
+            :forms="forms"
+            :endpoint="endpoint"
+            :query="baseQuery"
+            :targets="initialTargets"
+            :requiredForm="colorFormConstraint"
+            :disabled="
+              busy ||
+              !scopeReady ||
+              preparingPrint ||
+              csvPreparing ||
+              !!printSnapshot ||
+              presetModalOpen
+            "
+            :active="coloringActive"
+            @apply="applyColoring"
+            @save="saveColoring"
+          />
           <div v-if="!loading && !error" class="map-status" role="status">
             <span>表示に反映済み：{{ applied }}</span
             ><span v-if="busy">処理中…</span
             ><span v-else-if="matchedCount === 0">条件に一致する対象がありません。</span>
           </div>
           <p v-if="filterError" class="map-warning" role="alert">{{ filterError }}</p>
+          <p v-if="presetNotice" class="filter-help preset-notice" role="status">
+            {{ presetNotice }}
+          </p>
           <p v-if="skipped && !loading && !error" class="map-warning">
             位置情報などの問題により{{ skipped }}件を表示できませんでした。
           </p>
@@ -870,6 +1178,21 @@ onBeforeUnmount(() => {
       :layerIds="null"
       :answerPrint="{ action: printAction, snapshot: printSnapshot }"
       @close="printSnapshot = null"
+    />
+    <SaveMapPresetModal
+      :isOpen="presetDraft !== null"
+      :draft="presetDraft"
+      :endpoint="presetEndpoint"
+      @close="presetDraft = null"
+      @saved="presetSaved"
+    />
+    <SavedMapPresetsModal
+      :isOpen="presetsOpen"
+      :endpoint="presetEndpoint"
+      :restoring="restoringPreset"
+      :restoreError="presetRestoreError"
+      @close="closePresets"
+      @restore="restorePreset"
     />
   </div>
 </template>
@@ -1027,6 +1350,9 @@ select[multiple] {
 .filter-help {
   font-size: 12px;
   margin: 4px 0;
+}
+.preset-notice {
+  padding: 8px 12px;
 }
 button {
   background: #5f5f5f;

@@ -21,6 +21,13 @@ let fetchData: ReturnType<typeof vi.fn<typeof fetch>>;
 beforeEach(() => {
   vi.useFakeTimers();
   document.body.innerHTML = '<div id="map"></div>';
+  // Load the real CSS explicitly: Vitest stubs ?inline imports by default, while
+  // the shipped Markdown styles would otherwise fix legend ul/li at 16px.
+  for (const file of ["public/github.css", "../template-scripts/src/map/print/print-preview.css"]) {
+    const style = document.createElement("style");
+    style.textContent = readFileSync(file, "utf8");
+    document.head.append(style);
+  }
   localStorage.clear();
   localStorage.setItem(
     "geocode-web:last-map-view",
@@ -184,6 +191,175 @@ async function finishObjectLoads() {
   });
 }
 describe("印刷プレビューと実際のLeaflet", () => {
+  it("色分け未使用の通常印刷に凡例設定を追加しない", () => {
+    preview = createPrintPreview(state, vi.fn());
+    expect(document.querySelector(".answer-print-legend")).toBeNull();
+    expect(document.querySelector(".answer-print-legend-settings")).toBeNull();
+  });
+
+  it("回答地図の凡例を分類ごとにまとめ、同分類のマーカー・図形を一括切替しても非選択レイヤを復活させない", async () => {
+    const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
+    bootstrap.page = "form-answer-map";
+    bootstrap.markers = {
+      a: {
+        id: "a",
+        layer_id: "group-a",
+        marker_name: "避難所A",
+        detail: "",
+        latitude: 35.68,
+        longitude: 139.76,
+      },
+      b: {
+        id: "b",
+        layer_id: "group-a",
+        marker_name: "施設B",
+        detail: "",
+        latitude: 35.69,
+        longitude: 139.77,
+      },
+      c: {
+        id: "c",
+        layer_id: "group-b",
+        marker_name: "施設C",
+        detail: "",
+        latitude: 35.7,
+        longitude: 139.78,
+      },
+    };
+    bootstrap.shapes = [
+      {
+        id: "s",
+        layer_id: "group-a",
+        name: "区域",
+        shape_type: "circle",
+        geojson: {
+          type: "Feature",
+          properties: { radius: 30 },
+          geometry: { type: "Point", coordinates: [139.76, 35.68] },
+        },
+      },
+    ];
+    bootstrap.answerPreview = {
+      query: {},
+      targets: ["marker:a", "marker:b", "marker:c", "shape:s"],
+      parentOrigin: location.origin,
+      requestId: "r",
+      answerCount: 4,
+      targetCount: 4,
+    };
+    const before = JSON.stringify(bootstrap);
+    preview = createPrintPreview(state, vi.fn(), "form-answer-map", undefined, {
+      version: 1,
+      rules: [
+        { id: "r", label: "耐用年数50年以上", color: "#ff0000" },
+        { id: "empty", label: "該当なし", color: "#0000ff" },
+      ],
+      targets: { "marker:a": "r", "marker:c": "r", "shape:s": "r" },
+    });
+    const map = preview.map;
+    const center = map.getCenter();
+    const zoom = map.getZoom();
+    let markerA: any, markerB: any, markerC: any, shape: any;
+    map.eachLayer((layer: any) => {
+      if (layer.options?.icon) {
+        if (String(layer.getTooltip?.()?.getContent()).includes("避難所A")) markerA = layer;
+        if (String(layer.getTooltip?.()?.getContent()).includes("施設B")) markerB = layer;
+        if (String(layer.getTooltip?.()?.getContent()).includes("施設C")) markerC = layer;
+      } else if (layer.shapeId === "s" || layer.options?.color === "#ff0000") shape = layer;
+    });
+    expect(markerA).toBeDefined();
+    expect(markerB).toBeDefined();
+    expect(markerC).toBeDefined();
+    expect(map.hasLayer(markerC)).toBe(true);
+    checkbox("施設").click();
+    expect(map.hasLayer(markerC)).toBe(false);
+    expect(shape.options.color).toBe("#ff0000");
+    expect(document.querySelectorAll("#map .answer-value-marker")).toHaveLength(1);
+    const entries = document.querySelectorAll(".answer-print-legend li");
+    expect(entries).toHaveLength(1);
+    expect(entries[0].textContent).toBe("耐用年数50年以上");
+    expect(document.querySelector(".answer-print-legend")!.textContent).not.toContain("避難所A");
+    expect(document.querySelector(".answer-print-legend")!.textContent).not.toContain("区域");
+    expect(document.querySelector(".answer-print-legend-settings")!.textContent).not.toContain(
+      "該当なし",
+    );
+    expect(fetchData).not.toHaveBeenCalled();
+    checkbox("耐用年数50年以上").click();
+    expect(map.hasLayer(markerA)).toBe(true);
+    expect(map.hasLayer(shape)).toBe(true);
+    checkbox("地図と連動").click();
+    expect(map.hasLayer(markerA)).toBe(false);
+    expect(map.hasLayer(shape)).toBe(false);
+    expect(map.hasLayer(markerC)).toBe(false);
+    expect(map.hasLayer(markerB)).toBe(true);
+    checkbox("凡例を表示").click();
+    expect(document.querySelector<HTMLElement>(".answer-print-legend")!.hidden).toBe(true);
+    expect(map.hasLayer(markerA)).toBe(false);
+    checkbox("避難所").click();
+    checkbox("耐用年数50年以上").click();
+    expect(map.hasLayer(markerA)).toBe(false);
+    expect(map.hasLayer(shape)).toBe(false);
+    expect(map.hasLayer(markerB)).toBe(false);
+    expect(map.hasLayer(markerC)).toBe(false);
+    checkbox("地図と連動").click();
+    expect(map.hasLayer(markerA)).toBe(false);
+    checkbox("避難所").click();
+    expect(map.hasLayer(markerA)).toBe(true);
+    expect(map.hasLayer(shape)).toBe(true);
+    expect(map.hasLayer(markerB)).toBe(true);
+    expect(map.hasLayer(markerC)).toBe(false);
+    expect(preview.map).toBe(map);
+    expect(map.getCenter()).toEqual(center);
+    expect(map.getZoom()).toBe(zoom);
+    expect(JSON.stringify(bootstrap)).toBe(before);
+    expect(fetchData).not.toHaveBeenCalled();
+    finishImages();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((document.getElementById("print-submit") as HTMLButtonElement).disabled).toBe(false);
+    checkbox("凡例を表示").click();
+    const panel = document.querySelector<HTMLElement>(".answer-print-legend")!;
+    const font = document.querySelector<HTMLSelectElement>('[aria-label="凡例の文字サイズ"]')!;
+    expect(font.value).toBe("12");
+    for (const size of [8, 12, 18, 32]) {
+      font.value = String(size);
+      font.dispatchEvent(new Event("change", { bubbles: true }));
+      expect(getComputedStyle(panel).fontSize).toBe(`${size}px`);
+      expect(getComputedStyle(panel.querySelector("strong")!).fontSize).toBe(`${size}px`);
+      expect(getComputedStyle(panel.querySelector("li")!).fontSize).toBe(`${size}px`);
+      expect(getComputedStyle(panel.querySelector(".answer-print-legend-swatch")!).fontSize).toBe(
+        `${size}px`,
+      );
+      expect(
+        getComputedStyle(document.querySelector(".answer-print-legend-option")!).fontSize,
+      ).toBe("13px");
+    }
+    const ordinaryList = document.createElement("ul");
+    ordinaryList.innerHTML = "<li>通常の本文ラベル</li>";
+    document.body.append(ordinaryList);
+    expect(getComputedStyle(ordinaryList.firstElementChild!).fontSize).toBe("16px");
+    ordinaryList.remove();
+    font.value = "18";
+    font.dispatchEvent(new Event("change", { bubbles: true }));
+    expect((document.getElementById("print-submit") as HTMLButtonElement).disabled).toBe(true);
+    finishImages();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((document.getElementById("print-submit") as HTMLButtonElement).disabled).toBe(false);
+    expect(preview.map).toBe(map);
+    expect(map.getCenter()).toEqual(center);
+    expect(map.getZoom()).toBe(zoom);
+    expect(JSON.stringify(bootstrap)).toBe(before);
+    Object.defineProperties(panel, { clientHeight: { value: 100 }, scrollHeight: { value: 200 } });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((document.getElementById("print-submit") as HTMLButtonElement).disabled).toBe(true);
+    expect((document.getElementById("pdf-export") as HTMLButtonElement).disabled).toBe(true);
+    expect(document.getElementById("print-status")!.textContent).toContain(
+      "凡例が枠に収まりません",
+    );
+    checkbox("凡例を表示").click();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((document.getElementById("print-submit") as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it.each(["marker", "shape"])("%sのポップアップを印刷中・キャンセル後も保持する", async (kind) => {
     preview = createPrintPreview(state, vi.fn());
     await finishObjectLoads();

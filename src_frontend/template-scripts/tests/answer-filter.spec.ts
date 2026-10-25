@@ -42,6 +42,62 @@ function setup() {
 }
 
 describe("dedicated answer map filter", () => {
+  it("validates coloring against the new filter scope before updating either state", () => {
+    const s = setup();
+    const controller = { apply: vi.fn(), getState: () => null };
+    (s.runtime as any).answerColoring = controller;
+    const coloring = {
+      version: 1,
+      rules: [{ id: "a", label: "分類A", color: "#0072b2" }],
+      targets: { "marker:id": "a" },
+    };
+    s.send({ targets: ["shape:id"], coloring });
+    s.send({
+      targets: ["marker:id"],
+      coloring: { ...coloring, targets: { "marker:outside": "a" } },
+    });
+    expect(controller.apply).not.toHaveBeenCalled();
+    expect(s.runtime.setAnswerTargets).not.toHaveBeenCalled();
+    s.send({ targets: ["marker:id"], coloring }, "https://invalid.example");
+    expect(controller.apply).not.toHaveBeenCalled();
+    s.send({ targets: ["marker:id"], coloring });
+    expect(controller.apply).toHaveBeenCalledWith(coloring);
+    expect(s.post).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: "answer-map-filter-applied", visible: 1 }),
+      location.origin,
+    );
+    s.send({ targets: ["marker:id"], coloring: null });
+    expect(controller.apply).toHaveBeenLastCalledWith(null);
+    s.handlers.unload();
+  });
+
+  it("rolls back coloring and targets together when applying the filter fails", () => {
+    const s = setup();
+    const previous = {
+      version: 1,
+      rules: [{ id: "a", label: "A", color: "#0072b2" }],
+      targets: { "shape:id": "a" },
+    };
+    const controller = { apply: vi.fn(), getState: () => previous };
+    (s.runtime as any).answerColoring = controller;
+    s.runtime.setAnswerTargets.mockImplementationOnce(() => {
+      throw Error("failure");
+    });
+    s.send({ targets: ["marker:id"], coloring: null });
+    expect(controller.apply.mock.calls).toEqual([[null], [previous]]);
+    expect(s.runtime.setAnswerTargets).toHaveBeenLastCalledWith([
+      "marker:id",
+      "shape:id",
+      "marker:invalid",
+    ]);
+    expect(s.result.counts()).toEqual({ visible: 2, renderable: 2 });
+    expect(s.post).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: "answer-map-filter-error" }),
+      location.origin,
+    );
+    s.handlers.unload();
+  });
+
   it("CSVは反映済み条件と実際のレイヤ表示に限定し、古い更新・未許可・0件を拒否する", () => {
     const s = setup();
     const request = { type: "answer-map-csv-request", csvRequestId: "csv", updateId: "" };

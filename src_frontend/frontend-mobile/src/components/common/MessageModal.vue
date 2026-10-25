@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import BaseModal from "./BaseModal.vue";
 
-defineProps<{
-  isOpen: boolean;
-  message: string;
-  confirmLabel?: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    isOpen: boolean;
+    message: string;
+    confirmLabel?: string;
+    zIndex?: number;
+    busy?: boolean;
+  }>(),
+  { zIndex: 30, busy: false },
+);
 
 const emit = defineEmits<{
   close: [];
@@ -14,7 +19,12 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <BaseModal :isOpen="isOpen" :zIndex="30" @close="emit('close')">
+  <BaseModal
+    :isOpen="isOpen"
+    :zIndex="zIndex"
+    :closeOnOverlayClick="!busy"
+    @close="!props.busy && emit('close')"
+  >
     <h2 class="modal-h2">メッセージ</h2>
     <div class="input-text-zone">
       <p>
@@ -22,8 +32,10 @@ const emit = defineEmits<{
       </p>
     </div>
     <div class="btn-close">
-      <button @click="emit('close')">閉じる</button>
-      <button v-if="confirmLabel" type="button" @click="emit('confirm')">{{ confirmLabel }}</button>
+      <button :disabled="busy" @click="emit('close')">閉じる</button>
+      <button v-if="confirmLabel" type="button" :disabled="busy" @click="emit('confirm')">
+        {{ confirmLabel }}
+      </button>
     </div>
   </BaseModal>
 </template>

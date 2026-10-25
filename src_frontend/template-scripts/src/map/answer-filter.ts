@@ -1,5 +1,6 @@
 import type { FormAnswerMapBootstrap } from "./types";
 import { createAnswerPrintSnapshot } from "./print/answer-print-state";
+import { isAnswerColoring } from "./answer-coloring";
 
 /** Only this dedicated iframe accepts answer filters. Cached layers are retained. */
 export function installAnswerFilter(
@@ -98,7 +99,7 @@ export function installAnswerFilter(
       return;
     }
     if (event.data.type !== "answer-map-filter") return;
-    const { targets, updateId } = event.data;
+    const { targets, updateId, coloring } = event.data;
     if (typeof updateId !== "string" || updateId.length > 128) return;
     if (
       !Array.isArray(targets) ||
@@ -109,12 +110,34 @@ export function installAnswerFilter(
       send("answer-map-filter-error", { updateId, message: "地図の対象情報が不正です。" });
       return;
     }
+    if (
+      coloring !== undefined &&
+      coloring !== null &&
+      !isAnswerColoring(coloring, new Set<string>(targets))
+    ) {
+      send("answer-map-filter-error", { updateId, message: "色分けの設定が不正です。" });
+      return;
+    }
+    const previousTargets = [...allowed];
+    const previousColoring = runtime.answerColoring?.getState() ?? null;
     try {
+      if (coloring !== undefined) {
+        if (!runtime.answerColoring) throw new Error("Coloring is unavailable");
+        runtime.answerColoring.apply(coloring);
+      }
       runtime.setAnswerTargets(targets);
       allowed = new Set(targets);
       lastUpdate = updateId;
       send("answer-map-filter-applied", { updateId, ...counts() });
     } catch {
+      // Both updates belong to the same acknowledged revision. Restore both if
+      // either renderer fails, keeping print/CSV tied to the previous revision.
+      try {
+        if (coloring !== undefined) runtime.answerColoring?.apply(previousColoring);
+        runtime.setAnswerTargets(previousTargets);
+      } catch {
+        // The failed renderer already attempted its own rollback.
+      }
       send("answer-map-filter-error", { updateId, message: "地図の表示を更新できませんでした。" });
     }
   };

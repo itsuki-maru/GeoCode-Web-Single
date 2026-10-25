@@ -54,6 +54,30 @@ function fixture() {
   return { state, bootstrap, runtime: { getPrintState: () => state } };
 }
 describe("frozen answer print snapshot", () => {
+  it("includes coloring only when used, restricts it to print targets and freezes applied colors", () => {
+    const f = fixture();
+    expect(createAnswerPrintSnapshot(f.bootstrap, f.runtime, ["marker:same"])).not.toHaveProperty(
+      "coloring",
+    );
+    const coloring = {
+      version: 1,
+      rules: [{ id: "r", label: "分類", color: "#ff0000" }],
+      targets: { "marker:same": "r", "shape:same": "r", "marker:excluded": "r" },
+    };
+    (f.runtime as any).answerColoring = { getState: () => coloring };
+    const snapshot = createAnswerPrintSnapshot(f.bootstrap, f.runtime, ["marker:same"]);
+    expect(snapshot.coloring!.targets).toEqual({ "marker:same": "r" });
+    coloring.rules[0].color = "#00ff00";
+    expect(snapshot.coloring!.rules[0].color).toBe("#ff0000");
+    snapshot.coloring!.targets["shape:same"] = "r";
+    expect(isAnswerPrintSnapshot(snapshot)).toBe(false);
+    delete snapshot.coloring!.targets["shape:same"];
+    snapshot.coloring!.targets["marker:same"] = "unknown";
+    expect(isAnswerPrintSnapshot(snapshot)).toBe(false);
+    snapshot.coloring!.targets["marker:same"] = "r";
+    snapshot.coloring!.rules[0].color = "url(javascript:alert(1))";
+    expect(isAnswerPrintSnapshot(snapshot)).toBe(false);
+  });
   it("freezes popup sections and analysis for only the selected objects", () => {
     const f = fixture();
     const body = { free_text: "自由", managed_markdown: "回答", sync_required: false };
