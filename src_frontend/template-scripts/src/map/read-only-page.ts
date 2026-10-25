@@ -6,6 +6,7 @@ import { createLazyLayerObjects } from "./common/lazy-layer-objects";
 import type { PrintMapState } from "./common/print-state";
 import { readMapBootstrap } from "./bootstrap";
 import { hasValidAnswerGeometry } from "./answer-preview";
+import { createAnswerVisibility } from "./answer-visibility";
 import { createLayerBulkToggleControl, extractYouTubeId } from "./common/base";
 import {
   createNestedTokenizer,
@@ -163,7 +164,12 @@ export function initializeReadOnlyMapPage(
   const isPrint = isAnother && Boolean(printState);
   const isAnswerPreview =
     expectedPage === "form-answer-map" || (isAnother && Boolean(bootstrap.answerPreview));
-  let answerTargets: Set<string> | null = null;
+  const answerVisibility = createAnswerVisibility(() => {
+    layeredMarkerDisplay.rebuildVisibleMarkers();
+    layeredShapeDisplay.rebuildVisibleShapes();
+    groups.syncAllShapeGroupsVisibility();
+    map.fire("answerfilterchange");
+  });
   const persistSettings = isAnother && !isPrint && !isAnswerPreview;
   const isMobileAnswerMap =
     expectedPage === "form-answer-map" &&
@@ -540,7 +546,7 @@ export function initializeReadOnlyMapPage(
     createLayeredMarkerDisplayManager: (options) =>
       createLayeredMarkerDisplayManager({
         ...options,
-        isRecordAllowed: (record) => !answerTargets || answerTargets.has(`marker:${record.id}`),
+        isRecordAllowed: (record) => answerVisibility.allows(`marker:${record.id}`),
       }),
     escapeHtml,
     layerNames,
@@ -582,7 +588,7 @@ export function initializeReadOnlyMapPage(
     shapeMeasurementManager?.destroy();
   });
   const layeredShapeDisplay = createLayeredShapeDisplayManager({
-    isRecordAllowed: (record) => !answerTargets || answerTargets.has(`shape:${record.id}`),
+    isRecordAllowed: (record) => answerVisibility.allows(`shape:${record.id}`),
     isLayerVisible: layeredMarkerDisplay.isLayerVisible,
     map,
     onRebuild: () => {
@@ -818,23 +824,9 @@ export function initializeReadOnlyMapPage(
         ),
       };
     },
-    setAnswerTargets: (keys: string[]) => {
-      const previous = answerTargets;
-      const rebuild = () => {
-        layeredMarkerDisplay.rebuildVisibleMarkers();
-        layeredShapeDisplay.rebuildVisibleShapes();
-        groups.syncAllShapeGroupsVisibility();
-        map.fire("answerfilterchange");
-      };
-      try {
-        answerTargets = new Set(keys);
-        rebuild();
-      } catch (error) {
-        answerTargets = previous;
-        rebuild();
-        throw error;
-      }
-    },
+    setAnswerTargets: answerVisibility.setAnswerTargets,
+    setLegendHiddenTargets: answerVisibility.setLegendHiddenTargets,
+    applyShapeArrowStyle: shapeArrow.applyShapeArrowStyle,
     visibleMarkerGroup,
     getObjectLoadStatus: () => objectLoader?.getStatus() ?? { loading: false, failed: false },
     retryObjectLoads: () => objectLoader?.retrySelected(),

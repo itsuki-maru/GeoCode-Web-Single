@@ -235,40 +235,43 @@ pub(super) async fn validate_conditions(
                 "選択したフォームにない項目、または非対応の項目です。",
             ));
         }
-        // PostgreSQLのNUMERICで境界と指数を検証する。ブラウザ/f64で範囲を丸めない。
-        if condition.field_type == "number"
-            && !matches!(condition.op.as_str(), "empty" | "filled" | "missing")
-        {
-            let text = |v: &Value| {
-                v.as_str()
-                    .map(str::to_string)
-                    .unwrap_or_else(|| v.to_string())
-            };
-            let lo = text(&condition.value);
-            let hi = if condition.op == "between" {
-                text(&condition.upper)
-            } else {
-                lo.clone()
-            };
-            for v in [&lo, &hi] {
-                if v.find(['e', 'E']).is_some_and(|i| {
-                    !v[i + 1..]
-                        .parse::<i32>()
-                        .is_ok_and(|e| (-1000..=1000).contains(&e))
-                }) {
-                    return Err(invalid("数値の指数が大きすぎます。"));
-                }
-            }
-            let valid = super::answer_sqlite::compare_numbers(
-                &format!("query:{lo}"),
-                &format!("query:{hi}"),
-            ) != std::cmp::Ordering::Greater;
-            if !valid {
-                return Err(invalid("数値範囲を確認してください。"));
-            }
-        }
+        validate_numeric_condition(condition)?;
     }
     Ok(fields)
+}
+
+// 保存と実行で同じ十進数比較を使い、f64やSQLite REALへの変換を避ける。
+pub(super) fn validate_numeric_condition(condition: &AnswerCondition) -> Result<(), AppError> {
+    if condition.field_type == "number"
+        && !matches!(condition.op.as_str(), "empty" | "filled" | "missing")
+    {
+        let text = |v: &Value| {
+            v.as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| v.to_string())
+        };
+        let lo = text(&condition.value);
+        let hi = if condition.op == "between" {
+            text(&condition.upper)
+        } else {
+            lo.clone()
+        };
+        for v in [&lo, &hi] {
+            if v.find(['e', 'E']).is_some_and(|i| {
+                !v[i + 1..]
+                    .parse::<i32>()
+                    .is_ok_and(|e| (-1000..=1000).contains(&e))
+            }) {
+                return Err(invalid("数値の指数が大きすぎます。"));
+            }
+        }
+        if super::answer_sqlite::compare_numbers(&format!("query:{lo}"), &format!("query:{hi}"))
+            == std::cmp::Ordering::Greater
+        {
+            return Err(invalid("数値範囲を確認してください。"));
+        }
+    }
+    Ok(())
 }
 
 pub async fn filter_targets(

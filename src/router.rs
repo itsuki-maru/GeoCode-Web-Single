@@ -203,6 +203,24 @@ pub fn build_router(
         .route("/form-answers/search", post(search_answers_handler))
         .route("/form-answers/map-filter", post(filter_handler))
         .route(
+            "/form-answers/map-presets",
+            get(crate::handler::answer_map_presets::list_handler)
+                .post(crate::handler::answer_map_presets::create_handler)
+                .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static("no-store"),
+                )),
+        )
+        .route(
+            "/form-answers/map-presets/{id}",
+            delete(crate::handler::answer_map_presets::delete_handler).layer(
+                tower_http::set_header::SetResponseHeaderLayer::overriding(
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static("no-store"),
+                ),
+            ),
+        )
+        .route(
             "/form-answers/map-csv-check",
             post(crate::handler::answer_map_csv::check_handler),
         )

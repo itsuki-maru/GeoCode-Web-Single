@@ -48,7 +48,7 @@ async fn migrations_create_schema_and_record_versions() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 21);
+    assert_eq!(migration_count, 22);
 
     let live_location_table_count: i64 = sqlx::query_scalar(
         r#"
@@ -167,7 +167,7 @@ async fn migrations_are_idempotent() {
         .fetch_one(&pool)
         .await
         .expect("migration count should be returned");
-    assert_eq!(migration_count, 21);
+    assert_eq!(migration_count, 22);
 }
 
 #[tokio::test]
@@ -250,7 +250,7 @@ async fn migrations_record_versions_for_existing_schema() {
     .await
     .expect("migration rows should be returned");
 
-    assert_eq!(rows.len(), 21);
+    assert_eq!(rows.len(), 22);
     assert_eq!(rows[0].get::<i64, _>("version"), 1);
     assert_eq!(rows[0].get::<String, _>("name"), "create_initial_schema");
     assert_eq!(rows[1].get::<i64, _>("version"), 2);
@@ -489,6 +489,7 @@ async fn common_form_upgrade_preserves_legacy_config_answers_and_markdown() {
         DROP TABLE common_form_revision_model;
         DROP TABLE common_form_model;
         DROP TABLE json_import_receipt_model;
+        DROP TABLE answer_map_saved_condition_model;
         ALTER TABLE marker_form_submission_model DROP COLUMN revision;
         ALTER TABLE marker_form_submission_model DROP COLUMN edited_at;
         ALTER TABLE shape_form_submission_model DROP COLUMN revision;
@@ -550,7 +551,7 @@ async fn common_form_upgrade_preserves_legacy_config_answers_and_markdown() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        21
+        22
     );
 }
 
@@ -639,7 +640,7 @@ async fn receipt_upgrade_from_version_twenty_preserves_data_and_is_repeatable() 
     sqlx::query("INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES('existing-marker',$1,$2,'既存対象',35,139,'保持する本文',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
         .bind(&user).bind(&master).execute(&pool).await.unwrap();
     sqlx::raw_sql(
-        "DROP TABLE json_import_receipt_model; DELETE FROM schema_migrations WHERE version=21;",
+        "DROP TABLE answer_map_saved_condition_model; DROP TABLE json_import_receipt_model; DELETE FROM schema_migrations WHERE version>=21;",
     )
     .execute(&pool)
     .await
@@ -657,7 +658,7 @@ async fn receipt_upgrade_from_version_twenty_preserves_data_and_is_repeatable() 
             .fetch_all(&pool)
             .await
             .unwrap();
-    assert_eq!(after.len(), 21);
+    assert_eq!(after.len(), 22);
     assert_eq!(&after[..20], before);
     let detail: String =
         sqlx::query_scalar("SELECT detail FROM marker_info_model WHERE id='existing-marker'")
@@ -683,7 +684,7 @@ async fn receipt_upgrade_preserves_receipts_when_sql_was_applied_before_runtime_
     sqlx::query("INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES('preapplied-marker',$1,$2,'既存対象',35,139,'先行適用前の本文',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
         .bind(&user).bind(&master).execute(&pool).await.unwrap();
     sqlx::raw_sql(
-        "DROP TABLE json_import_receipt_model; DELETE FROM schema_migrations WHERE version=21;",
+        "DROP TABLE answer_map_saved_condition_model; DROP TABLE json_import_receipt_model; DELETE FROM schema_migrations WHERE version>=21;",
     )
     .execute(&pool)
     .await
@@ -721,7 +722,7 @@ async fn receipt_upgrade_preserves_receipts_when_sql_was_applied_before_runtime_
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(total, 21);
+    assert_eq!(total, 22);
     let detail: String =
         sqlx::query_scalar("SELECT detail FROM marker_info_model WHERE id='preapplied-marker'")
             .fetch_one(&pool)
@@ -734,4 +735,319 @@ async fn receipt_upgrade_preserves_receipts_when_sql_was_applied_before_runtime_
             .await
             .unwrap();
     assert_eq!(layer, master);
+}
+
+async fn insert_saved_condition(
+    pool: &SqlitePool,
+    user: &str,
+    id: &str,
+    kind: &str,
+    name: &str,
+    version: i64,
+    definition: &str,
+    display: &str,
+) -> Result<sqlx::sqlite::SqliteQueryResult, sqlx::Error> {
+    sqlx::query("INSERT INTO answer_map_saved_condition_model(id,user_id,kind,name,schema_version,definition,display,create_at) VALUES($1,$2,$3,$4,$5,$6,$7,'2026-10-25 01:02:03.000004')")
+        .bind(id).bind(user).bind(kind).bind(name).bind(version).bind(definition).bind(display)
+        .execute(pool).await
+}
+
+async fn assert_saved_condition_constraints(pool: &SqlitePool) {
+    let first = common::create_test_user(pool, "preset-constraint-first").await;
+    let second = common::create_test_user(pool, "preset-constraint-second").await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("PRAGMA foreign_keys")
+            .fetch_one(pool)
+            .await
+            .unwrap(),
+        1
+    );
+    let first_id = uuid::Uuid::new_v4().to_string();
+    let second_id = uuid::Uuid::new_v4().to_string();
+    for (user, id, kind) in [
+        (&first, &first_id, "filter"),
+        (&second, &second_id, "coloring"),
+    ] {
+        insert_saved_condition(pool, user, id, kind, "同名の保存条件", 1, "{}", "{}")
+            .await
+            .unwrap();
+    }
+    assert!(
+        insert_saved_condition(pool, &first, &first_id, "filter", "重複ID", 1, "{}", "{}")
+            .await
+            .is_err()
+    );
+    let hundred_chars = "🚧".repeat(100);
+    insert_saved_condition(
+        pool,
+        &first,
+        &uuid::Uuid::new_v4().to_string(),
+        "filter",
+        &hundred_chars,
+        1,
+        "{}",
+        "{}",
+    )
+    .await
+    .unwrap();
+    let long_name = "🚧".repeat(101);
+    for (kind, name, version, definition, display) in [
+        ("other", "名前", 1, "{}", "{}"),
+        ("filter", "", 1, "{}", "{}"),
+        ("filter", "   ", 1, "{}", "{}"),
+        ("filter", long_name.as_str(), 1, "{}", "{}"),
+        ("filter", "名前", 0, "{}", "{}"),
+        ("filter", "名前", 1, "invalid-json", "{}"),
+        ("filter", "名前", 1, "[]", "{}"),
+        ("filter", "名前", 1, "null", "{}"),
+        ("filter", "名前", 1, "{}", "invalid-json"),
+        ("filter", "名前", 1, "{}", "[]"),
+    ] {
+        assert!(
+            insert_saved_condition(
+                pool,
+                &first,
+                &uuid::Uuid::new_v4().to_string(),
+                kind,
+                name,
+                version,
+                definition,
+                display
+            )
+            .await
+            .is_err(),
+            "accepted {kind}/{name}/{version}/{definition}/{display}"
+        );
+    }
+    assert!(
+        insert_saved_condition(
+            pool,
+            &uuid::Uuid::new_v4().to_string(),
+            &uuid::Uuid::new_v4().to_string(),
+            "filter",
+            "他人",
+            1,
+            "{}",
+            "{}"
+        )
+        .await
+        .is_err()
+    );
+    let types: Vec<(String, String, String, String)> = sqlx::query_as(
+        "SELECT typeof(id),typeof(user_id),typeof(definition),typeof(display) FROM answer_map_saved_condition_model"
+    ).fetch_all(pool).await.unwrap();
+    assert_eq!(
+        types,
+        vec![("text".into(), "text".into(), "text".into(), "text".into()); 3]
+    );
+    let index: Vec<(String, bool)> = sqlx::query_as(
+        "SELECT name,\"desc\" FROM pragma_index_xinfo('idx_answer_map_saved_condition_owner') WHERE key=1 ORDER BY seqno"
+    ).fetch_all(pool).await.unwrap();
+    assert_eq!(
+        index,
+        vec![
+            ("user_id".into(), false),
+            ("create_at".into(), true),
+            ("id".into(), true)
+        ]
+    );
+    sqlx::query("DELETE FROM user_model WHERE id=$1")
+        .bind(&first)
+        .execute(pool)
+        .await
+        .unwrap();
+    let remaining: Vec<(String, String)> =
+        sqlx::query_as("SELECT id,user_id FROM answer_map_saved_condition_model")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(remaining, vec![(second_id, second)]);
+}
+
+#[tokio::test]
+async fn runtime_and_sqlx_migrations_create_the_same_constrained_saved_condition_schema() {
+    let runtime = common::test_pool().await;
+    let cli = memory_pool().await;
+    sqlx::migrate::Migrator::new(std::path::Path::new("./migrations"))
+        .await
+        .unwrap()
+        .run(&cli)
+        .await
+        .unwrap();
+    let schema = "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name='answer_map_saved_condition_model' ORDER BY type,name";
+    let runtime_schema: Vec<(String, String, String, Option<String>)> =
+        sqlx::query_as(schema).fetch_all(&runtime).await.unwrap();
+    let cli_schema: Vec<(String, String, String, Option<String>)> =
+        sqlx::query_as(schema).fetch_all(&cli).await.unwrap();
+    assert!(!runtime_schema.is_empty());
+    assert_eq!(runtime_schema, cli_schema);
+    assert_saved_condition_constraints(&runtime).await;
+    assert_saved_condition_constraints(&cli).await;
+}
+
+async fn seed_pre_preset_data(pool: &SqlitePool) -> String {
+    let owner = common::create_test_user(pool, "preset-upgrade").await;
+    let layer = common::master_layer_id(pool, &owner).await;
+    sqlx::query("INSERT INTO common_form_model(id,user_id,version,form_title,form_description,form_schema,create_at,update_at) VALUES('existing-form',$1,1,'既存フォーム','保持する説明','{\"fields\":[]}','2026-10-20 01:00:00','2026-10-20 01:00:00')")
+        .bind(&owner).execute(pool).await.unwrap();
+    sqlx::raw_sql("INSERT INTO common_form_revision_model(form_id,version,form_schema) VALUES('existing-form',1,'{\"fields\":[]}');")
+        .execute(pool).await.unwrap();
+    sqlx::query("UPDATE layer_model SET common_form_id='existing-form',common_form_version=1,restrict_free_text=true WHERE id=$1")
+        .bind(&layer).execute(pool).await.unwrap();
+    sqlx::query("INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES('existing-marker',$1,$2,'既存地点',35,139,'保持する地点本文','2026-10-20 01:00:00','2026-10-20 01:00:00')")
+        .bind(&owner).bind(&layer).execute(pool).await.unwrap();
+    sqlx::query("INSERT INTO shape_model(id,user_id,layer_id,name,shape_type,geojson,created_at,updated_at) VALUES('existing-shape',$1,$2,'既存図形','polygon','{\"properties\":{\"memo\":\"保持する図形本文\"}}','2026-10-20 01:00:00','2026-10-20 01:00:00')")
+        .bind(&owner).bind(&layer).execute(pool).await.unwrap();
+    sqlx::raw_sql(r#"
+        INSERT INTO marker_form_config_model(marker_id,public_id,enabled,form_title,form_description,form_schema,create_at,update_at,source_form)
+        VALUES('existing-marker','existing-marker-public',1,'地点フォーム','','{"fields":[]}','2026-10-20 01:00:00','2026-10-20 01:00:00','{"id":"existing-form","version":1}');
+        INSERT INTO marker_form_submission_model(id,marker_id,submitted_values,rendered_markdown,create_at,source_form,form_snapshot)
+        VALUES('existing-marker-answer','existing-marker','{"note":"地点回答"}','地点Markdown','2026-10-20 02:00:00','{"id":"existing-form","version":1}','{"form_title":"既存フォーム","form_schema":{"fields":[]}}');
+        INSERT INTO shape_form_config_model(shape_id,public_id,enabled,form_title,form_description,form_schema,create_at,update_at,source_form)
+        VALUES('existing-shape','existing-shape-public',1,'図形フォーム','','{"fields":[]}','2026-10-20 01:00:00','2026-10-20 01:00:00','{"id":"existing-form","version":1}');
+        INSERT INTO shape_form_submission_model(id,shape_id,submitted_values,rendered_markdown,create_at,source_form,form_snapshot)
+        VALUES('existing-shape-answer','existing-shape','{"note":"図形回答"}','図形Markdown','2026-10-20 02:00:00','{"id":"existing-form","version":1}','{"form_title":"既存フォーム","form_schema":{"fields":[]}}');
+    "#).execute(pool).await.unwrap();
+    sqlx::query("INSERT INTO json_import_receipt_model(user_id,request_id,payload_sha256,completed_at) VALUES($1,'existing-request',$2,'2026-10-23 01:02:03')")
+        .bind(&owner).bind(vec![17_u8;32]).execute(pool).await.unwrap();
+    owner
+}
+
+// Capture every column, including BLOB values, without changing SQLite's stored types.
+async fn existing_data_snapshot(pool: &SqlitePool) -> Vec<(String, Vec<String>)> {
+    let mut result = vec![];
+    for table in [
+        "user_model",
+        "layer_model",
+        "marker_info_model",
+        "shape_model",
+        "common_form_model",
+        "common_form_revision_model",
+        "marker_form_config_model",
+        "marker_form_submission_model",
+        "shape_form_config_model",
+        "shape_form_submission_model",
+        "json_import_receipt_model",
+    ] {
+        let columns: Vec<String> = sqlx::query(&format!("PRAGMA table_info({table})"))
+            .fetch_all(pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.get("name"))
+            .collect();
+        let quoted = columns
+            .iter()
+            .map(|column| format!("quote(\"{column}\")"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let rows: Vec<String> = sqlx::query_scalar(&format!(
+            "SELECT json_array({quoted}) FROM {table} ORDER BY rowid"
+        ))
+        .fetch_all(pool)
+        .await
+        .unwrap();
+        result.push((table.to_string(), rows));
+    }
+    result
+}
+
+#[tokio::test]
+async fn saved_condition_upgrade_from_twenty_one_preserves_all_existing_data_and_is_repeatable() {
+    let (pool, path) = common::file_test_pool().await;
+    sqlx::raw_sql("DROP TABLE answer_map_saved_condition_model; DELETE FROM schema_migrations WHERE version=22;")
+        .execute(&pool).await.unwrap();
+    let owner = seed_pre_preset_data(&pool).await;
+    let before = existing_data_snapshot(&pool).await;
+    let migrations_before: Vec<(i64, String, String)> =
+        sqlx::query_as("SELECT version,name,applied_at FROM schema_migrations ORDER BY version")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(migrations_before.len(), 21);
+    run_migrations(&pool).await.unwrap();
+    let id = uuid::Uuid::new_v4().to_string();
+    insert_saved_condition(
+        &pool,
+        &owner,
+        &id,
+        "filter",
+        "更新後に保存",
+        1,
+        "{\"common_form_id\":null,\"conditions\":[]}",
+        "{\"form_label\":null,\"fields\":[]}",
+    )
+    .await
+    .unwrap();
+    let preset_query = "SELECT id,user_id,kind,name,schema_version,definition,display,create_at FROM answer_map_saved_condition_model";
+    let preset_before: Vec<(String, String, String, String, i64, String, String, String)> =
+        sqlx::query_as(preset_query).fetch_all(&pool).await.unwrap();
+    // Reopen the file as the next application startup would, preserving saved conditions.
+    pool.close().await;
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&path)
+                .foreign_keys(true)
+                .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+        )
+        .await
+        .unwrap();
+    run_migrations(&pool).await.unwrap();
+    let migrations_after: Vec<(i64, String, String)> =
+        sqlx::query_as("SELECT version,name,applied_at FROM schema_migrations ORDER BY version")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(migrations_after.len(), 22);
+    assert_eq!(&migrations_after[..21], migrations_before);
+    assert_eq!(migrations_after[21].0, 22);
+    assert_eq!(existing_data_snapshot(&pool).await, before);
+    let preset_after: Vec<(String, String, String, String, i64, String, String, String)> =
+        sqlx::query_as(preset_query).fetch_all(&pool).await.unwrap();
+    assert_eq!(preset_after, preset_before);
+    common::close_file_test_pool(pool, path).await;
+}
+
+#[tokio::test]
+async fn saved_condition_upgrade_keeps_rows_when_sql_was_applied_before_runtime_migration() {
+    let pool = common::test_pool().await;
+    sqlx::raw_sql("DROP TABLE answer_map_saved_condition_model; DELETE FROM schema_migrations WHERE version=22;")
+        .execute(&pool).await.unwrap();
+    let owner = seed_pre_preset_data(&pool).await;
+    let existing_before = existing_data_snapshot(&pool).await;
+    sqlx::raw_sql(include_str!(
+        "../migrations/20261025120000_answer_map_saved_conditions.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    insert_saved_condition(
+        &pool,
+        &owner,
+        &uuid::Uuid::new_v4().to_string(),
+        "filter",
+        "CLI先行適用の保存条件",
+        1,
+        "{\"common_form_id\":null,\"conditions\":[]}",
+        "{\"form_label\":null,\"fields\":[]}",
+    )
+    .await
+    .unwrap();
+    let query = "SELECT id,user_id,kind,name,schema_version,definition,display,create_at FROM answer_map_saved_condition_model";
+    let before: Vec<(String, String, String, String, i64, String, String, String)> =
+        sqlx::query_as(query).fetch_all(&pool).await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    let after: Vec<(String, String, String, String, i64, String, String, String)> =
+        sqlx::query_as(query).fetch_all(&pool).await.unwrap();
+    assert_eq!(after, before);
+    assert_eq!(existing_data_snapshot(&pool).await, existing_before);
+    let versions: Vec<i64> =
+        sqlx::query_scalar("SELECT version FROM schema_migrations ORDER BY version")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(versions, (1..=22).collect::<Vec<_>>());
 }

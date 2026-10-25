@@ -3,6 +3,9 @@ import css from "./print-preview.css?inline";
 import { createPdfControls } from "./pdf-controls";
 import { initializeReadOnlyMapPage } from "../read-only-page";
 import { createLayerBulkToggleControl } from "../common/base";
+import { installAnswerColoring, type AnswerColoring } from "../answer-coloring";
+import { createAnswerPrintLegend } from "./answer-print-legend";
+import { readMapBootstrap } from "../bootstrap";
 import {
   isPrintMapState,
   PRINT_PAPERS,
@@ -29,6 +32,7 @@ export function createPrintPreview(
   close: () => void,
   page: "map-anather" | "form-answer-map" = "map-anather",
   session?: { parentOrigin: string; requestId: string },
+  coloring?: AnswerColoring,
 ) {
   const style = document.createElement("style");
   style.textContent = css;
@@ -103,6 +107,23 @@ export function createPrintPreview(
     lastPending = Date.now();
     markChanged();
   };
+  const colorController =
+    page === "form-answer-map" && coloring
+      ? installAnswerColoring(runtime, (window as any).L)
+      : undefined;
+  colorController?.apply(coloring!);
+  const bootstrap = colorController ? readMapBootstrap() : undefined;
+  const legend =
+    colorController && coloring && bootstrap?.page === "form-answer-map"
+      ? createAnswerPrintLegend({
+          coloring,
+          bootstrap,
+          mapElement,
+          settings: element("print-settings"),
+          setHiddenTargets: (keys) => runtime.setLegendHiddenTargets(keys),
+          onChange: resetWait,
+        })
+      : undefined;
   map.on("measurementselectionchange measurementlabelmove", resetWait);
   map.on("objectloadingchange", resetWait);
   const popupImages = () =>
@@ -217,27 +238,34 @@ export function createPrintPreview(
   const refreshStatus = () => {
     if (disposed || printing) return;
     const { loading, failed, objects } = readiness();
+    const legendOverflow = legend?.hasOverflow() ?? false;
     const settling = Date.now() - lastChange < 700;
     const timedOut = loading && Date.now() - lastPending > 30000;
     if (!loading) lastPending = Date.now();
     // この処理では、提供範囲外のタイルと画像取得・通信の失敗を区別できない。
     // 無期限に待機せず、現在表示できている地図を印刷できるようにする。
     submit.disabled =
-      objects.loading || objects.failed || moving || (!timedOut && (loading || settling));
+      legendOverflow ||
+      objects.loading ||
+      objects.failed ||
+      moving ||
+      (!timedOut && (loading || settling));
     submit.textContent =
       !objects.loading && !objects.failed && (failed || timedOut) ? "現在の表示で印刷" : "印刷";
     retry.hidden = !failed && !timedOut;
-    status.textContent = objects.failed
-      ? "選択したグループのデータを取得できませんでした。再読み込みで再試行するか、該当グループのチェックを外してください。"
-      : objects.loading
-        ? "選択したグループのデータを読み込んでいます…"
-        : timedOut
-          ? "読み込みを完了できませんでした。再読み込みするか、現在の表示で印刷できます。"
-          : loading || settling
-            ? "地図を読み込んでいます…"
-            : failed
-              ? "地図画像の一部を表示できません。表示されている内容で印刷できます。必要に応じて再読み込みしてください。"
-              : "印刷準備完了";
+    status.textContent = legendOverflow
+      ? "凡例が枠に収まりません。枠を広げるか、文字を小さくするか、分類を減らしてください。"
+      : objects.failed
+        ? "選択したグループのデータを取得できませんでした。再読み込みで再試行するか、該当グループのチェックを外してください。"
+        : objects.loading
+          ? "選択したグループのデータを読み込んでいます…"
+          : timedOut
+            ? "読み込みを完了できませんでした。再読み込みするか、現在の表示で印刷できます。"
+            : loading || settling
+              ? "地図を読み込んでいます…"
+              : failed
+                ? "地図画像の一部を表示できません。表示されている内容で印刷できます。必要に応じて再読み込みしてください。"
+                : "印刷準備完了";
     pdfControls?.refresh();
   };
   const timer = window.setInterval(refreshStatus, 200);
@@ -272,7 +300,14 @@ export function createPrintPreview(
     getSettings: () => ({ paperId: size.value as PrintPaper, title: titleInput.value }),
     isReady: () => {
       const { loading, failed } = readiness();
-      return !disposed && !printing && !loading && !failed && Date.now() - lastChange >= 700;
+      return (
+        !disposed &&
+        !printing &&
+        !loading &&
+        !failed &&
+        !legend?.hasOverflow() &&
+        Date.now() - lastChange >= 700
+      );
     },
     setBusy: (busy) => {
       if (busy) pause();
@@ -342,6 +377,8 @@ export function createPrintPreview(
   const dispose = () => {
     if (disposed) return;
     disposed = true;
+    legend?.dispose();
+    colorController?.dispose();
     pdfControls?.dispose();
     document.body.classList.remove("pdf-preparing", "print-preparing");
     window.clearInterval(timer);

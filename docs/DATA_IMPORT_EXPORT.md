@@ -105,7 +105,7 @@ flowchart TD
 3. PC版のJSON取り込みモーダルからファイルを選択し、取り込みを実行する。
 4. 作成されたレイヤを選び、件数、位置、図形、メモを確認する。
 
-JSON入出力の操作はPC版を使用する。モバイル版にはJSONエクスポートの入口と専用の取り込みモーダルがない。繰り返し取り込むと新規データが増えるため、同じファイルを再送して既存データを更新する用途には使わない。
+JSON入出力の操作はPC版を使用する。モバイル版にはJSONエクスポートの入口と専用の取り込みモーダルがない。成功確認後の再取り込みは新規コピーとなるため、同じファイルで既存データを更新する用途には使わない。
 
 ## 読み込み専用の従来version 2形式
 
@@ -155,14 +155,13 @@ JSON入出力の操作はPC版を使用する。モバイル版にはJSONエク�
 移行ファイル名は両版とも `migrations/20261023120000_json_import_receipts.sql` とし、定義は各DB用にする。PostgreSQL版は通常の `sqlx migrate run` で適用し、SQLite版はSQLite用SQLファイルを `src/db/pool.rs` のランタイム移行21にも登録して起動時に適用する。SQLite版の既存データはそのまま保持し、新しい完了記録テーブルを追加する。
 SQLite用SQLを先に適用済みの場合も、既存の完了記録を保持したまま起動時の移行21を記録できる。
 
-SQLite版は更新前にアプリを停止してDBをバックアップする。起動時の移行が成功してから共通UIを使用する。フロントエンドとテンプレートはPostgreSQL版をそのまま使用し、アプリのバージョン情報だけSQLite版を維持する。Tauri内のJSON保存に関する既存制約は[ルート仕様](../SPECIFICATION.md)のとおりで、今回の取り込み再試行対応では変更しない。
-
 ## 検証手順
 
 - `tests/form_transfer.rs`で別利用者への移行、空・同名レイヤ、管理と手動コピー、削除済み・未適用フォーム、旧回答、数値精度、同日時の最新選択、公開情報除外、失敗時の一括取り消しと容量境界を検証する。
-- SQLite版のルートで `SQLX_OFFLINE=true`、`DATABASE_URL=sqlite::memory:`、`CREATEDATABASE_PATH=:memory:` をプロセス環境へ明示し、`cargo test --locked --offline --jobs 1 --test import_idempotency --test form_transfer --test db_migrations` を実行する。`--jobs 1` はWindowsでのコンパイル時のメモリ使用量を抑える。SQLxのコンパイル時検証は既存の `.sqlx/` を使用し、テストはメモリDBまたは `target/` 内の一時SQLiteファイルを作る。利用中のDBや `.env`・設定JSONは変更しない。
-- `tests/import_idempotency.rs` で同一要求の直列・並列再送、異なる内容の409、利用者分離、別要求IDでのコピー、途中失敗時の完了記録を含むロールバック、旧形式、アカウント不一致、CORSを検証する。移行は `tests/db_migrations.rs` の一時DBで、ランタイム移行21とCLI用SQLの整合性・再実行・既存データ保持を確認する。
-- PCの専用テストで要求IDの保持と成功後の更新を検証する。MapViewのテストではmaster・通常レイヤの範囲、図形とマーカー、同一URLのiframe再読み込み、画面更新だけの再試行を確認する。フロントエンドとテンプレートは、アプリ自身のバージョン情報を除きPostgreSQL版との同一性も確認する。
+- PostgreSQLの検証は `GEOCODE_TEST_PG_BIN` に `initdb`・`pg_ctl`・`psql` を含むディレクトリを指定し、`python scripts/postgres-transfer-tests/run.py -- --test import_idempotency --test form_transfer --test db_migrations` で実行する。専用の一時PostgreSQLクラスタを `target/` 配下で起動し、コンパイル時のSQLxクエリ検証とテストの接続先をそのクラスタへ明示する。アプリの `.env` や既存DBへの接続情報を使用しない。終了時にはこの実行が起動したクラスタだけを停止する。詳細は [テスト実行手順](../scripts/postgres-transfer-tests/README.md) を参照する。
+- SQLite版は同版のルートで `SQLX_OFFLINE=true`、`DATABASE_URL=sqlite::memory:`、`CREATEDATABASE_PATH=:memory:` をプロセス環境へ明示し、`cargo test --locked --offline --jobs 1 --test import_idempotency --test form_transfer --test db_migrations` を実行する。`--jobs 1` はWindowsでのコンパイル時のメモリ使用量を抑える。SQLxのコンパイル時検証は既存の `.sqlx/` を使用し、テストはメモリDBまたは `target/` 内の一時SQLiteファイルを作る。利用中のDBや `.env`・設定JSONは変更しない。既存DBの移行も一時DBでランタイム移行21とCLI用SQLの整合性・再実行・既存データ保持を検証する。
+- `tests/import_idempotency.rs` で同一要求の直列・並列再送、異なる内容の409、利用者分離、別要求IDでのコピー、途中失敗時の完了記録を含むロールバック、旧形式、アカウント不一致、CORSを検証する。
+- PCの専用テストで要求IDの保持と成功後の更新を検証する。MapViewのテストではmaster・通常レイヤの範囲、図形とマーカー、同一URLのiframe再読み込み、画面更新だけの再試行を確認する。
 
 - 通常レイヤとmasterから出力し、対象範囲と内部IDを含まないことを確認する。
 - マーカーと4種の図形を取り込み、名前、所属、位置、メモ、線種・線幅・矢印を照合する。

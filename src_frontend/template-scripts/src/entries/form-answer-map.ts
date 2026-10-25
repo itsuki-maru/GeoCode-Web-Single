@@ -2,11 +2,13 @@ import { readMapBootstrap } from "../map/bootstrap";
 import { initializeReadOnlyMapPage } from "../map/read-only-page";
 import { finishAnswerPreview } from "../map/answer-preview";
 import { installAnswerFilter } from "../map/answer-filter";
+import { installAnswerColoring } from "../map/answer-coloring";
 
 const bootstrap = readMapBootstrap();
 if (bootstrap.page !== "form-answer-map") throw new Error("Unexpected answer map page");
 try {
   const runtime = initializeReadOnlyMapPage("form-answer-map");
+  installAnswerColoring(runtime, (window as any).L);
   installAnswerFilter(runtime, bootstrap.answerPreview, (window as any).L, bootstrap);
   finishAnswerPreview(runtime, bootstrap, (window as any).L);
 } catch {

@@ -1,10 +1,12 @@
 import type { FormAnswerMapBootstrap } from "../types";
 import { isPrintMapState, type PrintMapState } from "../common/print-state";
 import { isPopupBody } from "../common/popup-content";
+import { isAnswerColoring, type AnswerColoring } from "../answer-coloring";
 
 export interface AnswerPrintSnapshot {
   state: PrintMapState;
   bootstrap: FormAnswerMapBootstrap;
+  coloring?: AnswerColoring;
 }
 export const MAX_ANSWER_PRINT_BYTES = 32 * 1024 * 1024;
 const record = (v: any): v is Record<string, any> =>
@@ -56,6 +58,7 @@ export function isAnswerPrintSnapshot(v: any): v is AnswerPrintSnapshot {
   )
     return false;
   const keys = [...markers.map((m) => `marker:${m.id}`), ...shapes.map((s) => `shape:${s.id}`)];
+  if (v.coloring !== undefined && !isAnswerColoring(v.coloring, new Set(keys))) return false;
   if (
     b.popupBodies !== undefined &&
     (!record(b.popupBodies) ||
@@ -102,6 +105,7 @@ export function createAnswerPrintSnapshot(
     ...shapes.map((s) => s.layer_id),
   ]);
   const state: PrintMapState = runtime.getPrintState();
+  const coloring: AnswerColoring | null | undefined = runtime.answerColoring?.getState();
   const snapshot: AnswerPrintSnapshot = {
     state,
     bootstrap: {
@@ -131,6 +135,14 @@ export function createAnswerPrintSnapshot(
       },
     },
   };
+  if (coloring) {
+    snapshot.coloring = {
+      ...coloring,
+      targets: Object.fromEntries(
+        Object.entries(coloring.targets).filter(([key]) => targets.has(key)),
+      ),
+    };
+  }
   if (!isAnswerPrintSnapshot(snapshot))
     throw new Error(
       "印刷対象が不正、0件、またはデータ量が32MiBを超えています。条件を絞ってください。",

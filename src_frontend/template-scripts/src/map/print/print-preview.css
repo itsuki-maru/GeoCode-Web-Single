@@ -189,11 +189,93 @@ body.print-preparing #print-settings {
 body.pdf-preparing .pdf-output {
   pointer-events: auto;
 }
+.answer-print-legend {
+  box-sizing: border-box;
+  width: 300px;
+  min-width: min(160px, calc(100% - 20px));
+  min-height: min(70px, calc(100% - 20px));
+  max-width: calc(100% - 20px);
+  max-height: calc(100% - 20px);
+  overflow: auto;
+  resize: both;
+  padding: 10px 12px;
+  border: 1px solid #64748b;
+  border-radius: 6px;
+  background: #fff;
+  color: #172b4d;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 2px 8px rgb(15 23 42 / 15%);
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+.answer-print-legend-handle {
+  display: block;
+  user-select: none;
+}
+.answer-print-legend ul,
+.answer-print-legend li {
+  font-size: inherit;
+  line-height: inherit;
+}
+.answer-print-legend ul {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.answer-print-legend li,
+.answer-print-legend-option {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+.answer-print-legend li + li {
+  margin-top: 3px;
+}
+.answer-print-legend-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  border: 1px solid #475569;
+  box-sizing: border-box;
+}
+.answer-print-legend .answer-print-legend-swatch {
+  width: 1em;
+  height: 1em;
+  flex-basis: 1em;
+}
+.answer-print-legend-option {
+  font-size: 13px;
+  margin: 8px 0;
+}
+.answer-print-legend-option input {
+  flex: none;
+}
+.answer-print-legend-choices {
+  max-height: 300px;
+  overflow-y: auto;
+}
+.answer-print-legend-warning {
+  color: #b91c1c;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.answer-print-legend[hidden],
+.answer-print-legend [hidden],
+.answer-print-legend-warning[hidden] {
+  display: none !important;
+}
 .pdf-output [data-status] {
   font-size: 13px;
   overflow-wrap: anywhere;
 }
 @media print {
+  .answer-print-legend {
+    resize: none;
+    overflow: hidden;
+  }
   html,
   body {
     margin: 0 !important;

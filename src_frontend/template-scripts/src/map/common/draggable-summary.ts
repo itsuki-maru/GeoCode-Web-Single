@@ -4,12 +4,13 @@ export function makeSummaryDraggable(
   mapElement: HTMLElement,
   onPositionChange: () => void = () => {},
   initialPosition?: { x: number; y: number },
+  dragHandle: HTMLElement = panel,
 ) {
   let floating = false;
   let drag: { id: number; offsetX: number; offsetY: number } | null = null;
-  panel.style.cursor = "grab";
-  panel.style.touchAction = "none";
-  panel.title = "ドラッグして移動";
+  dragHandle.style.cursor = "grab";
+  dragHandle.style.touchAction = "none";
+  dragHandle.title = "ドラッグして移動";
 
   // 印刷プレビューでは用紙が CSS で拡縮されるため、位置は拡縮前の地図のピクセル座標で保持する。
   const scaleFor = (bounds: DOMRect) => ({
@@ -47,7 +48,7 @@ export function makeSummaryDraggable(
       });
       place((bounds.left - mapBounds.left) / scale.x, (bounds.top - mapBounds.top) / scale.y);
     }
-    panel.style.cursor = "grabbing";
+    dragHandle.style.cursor = "grabbing";
     panel.setPointerCapture(event.pointerId);
   };
   if (initialPosition) {
@@ -76,7 +77,7 @@ export function makeSummaryDraggable(
   const finish = (event: PointerEvent) => {
     if (!drag || event.pointerId !== drag.id) return;
     drag = null;
-    panel.style.cursor = "grab";
+    dragHandle.style.cursor = "grab";
     if (panel.hasPointerCapture(event.pointerId)) panel.releasePointerCapture(event.pointerId);
   };
   const resize = new ResizeObserver(() => {
@@ -84,7 +85,7 @@ export function makeSummaryDraggable(
   });
   resize.observe(mapElement);
   resize.observe(panel);
-  panel.addEventListener("pointerdown", down);
+  dragHandle.addEventListener("pointerdown", down);
   panel.addEventListener("pointermove", move);
   panel.addEventListener("pointerup", finish);
   panel.addEventListener("pointercancel", finish);
@@ -93,7 +94,7 @@ export function makeSummaryDraggable(
     if (drag && panel.hasPointerCapture(drag.id)) panel.releasePointerCapture(drag.id);
     drag = null;
     resize.disconnect();
-    panel.removeEventListener("pointerdown", down);
+    dragHandle.removeEventListener("pointerdown", down);
     panel.removeEventListener("pointermove", move);
     panel.removeEventListener("pointerup", finish);
     panel.removeEventListener("pointercancel", finish);
