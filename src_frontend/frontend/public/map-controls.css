@@ -289,7 +289,8 @@
     display: none;
 }
 
-:where(.leaflet-control) .leaflet-control-layers-overlays {
+:where(.leaflet-control) .leaflet-control-layers-overlays,
+:where(.leaflet-control) .marker-clustering-control {
     font-size: 14px;
 }
 

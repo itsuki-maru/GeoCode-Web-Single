@@ -4,6 +4,8 @@ export interface PrintMapState {
   view: StoredMapView;
   tileServerId: string;
   overlays: Record<string, boolean>;
+  clusteringEnabled?: boolean;
+  clusteringAllowed?: boolean;
   markersVisible: boolean;
   shapesVisible: boolean;
   shapeNamesVisible: boolean;
@@ -28,6 +30,8 @@ export function isPrintMapState(value: unknown): value is PrintMapState {
       typeof state.overlays === "object" &&
       !Array.isArray(state.overlays) &&
       Object.values(state.overlays).every((visible) => typeof visible === "boolean") &&
+      (state.clusteringEnabled === undefined || typeof state.clusteringEnabled === "boolean") &&
+      (state.clusteringAllowed === undefined || typeof state.clusteringAllowed === "boolean") &&
       typeof state.markersVisible === "boolean" &&
       typeof state.shapesVisible === "boolean" &&
       typeof state.shapeNamesVisible === "boolean" &&

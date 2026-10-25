@@ -448,7 +448,8 @@ popupContent = createPopupContentRuntime({
     return response.json();
   },
 });
-let markersClusterGroup = L.markerClusterGroup();
+let markersClusterGroup =
+  window.__GEOCODE_MAP_BOOTSTRAP__.isCluster === false ? L.featureGroup() : L.markerClusterGroup();
 let externalMarkerFilterIds = null;
 let externalShapeFilterIdSet = null;
 let localMarkerSearchQuery = "";

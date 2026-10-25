@@ -358,7 +358,8 @@ popupContent = createPopupContentRuntime({
     return response.json();
   },
 });
-let markersClusterGroup = L.markerClusterGroup();
+let markersClusterGroup =
+  window.__GEOCODE_MAP_BOOTSTRAP__.isCluster === false ? L.featureGroup() : L.markerClusterGroup();
 
 // HTMLと同時に取得したマーカーデータをプロット配備
 for (const key in markersFromAxum) {
