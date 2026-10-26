@@ -1,5 +1,6 @@
 import type { AnotherMapBootstrap, FormAnswerMapBootstrap } from "./types";
 import { installAnswerAnalysis } from "./answer-analysis";
+import { answerShapeIds, extendAnswerShapeBounds } from "./answer-shapes";
 
 export function hasValidAnswerGeometry(geojson: any): boolean {
   const geometry = geojson?.type === "Feature" ? geojson.geometry : geojson;
@@ -23,7 +24,7 @@ interface PreviewLayer {
   getLatLng?(): { lat: number; lng: number };
 }
 
-// Leafletの実レイヤから範囲を計算するので、円の半径や図形の広がりも含む。
+// 未生成の図形も原本の範囲から数える。円は中心だけでなく半径も含む。
 export function finishAnswerPreview(
   runtime: any,
   bootstrap: AnotherMapBootstrap | FormAnswerMapBootstrap,
@@ -41,10 +42,7 @@ export function finishAnswerPreview(
     });
   const bounds = leaflet.latLngBounds([]);
   let displayed = 0;
-  for (const layer of Object.values({
-    ...runtime.markers,
-    ...runtime.shapeLayers,
-  }) as PreviewLayer[]) {
+  for (const layer of Object.values(runtime.markers) as PreviewLayer[]) {
     const extent = layer.getBounds?.();
     const point = layer.getLatLng?.();
     if (extent?.isValid()) {
@@ -61,8 +59,13 @@ export function finishAnswerPreview(
       displayed++;
     }
   }
+  for (const id of answerShapeIds(runtime)) {
+    if (extendAnswerShapeBounds(bounds, runtime, id)) displayed++;
+  }
   runtime.map.invalidateSize();
-  if (bounds.isValid()) runtime.map.fitBounds(bounds, { padding: [32, 32], maxZoom: 16 });
+  if (!runtime.hasInheritedMapView && bounds.isValid()) {
+    runtime.map.fitBounds(bounds, { padding: [32, 32], maxZoom: 16 });
+  }
   window.parent.postMessage(
     {
       type: "answer-map-ready",

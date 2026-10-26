@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as content from "../src/map/common/content";
 
 import {
   SHAPE_MEMO_MAX_LENGTH,
@@ -64,6 +65,92 @@ describe("map common shape memo", () => {
     expect(dependencies.setupDetailsLazyImages).toHaveBeenCalledWith(popup.element);
   });
 
+  it("does not initialize a popup closed before its scheduled setup", () => {
+    const pending: Array<() => void> = [];
+    const { runtime, dependencies, popup } = createRuntime(undefined, (callback) =>
+      pending.push(callback),
+    );
+
+    runtime.openShapeMemoPopup({ on: vi.fn(), shapeMemo: "memo" }, { lat: 35, lng: 139 });
+    expect(dependencies.setupDetailsLazyImages).not.toHaveBeenCalled();
+    popup.isOpen.mockReturnValue(false);
+    pending[0]!();
+
+    expect(dependencies.setupDetailsLazyImages).not.toHaveBeenCalled();
+  });
+
+  it("does not initialize the document when its scheduled popup DOM is unavailable", () => {
+    const pending: Array<() => void> = [];
+    const { runtime, dependencies, popup } = createRuntime(undefined, (callback) =>
+      pending.push(callback),
+    );
+
+    runtime.openShapeMemoPopup({ on: vi.fn(), shapeMemo: "memo" }, { lat: 35, lng: 139 });
+    expect(dependencies.setupDetailsLazyImages).not.toHaveBeenCalled();
+    popup.getElement.mockReturnValue(null);
+    pending[0]!();
+
+    expect(dependencies.setupDetailsLazyImages).not.toHaveBeenCalled();
+  });
+
+  it("reuses prepared memo HTML on repeated taps and invalidates it when the memo changes", () => {
+    const { runtime, dependencies, popup } = createRuntime();
+    const layer = { on: vi.fn(), shapeName: "避難所", shapeMemo: "memo" };
+    const latLng = { lat: 35, lng: 139 };
+    runtime.openShapeMemoPopup(layer, latLng);
+    runtime.openShapeMemoPopup(layer, latLng);
+    expect(dependencies.renderMarkdown).toHaveBeenCalledTimes(1);
+    expect(popup.openOn).toHaveBeenCalledTimes(2);
+
+    layer.shapeMemo = "updated memo";
+    runtime.openShapeMemoPopup(layer, latLng);
+    expect(dependencies.renderMarkdown).toHaveBeenCalledTimes(2);
+    expect(dependencies.renderMarkdown).toHaveBeenLastCalledWith("updated memo");
+    layer.shapeName = "変更後";
+    runtime.openShapeMemoPopup(layer, latLng);
+    expect(popup.setContent).toHaveBeenLastCalledWith(expect.stringContaining("変更後"));
+  });
+
+  it("tracks manually opened popups and releases cached HTML when a layer is evicted", () => {
+    const { runtime, dependencies, popup } = createRuntime();
+    const layer = { on: vi.fn(), shapeName: "管路", shapeMemo: "memo" };
+    const release = vi.spyOn(content, "releaseDeferredDetails");
+    const remove = vi.fn(() => popup.isOpen.mockReturnValue(false));
+    Object.assign(popup, { remove });
+    expect(runtime.isShapePopupOpen(layer)).toBe(false);
+    runtime.openShapeMemoPopup(layer, { lat: 35, lng: 139 });
+    expect(runtime.isShapePopupOpen(layer)).toBe(true);
+    runtime.releaseLayer(layer);
+    expect(remove).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledWith(expect.stringContaining("md-detail-contents"));
+    popup.isOpen.mockReturnValue(true);
+    expect(runtime.isShapePopupOpen(layer)).toBe(false);
+    runtime.openShapeMemoPopup(layer, { lat: 35, lng: 139 });
+    expect(runtime.isShapePopupOpen(layer)).toBe(true);
+    expect(dependencies.renderMarkdown).toHaveBeenCalledTimes(2);
+  });
+
+  it("unpins a closed popup and skips scheduled work after layer release", () => {
+    const pending: Array<() => void> = [];
+    const { runtime, dependencies, popup } = createRuntime(undefined, (callback) =>
+      pending.push(callback),
+    );
+    const removals: Array<() => void> = [];
+    Object.assign(popup, {
+      once: (event: string, callback: () => void) => {
+        if (event === "remove") removals.push(callback);
+      },
+    });
+    const layer = { on: vi.fn(), shapeMemo: "memo" };
+    runtime.openShapeMemoPopup(layer, { lat: 35, lng: 139 });
+    expect(runtime.isShapePopupOpen(layer)).toBe(true);
+    removals[0]!();
+    expect(runtime.isShapePopupOpen(layer)).toBe(false);
+    runtime.releaseLayer(layer);
+    pending.forEach((callback) => callback());
+    expect(dependencies.setupDetailsLazyImages).not.toHaveBeenCalled();
+  });
+
   it("binds a shape click only once", () => {
     const { runtime, popup } = createRuntime();
     const listeners = new Map<string, (event?: { latlng?: unknown }) => void>();
@@ -113,11 +200,13 @@ describe("map common shape memo", () => {
 
 function createRuntime(
   onShapeClick?: Parameters<typeof createShapeMemoRuntime>[0]["onShapeClick"],
+  schedule: (callback: () => void) => void = (callback) => callback(),
 ) {
   const element = document.createElement("div");
   const popup = {
     element,
-    getElement: vi.fn(() => element),
+    getElement: vi.fn<() => HTMLElement | null>(() => element),
+    isOpen: vi.fn(() => true),
     openOn: vi.fn(function (this: typeof popup) {
       return this;
     }),
@@ -155,7 +244,7 @@ function createRuntime(
     renderIframe: (html) => `<iframe>${html}</iframe>`,
     renderMarkdown: dependencies.renderMarkdown,
     sanitizeHtml: dependencies.sanitizeHtml,
-    schedule: (callback) => callback(),
+    schedule,
     setupDetailsLazyImages: dependencies.setupDetailsLazyImages,
   });
 

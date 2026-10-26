@@ -26,6 +26,8 @@ async function saveShape(shapeType, layer, shapeName = "", forcedLayerId = null)
   }
 
   const data = await response.json();
+  // 保存直後は確認のため表示し、次の地図操作で通常の範囲・縮尺判定へ戻す。
+  recentlyCreatedShapeId = String(data.id);
   applyShapeRecord(layer, {
     id: data.id,
     layer_id: targetLayerId,
@@ -36,11 +38,10 @@ async function saveShape(shapeType, layer, shapeName = "", forcedLayerId = null)
   applyShapeStyle(layer, activeDrawMode === "delete");
   updateShapeNameLabel(layer, shapeName);
   attachShapeEvents(layer);
-  drawnShapesGroup.addLayer(layer);
-  renderVisibleShapes();
   if (!map.hasLayer(drawnShapesGroup)) {
     drawnShapesGroup.addTo(map);
   }
+  renderVisibleShapes();
   applyMeasurementVisibilityToDrawnShapesGroup();
   setDrawStatus("図形描画: 保存しました。");
   if (!editorEntryProfile.isMobile) callParentReload();

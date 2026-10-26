@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import apiClient from "@/axiosClient";
 import { submitAuthenticatedForm } from "@/utils/authenticated-form";
+import { requestCurrentMapView } from "@/utils/map-view";
 import PrintMapModal from "../map/PrintMapModal.vue";
 import AnswerColoringPanel from "./AnswerColoringPanel.vue";
 import SaveMapPresetModal from "./SaveMapPresetModal.vue";
@@ -72,6 +73,8 @@ const filtersOpen = ref(true);
 const filtersPanelId = `${frameName}-filters`;
 const parentOrigin = window.location.origin;
 const requestId = ref("");
+const initialView = ref("");
+let viewController: AbortController | undefined;
 const loading = ref(false),
   error = ref(""),
   filterError = ref(""),
@@ -232,6 +235,7 @@ const csvAction = computed(() => endpoint.value.replace(/\/map-filter$/, "/map-c
 const csvCheckAction = computed(() => endpoint.value.replace(/\/map-filter$/, "/map-csv-check"));
 const presetEndpoint = computed(() => endpoint.value.replace(/\/map-filter$/, "/map-presets"));
 const stop = () => {
+  viewController?.abort();
   stopPresets();
   stopCsv();
   printSnapshot.value = null;
@@ -257,6 +261,11 @@ const submit = async () => {
   filterError.value = "";
   busy.value = false;
   requestId.value = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  initialView.value = "";
+  viewController = new AbortController();
+  const view = await requestCurrentMapView(viewController.signal);
+  if (!props.isOpen || current !== epoch) return;
+  initialView.value = view ? JSON.stringify(view) : "";
   await nextTick();
   if (!props.isOpen || current !== epoch) return;
   try {
@@ -1159,6 +1168,7 @@ onBeforeUnmount(() => {
           type="hidden"
           :value="parentOrigin"
         /><input name="request_id" type="hidden" :value="requestId" />
+        <input name="initial_view" type="hidden" :value="initialView" />
       </form>
       <iframe
         v-if="printEnabled"

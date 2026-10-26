@@ -48,6 +48,37 @@ describe("map object focus controller", () => {
     expect(setFocusedLayer).toHaveBeenCalledWith(shape);
     expect(removeLayer).toHaveBeenCalledWith(shape);
   });
+
+  it("creates an unrendered target on demand and reports the focused ID", () => {
+    const shape = { addTo: vi.fn(), shapeId: "offscreen", shapeName: "Pipe" };
+    const getShapeLayer = vi.fn(() => shape);
+    const onFocusedShapeChange = vi.fn();
+    const runtime = createRuntime({ getShapeLayer, onFocusedShapeChange });
+
+    runtime.controller.focusMapObject("shape", "offscreen", 35, 139);
+
+    expect(getShapeLayer).toHaveBeenCalledWith("offscreen");
+    expect(onFocusedShapeChange).toHaveBeenCalledWith("offscreen");
+    expect(shape.addTo).toHaveBeenCalled();
+    runtime.controller.clearFocusedShapeFocus();
+    expect(onFocusedShapeChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it("does not remove a focused target adopted by the visible shape group", () => {
+    const shape = { addTo: vi.fn(), shapeId: "lazy", shapeName: "Pipe" };
+    let adopted = false;
+    const removeLayer = vi.fn();
+    const runtime = createRuntime({
+      getShapeLayer: () => shape,
+      drawnShapesGroup: { addLayer: vi.fn(), hasLayer: () => adopted },
+      hasLayer: vi.fn(() => false),
+      removeLayer,
+    });
+    runtime.controller.focusMapObject("shape", "lazy", 35, 139);
+    adopted = true;
+    runtime.controller.clearFocusedShapeFocus();
+    expect(removeLayer).not.toHaveBeenCalled();
+  });
 });
 
 function createRuntime(overrides: Record<string, unknown> = {}) {

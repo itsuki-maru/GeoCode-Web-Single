@@ -67,6 +67,8 @@ interface RestoreSavedShapesOptions {
   shapeLayers: Record<string, RestoredShapeLayer>;
 }
 
+type RestoreShapeOptions = Omit<RestoreSavedShapesOptions, "addLayer" | "records">;
+
 export function createShapeNameLabelBinder({
   attachShapeMemoTooltipOpen,
   escapeHtml,
@@ -179,43 +181,50 @@ export function createReadOnlyShapeRestorationRuntime({
     scheduleTask,
   });
 
+  const restoreShape = (
+    shape: ShapeRecord,
+    {
+      applyShapeStyle: shouldApplyShapeStyle = false,
+      bindPolylineHover = false,
+      restoreShapeStyleOnHover = false,
+      shapeLayers,
+    }: RestoreShapeOptions,
+  ): RestoredShapeLayer | null => {
+    if (!shape.shape_type) return null;
+    const shapeStyle = getShapeStyleFromGeoJson(shape.shape_type, shape.geojson);
+    const layer = createLeafletShapeLayer(shape.shape_type, shape.geojson, shapeStyle);
+    if (!layer) return null;
+
+    layer.shapeId = shape.id;
+    layer.layerId = shape.layer_id ?? null;
+    layer.shapeType = shape.shape_type;
+    layer.shapeStyle = shapeStyle;
+    layer.shapeMemo = getShapeMemoFromGeoJson(shape.geojson);
+    updateShapeNameLabel(layer, shape.name);
+    shapeLayers[`shape-${shape.id}`] = layer;
+    if (shouldApplyShapeStyle) applyShapeStyle(layer);
+    attachShapeMemoPopup(layer);
+    if (bindPolylineHover) {
+      if (restoreShapeStyleOnHover) {
+        bindPolylineHoverHighlight(layer, {
+          restoreStyle: () => applyShapeStyle(layer),
+        });
+      } else {
+        bindPolylineHoverHighlight(layer);
+      }
+    }
+    return layer;
+  };
+
   const restoreSavedShapes = ({
     addLayer,
-    applyShapeStyle: shouldApplyShapeStyle = false,
-    bindPolylineHover = false,
     records,
-    restoreShapeStyleOnHover = false,
-    shapeLayers,
+    ...options
   }: RestoreSavedShapesOptions): boolean => {
     let hasRestoredShapes = false;
-
     getShapeRecords(records).forEach((shape) => {
-      if (!shape.shape_type) return;
-      const shapeStyle = getShapeStyleFromGeoJson(shape.shape_type, shape.geojson);
-      const layer = createLeafletShapeLayer(shape.shape_type, shape.geojson, shapeStyle);
-      if (!layer) return;
-
-      layer.shapeId = shape.id;
-      layer.layerId = shape.layer_id ?? null;
-      layer.shapeType = shape.shape_type;
-      layer.shapeStyle = shapeStyle;
-      layer.shapeMemo = getShapeMemoFromGeoJson(shape.geojson);
-      updateShapeNameLabel(layer, shape.name);
-      shapeLayers[`shape-${shape.id}`] = layer;
-      if (shouldApplyShapeStyle) applyShapeStyle(layer);
-      attachShapeMemoPopup(layer);
-      if (bindPolylineHover) {
-        if (restoreShapeStyleOnHover) {
-          bindPolylineHoverHighlight(layer, {
-            restoreStyle: () => applyShapeStyle(layer),
-          });
-        } else {
-          bindPolylineHoverHighlight(layer);
-        }
-      }
-      if (addLayer(layer, shape.layer_id) !== false) {
-        hasRestoredShapes = true;
-      }
+      const layer = restoreShape(shape, options);
+      if (layer && addLayer(layer, shape.layer_id) !== false) hasRestoredShapes = true;
     });
 
     return hasRestoredShapes;
@@ -223,6 +232,7 @@ export function createReadOnlyShapeRestorationRuntime({
 
   return {
     bindShapeNameLabelTooltip,
+    restoreShape,
     restoreSavedShapes,
     updateShapeNameLabel,
   };

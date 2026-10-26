@@ -8,6 +8,8 @@ function setup() {
     layersFromAxum: { locked: { restrict_free_text: true }, free: { restrict_free_text: false } },
     currentMapMode: "edit",
     activeDrawMode: null,
+    savingShapeIds: new Map(),
+    shapeRenderManager: null,
     document,
     fetchWithAuth: vi.fn().mockResolvedValue({ ok: true }),
     setDrawStatus: vi.fn(),

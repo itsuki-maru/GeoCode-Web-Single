@@ -22,18 +22,23 @@ import { createTileOverlayManager } from "/src/map/common/tile-overlays.ts";
 import { installMarkerClustering } from "/src/map/common/marker-clustering.ts";
 import { createLayerBulkToggleControl, extractYouTubeId } from "/src/map/common/base.ts";
 import { installMapContentActions, resolveSameOriginContentUrl } from "/src/map/common/content-actions.ts";
-import { createNestedTokenizer, isLocalhost, isPDF, isValidCoordinate, renderIframe, setupDetailsLazyImages } from "/src/map/common/content.ts";
+import { createNestedTokenizer, isLocalhost, isPDF, isValidCoordinate, renderProgressiveMarkdown, renderIframe, setupDetailsLazyImages } from "/src/map/common/content.ts";
 import { createMapObjectFocusController } from "/src/map/common/map-object-focus.ts";
 import { loadLastMapView, observeMapView } from "/src/map/common/map-view-persistence.ts";
 import { createMarkerPopupRuntime, enableMarkerIconFallback, escapeHtml, initializeUserLocation, markerOptionsForLayer } from "/src/map/common/marker.ts";
 import { createLayeredMarkerDisplayManager, createLayeredShapeDisplayManager, createMapSearchRuntime, filterMeasurementMarkersForBounds, getShapeRecords, matchesMarkerSearch, matchesShapeSearch, normalizeMarkerSearchText, resetMapSearchStatus } from "/src/map/common/search.ts";
 import { createShapeArrowRuntime } from "/src/map/common/shape-arrow.ts";
 import { createShapeLayerRuntime } from "/src/map/common/shape-layer.ts";
+import { createShapeRenderManager } from "/src/map/common/shape-renderer.ts";
 import { createShapeMeasurementRuntime } from "/src/map/common/shape-measurement.ts";
 import { SHAPE_MEMO_MAX_LENGTH, createShapeMemoRuntime, getShapeMemoFromGeoJson, normalizeShapeMemo, normalizeShapeName } from "/src/map/common/shape-memo.ts";
 import { SHAPE_ARROW_TYPE_OPTIONS, SHAPE_LINE_TYPE_OPTIONS, SHAPE_WEIGHT_MAX, SHAPE_WEIGHT_MIN, createShapeStyleCore } from "/src/map/common/shape-style.ts";
 import { createShapeViewportRuntime } from "/src/map/common/shape-viewport.ts";
 import { createMapStorage, createTileChangeHandler } from "/src/map/common/storage.ts";
+
+function renderMapMarkdown(markdown, links) {
+  return renderProgressiveMarkdown(markdown, (html) => renderIframe(filterXSS(html, xssOptions)), links);
+}
 
 const {
   enableTileServerSelectionPersistence,
@@ -95,13 +100,14 @@ const {
 const {
   createViewportShapeLabelManager,
   createViewportShapeMeasurementManager,
-  shouldSuppressInitialShapeRendering,
-} = createShapeViewportRuntime({ getShapeRecords });
+} = createShapeViewportRuntime();
 
 const {
   attachShapeMemoPopup,
   attachShapeMemoTooltipOpen,
   openShapeMemoPopup,
+  releaseLayer: releaseShapeMemoLayer,
+  isShapePopupOpen: isEditorShapePopupOpen,
   renderShapeMemoPopupContent,
 } = createShapeMemoRuntime({
   renderPopup: (layer) => popupContent.render({kind: "shape", id: layer.shapeId, name: layer.shapeName || "", body: layer.shapeMemo || ""}),
@@ -109,9 +115,9 @@ const {
   getLeaflet: () => L,
   getMap: () => map,
   renderIframe,
-  renderMarkdown: (markdown) => marked.parse(markdown),
+  renderMarkdown: renderMapMarkdown,
   sanitizeHtml: (html) => filterXSS(html, xssOptions),
-  setupDetailsLazyImages,
+  setupDetailsLazyImages: (root) => setupDetailsLazyImages(root, renderMapMarkdown),
 });
 
 const {
@@ -191,6 +197,11 @@ const mapObjectFocusController = createMapObjectFocusController({
   openShapeMemoPopup,
   searchableShapeLayers,
   shapeNameLabelManager,
+  getShapeLayer: (id) => shapeRenderManager?.ensureLayer(id) ?? null,
+  onFocusedShapeChange: (id) => {
+    focusedEditorShapeId = id;
+    shapeRenderManager?.scheduleRefresh();
+  },
 });
 function clearFocusedShapeFocus(targetLayer = null) {
   mapObjectFocusController.clearFocusedShapeFocus(targetLayer);

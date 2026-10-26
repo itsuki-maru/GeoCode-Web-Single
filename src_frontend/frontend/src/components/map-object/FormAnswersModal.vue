@@ -1166,8 +1166,27 @@ summary {
   flex: 0 0 auto;
   white-space: nowrap;
 }
-.table-scroll {
-  max-height: 48dvh;
+@media (min-width: 701px) {
+  .answers-modal {
+    height: min(92dvh, 1200px);
+    max-height: calc(100dvh - 64px);
+  }
+  .answers-scroll {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+  }
+  .answers-scroll > * {
+    flex-shrink: 0;
+  }
+  .list-toolbar > label {
+    flex-direction: row;
+    align-items: center;
+  }
+  .table-scroll {
+    flex: 1 0 min(320px, 52dvh);
+    min-height: min(320px, 52dvh);
+  }
 }
 th {
   position: sticky;

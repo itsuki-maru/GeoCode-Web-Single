@@ -50,13 +50,11 @@ interface ShapeMeasurementManagerOptions {
 
 interface ShapeViewportDependencies {
   cancelFrame?: (handle: number) => void;
-  getShapeRecords(records: unknown): unknown[];
   scheduleFrame?: (callback: () => void) => number;
 }
 
 const DEFAULT_SHAPE_NAME_MIN_ZOOM = 8;
 const SHAPE_NAME_RENDER_THRESHOLD = 50;
-const INITIAL_SHAPE_RENDER_THRESHOLD = 400;
 
 function listLayers(source: LayerSource): ViewportLayer[] {
   const layers = typeof source === "function" ? source() : source;
@@ -75,17 +73,11 @@ export function createShapeViewportRuntime({
       clearTimeout(handle);
     }
   },
-  getShapeRecords,
   scheduleFrame = (callback) =>
     typeof requestAnimationFrame === "function"
       ? requestAnimationFrame(callback)
       : window.setTimeout(callback, 0),
-}: ShapeViewportDependencies) {
-  const shouldSuppressInitialShapeRendering = (
-    shapeRecords: unknown,
-    threshold = INITIAL_SHAPE_RENDER_THRESHOLD,
-  ): boolean => getShapeRecords(shapeRecords).length > threshold;
-
+}: ShapeViewportDependencies = {}) {
   const createViewportShapeLabelManager = ({
     map,
     getLayers,
@@ -365,6 +357,5 @@ export function createShapeViewportRuntime({
   return {
     createViewportShapeLabelManager,
     createViewportShapeMeasurementManager,
-    shouldSuppressInitialShapeRendering,
   };
 }

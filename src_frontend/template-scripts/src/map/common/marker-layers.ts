@@ -1,3 +1,5 @@
+import { bindDeferredPopupLayout } from "./content";
+
 interface ReadOnlyLayerRecord {
   id: string;
   layer_name: string;
@@ -139,7 +141,15 @@ export function hydrateReadOnlyMarkers({
       )
       .bindPopup(escapeHtml(markerData.marker_name));
     enableMarkerIconFallback?.(marker, markerData.layer_id, layerRecords);
-    marker.on("popupopen", () => setupDetailsLazyImages(documentRoot));
+    let stopLayout = () => {};
+    marker.on("popupopen", (event?: { popup?: Parameters<typeof bindDeferredPopupLayout>[0] }) => {
+      stopLayout();
+      if (event?.popup) stopLayout = bindDeferredPopupLayout(event.popup);
+      setupDetailsLazyImages(documentRoot);
+    });
+    marker.on("popupclose", () => {
+      stopLayout();
+    });
     markerGroup.addLayer(marker);
 
     const tooltipName = markerData.marker_name ? escapeHtml(markerData.marker_name) : "No Name";

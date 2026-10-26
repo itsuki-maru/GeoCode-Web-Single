@@ -1,4 +1,6 @@
 import { escapeHtml } from "./marker";
+import { releaseDeferredDetails, disposeMapContent, registerProgressiveHtml } from "./content";
+import { updatePopupLayout } from "./popup-layout";
 
 export interface PopupBody {
   body?: string;
@@ -8,11 +10,13 @@ export interface PopupBody {
 }
 export type PopupBodies = Record<string, PopupBody>;
 type Content = { kind: "marker" | "shape"; id: string; name: string; body: string };
+type MarkdownReferences = Record<string, { href: string; title: string | null }>;
+type RenderMarkdown = (markdown: string, links?: MarkdownReferences) => string;
 interface Options {
   map: { on(event: string, fn: (event: any) => void): void };
-  renderMarkdown(markdown: string): string;
+  renderMarkdown: RenderMarkdown;
   sanitizeHtml(html: string): string;
-  setupImages(root: ParentNode): void;
+  setupImages(root: ParentNode, render?: RenderMarkdown): void;
   loadBody?(kind: string, id: string): Promise<PopupBody>;
   snapshot?: PopupBodies;
   analysis?: Record<string, string>;
@@ -32,15 +36,18 @@ export function isPopupBody(value: any): value is PopupBody {
 // Installed only by the five owner map pages. Content is rendered with the page's
 // existing Markdown sanitizer; the toolbar is built outside user Markdown.
 export function createPopupContentRuntime(options: Options) {
-  const contents = new Map<string, Content>();
+  const contents = new Map<string, Content & { html: string }>();
   const analysis = new Map<string, string>(Object.entries(options.analysis || {}));
-  const cache = new Map<string, Promise<PopupBody>>();
-  const sessions = new WeakMap<HTMLElement, object>();
+  const cache = new Map<string, { body: string; pending: Promise<PopupBody> }>();
+  const sessions = new WeakMap<HTMLElement, { dispose(): void }>();
+  const activeSessions = new Set<{ dispose(): void }>();
   const stopToolbarEvent = (event: Event) => event.stopPropagation();
   const render = (content: Content) => {
     const key = `${content.kind}:${content.id}`;
-    contents.set(key, { ...content });
-    return `<div class="geocode-content-popup" data-content-key="${escapeHtml(key)}">
+    const previous = contents.get(key);
+    if (previous?.body === content.body && previous.name === content.name) return previous.html;
+    if (previous) releaseDeferredDetails(previous.html);
+    const html = `<div class="geocode-content-popup" data-content-key="${escapeHtml(key)}">
       <div class="popup-content-toolbar"><label>表示内容<select aria-label="表示内容">
         <option value="free" disabled>自由入力の内容</option>
         <option value="answers" disabled>フォームからの回答</option>
@@ -49,7 +56,9 @@ export function createPopupContentRuntime(options: Options) {
       <div class="popup-content-analysis"></div>
       <h1 class="popup-content-title">${escapeHtml(content.name)}</h1>
       <p class="popup-content-note" role="status"></p>
-      <div class="md-detail-contents popup-content-body">${options.renderMarkdown(content.body)}</div></div>`;
+      <div class="md-detail-contents popup-content-body">${content.body.trim() ? options.renderMarkdown(content.body) : "内容はありません。"}</div></div>`;
+    contents.set(key, { ...content, html });
+    return html;
   };
   const onOpen = async (event: any) => {
     const popup = event.popup;
@@ -60,47 +69,71 @@ export function createPopupContentRuntime(options: Options) {
     const key = root.dataset.contentKey!;
     const content = contents.get(key);
     if (!content) return;
-    // Leaflet.update() re-applies string content. Retain the live node so layout
-    // updates never replace the select or discard its change handler.
-    popup.setContent?.(root);
-    const session = {};
-    sessions.set(root, session);
+    if (sessions.has(root)) return;
     const select = root.querySelector<HTMLSelectElement>("select")!;
     const note = root.querySelector<HTMLElement>(".popup-content-note")!;
     const body = root.querySelector<HTMLElement>(".popup-content-body")!;
     const printLabel = root.querySelector<HTMLElement>(".popup-content-print-label")!;
     const analysisElement = root.querySelector<HTMLElement>(".popup-content-analysis")!;
-    const update = () => {
-      const focused = root.ownerDocument.activeElement as HTMLElement | null;
-      options.setupImages(root);
-      popup.update?.();
-      if (focused && root.contains(focused)) focused.focus({ preventScroll: true });
+    const normalBodyHtml = body.innerHTML;
+    const toolbar = root.querySelector(".popup-content-toolbar")!;
+    const toolbarEvents = ["click", "dblclick", "mousedown", "pointerdown", "touchstart", "wheel"];
+    let displayedMode = "normal";
+    let transientHtml = "";
+    let analysisHtml = "";
+    const session = {
+      dispose: () => {
+        select.onchange = null;
+        for (const type of toolbarEvents) toolbar.removeEventListener(type, stopToolbarEvent);
+        root.removeEventListener("geocode:contentchange", update);
+        disposeMapContent(root);
+        releaseDeferredDetails(transientHtml);
+        releaseDeferredDetails(analysisHtml);
+        transientHtml = "";
+        sessions.delete(root);
+        activeSessions.delete(session);
+      },
     };
+    sessions.set(root, session);
+    activeSessions.add(session);
+    const update = () => {
+      updatePopupLayout(popup, root);
+    };
+    root.addEventListener("geocode:contentchange", update);
     select.value = "normal";
     for (const option of Array.from(select.options)) option.disabled = option.value !== "normal";
-    analysisElement.innerHTML = options.sanitizeHtml(analysis.get(key) || "");
-    body.innerHTML = content.body.trim()
-      ? options.renderMarkdown(content.body)
-      : "内容はありません。";
+    const analysisContent = analysis.get(key) || "";
+    analysisHtml = analysisContent
+      ? registerProgressiveHtml(analysisContent, options.sanitizeHtml)
+      : "";
+    analysisElement.innerHTML = analysisHtml;
     printLabel.textContent = "通常表示";
     note.textContent = "表示内容を確認しています…";
     // Prevent map dragging/zooming while operating the select, without trapping keyboard focus.
-    for (const type of ["click", "dblclick", "mousedown", "pointerdown", "touchstart", "wheel"])
-      root.querySelector(".popup-content-toolbar")!.addEventListener(type, stopToolbarEvent);
-    update();
+    for (const type of toolbarEvents) toolbar.addEventListener(type, stopToolbarEvent);
+    // Initial image batches can synchronously update the popup layout. Retain
+    // the live node before setup so Leaflet never restores the prepared string.
+    if (popup.setContent) popup.setContent(root);
+    else update();
+    options.setupImages(root, options.renderMarkdown);
     try {
       let info: PopupBody;
       if (options.snapshot !== undefined) {
         info = options.snapshot[key];
       } else {
-        const cacheKey = `${key}\n${content.body}`;
-        let pending = cache.get(cacheKey);
-        if (!pending) {
-          pending = options.loadBody!(content.kind, content.id);
-          cache.set(cacheKey, pending);
-          pending.catch(() => cache.delete(cacheKey));
+        let cached = cache.get(key);
+        if (!cached || cached.body !== content.body) {
+          const pending = options.loadBody!(content.kind, content.id);
+          cached = { body: content.body, pending };
+          cache.set(key, cached);
+          pending.catch(() => {
+            if (cache.get(key)?.pending === pending) cache.delete(key);
+          });
         }
-        info = await pending;
+        cache.delete(key);
+        cache.set(key, cached);
+        while (cache.size > 32) cache.delete(cache.keys().next().value!);
+        info = await cached.pending;
       }
       if (sessions.get(root) !== session || !root.isConnected) return;
       if (!isPopupBody(info)) throw Error("Invalid popup body");
@@ -117,6 +150,7 @@ export function createPopupContentRuntime(options: Options) {
       }
       for (const option of Array.from(select.options)) option.disabled = false;
       const show = () => {
+        if (sessions.get(root) !== session || !root.isConnected) return;
         const mode = select.value;
         const markdown =
           mode === "free"
@@ -124,13 +158,22 @@ export function createPopupContentRuntime(options: Options) {
             : mode === "answers"
               ? info.managed_markdown
               : content.body;
-        body.innerHTML = markdown.trim()
-          ? options.renderMarkdown(markdown)
-          : mode === "free"
-            ? "自由入力の内容はありません。"
-            : mode === "answers"
-              ? "フォームからの回答はありません。"
-              : "内容はありません。";
+        if (mode !== displayedMode) {
+          disposeMapContent(body);
+          releaseDeferredDetails(transientHtml);
+          transientHtml = "";
+          if (mode === "normal") body.innerHTML = normalBodyHtml;
+          else {
+            transientHtml = markdown.trim()
+              ? options.renderMarkdown(markdown)
+              : mode === "free"
+                ? "自由入力の内容はありません。"
+                : "フォームからの回答はありません。";
+            body.innerHTML = transientHtml;
+          }
+          displayedMode = mode;
+          options.setupImages(root, options.renderMarkdown);
+        }
         note.textContent =
           mode === "answers" && options.answerMap
             ? "この対象の回答をすべて表示します。絞り込み・分析に使用した回答だけには限定しません。"
@@ -151,13 +194,30 @@ export function createPopupContentRuntime(options: Options) {
   options.map.on("popupclose", (event) => {
     const root = event.popup?.getElement?.()?.querySelector(".geocode-content-popup");
     if (root) {
-      sessions.delete(root);
-      const select = root.querySelector("select");
-      if (select) select.onchange = null;
+      sessions.get(root)?.dispose();
+      const content = contents.get(root.dataset.contentKey!);
+      // Keep only the prepared, collapsed HTML while the popup is closed.
+      // Expanded image DOM must not accumulate across visited markers.
+      if (content) event.popup.setContent?.(content.html);
     }
+  });
+  const release = (kind: "marker" | "shape", id: string) => {
+    const key = `${kind}:${id}`;
+    const content = contents.get(key);
+    if (content) releaseDeferredDetails(content.html);
+    contents.delete(key);
+    cache.delete(key);
+  };
+  options.map.on("unload", () => {
+    [...activeSessions].forEach((session) => session.dispose());
+    contents.forEach((content) => releaseDeferredDetails(content.html));
+    contents.clear();
+    cache.clear();
+    analysis.clear();
   });
   return {
     render,
+    release,
     setAnalysis: (key: string, html: string) => analysis.set(key, html),
     getAnalysis: () => Object.fromEntries(analysis),
   };

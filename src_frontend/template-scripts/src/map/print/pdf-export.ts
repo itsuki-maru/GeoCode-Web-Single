@@ -3,7 +3,7 @@ import { jsPDF } from "jspdf";
 import { PRINT_PAPERS, type PrintPaper } from "../common/print-state";
 
 const EXCLUDED =
-  ".leaflet-control-zoom, .leaflet-popup-close-button, .measurement-selection-help, .measurement-selection-summary:not(.has-selection)";
+  ".leaflet-control-zoom, .leaflet-popup-close-button, .measurement-selection-help, .measurement-selection-summary:not(.has-selection), .geocode-content-load-more, .geocode-content-load-all";
 export function pdfScale(width: number, height: number): number {
   return Math.min(150 / 96, Math.sqrt(4_000_000 / (width * height)));
 }

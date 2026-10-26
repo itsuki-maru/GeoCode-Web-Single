@@ -124,6 +124,7 @@ async function persistShapeGeometryEdit(layer, snapshot, options = {}) {
   }
 
   isShapeGeometrySaving = true;
+  beginSavingShape(layer.shapeId);
   closeShapeVertexDeletePopup();
   setShapeGeometryHandlesEnabled(false);
   try {
@@ -183,6 +184,7 @@ async function persistShapeGeometryEdit(layer, snapshot, options = {}) {
       true,
     );
   } finally {
+    endSavingShape(layer.shapeId);
     isShapeGeometrySaving = false;
     if (
       geometryEditingShapeLayer === layer &&

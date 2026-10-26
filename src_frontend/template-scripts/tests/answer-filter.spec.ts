@@ -42,6 +42,31 @@ function setup() {
 }
 
 describe("dedicated answer map filter", () => {
+  it("未生成の図形も件数・CSV・全体表示に含め、Leaflet生成を要求しない", () => {
+    const s = setup();
+    delete (s.runtime.shapeLayers as Record<string, unknown>)["shape-id"];
+    Object.assign(s.runtime, {
+      shapeRenderer: { isRenderable: (id: string) => id === "id", ensureLayer: vi.fn() },
+      isShapeLogicallyVisible: (id: string) => id === "id",
+      getShapeGeometryInfo: () => ({ bounds: { south: 34, west: 138, north: 36, east: 140 } }),
+    });
+    expect(s.result.counts()).toEqual({ visible: 2, renderable: 2 });
+    s.send({ type: "answer-map-print-enable", enabled: true });
+    s.send({ type: "answer-map-csv-request", csvRequestId: "csv", updateId: "" });
+    expect(s.post).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type: "answer-map-csv-targets",
+        targets: ["marker:id", "shape:id"],
+      }),
+      location.origin,
+    );
+    s.send({ type: "answer-map-fit" });
+    expect(s.bounds.extend).toHaveBeenCalledWith([34, 138]);
+    expect(s.bounds.extend).toHaveBeenCalledWith([36, 140]);
+    expect((s.runtime as any).shapeRenderer.ensureLayer).not.toHaveBeenCalled();
+    s.handlers.unload();
+  });
+
   it("validates coloring against the new filter scope before updating either state", () => {
     const s = setup();
     const controller = { apply: vi.fn(), getState: () => null };
@@ -173,6 +198,10 @@ describe("dedicated answer map filter", () => {
     s.runtime.setAnswerTargets.mockClear();
     s.send({ targets: [] });
     expect(s.runtime.setAnswerTargets).not.toHaveBeenCalled();
-    expect(s.runtime.map.off).toHaveBeenCalledOnce();
+    expect(s.runtime.map.off).toHaveBeenCalledWith(
+      "layeradd layerremove overlayadd overlayremove answerfilterchange",
+      expect.any(Function),
+    );
+    expect(s.runtime.map.off).toHaveBeenCalledWith("shaperenderchange", expect.any(Function));
   });
 });

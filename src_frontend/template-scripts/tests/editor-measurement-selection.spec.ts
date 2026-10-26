@@ -343,7 +343,6 @@ describe("editor measurement selection", () => {
     const layers = [a, b];
     const displayed = new Set();
     const viewport = createShapeViewportRuntime({
-      getShapeRecords: () => [],
       scheduleFrame: () => 1,
       cancelFrame: () => {},
     });

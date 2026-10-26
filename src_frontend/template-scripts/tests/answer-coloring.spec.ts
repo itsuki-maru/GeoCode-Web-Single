@@ -1,3 +1,4 @@
+import { installAnswerAnalysis } from "../src/map/answer-analysis";
 import { describe, expect, it, vi } from "vitest";
 import {
   installAnswerColoring,
@@ -64,6 +65,82 @@ function setup() {
 }
 
 describe("answer map coloring", () => {
+  it("旧分析と色分けを併用しても、遅延生成時の優先順位と解除後の色を維持する", () => {
+    const s = setup();
+    const created = new Set<(layer: any, record: { id: string }) => void>();
+    Object.assign(s.runtime, {
+      onShapeLayerCreated: (listener: any, first = false) => {
+        if (first) {
+          const previous = [...created];
+          created.clear();
+          created.add(listener);
+          previous.forEach((fn) => created.add(fn));
+        } else created.add(listener);
+        return () => created.delete(listener);
+      },
+    });
+    delete (s.runtime.shapeLayers as Record<string, unknown>)["shape-same"];
+    const modern = installAnswerColoring(s.runtime, s.leaflet);
+    installAnswerAnalysis(
+      s.runtime,
+      {
+        active: true,
+        field_label: "旧分析",
+        legend: [{ label: "legacy", color: "#00aa00", count: 1 }],
+        forms: [],
+        forms_overflow: false,
+        fields: [],
+        targets: { "shape:same": { bucket: 0, value: "0", answered_at: null } },
+      },
+      s.leaflet,
+      vi.fn(),
+    );
+    modern.apply(s.state);
+    s.runtime.shapeLayers["shape-same"] = s.shape;
+    created.forEach((fn) => fn(s.shape, { id: "same" }));
+    expect(s.shape.shapeStyle.color).toBe("#0072b2");
+    modern.apply(null);
+    expect(s.shape.shapeStyle.color).toBe("#00aa00");
+    modern.dispose();
+  });
+
+  it("後から生成した図形へ色分けを適用し、破棄・再生成後も最新の元スタイルへ戻す", () => {
+    const s = setup();
+    const created = new Set<(layer: any, record: { id: string }) => void>();
+    const evicted = new Set<(layer: any, record: { id: string }) => void>();
+    Object.assign(s.runtime, {
+      onShapeLayerCreated: (listener: any) => {
+        created.add(listener);
+        return () => created.delete(listener);
+      },
+      onShapeLayerEvicted: (listener: any) => {
+        evicted.add(listener);
+        return () => evicted.delete(listener);
+      },
+    });
+    delete (s.runtime.shapeLayers as Record<string, unknown>)["shape-same"];
+    const controller = installAnswerColoring(s.runtime, s.leaflet);
+    controller.apply(s.state);
+    s.runtime.shapeLayers["shape-same"] = s.shape;
+    created.forEach((fn) => fn(s.shape, { id: "same" }));
+    expect(s.shape.shapeStyle.color).toBe("#0072b2");
+    evicted.forEach((fn) => fn(s.shape, { id: "same" }));
+    const replacement = {
+      ...s.shape,
+      shapeStyle: { color: "#abcdef", weight: 3, dashArray: "1,6", arrowType: "both" },
+      options: { color: "#abcdef", weight: 3, fillColor: null },
+      setStyle: vi.fn(),
+    };
+    s.runtime.shapeLayers["shape-same"] = replacement;
+    created.forEach((fn) => fn(replacement, { id: "same" }));
+    expect(replacement.shapeStyle.color).toBe("#0072b2");
+    controller.apply(null);
+    expect(replacement.shapeStyle.color).toBe("#abcdef");
+    controller.dispose();
+    expect(created.size).toBe(0);
+    expect(evicted.size).toBe(0);
+  });
+
   it("validates colors, references, scope, target kinds and bounded rules", () => {
     const s = setup();
     expect(isAnswerColoring(s.state, new Set(["marker:same", "shape:same"]))).toBe(true);

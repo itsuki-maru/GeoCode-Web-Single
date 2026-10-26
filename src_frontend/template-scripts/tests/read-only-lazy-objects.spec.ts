@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Marked } from "marked";
 import { initializeReadOnlyMapPage } from "../src/map/read-only-page";
 import { finishAnswerPreview } from "../src/map/answer-preview";
 import type { AnotherMapBootstrap } from "../src/map/types";
@@ -66,16 +67,7 @@ beforeEach(() => {
   );
   Object.assign(window, {
     L: leaflet,
-    marked: {
-      Renderer: class {
-        link() {
-          return "";
-        }
-      },
-      setOptions: vi.fn(),
-      use: vi.fn(),
-      parse: (value: string) => value,
-    },
+    marked: new Marked(),
     filterXSS: (value: string) => value,
   });
   window.__GEOCODE_MAP_BOOTSTRAP__ = {
@@ -130,6 +122,275 @@ const status = (id: string) =>
   document.querySelector(`[data-layer-load-id="${id}"] .layer-object-load-state`)!.textContent;
 
 describe("lazy groups in the actual read-only map runtime", () => {
+  it("縮尺によって図形が省略されても移動・拡大の案内を表示しない", async () => {
+    const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
+    bootstrap.page = "form-answer-map";
+    const record = shape("a");
+    record.geojson.properties.radius = 1;
+    bootstrap.shapes = [record];
+    bootstrap.answerPreview = {
+      query: {},
+      targets: ["shape:s-a"],
+      parentOrigin: location.origin,
+      requestId: "small-shape-status",
+    };
+    runtime = initializeReadOnlyMapPage("form-answer-map");
+    await runtime.shapeRenderer.whenIdle();
+    expect(runtime.shapeRenderer.getStats()).toMatchObject({
+      eligibleCount: 1,
+      renderedCount: 0,
+      pendingCount: 0,
+    });
+    const status = document.querySelector<HTMLElement>(".shape-render-status");
+    expect(status?.hidden).toBe(true);
+    expect(status?.textContent).toBe("");
+  });
+
+  it("同じ検索のまま地図を移動しても原本の長いメモを再走査しない", async () => {
+    const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
+    bootstrap.page = "form-answer-map";
+    const record = shape("a");
+    let reads = 0;
+    Object.defineProperty(record.geojson.properties, "memo", {
+      get() {
+        reads++;
+        return "needle ".repeat(1000);
+      },
+    });
+    bootstrap.shapes = [record];
+    bootstrap.answerPreview = {
+      query: {},
+      targets: ["shape:s-a"],
+      parentOrigin: location.origin,
+      requestId: "search-cache",
+    };
+    const local = initializeReadOnlyMapPage("form-answer-map");
+    runtime = local;
+    await local.shapeRenderer.whenIdle();
+    reads = 0;
+    const input = document.getElementById("marker-search-input") as HTMLInputElement;
+    input.value = "needle";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await local.shapeRenderer.whenIdle();
+    expect(reads).toBe(1);
+    local.map.setView([35.681, 139.761], 14, { animate: false });
+    await local.shapeRenderer.whenIdle();
+    expect(reads).toBe(1);
+    input.value = "absent";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await local.shapeRenderer.whenIdle();
+    expect(reads).toBe(2);
+    expect(local.getVisibleShapeIds()).toEqual([]);
+  });
+
+  it("回答地図は画面外の図形を生成せず、検索対象を保持して移動後に生成する", async () => {
+    const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
+    bootstrap.page = "form-answer-map";
+    bootstrap.shapes = Array.from({ length: 80 }, (_, index) => {
+      const record = shape("a");
+      const far = index >= 40;
+      return {
+        ...record,
+        id: `lazy-${index}`,
+        name: `${far ? "far" : "near"} pipe ${index}`,
+        geojson: {
+          ...record.geojson,
+          geometry: { type: "Point", coordinates: far ? [135.5, 34.69] : [139.76, 35.68] },
+        },
+      };
+    });
+    bootstrap.answerPreview = {
+      query: {},
+      targets: bootstrap.shapes.map((record: any) => `shape:${record.id}`),
+      parentOrigin: location.origin,
+      requestId: "lazy-viewport",
+    };
+    runtime = initializeReadOnlyMapPage("form-answer-map");
+    await runtime.shapeRenderer.whenIdle();
+    expect(runtime.getRenderableShapeIds()).toHaveLength(80);
+    expect(runtime.getVisibleShapeIds()).toHaveLength(80);
+    expect(Object.keys(runtime.shapeLayers)).toHaveLength(40);
+    expect(runtime.shapeLayers["shape-lazy-40"]).toBeUndefined();
+    const search = document.getElementById("marker-search-input") as HTMLInputElement;
+    search.value = "far pipe";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(runtime.getVisibleShapeIds()).toHaveLength(40);
+    expect(runtime.shapeRenderer.getStats().renderedCount).toBe(0);
+    runtime.map.setView([34.69, 135.5], 14, { animate: false });
+    await vi.waitFor(() => expect(runtime!.shapeRenderer.getStats().renderedCount).toBe(40));
+    await runtime.shapeRenderer.whenIdle();
+    expect(runtime.shapeLayers["shape-lazy-40"]).toBeDefined();
+    expect(runtime.getVisibleShapeIds()).toHaveLength(40);
+  });
+
+  it("画面外の図形も検索でき、同じ検索の表示再判定ではメモを再走査しない", () => {
+    const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
+    bootstrap.page = "form-answer-map";
+    bootstrap.initialView = { latitude: 34.69, longitude: 135.5, zoom: 14 };
+    const record = shape("a");
+    const readMemo = vi.fn(() => "needle in a long memo");
+    Object.defineProperty(record.geojson.properties, "memo", { enumerable: true, get: readMemo });
+    bootstrap.shapes = [record];
+    bootstrap.answerPreview = {
+      query: {},
+      targets: ["shape:s-a"],
+      parentOrigin: location.origin,
+      requestId: "search-cache",
+    };
+    runtime = initializeReadOnlyMapPage("form-answer-map");
+    expect(readMemo).not.toHaveBeenCalled();
+    const input = document.getElementById("marker-search-input") as HTMLInputElement;
+    input.value = " NeEdLe ";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(runtime.getVisibleShapeIds()).toEqual(["s-a"]);
+    expect(readMemo).toHaveBeenCalledOnce();
+    for (let i = 0; i < 3; i++) runtime.shapeRenderer.refresh();
+    expect(runtime.getVisibleShapeIds()).toEqual(["s-a"]);
+    expect(readMemo).toHaveBeenCalledOnce();
+    input.value = "missing";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(runtime.getVisibleShapeIds()).toEqual([]);
+    expect(readMemo).toHaveBeenCalledTimes(2);
+    input.value = "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    runtime.shapeRenderer.refresh();
+    expect(runtime.getVisibleShapeIds()).toEqual(["s-a"]);
+    expect(readMemo).toHaveBeenCalledTimes(2);
+  });
+
+  it("共有地図は小図形を低縮尺で生成せず、拡大後に表示する", async () => {
+    const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
+    Object.assign(bootstrap, {
+      page: "temporary-map",
+      isChecked: true,
+      isMaster: false,
+      isMapUiHidden: false,
+      initialView: { latitude: 35.68, longitude: 139.76, zoom: 5 },
+      shapes: { a: shape("a") },
+    });
+    runtime = initializeReadOnlyMapPage("temporary-map");
+    await runtime.shapeRenderer.whenIdle();
+    expect(runtime.getVisibleShapeIds()).toEqual(["s-a"]);
+    expect(runtime.shapeRenderer.getStats().createdCount).toBe(0);
+    runtime.map.setView([35.68, 139.76], 14, { animate: false });
+    await vi.waitFor(() => expect(runtime!.shapeRenderer.getStats().renderedCount).toBe(1));
+    expect(runtime.shapeLayers["shape-s-a"]).toBeDefined();
+  });
+
+  it("印刷は小図形を省略せず、生成バッチが終わるまで準備完了にしない", async () => {
+    const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
+    bootstrap.page = "form-answer-map";
+    bootstrap.shapes = Array.from({ length: 300 }, (_, index) => ({
+      ...shape("a"),
+      id: `print-${index}`,
+    }));
+    bootstrap.answerPreview = {
+      query: {},
+      targets: bootstrap.shapes.map((record: any) => `shape:${record.id}`),
+      parentOrigin: location.origin,
+      requestId: "lazy-print",
+    };
+    runtime = initializeReadOnlyMapPage("form-answer-map", {
+      view: { latitude: 35.68, longitude: 139.76, zoom: 5 },
+      tileServerId: "1",
+      layerIds: ["a"],
+      markersVisible: true,
+      shapesVisible: true,
+      shapeNamesVisible: false,
+      overlays: {},
+    });
+    expect(runtime.getObjectLoadStatus().loading).toBe(true);
+    await runtime.shapeRenderer.whenIdle();
+    expect(runtime.getObjectLoadStatus().loading).toBe(false);
+    expect(runtime.shapeRenderer.getStats().renderedCount).toBe(300);
+  });
+
+  it.each([false, true])(
+    "回答地図はトップ地図の中心とズームを引き継ぎ、手動で対象全体にも移動できる（mobile=%s）",
+    (mobile) => {
+      const previousUrl = location.href;
+      const previousClass = document.body.className;
+      try {
+        history.replaceState({}, "", mobile ? "?map_ui=mobile" : "?");
+        const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
+        bootstrap.page = "form-answer-map";
+        bootstrap.markers = { a: marker("a") };
+        const view = { latitude: 34.6937, longitude: 135.5023, zoom: 12 };
+        bootstrap.answerPreview = {
+          initialView: view,
+          query: {},
+          targets: ["marker:m-a"],
+          answerCount: 1,
+          targetCount: 1,
+          parentOrigin: location.origin,
+          requestId: "inherit-view",
+        };
+        // 別タブなどで最後に保存された位置よりも、呼び出し元の地図位置を優先する。
+        localStorage.setItem(
+          "geocode-web:last-map-view",
+          JSON.stringify({ latitude: 43, longitude: 141, zoom: 9 }),
+        );
+        const saved = JSON.stringify(localStorage);
+        const post = vi.spyOn(window.parent, "postMessage").mockImplementation(() => {});
+        runtime = initializeReadOnlyMapPage("form-answer-map");
+        const fit = vi.spyOn(runtime.map, "fitBounds");
+        finishAnswerPreview(runtime, bootstrap, leaflet);
+        const inherited = runtime.getPrintState().view;
+        // Leafletの画面サイズ更新によるピクセル単位の丸めを許容する。
+        expect(inherited.latitude).toBeCloseTo(view.latitude, 3);
+        expect(inherited.longitude).toBeCloseTo(view.longitude, 3);
+        expect(inherited.zoom).toBe(view.zoom);
+        expect(fit).not.toHaveBeenCalled();
+        expect(post).toHaveBeenCalledWith(
+          expect.objectContaining({ type: "answer-map-ready", displayed: 1 }),
+          location.origin,
+        );
+        runtime.map.setView([36, 140], 10, { animate: false });
+        expect(JSON.stringify(localStorage)).toBe(saved);
+
+        installAnswerFilter(runtime, bootstrap.answerPreview, leaflet, bootstrap);
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            origin: location.origin,
+            source: window.parent,
+            data: { type: "answer-map-fit", requestId: "inherit-view" },
+          }),
+        );
+        expect(fit).toHaveBeenCalledOnce();
+        expect(JSON.stringify(localStorage)).toBe(saved);
+      } finally {
+        history.replaceState({}, "", previousUrl);
+        document.body.className = previousClass;
+      }
+    },
+  );
+
+  it.each([undefined, { latitude: 91, longitude: 139, zoom: 12 }])(
+    "引き継ぐ位置がないか不正な場合は回答対象全体に合わせる（view=%j）",
+    (initialView) => {
+      const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
+      bootstrap.page = "form-answer-map";
+      bootstrap.markers = { a: marker("a") };
+      bootstrap.answerPreview = {
+        initialView,
+        query: {},
+        targets: ["marker:m-a"],
+        answerCount: 1,
+        targetCount: 1,
+        parentOrigin: location.origin,
+        requestId: "fallback-view",
+      };
+      vi.spyOn(window.parent, "postMessage").mockImplementation(() => {});
+      runtime = initializeReadOnlyMapPage("form-answer-map");
+      const fit = vi.spyOn(runtime.map, "fitBounds");
+      finishAnswerPreview(runtime, bootstrap, leaflet);
+      expect(fit).toHaveBeenCalledOnce();
+      expect(
+        (fit.mock.calls[0][0] as any).contains(runtime.markers["marker-m-a"].getLatLng()),
+      ).toBe(true);
+    },
+  );
+
   it.each([false, true])(
     "回答地図の機能切替はモバイル呼び出しだけに表示する（mobile=%s）",
     (mobile) => {
@@ -450,7 +711,9 @@ describe("lazy groups in the actual read-only map runtime", () => {
     pendingShapes.resolve(new Response(JSON.stringify([shape("a")])));
     await flush();
     expect(runtime.map.hasLayer(runtime.markers["marker-m-a"])).toBe(false);
-    expect(runtime.map.hasLayer(runtime.shapeLayers["shape-s-a"])).toBe(false);
+    // チェック解除中に取得した図形はレコードだけを保持し、生成しない。
+    expect(runtime.shapeLayers["shape-s-a"]).toBeUndefined();
+    expect(runtime.getShapeRecord("s-a")).not.toBeNull();
     checkbox("a").click();
     await flush();
     expect(fetchData).toHaveBeenCalledTimes(2);

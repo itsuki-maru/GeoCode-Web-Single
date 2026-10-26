@@ -33,6 +33,8 @@ interface MapObjectFocusDependencies<TMarker extends object> {
   normalizeShapeName(name: unknown): string;
   openMarkerPopup(markerId: string | number): void;
   openShapeMemoPopup(layer: FocusLayer, latLng: object): boolean;
+  getShapeLayer?: (id: string) => FocusLayer | null;
+  onFocusedShapeChange?: (id: string | null) => void;
   searchableShapeLayers: Iterable<FocusLayer>;
   shapeNameLabelManager?: ShapeLabelManager | null;
 }
@@ -47,6 +49,8 @@ export function createMapObjectFocusController<TMarker extends object>({
   normalizeShapeName,
   openMarkerPopup,
   openShapeMemoPopup,
+  getShapeLayer,
+  onFocusedShapeChange,
   searchableShapeLayers,
   shapeNameLabelManager,
 }: MapObjectFocusDependencies<TMarker>) {
@@ -58,12 +62,17 @@ export function createMapObjectFocusController<TMarker extends object>({
       return;
     }
     shapeNameLabelManager?.setFocusedLayer(null);
-    if (focusedShapeLayerIsTemporary && map.hasLayer(focusedShapeLayer)) {
+    if (
+      focusedShapeLayerIsTemporary &&
+      !drawnShapesGroup.hasLayer(focusedShapeLayer) &&
+      map.hasLayer(focusedShapeLayer)
+    ) {
       map.removeLayer(focusedShapeLayer);
     }
     map.closePopup?.();
     focusedShapeLayer = null;
     focusedShapeLayerIsTemporary = false;
+    onFocusedShapeChange?.(null);
   };
 
   const releaseFocusedShapeToVisibleGroup = (): void => {
@@ -74,6 +83,7 @@ export function createMapObjectFocusController<TMarker extends object>({
     }
     focusedShapeLayer = null;
     focusedShapeLayerIsTemporary = false;
+    onFocusedShapeChange?.(null);
   };
 
   const focusMarker = (markerId: string | number, latitude: unknown, longitude: unknown): void => {
@@ -109,10 +119,14 @@ export function createMapObjectFocusController<TMarker extends object>({
     map.setView(latLng, 16);
     const shapeId = String(shapeIdValue || "");
     if (!shapeId) return;
-    const targetLayer = Array.from(searchableShapeLayers).find(
-      (layer) => String(layer.shapeId || "") === shapeId,
-    );
-    if (!targetLayer || targetLayer.isDeletedShape) return;
+    onFocusedShapeChange?.(shapeId);
+    const targetLayer =
+      getShapeLayer?.(shapeId) ??
+      Array.from(searchableShapeLayers).find((layer) => String(layer.shapeId || "") === shapeId);
+    if (!targetLayer || targetLayer.isDeletedShape) {
+      onFocusedShapeChange?.(null);
+      return;
+    }
 
     focusedShapeLayer = targetLayer;
     focusedShapeLayerIsTemporary = !map.hasLayer(targetLayer);

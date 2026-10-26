@@ -132,7 +132,6 @@ describe("geographic draggable measurement labels", () => {
     replacement.addTo(map);
     const attach = vi.fn();
     const manager = createShapeViewportRuntime({
-      getShapeRecords: () => [],
       scheduleFrame: () => 1,
       cancelFrame: () => {},
     }).createViewportShapeMeasurementManager({
@@ -190,7 +189,6 @@ describe("geographic draggable measurement labels", () => {
     const remove = vi.fn(() => marker.remove());
     const attach = vi.fn(() => marker.addTo(map));
     const manager = createShapeViewportRuntime({
-      getShapeRecords: () => [],
       scheduleFrame: () => 1,
       cancelFrame: () => {},
     }).createViewportShapeMeasurementManager({

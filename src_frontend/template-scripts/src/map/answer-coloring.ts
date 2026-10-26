@@ -91,55 +91,73 @@ export function installAnswerColoring(runtime: any, leaflet: any): AnswerColorin
       }
     }
   };
+  const applyToLayer = (
+    key: string,
+    layer: any,
+    rule: AnswerColoring["rules"][number],
+    icons: Map<string, unknown>,
+  ) => {
+    if (!originals.has(key)) {
+      originals.set(
+        key,
+        key.startsWith("marker:")
+          ? { layer, icon: layer.options?.icon }
+          : {
+              layer,
+              style: { ...layer.shapeStyle },
+              options: {
+                color: layer.options?.color ?? layer.shapeStyle?.color,
+                fillColor: layer.options?.fillColor ?? layer.shapeStyle?.fillColor ?? null,
+              },
+            },
+      );
+    }
+    if (key.startsWith("marker:")) {
+      if (!icons.has(rule.color)) {
+        icons.set(
+          rule.color,
+          leaflet.divIcon({
+            className: "answer-value-marker",
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+            popupAnchor: [0, -12],
+            html: `<span style="display:block;width:20px;height:20px;border:2px solid white;border-radius:50%;background:${rule.color};box-shadow:0 0 3px #222"></span>`,
+          }),
+        );
+      }
+      layer.setIcon(icons.get(rule.color));
+    } else {
+      updateShape(layer, {
+        ...originals.get(key)!.style,
+        color: rule.color,
+        fillColor: rule.color,
+      });
+    }
+  };
   const render = (state: AnswerColoring | null) => {
     restore();
     const rules = new Map(state?.rules.map((rule) => [rule.id, rule]) || []);
     const icons = new Map<string, unknown>();
     for (const [key, id] of Object.entries(state?.targets || {})) {
-      const rule = rules.get(id)!;
       const layer = layerFor(key);
-      if (!layer) continue; // Invalid positions and geometry have no rendered layer.
-      if (!originals.has(key)) {
-        originals.set(
-          key,
-          key.startsWith("marker:")
-            ? { layer, icon: layer.options?.icon }
-            : {
-                layer,
-                style: { ...layer.shapeStyle },
-                options: {
-                  color: layer.options?.color ?? layer.shapeStyle?.color,
-                  fillColor: layer.options?.fillColor ?? layer.shapeStyle?.fillColor ?? null,
-                },
-              },
-        );
-      }
-      if (key.startsWith("marker:")) {
-        if (!icons.has(rule.color)) {
-          icons.set(
-            rule.color,
-            leaflet.divIcon({
-              className: "answer-value-marker",
-              iconSize: [24, 24],
-              iconAnchor: [12, 12],
-              popupAnchor: [0, -12],
-              html: `<span style="display:block;width:20px;height:20px;border:2px solid white;border-radius:50%;background:${rule.color};box-shadow:0 0 3px #222"></span>`,
-            }),
-          );
-        }
-        layer.setIcon(icons.get(rule.color));
-      } else {
-        updateShape(layer, {
-          ...originals.get(key)!.style,
-          color: rule.color,
-          fillColor: rule.color,
-        });
-      }
+      if (!layer) continue;
+      applyToLayer(key, layer, rules.get(id)!, icons);
     }
     // Classification colors belong to individual objects. Keep the existing
     // cluster renderer so its size, count colors, and any custom styling survive.
     cluster?.refreshClusters?.();
   };
+  const stopCreated = runtime.onShapeLayerCreated?.((layer: any, record: { id: string }) => {
+    if (disposed || !current) return;
+    const key = `shape:${record.id}`;
+    const ruleId = current.targets[key];
+    const rule = current.rules.find((rule) => rule.id === ruleId);
+    if (rule) applyToLayer(key, layer, rule, new Map());
+  });
+  const stopEvicted = runtime.onShapeLayerEvicted?.((layer: any, record: { id: string }) => {
+    const key = `shape:${record.id}`;
+    if (originals.get(key)?.layer === layer) originals.delete(key);
+  });
   const controller: AnswerColoringController = {
     apply(state: AnswerColoring | null) {
       if (disposed) throw new Error("色分け画面は終了しています。");
@@ -162,6 +180,8 @@ export function installAnswerColoring(runtime: any, leaflet: any): AnswerColorin
       current = null;
       originals.clear();
       disposed = true;
+      stopCreated?.();
+      stopEvicted?.();
       runtime.map.off("unload", controller.dispose);
       if (runtime.answerColoring === controller) delete runtime.answerColoring;
     },

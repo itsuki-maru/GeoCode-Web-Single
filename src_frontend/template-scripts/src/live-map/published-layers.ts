@@ -9,8 +9,10 @@ import { flattenShapeLatLngs } from "../map/common/shape-measurement-display";
 import { normalizeShapeName, getShapeMemoFromGeoJson } from "../map/common/shape-memo";
 import {
   createNestedTokenizer,
+  bindDeferredPopupLayout,
   isLocalhost,
   isPDF,
+  renderProgressiveMarkdown,
   renderIframe,
   setupDetailsLazyImages,
 } from "../map/common/content";
@@ -50,7 +52,15 @@ export function addPublishedLayerControl(
   installMjpegCameras(map);
   const { marked, filterXSS } = window as any;
   installMapMarkdownExtensions({
-    createNestedTokenizer: createNestedTokenizer as any,
+    createNestedTokenizer: (type) =>
+      createNestedTokenizer(type, {
+        renderDeferredBody: (text, links) =>
+          renderProgressiveMarkdown(
+            text,
+            (html) => renderIframe(filterXSS(html, xssOptions)),
+            links,
+          ),
+      }) as any,
     extractYouTubeId,
     marked,
   });
@@ -61,14 +71,25 @@ export function addPublishedLayerControl(
     isPdf: isPDF,
     marked,
   });
+  const renderContentMarkdown = (
+    markdown: string,
+    links?: Parameters<typeof renderProgressiveMarkdown>[2],
+  ) =>
+    renderProgressiveMarkdown(markdown, (html) => renderIframe(filterXSS(html, xssOptions)), links);
   const popupContent = (name: string, memo: string) =>
-    `<div class="md-detail-contents"><h1>${escapeHtml(name)}</h1>${renderIframe(filterXSS(marked.parse(memo), xssOptions))}</div>`;
+    `<div class="md-detail-contents"><h1>${escapeHtml(name)}</h1>${renderContentMarkdown(memo)}</div>`;
   const bindContent = (layer: any, name: string, memo: string, showHoverName = true) => {
     if (showHoverName && name) layer.bindTooltip(escapeHtml(name));
     layer.bindPopup(popupContent(name, memo), { className: "live-published-popup" });
+    let stopLayout = () => {};
     layer.on("popupopen", (event: any) => {
+      stopLayout();
+      stopLayout = bindDeferredPopupLayout(event.popup);
       const element = event.popup.getElement();
-      if (element) setupDetailsLazyImages(element);
+      if (element) setupDetailsLazyImages(element, renderContentMarkdown);
+    });
+    layer.on("popupclose", () => {
+      stopLayout();
     });
   };
   const defaults = { color: "#3388ff", weight: 3, fillOpacity: 0.2 };
@@ -157,9 +178,7 @@ export function addPublishedLayerControl(
       });
     },
   });
-  const shapeLabels = createShapeViewportRuntime({
-    getShapeRecords: () => data.shapes,
-  }).createViewportShapeLabelManager({
+  const shapeLabels = createShapeViewportRuntime().createViewportShapeLabelManager({
     map,
     getLayers: () => publishedShapes,
     bindLabel,

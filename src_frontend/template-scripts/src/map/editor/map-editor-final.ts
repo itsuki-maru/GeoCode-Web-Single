@@ -46,8 +46,8 @@ function applyMarkerUpdateFromParent(payload) {
     );
   } else if (nextRecord.detail) {
     const mdText = `# ${nextRecord.marker_name}\n\n${nextRecord.detail}`;
-    const cleanHtml = filterXSS(marked.parse(mdText), xssOptions);
-    marker.bindPopup(`<div class="md-detail-contents">${renderIframe(cleanHtml)}</div>`);
+    const cleanHtml = renderMapMarkdown(mdText);
+    marker.bindPopup(`<div class="md-detail-contents">${cleanHtml}</div>`);
   }
 
   const markerOptions = markerOptionsForLayer(nextRecord.layer_id, layersFromAxum);
@@ -83,25 +83,38 @@ function applyMarkerDeleteFromParent(markerIdValue) {
 // Vue 側で更新された図形情報を、既存の Leaflet レイヤへ反映する
 function applyShapeUpdateFromParent(payload) {
   const shapeId = String(payload?.id || "");
-  const targetLayer = Array.from(searchableShapeLayers).find(
-    (shapeLayer) => String(shapeLayer?.shapeId || "") === shapeId,
-  );
-  if (!targetLayer || !payload?.geojson || targetLayer.shapeType !== payload.shapeType) {
+  const current = editorShapeRecords.get(shapeId);
+  if (!current || !payload?.geojson || current.shape_type !== payload.shapeType) {
     return false;
   }
-
-  const currentGeometry = targetLayer.options?.shapeRecord?.geojson?.geometry;
-  if (JSON.stringify(currentGeometry) !== JSON.stringify(payload.geojson.geometry)) {
-    return false;
-  }
-
-  applyShapeRecord(targetLayer, {
+  const nextRecord = {
+    ...current,
     id: shapeId,
     layer_id: String(payload.layerId || ""),
     shape_type: payload.shapeType,
     name: String(payload.name || ""),
     geojson: payload.geojson,
-  });
+  };
+  const targetLayer = shapeRenderManager?.getLayer(shapeId);
+  if (!targetLayer) {
+    editorShapeRecords.set(shapeId, nextRecord);
+    shapeRenderManager?.upsert(nextRecord);
+    renderVisibleShapes();
+    return true;
+  }
+
+  if (JSON.stringify(current.geojson?.geometry) !== JSON.stringify(payload.geojson.geometry)) {
+    const geometry = payload.geojson.geometry;
+    if (payload.shapeType === "circle" && geometry?.type === "Point") {
+      targetLayer.setLatLng([geometry.coordinates[1], geometry.coordinates[0]]);
+      targetLayer.setRadius(getCircleRadiusFromGeoJson(payload.geojson));
+    } else if (geometry?.type === "LineString" || geometry?.type === "Polygon") {
+      targetLayer.setLatLngs(
+        L.GeoJSON.coordsToLatLngs(geometry.coordinates, geometry.type === "Polygon" ? 1 : 0),
+      );
+    } else return false;
+  }
+  applyShapeRecord(targetLayer, nextRecord);
   updateShapeNameLabel(targetLayer, payload.name || "");
   applyShapeStyle(targetLayer, activeDrawMode === "delete");
   refreshShapeMeasurementMarkers(targetLayer);
@@ -154,7 +167,17 @@ window.addEventListener("message", function (event) {
   if (event.source === window.parent && (allowOrigins.includes(event.origin) || isSameOrigin)) {
     const messageData = event.data;
     if (!messageData || typeof messageData !== "object") return;
-    if (messageData.type === "layerInputPolicies") {
+    if (messageData.type === "mapViewRequest") {
+      const center = map.getCenter();
+      window.parent.postMessage(
+        {
+          type: "mapViewResult",
+          requestId: messageData.requestId,
+          view: { latitude: center.lat, longitude: center.lng, zoom: map.getZoom() },
+        },
+        event.origin,
+      );
+    } else if (messageData.type === "layerInputPolicies") {
       let changed = false;
       for (const [id, restricted] of Object.entries(messageData.policies || {})) {
         if (layersFromAxum[id] && typeof restricted === "boolean") {

@@ -1,4 +1,5 @@
 import { escapeHtml } from "./common/marker";
+import { isAnswerShapeVisible } from "./answer-shapes";
 
 export interface AnswerAnalysis {
   active: boolean;
@@ -24,23 +25,22 @@ export function installAnswerAnalysis(
       const layer =
         kind === "marker" ? runtime.markers[`marker-${id}`] : runtime.shapeLayers[`shape-${id}`];
       const visible =
-        !!layer &&
-        (kind === "marker"
-          ? runtime.map.hasLayer(runtime.visibleMarkerGroup) &&
-            runtime.visibleMarkerGroup.hasLayer(layer)
-          : runtime.map.hasLayer(layer));
+        kind === "shape"
+          ? isAnswerShapeVisible(runtime, id)
+          : !!layer &&
+            runtime.map.hasLayer(runtime.visibleMarkerGroup) &&
+            runtime.visibleMarkerGroup.hasLayer(layer);
       if (visible && counts[target.bucket] !== undefined) counts[target.bucket]++;
     }
     return counts;
   };
   if (!data.active) return { visibleCounts };
-  for (const [key, target] of Object.entries(data.targets)) {
-    const [kind, id] = key.split(":");
+  const applyTarget = (key: string, layer: any) => {
+    const target = data.targets[key];
+    if (!target) return;
+    const [kind] = key.split(":");
     const bucket = data.legend[target.bucket];
-    if (!bucket || !/^#[0-9a-f]{6}$/i.test(bucket.color)) continue;
-    const layer =
-      kind === "marker" ? runtime.markers[`marker-${id}`] : runtime.shapeLayers[`shape-${id}`];
-    if (!layer) continue;
+    if (!bucket || !/^#[0-9a-f]{6}$/i.test(bucket.color)) return;
     const value = target.value;
     const text = `${data.field_label}: ${value ?? bucket.label}（${bucket.label}）`;
     const date = target.answered_at
@@ -48,6 +48,7 @@ export function installAnswerAnalysis(
       : "選択フォームの該当回答なし";
     const html = `<section class="answer-analysis-value"><strong>${escapeHtml(text)}</strong><br>${escapeHtml(date)}</section>`;
     runtime.popupContent?.setAnalysis(key, html);
+    if (!layer) return;
     if (kind === "marker") {
       layer.setIcon(
         leaflet.divIcon({
@@ -72,7 +73,19 @@ export function installAnswerAnalysis(
       if (!runtime.popupContent)
         layer.shapeMemo = `### 分析に使用した回答\n\n${markdownEscape(text)}\n\n${markdownEscape(date)}\n\n---\n\n${layer.shapeMemo || ""}`;
     }
+  };
+  for (const key of Object.keys(data.targets)) {
+    const [kind, id] = key.split(":");
+    applyTarget(
+      key,
+      kind === "marker" ? runtime.markers[`marker-${id}`] : runtime.shapeLayers[`shape-${id}`],
+    );
   }
+  // Legacy analysis is the base style; modern classification must run afterwards.
+  const stopCreated = runtime.onShapeLayerCreated?.(
+    (layer: any, record: { id: string }) => applyTarget(`shape:${record.id}`, layer),
+    true,
+  );
   const cluster = runtime.visibleMarkerGroup;
   if (cluster?.refreshClusters) {
     cluster.options.iconCreateFunction = (group: any) =>
@@ -89,9 +102,12 @@ export function installAnswerAnalysis(
     timer = setTimeout(() => notify(visibleCounts()), 50);
   };
   runtime.map.on("layeradd layerremove overlayadd overlayremove moveend", update);
+  runtime.map.on("answerfilterchange", update);
   runtime.map.on("unload", () => {
     clearTimeout(timer);
+    stopCreated?.();
     runtime.map.off("layeradd layerremove overlayadd overlayremove moveend", update);
+    runtime.map.off("answerfilterchange", update);
   });
   return { visibleCounts };
 }

@@ -5,7 +5,6 @@ import { createPopupContentRuntime } from "./common/popup-content";
 import { createLazyLayerObjects } from "./common/lazy-layer-objects";
 import type { PrintMapState } from "./common/print-state";
 import { readMapBootstrap } from "./bootstrap";
-import { hasValidAnswerGeometry } from "./answer-preview";
 import { createAnswerVisibility } from "./answer-visibility";
 import { createLayerBulkToggleControl, extractYouTubeId } from "./common/base";
 import {
@@ -13,6 +12,7 @@ import {
   isLocalhost,
   isPDF,
   isValidCoordinate,
+  renderProgressiveMarkdown,
   renderIframe,
   setupDetailsLazyImages,
 } from "./common/content";
@@ -23,7 +23,7 @@ import { installMapMarkdownExtensions } from "./common/markdown-extensions";
 import { downloadMapContentFile, installMapMarkdownRenderer } from "./common/markdown-renderer";
 import { createReadOnlyMapRuntime } from "./common/map-runtime";
 import { createMapUiVisibilityRuntime } from "./common/map-ui-visibility";
-import { loadLastMapView, observeMapView } from "./common/map-view-persistence";
+import { isValidMapView, loadLastMapView, observeMapView } from "./common/map-view-persistence";
 import {
   enableMarkerIconFallback,
   escapeHtml,
@@ -39,12 +39,17 @@ import {
 } from "./common/page-controls";
 import {
   createLayeredMarkerDisplayManager,
-  createLayeredShapeDisplayManager,
   createMapObjectSearchCoordinator,
   createMapSearchRuntime,
   filterMeasurementMarkersForBounds,
   getShapeRecords,
+  matchesShapeSearch,
+  normalizeMarkerSearchText,
 } from "./common/search";
+import {
+  createShapeRenderManager,
+  getShapeGeometryInfo as getRecordGeometryInfo,
+} from "./common/shape-renderer";
 import { createShapeArrowRuntime } from "./common/shape-arrow";
 import { createShapeLayerRuntime } from "./common/shape-layer";
 import { createShapeMeasurementRuntime } from "./common/shape-measurement";
@@ -202,9 +207,21 @@ export function initializeReadOnlyMapPage(
     normalizeShapeColor: shapeStyle.normalizeShapeColor,
     normalizeShapeWeight: shapeStyle.normalizeShapeWeight,
   });
-  const viewport = createShapeViewportRuntime({ getShapeRecords });
+  const viewport = createShapeViewportRuntime();
 
-  installMapMarkdownExtensions({ createNestedTokenizer, extractYouTubeId, marked });
+  installMapMarkdownExtensions({
+    createNestedTokenizer: (type) =>
+      createNestedTokenizer(type, {
+        renderDeferredBody: (text, links) =>
+          renderProgressiveMarkdown(
+            text,
+            (html) => renderIframe(filterXSS(html, xssOptions)),
+            links,
+          ),
+      }),
+    extractYouTubeId,
+    marked,
+  });
   const xssOptions = installMapMarkdownRenderer({
     printing: isPrint,
     enablePwaDownloads: isAnother,
@@ -213,6 +230,8 @@ export function initializeReadOnlyMapPage(
     isPdf: isPDF,
     marked,
   });
+  const renderContentMarkdown = (markdown, links) =>
+    renderProgressiveMarkdown(markdown, (html) => renderIframe(filterXSS(html, xssOptions)), links);
 
   let map: DynamicRecord;
   let bounds: unknown;
@@ -248,8 +267,13 @@ export function initializeReadOnlyMapPage(
   }
 
   const lastMapView = isAnother && !isAnswerPreview ? loadLastMapView() : null;
+  const answerMapView =
+    isAnswerPreview && isValidMapView(bootstrap.answerPreview?.initialView)
+      ? bootstrap.answerPreview.initialView
+      : null;
   const initialView =
     printState?.view ??
+    answerMapView ??
     (isAnother ? (lastMapView ?? bootstrap.initialView) : temporaryBootstrap!.initialView);
   const mapRuntime = createReadOnlyMapRuntime({
     center: [initialView.latitude, initialView.longitude],
@@ -266,7 +290,7 @@ export function initializeReadOnlyMapPage(
         map,
         sanitizeHtml: (html) => filterXSS(html, xssOptions),
         analysis: bootstrap.popupAnalysis,
-        renderMarkdown: (text) => renderIframe(filterXSS(marked.parse(text), xssOptions)),
+        renderMarkdown: renderContentMarkdown,
         setupImages: setupDetailsLazyImages,
         snapshot: isAnswerPreview ? bootstrap.popupBodies || {} : undefined,
         answerMap: isAnswerPreview,
@@ -326,6 +350,12 @@ export function initializeReadOnlyMapPage(
   const layerVisibilityGroups: DynamicRecord = {};
   const shapeGroups: DynamicRecord = {};
   const shapeLayers: DynamicRecord = {};
+  let shapeRenderer: ReturnType<typeof createShapeRenderManager>;
+  let shapeRenderStatus: HTMLElement | null = null;
+  let shapeSearchQuery = "";
+  const shapeSearchMatches = new WeakMap<object, { query: string; result: boolean }>();
+  const shapeCreatedListeners = new Set<(layer: any, record: any) => void>();
+  const shapeEvictedListeners = new Set<(layer: any, record: any) => void>();
   const markers: DynamicRecord = {};
   const layerNames: Record<string, string> = {};
   const clusteringAllowed =
@@ -334,20 +364,12 @@ export function initializeReadOnlyMapPage(
   if (isTemporary || (printState?.markersVisible ?? storage.getInitialMarkerVisibility()))
     visibleMarkerGroup.addTo(map);
   const drawnShapesGroup = isAnother ? L.featureGroup() : undefined;
-  const suppressShapes =
-    isAnother && !isAnswerPreview && viewport.shouldSuppressInitialShapeRendering(shapeRecords);
   const shapeVisibilityLayer = L.layerGroup();
-  if (
-    isTemporary ||
-    (printState?.shapesVisible ?? (!suppressShapes && storage.getInitialShapeLayerVisibility()))
-  ) {
+  if (isTemporary || (printState?.shapesVisible ?? storage.getInitialShapeLayerVisibility())) {
     shapeVisibilityLayer.addTo(map);
   }
   const shapeNameVisibilityLayer = L.layerGroup();
-  if (
-    isAnother &&
-    (printState?.shapeNamesVisible ?? (!suppressShapes && storage.getInitialShapeNameVisibility()))
-  ) {
+  if (isAnother && (printState?.shapeNamesVisible ?? storage.getInitialShapeNameVisibility())) {
     shapeNameVisibilityLayer.addTo(map);
   }
 
@@ -385,9 +407,9 @@ export function initializeReadOnlyMapPage(
     getLeaflet: () => L,
     getMap: () => map,
     renderIframe,
-    renderMarkdown: (markdown) => marked.parse(markdown),
+    renderMarkdown: renderContentMarkdown,
     sanitizeHtml: (html) => filterXSS(html, xssOptions),
-    setupDetailsLazyImages,
+    setupDetailsLazyImages: (root) => setupDetailsLazyImages(root, renderContentMarkdown),
   });
   installMapContentActions({
     downloadFile: isAnother ? downloadMapContentFile : undefined,
@@ -419,7 +441,7 @@ export function initializeReadOnlyMapPage(
   });
   const selection = createMeasurementSelection({
     getEnabled: () => isMeasurementVisible,
-    isVisible: (layer) => map.hasLayer(layer),
+    isVisible: (layer) => isShapeLogicallyVisible(layer.shapeId),
     measure: (layer) => {
       if (layer.shapeType === "polyline")
         return { area: 0, distance: measurement.measurePolyline(layer).totalDistance };
@@ -505,10 +527,10 @@ export function initializeReadOnlyMapPage(
       markerOptionsForLayer,
       markerRecords: records,
       markers,
-      parseMarkdown: (markdown) => marked.parse(markdown),
+      parseMarkdown: renderContentMarkdown,
       renderIframe,
       sanitizeHtml: (html) => filterXSS(html, xssOptions),
-      setupDetailsLazyImages,
+      setupDetailsLazyImages: (root) => setupDetailsLazyImages(root, renderContentMarkdown),
       shapeRecords,
     });
   hydrateMarkers(markerRecords);
@@ -519,25 +541,27 @@ export function initializeReadOnlyMapPage(
     }
   }
 
-  const restoreShapes = (records) =>
-    restoration.restoreSavedShapes({
-      addLayer: isAnother
-        ? (layer, layerId) => groups.addShapeLayerToManagedGroups(layer, layerId)
-        : (layer, layerId) => {
-            const group = groups.ensureShapeGroup(layerId);
-            if (!group) return false;
-            group.addLayer(layer);
-            return true;
-          },
-      applyShapeStyle: isAnother,
-      bindPolylineHover: !isMobile,
-      records: isAnswerPreview
-        ? getShapeRecords(records).filter((record) => hasValidAnswerGeometry(record.geojson))
-        : records,
-      restoreShapeStyleOnHover: isAnother,
-      shapeLayers,
-    });
-  const hasSharedShapes = restoreShapes(shapeRecords);
+  // 表示設定・検索・回答条件は描画済みオブジェクトの有無とは独立して判定する。
+  const matchesCurrentShapeSearch = (record) => {
+    if (!shapeSearchQuery) return true;
+    const cached = shapeSearchMatches.get(record);
+    if (cached?.query === shapeSearchQuery) return cached.result;
+    const result = matchesShapeSearch(record, shapeSearchQuery);
+    shapeSearchMatches.set(record, { query: shapeSearchQuery, result });
+    return result;
+  };
+  const isShapeRecordVisible = (record) =>
+    map.hasLayer(shapeVisibilityLayer) &&
+    layeredMarkerDisplay.isLayerVisible(record.layer_id) &&
+    answerVisibility.allows(`shape:${record.id}`) &&
+    matchesCurrentShapeSearch(record);
+  const isShapeLogicallyVisible = (id) => {
+    const record = shapeRenderer?.getRecord(id);
+    return Boolean(record && shapeRenderer.isRenderable(id) && isShapeRecordVisible(record));
+  };
+  const hasSharedShapes = getShapeRecords(shapeRecords).some((record) =>
+    Boolean(getRecordGeometryInfo(record)),
+  );
 
   const markerLayerControl = createReadOnlyMarkerLayerControl({
     formatLayerName: isAnother
@@ -589,18 +613,78 @@ export function initializeReadOnlyMapPage(
     shapeNameLabelManager?.destroy();
     shapeMeasurementManager?.destroy();
   });
-  const layeredShapeDisplay = createLayeredShapeDisplayManager({
-    isRecordAllowed: (record) => answerVisibility.allows(`shape:${record.id}`),
-    isLayerVisible: layeredMarkerDisplay.isLayerVisible,
+  shapeRenderer = createShapeRenderManager({
     map,
-    onRebuild: () => {
-      shapeNameLabelManager!.scheduleRefresh();
-      selection.prune();
+    records: getShapeRecords(shapeRecords),
+    // 印刷は用紙上の縮尺を使い、小図形の視認性抑止を適用しない。
+    minPixelSize: isPrint ? 0 : undefined,
+    isRecordVisible: isShapeRecordVisible,
+    isPinned: (_id, layer) =>
+      Boolean(layer && (selection.includes(layer) || memo.isShapePopupOpen(layer))),
+    createLayer: (record) =>
+      restoration.restoreShape(record, {
+        applyShapeStyle: isAnother,
+        bindPolylineHover: !isMobile,
+        restoreShapeStyleOnHover: isAnother,
+        shapeLayers,
+      }),
+    addLayer: (layer, record) => {
+      groups.addShapeLayerToManagedGroups(layer, record.layer_id);
+      // 新しいグループだけを地図へ加え、追加のたびに全図形を走査しない。
+      const group = groups.ensureShapeGroup(record.layer_id);
+      if (group && !map.hasLayer(group) && isShapeRecordVisible(record)) group.addTo(map);
     },
-    shapeGroups,
-    shapeLayers,
-    shapeRecords,
+    removeLayer: (layer, record) => {
+      measurementDisplay.removeShapeMeasurementMarkers(layer);
+      groups.removeShapeLayerFromManagedGroups(layer, record.layer_id);
+    },
+    disposeLayer: (layer) => {
+      measurementDisplay.removeShapeMeasurementMarkers(layer);
+      memo.releaseLayer(layer);
+      popupContent?.release("shape", String(layer.shapeId));
+      layer.unbindTooltip?.();
+      layer.unbindPopup?.();
+      layer.off?.();
+    },
+    onLayerCreated: (layer, record) => {
+      shapeCreatedListeners.forEach((listener) => listener(layer, record));
+    },
+    onLayerEvicted: (layer, record) => {
+      if (shapeLayers[`shape-${record.id}`] === layer) delete shapeLayers[`shape-${record.id}`];
+      shapeEvictedListeners.forEach((listener) => listener(layer, record));
+    },
+    onRefresh: () => {
+      shapeNameLabelManager?.scheduleRefresh();
+      shapeMeasurementManager?.scheduleRefresh();
+      if (shapeRenderStatus) {
+        const stats = shapeRenderer.getStats();
+        const message = stats.pendingCount > 0 ? "図形を表示しています…" : "";
+        shapeRenderStatus.hidden = !message;
+        if (shapeRenderStatus.textContent !== message) shapeRenderStatus.textContent = message;
+      }
+      map.fire("shaperenderchange");
+      map.fire("objectloadingchange");
+    },
   });
+  map.on("unload", () => {
+    shapeRenderer.destroy();
+    shapeCreatedListeners.clear();
+    shapeEvictedListeners.clear();
+  });
+  const layeredShapeDisplay = {
+    rebuildVisibleShapes() {
+      selection.prune();
+      shapeRenderer.refresh();
+    },
+    setSearchQuery(query) {
+      shapeSearchQuery = normalizeMarkerSearchText(query);
+      this.rebuildVisibleShapes();
+    },
+    clearSearch() {
+      shapeSearchQuery = "";
+      this.rebuildVisibleShapes();
+    },
+  };
   const searchCoordinator = createMapObjectSearchCoordinator({
     markerDisplay: layeredMarkerDisplay,
     shapeDisplay: layeredShapeDisplay,
@@ -639,7 +723,10 @@ export function initializeReadOnlyMapPage(
     markerDisplay: layeredMarkerDisplay,
     onMarkerVisibilityChange: persistSettings ? storage.saveMarkerVisibility : undefined,
     onShapeNameVisibilityChange: persistSettings ? storage.saveShapeNameVisibility : undefined,
-    onShapeVisibilityChange: persistSettings ? storage.saveShapeLayerVisibility : undefined,
+    onShapeVisibilityChange: (visible) => {
+      if (persistSettings) storage.saveShapeLayerVisibility(visible);
+      layeredShapeDisplay.rebuildVisibleShapes();
+    },
     shapeDisplay: layeredShapeDisplay,
     shapeNameLabelManager,
     shapeNameVisibilityLayer,
@@ -797,11 +884,13 @@ export function initializeReadOnlyMapPage(
             Object.entries(data.markers).filter(([, record]) => !markers[`marker-${record.id}`]),
           ),
         );
-        restoreShapes(data.shapes.filter((record) => !shapeLayers[`shape-${record.id}`]));
         Object.assign(markerRecords, data.markers);
         const knownShapes = new Set(getShapeRecords(shapeRecords).map((record) => record.id));
         data.shapes.forEach((record) => {
-          if (!knownShapes.has(record.id)) shapeRecords.push(record);
+          if (!knownShapes.has(record.id)) {
+            shapeRecords.push(record);
+            shapeRenderer.upsert(record);
+          }
         });
         layeredMarkerDisplay.rebuildVisibleMarkers();
         layeredShapeDisplay.rebuildVisibleShapes();
@@ -821,7 +910,59 @@ export function initializeReadOnlyMapPage(
     });
   }
 
+  if (!isPrint) {
+    const ShapeRenderStatusControl = L.Control.extend({
+      options: { position: "bottomright" },
+      onAdd() {
+        const element = L.DomUtil.create("div", "shape-render-status");
+        element.setAttribute("role", "status");
+        element.setAttribute("aria-live", "polite");
+        element.style.cssText =
+          "background:rgba(255,255,255,.92);padding:6px 10px;border-radius:4px;font-size:12px;max-width:240px";
+        element.hidden = true;
+        L.DomEvent.disableClickPropagation(element);
+        L.DomEvent.disableScrollPropagation(element);
+        shapeRenderStatus = element;
+        return element;
+      },
+    });
+    const control = new ShapeRenderStatusControl();
+    map.addControl(control);
+    if (isMobile) registerHideableMapControl!(control);
+  }
+
+  // 設定・グループ・イベントの初期化後に一度だけ生成を開始する。
+  shapeRenderer.refresh();
+
   return {
+    shapeRenderer,
+    getShapeRecord: (id: string) => shapeRenderer.getRecord(id),
+    getShapeGeometryInfo: (id: string) => shapeRenderer.getGeometryInfo(id),
+    isShapeLogicallyVisible,
+    getRenderableShapeIds: () =>
+      shapeRenderer
+        .getRecords()
+        .filter((record) => shapeRenderer.isRenderable(record.id))
+        .map((record) => String(record.id)),
+    getVisibleShapeIds: () =>
+      shapeRenderer
+        .getRecords()
+        .filter((record) => isShapeLogicallyVisible(record.id))
+        .map((record) => String(record.id)),
+    onShapeLayerCreated(listener: (layer: any, record: any) => void, first = false) {
+      if (first) {
+        const existing = [...shapeCreatedListeners];
+        shapeCreatedListeners.clear();
+        shapeCreatedListeners.add(listener);
+        existing.forEach((previous) => shapeCreatedListeners.add(previous));
+      } else shapeCreatedListeners.add(listener);
+      return () => shapeCreatedListeners.delete(listener);
+    },
+    onShapeLayerEvicted(listener: (layer: any, record: any) => void) {
+      shapeEvictedListeners.add(listener);
+      return () => shapeEvictedListeners.delete(listener);
+    },
+    hasInheritedMapView: Boolean(answerMapView),
     popupContent,
     getPrintState: (): PrintMapState => {
       const center = map.getCenter();
@@ -843,7 +984,10 @@ export function initializeReadOnlyMapPage(
     setLegendHiddenTargets: answerVisibility.setLegendHiddenTargets,
     applyShapeArrowStyle: shapeArrow.applyShapeArrowStyle,
     visibleMarkerGroup,
-    getObjectLoadStatus: () => objectLoader?.getStatus() ?? { loading: false, failed: false },
+    getObjectLoadStatus: () => {
+      const objects = objectLoader?.getStatus() ?? { loading: false, failed: false };
+      return { ...objects, loading: objects.loading || shapeRenderer.getStats().pendingCount > 0 };
+    },
     retryObjectLoads: () => objectLoader?.retrySelected(),
     map,
     markers,

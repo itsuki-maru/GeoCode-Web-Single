@@ -1,15 +1,19 @@
 // @ts-nocheck -- Leaflet編集画面の共有スコープを保つ統合境界。
 const drawnShapesGroup = L.featureGroup();
 const searchableShapeLayers = new Set();
+// 保存データと描画済みキャッシュを分離し、未生成の図形も更新・検索できるようにする。
+const editorShapeRecords = new Map();
+let shapeRenderManager = null;
+let focusedEditorShapeId = null;
+let recentlyCreatedShapeId = null;
+const savingShapeIds = new Map();
+const editorShapeSearchCache = new WeakMap();
 let shapeNameLabelManager = null;
 let shapeMeasurementManager = null;
 
 const mapEditorProfile = Object.freeze({
   bindPolylineHoverHighlight: !editorEntryProfile.isMobile,
-  isShapeVisibleForMeasurement: (layer) =>
-    editorEntryProfile.isMobile
-      ? isShapeVisibleForSearch(layer)
-      : isShapeVisibleForExternalFilter(layer),
+  isShapeVisibleForMeasurement: (layer) => isEditorShapeRecordVisible(layer?.options?.shapeRecord),
   shouldSuppressShapeLabelClick: () =>
     editorEntryProfile.isMobile ? false : isShapeLabelClickSuppressed(),
 });

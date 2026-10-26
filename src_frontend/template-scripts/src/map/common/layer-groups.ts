@@ -86,6 +86,14 @@ export function createReadOnlyLayerGroupRuntime({
     ensureShapeGroup(layerId)?.addLayer(layer);
   };
 
+  const removeShapeLayerFromManagedGroups = (
+    layer: ManagedLayer,
+    layerId: string | null | undefined,
+  ): void => {
+    drawnShapesGroup?.removeLayer(layer);
+    if (layerId) shapeGroups[layerId]?.removeLayer(layer);
+  };
+
   const findLayerIdByMarkerGroup = (group: ManagedLayer): string | null =>
     getLayeredMarkerDisplay().findLayerIdByVisibilityGroup(group);
 
@@ -115,6 +123,7 @@ export function createReadOnlyLayerGroupRuntime({
 
   return {
     addShapeLayerToManagedGroups,
+    removeShapeLayerFromManagedGroups,
     createMarkerGroupForLayer,
     ensureShapeGroup,
     findLayerIdByMarkerGroup,

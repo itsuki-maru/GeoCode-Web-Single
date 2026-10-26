@@ -57,6 +57,9 @@ async function deleteShape(layer) {
       clearFocusedShapeFocus(layer);
     }
     removeShapeMeasurementMarkers(layer);
+    editorShapeRecords.delete(shapeId);
+    shapeRenderManager?.remove(shapeId);
+    shapeRenderManager?.scheduleRefresh();
     drawnShapesGroup.removeLayer(layer);
     searchableShapeLayers.delete(layer);
     shapeNameLabelManager?.invalidate(layer);
