@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createShapeRenderManager,
   getShapeGeometryInfo,
+  getShapeMinPixelSizeForZoom,
   type ShapeBounds,
   type ShapeRenderRecord,
 } from "../src/map/common/shape-renderer";
@@ -39,6 +40,7 @@ function fixture(
     maxBatchVertices?: number;
     batchBudgetMs?: number;
     minPixelSize?: number;
+    collectDiagnostics?: boolean;
     now?: () => number;
     create?: (record: Record) => Layer | null;
   } = {},
@@ -138,6 +140,249 @@ function fixture(
     },
   };
 }
+
+const linePixels = (id: string, pixels: number, zoom: number, longitude = 0) =>
+  line(id, longitude, (pixels * 360) / (256 * 2 ** zoom));
+const localBounds: ShapeBounds = { south: 35.6, west: -1, north: 35.75, east: 1 };
+
+describe("zoom-dependent shape visibility", () => {
+  it.each([
+    [5, 8],
+    [10, 8],
+    [10.999, 8],
+    [11, 6],
+    [13, 6],
+    [13.999, 6],
+    [14, 4],
+    [18, 4],
+    [NaN, 4],
+    [Infinity, 4],
+    [-Infinity, 4],
+  ])("uses a %s zoom threshold of %s CSS pixels", (zoom, expected) => {
+    expect(getShapeMinPixelSizeForZoom(zoom)).toBe(expected);
+  });
+
+  it.each([
+    [10, 8],
+    [11, 6],
+    [13, 6],
+    [14, 4],
+  ])(
+    "includes the exact pixel boundary at zoom %s without excluding records from logical results",
+    (zoom, threshold) => {
+      const f = fixture();
+      f.setBounds(localBounds);
+      f.setZoom(zoom);
+      const shapes = [
+        linePixels("below", threshold - 0.001, zoom),
+        linePixels("boundary", threshold, zoom),
+        linePixels("above", threshold + 0.001, zoom),
+      ];
+      const original = JSON.stringify(shapes);
+      f.manager.replaceRecords(shapes);
+      f.manager.refresh();
+      expect([...f.attached].map((layer) => layer.id)).toEqual(["boundary", "above"]);
+      expect(f.manager.getStats()).toMatchObject({
+        recordCount: 3,
+        eligibleCount: 3,
+        renderedCount: 2,
+      });
+      expect(f.manager.isVisible("below")).toBe(true);
+      expect(f.manager.isRenderable("below")).toBe(true);
+      expect(f.manager.getRecord("below")).toBe(shapes[0]);
+      expect(JSON.stringify(shapes)).toBe(original);
+    },
+  );
+
+  it.each([0, 4, 6, 8, 12])("honors an explicit %s pixel override, including print", (minimum) => {
+    const f = fixture({ minPixelSize: minimum });
+    f.setBounds(localBounds);
+    f.setZoom(10);
+    const sizes = [0.125, 3, 5, 7, 9, 13];
+    f.manager.replaceRecords(sizes.map((size) => linePixels(String(size), size, 10)));
+    f.manager.refresh();
+    expect([...f.attached].map((layer) => layer.id)).toEqual(
+      sizes.filter((size) => size >= minimum).map(String),
+    );
+  });
+
+  it("restores detail after zooming and reuses cached layers when returning", async () => {
+    const f = fixture();
+    f.setBounds(localBounds);
+    f.manager.replaceRecords([linePixels("a", 7, 10), linePixels("b", 3, 10)]);
+    f.setZoom(14);
+    f.manager.refresh();
+    const layers = [f.manager.getLayer("a"), f.manager.getLayer("b")];
+    f.setZoom(10);
+    f.manager.refresh();
+    expect(f.attached.size).toBe(0);
+    for (const zoom of [11, 14, 10, 14]) {
+      f.emit("zoomstart");
+      f.setZoom(zoom);
+      f.emit("zoomend");
+      f.flush();
+      await f.manager.whenIdle();
+      expect([...f.attached].map((layer) => layer.id)).toEqual(zoom === 10 ? [] : ["a", "b"]);
+    }
+    expect([f.manager.getLayer("a"), f.manager.getLayer("b")]).toEqual(layers);
+    expect(f.create).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["polyline", "polygon", "rectangle", "circle"])(
+    "applies the same overview policy to %s geometry",
+    (shapeType) => {
+      const f = fixture();
+      f.setBounds({ south: -1, west: -1, north: 1, east: 1 });
+      f.setZoom(10);
+      const shapes = [7.5, 8.5].map((pixels, index) => {
+        const width = (pixels * 360) / (256 * 2 ** 10);
+        const geometry =
+          shapeType === "polyline"
+            ? {
+                type: "LineString",
+                coordinates: [
+                  [0, 0],
+                  [width, 0],
+                ],
+              }
+            : shapeType === "circle"
+              ? { type: "Point", coordinates: [0, 0] }
+              : {
+                  type: "Polygon",
+                  coordinates: [
+                    [
+                      [0, 0],
+                      [width, 0],
+                      [width, width],
+                      [0, 0],
+                    ],
+                  ],
+                };
+        return {
+          id: String(index),
+          shape_type: shapeType,
+          geojson: {
+            type: "Feature",
+            properties: { radius: ((pixels / 2) * 2 * Math.PI * 6371000) / (256 * 2 ** 10) },
+            geometry,
+          },
+        };
+      });
+      f.manager.replaceRecords(shapes);
+      f.manager.refresh();
+      expect([...f.attached].map((layer) => layer.id)).toEqual(["1"]);
+    },
+  );
+
+  it("keeps long crossing pipes and pinned small shapes while respecting logical filters", () => {
+    const f = fixture();
+    f.setBounds(localBounds);
+    f.setZoom(10);
+    f.pinned.add("small");
+    f.pinned.add("hidden");
+    f.manager.replaceRecords([
+      line("crossing", -2, 4),
+      linePixels("small", 1, 10, 2),
+      { ...linePixels("hidden", 1, 10), shown: false },
+      linePixels("omitted", 7, 10),
+    ]);
+    f.manager.refresh();
+    expect([...f.attached].map((layer) => layer.id)).toEqual(["small", "crossing"]);
+    expect(f.manager.getLayer("hidden")).toBeNull();
+    expect(f.manager.getLayer("omitted")).toBeNull();
+  });
+});
+
+describe("optional shape visibility diagnostics", () => {
+  it("records disjoint viewport and buffer distributions without changing rendering or source data", () => {
+    const sizes = [3, 4, 6, 8, 12];
+    const shapes = [
+      ...sizes.map((size) => linePixels(`view-${size}`, size, 10)),
+      ...sizes.map((size) => linePixels(`buffer-${size}`, size, 10, 1.1)),
+      linePixels("outside", 12, 10, 2),
+      linePixels("pinned-tiny", 3, 10),
+      linePixels("pinned-outside", 2, 10, 3),
+      { ...linePixels("hidden-pin", 3, 10), shown: false },
+      { ...linePixels("invalid", 3, 10), geojson: {} },
+    ];
+    const original = JSON.stringify(shapes);
+    const f = fixture({ collectDiagnostics: true }),
+      plain = fixture();
+    for (const instance of [f, plain]) {
+      instance.setBounds(localBounds);
+      instance.setZoom(10);
+      instance.pinned.add("pinned-tiny");
+      instance.pinned.add("pinned-outside");
+      instance.pinned.add("hidden-pin");
+      expect(instance.manager.getDiagnostics()).toBeNull();
+      instance.manager.replaceRecords(shapes);
+      instance.manager.refresh();
+    }
+    expect([...f.attached].map((layer) => layer.id)).toEqual(
+      [...plain.attached].map((layer) => layer.id),
+    );
+    expect(plain.manager.getDiagnostics()).toBeNull();
+    expect(f.manager.getDiagnostics()).toEqual({
+      zoom: 10,
+      minPixelSize: 8,
+      wantedCount: 6,
+      wantedVertices: 12,
+      pinnedCount: 2,
+      pinnedOutsideCount: 1,
+      viewport: {
+        candidateCount: 6,
+        candidateVertices: 12,
+        omittedCount: 3,
+        omittedVertices: 6,
+        wantedCount: 3,
+        wantedVertices: 6,
+        sizeBuckets: {
+          below4: { count: 2, vertexCount: 4 },
+          from4To6: { count: 1, vertexCount: 2 },
+          from6To8: { count: 1, vertexCount: 2 },
+          from8To12: { count: 1, vertexCount: 2 },
+          atLeast12: { count: 1, vertexCount: 2 },
+        },
+      },
+      buffer: {
+        candidateCount: 5,
+        candidateVertices: 10,
+        omittedCount: 3,
+        omittedVertices: 6,
+        wantedCount: 2,
+        wantedVertices: 4,
+        sizeBuckets: {
+          below4: { count: 1, vertexCount: 2 },
+          from4To6: { count: 1, vertexCount: 2 },
+          from6To8: { count: 1, vertexCount: 2 },
+          from8To12: { count: 1, vertexCount: 2 },
+          atLeast12: { count: 1, vertexCount: 2 },
+        },
+      },
+    });
+    const snapshot = f.manager.getDiagnostics()!;
+    snapshot.zoom = 99;
+    snapshot.viewport.candidateCount = 99;
+    snapshot.viewport.sizeBuckets.below4.count = 99;
+    f.visible.mockClear();
+    expect(f.manager.getDiagnostics()).toMatchObject({
+      zoom: 10,
+      viewport: { candidateCount: 6, sizeBuckets: { below4: { count: 2 } } },
+    });
+    expect(f.visible).not.toHaveBeenCalled();
+    expect(JSON.stringify(shapes)).toBe(original);
+    f.manager.scheduleRefresh();
+    expect(f.manager.getDiagnostics()).toBeNull();
+    f.flush();
+    expect(f.manager.getDiagnostics()?.viewport.candidateCount).toBe(6);
+    f.manager.remove("pinned-tiny");
+    expect(f.manager.getDiagnostics()).toBeNull();
+    f.manager.refresh();
+    expect(f.manager.getDiagnostics()?.pinnedCount).toBe(1);
+    f.manager.destroy();
+    expect(f.manager.getDiagnostics()).toBeNull();
+  });
+});
 
 describe("shape geometry metadata", () => {
   it("calculates line and polygon extents without changing the source coordinates", () => {

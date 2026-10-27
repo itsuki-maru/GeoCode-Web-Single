@@ -1085,6 +1085,80 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
     },
   );
   it.each(["map.html", "map-mobile.html"])(
+    "%sは縮尺別に図形を省略し、計測選択・検索フォーカス中の図形を保持する",
+    async (templateName) => {
+      const page = pages.find((page) => page.templateName === templateName)!;
+      const records = [
+        ["overview", 7, 10],
+        ["middle", 5, 11],
+        ["large", 12, 10],
+      ].map(([id, pixels, zoom]) => {
+        const width = (Number(pixels) * 360) / (256 * 2 ** Number(zoom));
+        return {
+          ...editorShapes()[0],
+          id: String(id),
+          name: "",
+          geojson: {
+            type: "Feature",
+            properties: {},
+            geometry: {
+              type: "LineString",
+              coordinates: [
+                [139.767 - width / 2, 35.681],
+                [139.767 + width / 2, 35.681],
+              ],
+            },
+          },
+        };
+      });
+      const original = JSON.stringify(records);
+      const dom = smokeLoadPage(
+        { ...page, globals: { ...page.globals, markersFromAxum: {}, shapesFromAxum: records } },
+        { lastMapView: { latitude: 35.681, longitude: 139.767, zoom: 10 } },
+      );
+      const state = editorState(dom),
+        manager = state.shapeRenderManager;
+      await manager.whenIdle();
+      expect(manager.getStats()).toMatchObject({ eligibleCount: 3, renderedCount: 1 });
+      for (const [zoom, renderedCount] of [
+        [11, 2],
+        [14, 3],
+      ]) {
+        state.map.setView([35.681, 139.767], zoom, { animate: false });
+        await manager.whenIdle();
+        expect(manager.getStats().renderedCount).toBe(renderedCount);
+      }
+      const middle = manager.getLayer("middle");
+      new Script(
+        'isTooltipVisible = true; measurementSelectedShapes.add(shapeRenderManager.getLayer("middle")); measurementSelectionType = "polyline";',
+      ).runInContext(dom.getInternalVMContext());
+      state.map.setView([35.681, 139.767], 10, { animate: false });
+      await manager.whenIdle();
+      expect(manager.getStats().renderedCount).toBe(2);
+      expect(manager.getLayer("middle")).toBe(middle);
+      expect(state.map.hasLayer(middle)).toBe(true);
+      new Script("measurementSelectedShapes.clear();").runInContext(dom.getInternalVMContext());
+      manager.refresh();
+      await manager.whenIdle();
+      expect(manager.getStats().renderedCount).toBe(1);
+      new Script('focusMapObject("shape", "overview", 35.681, 139.767);').runInContext(
+        dom.getInternalVMContext(),
+      );
+      await manager.whenIdle();
+      state.map.setView([35.681, 139.767], 10, { animate: false });
+      await manager.whenIdle();
+      expect(manager.getStats()).toMatchObject({
+        recordCount: 3,
+        eligibleCount: 3,
+        renderedCount: 2,
+      });
+      expect(state.map.hasLayer(manager.getLayer("overview"))).toBe(true);
+      expect(manager.getStats().createdCount).toBe(3);
+      expect(JSON.stringify(records)).toBe(original);
+    },
+  );
+
+  it.each(["map.html", "map-mobile.html"])(
     "%sは追加・再表示した図形の編集カーソルを現在のモードと図形種別に合わせる",
     async (templateName) => {
       const page = pages.find((page) => page.templateName === templateName)!;

@@ -45,6 +45,41 @@ export interface ShapeRenderStats {
   disposedCount: number;
 }
 
+export interface ShapeSizeBucket {
+  count: number;
+  vertexCount: number;
+}
+
+export interface ShapeSizeBuckets {
+  below4: ShapeSizeBucket;
+  from4To6: ShapeSizeBucket;
+  from6To8: ShapeSizeBucket;
+  from8To12: ShapeSizeBucket;
+  atLeast12: ShapeSizeBucket;
+}
+
+export interface ShapeRenderAreaDiagnostics {
+  candidateCount: number;
+  candidateVertices: number;
+  omittedCount: number;
+  omittedVertices: number;
+  wantedCount: number;
+  wantedVertices: number;
+  sizeBuckets: ShapeSizeBuckets;
+}
+
+/** Target selection at the latest refresh, before asynchronous layer generation. */
+export interface ShapeRenderDiagnostics {
+  zoom: number | null;
+  minPixelSize: number;
+  wantedCount: number;
+  wantedVertices: number;
+  pinnedCount: number;
+  pinnedOutsideCount: number;
+  viewport: ShapeRenderAreaDiagnostics;
+  buffer: ShapeRenderAreaDiagnostics;
+}
+
 interface ShapeRenderOptions<TRecord extends ShapeRenderRecord, TLayer> {
   map: RenderMap;
   records?: Iterable<TRecord>;
@@ -57,7 +92,9 @@ interface ShapeRenderOptions<TRecord extends ShapeRenderRecord, TLayer> {
   onLayerCreated?(layer: TLayer, record: TRecord): void;
   onLayerEvicted?(layer: TLayer, record: TRecord): void;
   onRefresh?(): void;
+  /** An explicit value overrides the zoom policy, including zero for print. */
   minPixelSize?: number;
+  collectDiagnostics?: boolean;
   padding?: number;
   maxCachedLayers?: number;
   maxCachedVertices?: number;
@@ -207,6 +244,74 @@ function intersects(bounds: ShapeBounds, viewport: ShapeBounds): boolean {
   return bounds.east + offset >= viewport.west && bounds.west + offset <= viewport.east;
 }
 
+/** Small shapes become eligible progressively as the map is enlarged. */
+export function getShapeMinPixelSizeForZoom(zoom: number): number {
+  if (!Number.isFinite(zoom)) return 4;
+  if (zoom < 11) return 8;
+  if (zoom < 14) return 6;
+  return 4;
+}
+
+function createAreaDiagnostics(): ShapeRenderAreaDiagnostics {
+  return {
+    candidateCount: 0,
+    candidateVertices: 0,
+    omittedCount: 0,
+    omittedVertices: 0,
+    wantedCount: 0,
+    wantedVertices: 0,
+    sizeBuckets: {
+      below4: { count: 0, vertexCount: 0 },
+      from4To6: { count: 0, vertexCount: 0 },
+      from6To8: { count: 0, vertexCount: 0 },
+      from8To12: { count: 0, vertexCount: 0 },
+      atLeast12: { count: 0, vertexCount: 0 },
+    },
+  };
+}
+
+function recordSize(
+  area: ShapeRenderAreaDiagnostics,
+  pixelSize: number,
+  vertexCount: number,
+  wanted: boolean,
+): void {
+  const key =
+    pixelSize < 4
+      ? "below4"
+      : pixelSize < 6
+        ? "from4To6"
+        : pixelSize < 8
+          ? "from6To8"
+          : pixelSize < 12
+            ? "from8To12"
+            : "atLeast12";
+  area.sizeBuckets[key].count++;
+  area.sizeBuckets[key].vertexCount += vertexCount;
+  area.candidateCount++;
+  area.candidateVertices += vertexCount;
+  if (wanted) {
+    area.wantedCount++;
+    area.wantedVertices += vertexCount;
+  } else {
+    area.omittedCount++;
+    area.omittedVertices += vertexCount;
+  }
+}
+
+function copyAreaDiagnostics(area: ShapeRenderAreaDiagnostics): ShapeRenderAreaDiagnostics {
+  return {
+    ...area,
+    sizeBuckets: {
+      below4: { ...area.sizeBuckets.below4 },
+      from4To6: { ...area.sizeBuckets.from4To6 },
+      from6To8: { ...area.sizeBuckets.from6To8 },
+      from8To12: { ...area.sizeBuckets.from8To12 },
+      atLeast12: { ...area.sizeBuckets.atLeast12 },
+    },
+  };
+}
+
 /** EPSG:3857 is the CRS used by both the editor and read-only map. */
 function screenSize(bounds: ShapeBounds, zoom: number): number {
   if (!Number.isFinite(zoom)) return Infinity;
@@ -240,7 +345,8 @@ export function createShapeRenderManager<TRecord extends ShapeRenderRecord, TLay
   onLayerCreated,
   onLayerEvicted,
   onRefresh = () => {},
-  minPixelSize = 4,
+  minPixelSize,
+  collectDiagnostics = false,
   padding = 0.2,
   maxCachedLayers = 256,
   maxCachedVertices = 50000,
@@ -287,6 +393,7 @@ export function createShapeRenderManager<TRecord extends ShapeRenderRecord, TLay
   let logicalStatsDirty = true;
   let renderableCount = 0;
   let eligibleCount = 0;
+  let diagnostics: ShapeRenderDiagnostics | null = null;
 
   const resolveIdle = () => {
     if (!disposed && (frame !== null || work || refreshRequested || zooming || moving)) return;
@@ -295,6 +402,7 @@ export function createShapeRenderManager<TRecord extends ShapeRenderRecord, TLay
     callbacks.forEach((resolve) => resolve());
   };
   const cancelWork = () => {
+    diagnostics = null;
     generation++;
     if (frame !== null) cancelFrame(frame);
     frame = null;
@@ -425,6 +533,19 @@ export function createShapeRenderManager<TRecord extends ShapeRenderRecord, TLay
     const viewport = readViewport(map, 0);
     const paddedViewport = readViewport(map, Math.max(0, padding));
     const zoom = Number(map.getZoom?.());
+    const effectiveMinPixelSize = Math.max(0, minPixelSize ?? getShapeMinPixelSizeForZoom(zoom));
+    diagnostics = collectDiagnostics
+      ? {
+          zoom: Number.isFinite(zoom) ? zoom : null,
+          minPixelSize: effectiveMinPixelSize,
+          wantedCount: 0,
+          wantedVertices: 0,
+          pinnedCount: 0,
+          pinnedOutsideCount: 0,
+          viewport: createAreaDiagnostics(),
+          buffer: createAreaDiagnostics(),
+        }
+      : null;
     const wanted = new Set<string>();
     const pinnedAttachments: string[] = [];
     const viewportAttachments: string[] = [];
@@ -436,18 +557,39 @@ export function createShapeRenderManager<TRecord extends ShapeRenderRecord, TLay
       if (!eligible(entry)) continue;
       eligibleCount++;
       const pinned = isPinned(entry.id, entry.layer);
-      if (
-        !pinned &&
-        !(
-          (!paddedViewport || intersects(entry.info!.bounds, paddedViewport)) &&
-          screenSize(entry.info!.bounds, zoom) >= Math.max(0, minPixelSize)
-        )
-      )
-        continue;
+      // Preserve the inexpensive pinned path unless diagnostics were explicitly requested.
+      const inPaddedViewport =
+        (!pinned || diagnostics !== null) &&
+        (!paddedViewport || intersects(entry.info!.bounds, paddedViewport));
+      if (!pinned && !inPaddedViewport) continue;
+      const pixelSize =
+        !pinned || (diagnostics && inPaddedViewport) ? screenSize(entry.info!.bounds, zoom) : 0;
+      const shouldDisplay = pinned || pixelSize >= effectiveMinPixelSize;
+      let inViewport: boolean | undefined;
+      if (diagnostics) {
+        if (pinned) {
+          diagnostics.pinnedCount++;
+          if (!inPaddedViewport) diagnostics.pinnedOutsideCount++;
+        }
+        if (inPaddedViewport) {
+          inViewport = !viewport || intersects(entry.info!.bounds, viewport);
+          recordSize(
+            inViewport ? diagnostics.viewport : diagnostics.buffer,
+            pixelSize,
+            entry.info!.vertexCount,
+            shouldDisplay,
+          );
+        }
+        if (shouldDisplay) {
+          diagnostics.wantedCount++;
+          diagnostics.wantedVertices += entry.info!.vertexCount;
+        }
+      }
+      if (!shouldDisplay) continue;
       wanted.add(entry.id);
       if (attached.has(entry.id)) continue;
       if (pinned) pinnedAttachments.push(entry.id);
-      else if (!viewport || intersects(entry.info!.bounds, viewport))
+      else if (inViewport ?? (!viewport || intersects(entry.info!.bounds, viewport)))
         viewportAttachments.push(entry.id);
       else bufferedAttachments.push(entry.id);
     }
@@ -470,6 +612,7 @@ export function createShapeRenderManager<TRecord extends ShapeRenderRecord, TLay
   };
   const scheduleRefresh = () => {
     if (disposed) return;
+    diagnostics = null;
     refreshRequested = true;
     logicalStatsDirty = true;
     // A new view supersedes unfinished work rather than drawing stale candidates.
@@ -642,6 +785,14 @@ export function createShapeRenderManager<TRecord extends ShapeRenderRecord, TLay
         resolveIdle();
       }),
     getStats,
+    getDiagnostics: (): ShapeRenderDiagnostics | null =>
+      diagnostics
+        ? {
+            ...diagnostics,
+            viewport: copyAreaDiagnostics(diagnostics.viewport),
+            buffer: copyAreaDiagnostics(diagnostics.buffer),
+          }
+        : null,
     destroy,
   };
 }

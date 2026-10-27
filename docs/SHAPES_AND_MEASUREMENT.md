@@ -58,9 +58,9 @@ PCとモバイルの編集地図で描画・編集する。別画面と共有ペ
 
 測定ラベルは初回復元時にまとめて生成せず、表示を有効にした間だけ、表示中で画面範囲と交差する図形と画面内のラベルを生成する。図形名はズーム8未満、または表示候補50件以上で抑制する。保存済み表示設定も適用する。
 
-図形本体も、表示範囲と周囲20%に入る図形だけを必要時に生成する。画面上の大きさが長辺4 CSS px未満の場合は省略し、移動・拡大後に表示する。小さな管路を低ズームでまとめて生成する処理を避けるための制御で、保存された形状や頂点は変更しない。
+図形本体も、表示範囲と周囲20%に入る図形だけを必要時に生成する。長辺の表示開始条件は、ズーム11未満で8 CSS px、11以上14未満で6 CSS px、14以上で4 CSS pxとする。閾値以上の図形を表示し、拡大すると省略していた小図形も順に表示する。長辺は図形全体の外接矩形をEPSG:3857へ投影した大きさであり、線幅や画面内に見えている部分だけの長さではない。保存された形状や頂点は変更しない。追加は固定対象・画面内・周囲の余白の順で行い、画面内が揃っても余白分を継続する。印刷などの完了待機は全処理の終了まで維持する。
 
-通常のPC・モバイル地図と別画面地図は、図形の総件数に関係なく、保存済みの図形・図形名表示設定に従う。未保存ならONとし、初期化で保存設定を書き換えない。初期表示にも同じ遅延描画を適用する。回答地図・共有地図・印刷の表示状態の引き継ぎルールは維持する。画面外の図形も検索・CSV・印刷・全対象への移動から除外せず、印刷では用紙の範囲で描画し、4pxによる省略を行わない。
+通常のPC・モバイル地図と別画面地図は、図形の総件数に関係なく、保存済みの図形・図形名表示設定に従う。未保存ならONとし、初期化で保存設定を書き換えない。初期表示にも同じ遅延描画を適用する。回答地図・共有地図・印刷の表示状態の引き継ぎルールは維持する。画面外の図形も検索・CSV・印刷・全対象への移動から除外せず、印刷では用紙の範囲で描画し、画面表示向けのサイズ省略を行わない。
 
 生成済み図形は再利用するが、非表示かつ非選択のキャッシュは256件・50000頂点までとし、古いものから解放する。編集中・フォーカス中・計測選択中の図形は保持する。パンで画面外へ移動しただけでは計測の選択や合計を解除しない。
 
@@ -182,9 +182,45 @@ node scripts/measure-initial-shape-visibility.mjs --samples=3 --playwright-path=
 
 ```powershell
 # src_frontend/frontend で実行
-node scripts/measure-shape-render-tuning.mjs --stage=after --entry=editor-pc --case=spread --framed=true --initial-only=true --samples=3 --timeout-ms=60000 --playwright-path=C:/path/to/playwright/index.mjs --output=target/shape-data-server.json
-node scripts/measure-shape-render-tuning.mjs --stage=after --entry=editor-pc --case=spread --parent-data=true --framed=true --initial-only=true --samples=3 --timeout-ms=60000 --playwright-path=C:/path/to/playwright/index.mjs --output=target/shape-data-parent.json
+node scripts/measure-shape-render-tuning.mjs --stage=after --entry=editor-pc --case=spread --frame=true --initial-only=true --samples=3 --timeout-ms=60000 --playwright-path=C:/path/to/playwright/index.mjs --output=target/shape-data-server.json
+node scripts/measure-shape-render-tuning.mjs --stage=after --entry=editor-pc --case=spread --parent-data=true --frame=true --initial-only=true --samples=3 --timeout-ms=60000 --playwright-path=C:/path/to/playwright/index.mjs --output=target/shape-data-parent.json
 ```
+
+### 縮尺に応じた小図形の省略
+
+2026-10-27に、全縮尺共通4pxから、広域8px・中間6px・詳細4pxへ既定値を変更した。ズーム11未満／11以上14未満／14以上の区分は小数のズーム値にも適用する。明示的な `minPixelSize` の指定を優先し、印刷の0px指定と、比較計測の固定4・6・8・12px指定を維持する。
+
+通常の編集PC・モバイル、別画面、回答、一時共有PC・モバイルが共通処理を使う。公開live-mapの公開レイヤは別実装であり、この変更の対象には含めない。図形表示・所属レイヤ・検索・回答対象のフィルターを優先し、その範囲内で編集中・保存中・新規作成直後・フォーカス・ポップアップ・計測選択中の図形を保持する。回答件数、凡例、全対象への移動、CSV、計測値は原本から計算し、描画省略で対象データを削除しない。API・DB・原本キャッシュは変更しない。
+
+余白20%、画面内優先、分割生成の8ms予算、非表示キャッシュ上限は維持する。長い管路は外接矩形も大きいため残りやすい。今回のサイズ条件を超える長距離管路が多数残る場合は、表示用形状や管路専用の開始縮尺を別途検討する。
+
+計測時だけ `collectDiagnostics: true` を指定すると、`getDiagnostics()` で最新の範囲判定時点の表示予定件数・頂点数、サイズ省略件数、画面内／余白のサイズ分布（4px未満、4〜6、6〜8、8〜12、12px以上）を取得できる。画面内と余白は重複せず、余白外の保護対象は別カウントとなる。集計は既存の対象判定ループで行い、通常利用では無効。返り値はコピーであり、範囲・原本変更後は次の判定までnullとなる。これは生成前の予定値なので、描画完了件数は `getStats()` と `whenIdle()` で確認する。
+
+比較には `measure-shape-render-tuning.mjs` の `zoom-policy-z10`／`zoom-policy-z12`／`zoom-policy-z14` ケースを使う。省略条件以外を同じにした現行runtime同士で、`--min-pixel=4` と既定の縮尺連動を比較する。 各ケースは初期ズームで同じ画面上の長さになるよう地理座標を作るため、z10・z12・z14のケース間は別の地理データである。同じケース内の固定値対縮尺連動、および同じ原本によるズーム往復として比較する。`--initial-only=true` では初期生成だけ、指定を外すとパン・ズーム往復後の表示・再生成・キャッシュも確認する。
+
+```powershell
+# src_frontend/frontend で実行。PCからeditor-mobile、another-pcにも置き換えられる。
+node scripts/measure-shape-render-tuning.mjs --stage=after --entry=editor-pc --case=zoom-policy --min-pixel=4 --initial-only=true --samples=3 --timeout-ms=60000 --playwright-path=C:/path/to/playwright/index.mjs --output=target/shape-zoom-fixed4.json
+node scripts/measure-shape-render-tuning.mjs --stage=after --entry=editor-pc --case=zoom-policy --initial-only=true --samples=3 --timeout-ms=60000 --playwright-path=C:/path/to/playwright/index.mjs --output=target/shape-zoom-adaptive.json
+```
+
+今回の比較はChrome 155.0.8059.85・Leaflet SVGで実行した。PCは1024×768、モバイル幅は390×844・CPU4倍制限のエミュレーションであり、実端末・ユーザーの実データではない。各ケースは4万件、画面内3.2万件・余白8千件、初期長辺3.25／5.25／7.25／10.25／16.25 CSS pxを各8千件とした。初期比較は各3回の中央値（ms）。生成数は余白も含み、画面内生成完了と余白込み完了を区別する。通信・JSON転送解析・fixture準備・モジュール読み込みを含まず、GPU描画完了時刻ではない。診断・生成観測の負荷は両比較条件に入っている。
+
+| 対象 | ズーム | 生成数（固定4px → 縮尺連動） | 画面内生成完了ms | 余白込み生成完了ms |
+|---|---:|---:|---:|---:|
+| 編集PC | 10 | 32,000 → 16,000 | 1,721.2 → 944.5 | 2,130.6 → 1,158.8 |
+| 編集PC | 12 | 32,000 → 24,000 | 1,752.5 → 1,345.1 | 2,158.5 → 1,629.2 |
+| 編集PC | 14 | 32,000 → 32,000 | 1,785.5 → 1,750.5 | 2,191 → 2,129.7 |
+| 編集モバイル幅・CPU4倍制限 | 10 | 32,000 → 16,000 | 7,461.7 → 3,809.9 | 9,652 → 4,622.9 |
+| 編集モバイル幅・CPU4倍制限 | 12 | 32,000 → 24,000 | 7,762.6 → 5,597.1 | 10,102.2 → 7,073.9 |
+| 編集モバイル幅・CPU4倍制限 | 14 | 32,000 → 32,000 | 7,539 → 7,480.2 | 9,905.1 → 9,953.1 |
+| 別画面PC | 10 | 32,000 → 16,000 | 1,706.3 → 854.7 | 2,128.8 → 1,082.8 |
+
+広域では生成数が50%、中間では25%減少し、詳細では同じ件数を維持した。固定12pxもズーム10で各3回比較し、生成数8千件、余白込み完了はPC568.5ms／モバイル幅2695.7msだった。ただし8pxでは表示される10.25pxの管路も省略するため、既定値には採用せず比較用に留めた。
+
+初期比較48試行と、編集PC・モバイル幅／別画面PC・モバイル幅のズーム往復・パン検証各1回、計52試行が完了した。往復では同じ4万件の原本で、ズーム10の1.6万件→ズーム11の3.2万件→ズーム10の1.6万件を確認した。戻りでは非表示キャッシュ上限により再生成も発生する。遠方移動後は表示0・保留0、非表示キャッシュは256件・50000頂点以内だった。
+
+[計測JSON（全52試行、分布・頂点数・各段階の生データ）](performance/shape-zoom-policy.json)。この比較はPostgreSQL作業ツリーの共通フロントエンドで実施し、同一の変更と結果をSQLite版にも反映した。実データに長い管路が多い場合は同じ削減率になるとは限らず、サイズ分布と実機での視認性を併せて判断する。
 
 ## 関連する実装
 

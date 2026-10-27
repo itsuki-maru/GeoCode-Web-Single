@@ -277,6 +277,111 @@ describe("lazy groups in the actual read-only map runtime", () => {
     expect(runtime.shapeLayers["shape-s-a"]).toBeDefined();
   });
 
+  it.each(["map-anather", "form-answer-map", "temporary-map", "temporary-map-mobile"] as const)(
+    "%sは縮尺別の省略後も原本・回答対象を保持し、拡大後に同じ図形を再利用する",
+    async (page) => {
+      const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
+      const records = [
+        ["overview", 7, 10],
+        ["middle", 5, 11],
+        ["tiny", 3, 14],
+        ["large", 12, 10],
+      ].map(([id, pixels, zoom]) => {
+        const width = (Number(pixels) * 360) / (256 * 2 ** Number(zoom));
+        return {
+          ...shape("a"),
+          id: String(id),
+          name: "",
+          shape_type: "polyline",
+          geojson: {
+            type: "Feature",
+            properties: {},
+            geometry: {
+              type: "LineString",
+              coordinates: [
+                [139.76 - width / 2, 35.68],
+                [139.76 + width / 2, 35.68],
+              ],
+            },
+          },
+        };
+      });
+      const original = JSON.stringify(records);
+      const view = { latitude: 35.68, longitude: 139.76, zoom: 10 };
+      Object.assign(bootstrap, {
+        page,
+        isChecked: true,
+        isMaster: false,
+        isMapUiHidden: false,
+        initialView: view,
+        shapes: page.startsWith("temporary-")
+          ? Object.fromEntries(records.map((record) => [record.id, record]))
+          : records,
+      });
+      if (page === "form-answer-map") {
+        bootstrap.answerPreview = {
+          initialView: view,
+          query: {},
+          targets: records.map((record) => `shape:${record.id}`),
+          answerCount: 9,
+          targetCount: 4,
+          parentOrigin: location.origin,
+          requestId: "zoom-policy",
+        };
+      }
+      fetchData.mockImplementation(
+        async (url) => new Response(JSON.stringify(String(url).startsWith("/shapes") ? records : {})),
+      );
+      runtime = initializeReadOnlyMapPage(page);
+      if (page === "map-anather" && !checkbox("a").checked) {
+        checkbox("a").click();
+        await flush();
+      }
+      await runtime.shapeRenderer.whenIdle();
+      expect(runtime.shapeRenderer.getStats()).toMatchObject({ eligibleCount: 4, renderedCount: 1 });
+      expect(runtime.shapeLayers["shape-overview"]).toBeUndefined();
+      expect(runtime.shapeLayers["shape-middle"]).toBeUndefined();
+      const large = runtime.shapeLayers["shape-large"];
+      const initialRequests = fetchData.mock.calls.length;
+      const post = vi.spyOn(window.parent, "postMessage").mockImplementation(() => {});
+      for (const [zoom, renderedCount] of [
+        [11, 2],
+        [14, 3],
+        [10, 1],
+      ]) {
+        runtime.map.setView([35.68, 139.76], zoom, { animate: false });
+        await runtime.shapeRenderer.whenIdle();
+        expect(runtime.shapeRenderer.getStats()).toMatchObject({
+          eligibleCount: 4,
+          renderedCount,
+          pendingCount: 0,
+        });
+        expect(runtime.getRenderableShapeIds()).toEqual(records.map((record) => record.id));
+        expect(runtime.getVisibleShapeIds()).toEqual(records.map((record) => record.id));
+        if (page === "form-answer-map") {
+          finishAnswerPreview(runtime, bootstrap, leaflet);
+          expect(post).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+              type: "answer-map-ready",
+              answerCount: 9,
+              targetCount: 4,
+              displayed: 4,
+              skipped: 0,
+            }),
+            location.origin,
+          );
+          expect(runtime.map.getZoom()).toBe(zoom);
+        }
+      }
+      expect(runtime.shapeLayers["shape-large"]).toBe(large);
+      expect(runtime.shapeRenderer.getStats().createdCount).toBe(3);
+      expect(runtime.shapeLayers["shape-tiny"]).toBeUndefined();
+      expect(fetchData).toHaveBeenCalledTimes(initialRequests);
+      expect(JSON.stringify(records)).toBe(original);
+      post.mockRestore();
+    },
+  );
+
   it("印刷は小図形を省略せず、生成バッチが終わるまで準備完了にしない", async () => {
     const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
     bootstrap.page = "form-answer-map";

@@ -79,8 +79,12 @@
       };
       window.measure = async (test, policy, timeoutMs, parentData = false, initialOnly = false) => {
         localStorage.clear();
+        const geometryZoom = test.kind === "zoom-policy" ? test.zoom : 14;
+        // Expected candidates are derived from fixture geometry and the selected policy,
+        // independently of the render manager and its diagnostics.
+        const minimumAtZoom = (zoom) => policy.minPixelSize ?? (zoom < 11 ? 8 : zoom < 14 ? 6 : 4);
         const center = L.latLng(35.681, 139.7615),
-          base = L.CRS.EPSG3857.latLngToPoint(center, 14),
+          base = L.CRS.EPSG3857.latLngToPoint(center, geometryZoom),
           size = L.point(innerWidth, innerHeight);
         const viewCenter = L.CRS.EPSG3857.latLngToPoint(center, test.zoom),
           origin = viewCenter.subtract(size.divideBy(2)).round();
@@ -99,6 +103,7 @@
           expectedTotal = new Set(),
           expectedPanViewport = new Set();
         let shortOmitted = 0;
+        const fixtureGeometry = [];
         const shapes = Array.from({ length: test.count }, (_, i) => {
           const far = test.kind === "spread" && i >= 80;
           let x,
@@ -108,6 +113,9 @@
             const band = Math.floor(i / 8000);
             x = size.x / 2 + size.x * (0.025 + 0.05 * band);
             y = ((i % 200) - 100) * 2;
+          } else if (test.kind === "zoom-policy" && i >= 32000) {
+            x = size.x / 2 + size.x * 0.05;
+            y = ((i % 200) - 100) * 2;
           } else if (test.kind === "spread" && !far) {
             x = ((i % 10) - 5) * 16;
             y = (Math.floor(i / 10) - 4) * 14;
@@ -116,14 +124,18 @@
             y = ((Math.floor(i / 200) % 200) - 100) * 2;
           }
           if (test.kind === "short") length = [3, 5, 7, 10][i % 4];
-          const anchor = far ? L.CRS.EPSG3857.latLngToPoint(L.latLng(34.69, 135.5), 14) : base;
+          // Stay away from exact thresholds after projection and zooming.
+          if (test.kind === "zoom-policy") length = [3.25, 5.25, 7.25, 10.25, 16.25][i % 5];
+          const anchor = far
+            ? L.CRS.EPSG3857.latLngToPoint(L.latLng(34.69, 135.5), geometryZoom)
+            : base;
           const coordinates = Array.from({ length: test.vertices }, (_, j) => {
             const p = L.CRS.EPSG3857.pointToLatLng(
               L.point(
                 anchor.x + x + (length * j) / (test.vertices - 1),
                 anchor.y + y + 0.2 * Math.sin(j),
               ),
-              14,
+              geometryZoom,
             );
             return [p.lng, p.lat];
           });
@@ -131,8 +143,9 @@
           const first = L.latLng(coordinates[0][1], coordinates[0][0]),
             last = L.latLng(coordinates.at(-1)[1], coordinates.at(-1)[0]);
           const bounds = L.latLngBounds(first, last);
-          const displayedLength = length * Math.pow(2, test.zoom - 14);
-          if (displayedLength >= policy.minPixelSize) {
+          fixtureGeometry.push({ id, bounds, length });
+          const displayedLength = length * Math.pow(2, test.zoom - geometryZoom);
+          if (displayedLength >= minimumAtZoom(test.zoom)) {
             if (padded.intersects(bounds)) expectedTotal.add(id);
             if (viewport.intersects(bounds)) expectedViewport.add(id);
             if (smallPanViewport.intersects(bounds)) expectedPanViewport.add(id);
@@ -152,6 +165,25 @@
             },
           };
         });
+        const zoomInZoom = test.zoom < 11 ? 11 : test.zoom < 14 ? 14 : test.zoom + 1;
+        let expectedZoomIn = null;
+        if (test.kind === "zoom-policy" && !initialOnly) {
+          const projected = L.CRS.EPSG3857.latLngToPoint(center, zoomInZoom),
+            zoomOrigin = projected.subtract(size.divideBy(2)).round();
+          const zoomViewport = L.latLngBounds(
+            L.CRS.EPSG3857.pointToLatLng(zoomOrigin, zoomInZoom),
+            L.CRS.EPSG3857.pointToLatLng(zoomOrigin.add(size), zoomInZoom),
+          );
+          const zoomPadded = zoomViewport.pad(policy.padding);
+          let total = 0, visible = 0;
+          for (const shape of fixtureGeometry) {
+            if (shape.length * Math.pow(2, zoomInZoom - geometryZoom) < minimumAtZoom(zoomInZoom))
+              continue;
+            if (zoomPadded.intersects(shape.bounds)) total++;
+            if (zoomViewport.intersects(shape.bounds)) visible++;
+          }
+          expectedZoomIn = { zoom: zoomInZoom, total, viewport: visible };
+        }
         const tiles = {
             1: {
               id: 1,
@@ -303,10 +335,44 @@
           viewportHeight: runtime.map.getSize().y,
           creations,
           paths: document.querySelectorAll("#map svg path").length,
+          diagnostics: manager.getDiagnostics?.() ?? null,
           ...manager.getStats(),
         };
         await frames();
-        let afterMove = null;
+        let afterMove = null, afterZoom = null;
+        if (status === "complete" && expectedZoomIn) {
+          const beforeZoom = creations, zoomStarted = performance.now();
+          runtime.map.setView(center, zoomInZoom, { animate: false });
+          await manager.whenIdle();
+          const zoomedIn = {
+            readyMs: round(performance.now() - zoomStarted),
+            newCreations: creations - beforeZoom,
+            diagnostics: manager.getDiagnostics?.() ?? null,
+            ...manager.getStats(),
+          };
+          if (zoomedIn.renderedCount !== expectedZoomIn.total || zoomedIn.pendingCount !== 0)
+            throw Error("Zoom-in candidate count invariant failed");
+          await frames();
+          const beforeReturn = creations, returnStarted = performance.now();
+          runtime.map.setView(center, test.zoom, { animate: false });
+          await manager.whenIdle();
+          const returned = {
+            readyMs: round(performance.now() - returnStarted),
+            newCreations: creations - beforeReturn,
+            diagnostics: manager.getDiagnostics?.() ?? null,
+            ...manager.getStats(),
+          };
+          if (returned.renderedCount !== expectedTotal.size || returned.pendingCount !== 0)
+            throw Error("Return-zoom candidate count invariant failed");
+          afterZoom = {
+            expected: {
+              zoomedIn: expectedZoomIn,
+              returned: { zoom: test.zoom, total: expectedTotal.size, viewport: expectedViewport.size },
+            },
+            zoomedIn, returned,
+          };
+          await frames();
+        }
         if (status === "complete" && !initialOnly) {
           panPending = new Set([...expectedPanViewport].filter((id) => !expectedTotal.has(id)));
           const before = creations,
@@ -319,6 +385,7 @@
             readyMs: round(performance.now() - moved),
             viewportReadyMs: round(panViewportAt - moved),
             newCreations: creations - before,
+            diagnostics: manager.getDiagnostics?.() ?? null,
             ...manager.getStats(),
           };
           await frames();
@@ -329,6 +396,7 @@
             smallPan: small,
             farMoveMs: round(performance.now() - farMoved),
             final: manager.getStats(),
+            finalDiagnostics: manager.getDiagnostics?.() ?? null,
           };
           await frames();
         }
@@ -343,6 +411,7 @@
             smallSegmentsOmitted: shortOmitted,
           },
           initial,
+          afterZoom,
           afterMove,
           longTaskCount: tasks.length,
           maxLongTaskMs: round(Math.max(0, ...tasks.map((t) => t.duration))),

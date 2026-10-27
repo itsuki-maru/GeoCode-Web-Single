@@ -23,10 +23,16 @@ const baseline = execFileSync("git", ["rev-parse", args.baseline || "HEAD"], {
   cwd: root,
   encoding: "utf8",
 }).trim();
-const padding = Number(args.padding ?? 0.2),
-  minPixelSize = Number(args["min-pixel"] ?? 4);
-if (!Number.isFinite(padding) || padding < 0 || !Number.isFinite(minPixelSize) || minPixelSize < 0)
+const padding = Number(args.padding ?? 0.2);
+const adaptive = stage === "after" &&
+  (args["min-pixel"] === undefined || args["min-pixel"] === "adaptive");
+if (args["min-pixel"] === "adaptive" && stage !== "after")
+  throw Error("Adaptive rendering requires current after source");
+const minPixelSize = adaptive ? undefined : Number(args["min-pixel"] ?? 4);
+if (!Number.isFinite(padding) || padding < 0 ||
+    (minPixelSize !== undefined && (!Number.isFinite(minPixelSize) || minPixelSize < 0)))
   throw Error("Invalid rendering policy");
+const policy = { padding, ...(minPixelSize === undefined ? {} : { minPixelSize }) };
 const timeoutMs = Math.max(1000, Number(args["timeout-ms"] || 30000));
 const { chromium } = await import(
   args["playwright-path"] ? pathToFileURL(resolve(args["playwright-path"])).href : "playwright"
@@ -131,6 +137,9 @@ const cases = [
   { name: "short-40000", count: 40000, kind: "short", vertices: 2, zoom: 14 },
   { name: "multi-vertex-40000", count: 40000, kind: "spread", vertices: 100, zoom: 14 },
   { name: "overview-40000", count: 40000, kind: "dense", vertices: 2, zoom: 5 },
+  ...[10, 12, 14].map((zoom) => ({
+    name: `zoom-policy-z${zoom}-40000`, count: 40000, kind: "zoom-policy", vertices: 2, zoom,
+  })),
 ];
 const vendors = {
   "/vendor/leaflet.js": "leaflet/dist/leaflet.js",
@@ -145,7 +154,7 @@ function instrumentRenderer(source) {
   if (!source.includes(original)) throw Error("Renderer function not found");
   return (
     source.replace(original, "function createShapeRenderManagerBase") +
-    "\nexport function createShapeRenderManager(options){\n const observer=window.__shapeBenchmarkObserver; const policy=window.__shapeBenchmarkPolicy||{};\n let manager;\n manager=createShapeRenderManagerBase({...options,...policy,addLayer:(layer,record)=>{options.addLayer(layer,record);observer?.added(String(record.id));},onRefresh:()=>{options.onRefresh?.();observer?.refreshed();}});\n return manager;\n}\n"
+    "\nexport function createShapeRenderManager(options){\n const observer=window.__shapeBenchmarkObserver; const policy=window.__shapeBenchmarkPolicy||{};\n let manager;\n manager=createShapeRenderManagerBase({...options,...policy,collectDiagnostics:true,addLayer:(layer,record)=>{options.addLayer(layer,record);observer?.added(String(record.id));},onRefresh:()=>{options.onRefresh?.();observer?.refreshed();}});\n return manager;\n}\n"
   );
 }
 const server = await createServer({
@@ -306,7 +315,7 @@ try {
                 clearTimeout(timer);
               }
             },
-            { test, policy: { padding, minPixelSize }, timeoutMs, parentData, initialOnly },
+            { test, policy, timeoutMs, parentData, initialOnly },
           );
           if (errors.length) throw Error(errors.join("\n"));
           if (
@@ -347,6 +356,8 @@ try {
         readyMs: median("readyMs"),
         elapsedMs: median("elapsedMs"),
         creations: median("creations"),
+        diagnostics: trials[0].initial.diagnostics,
+        zoomCycle: trials[0].afterZoom?.expected ?? null,
         expected: trials[0].expected,
       };
       results.push({ configuration, ...test, summary, trials });
@@ -356,7 +367,7 @@ try {
           entry: configuration.label,
           case: test.name,
           padding,
-          minPixelSize,
+          minPixelSize: minPixelSize ?? "adaptive",
           ...summary,
         }),
       );
@@ -371,10 +382,10 @@ try {
     canonicalCopies: framed ? 2 : 1,
     browser: browser.version(),
     samples,
-    policy: { padding, minPixelSize },
+    policy: { ...policy, pixelSizeMode: adaptive ? "zoom" : "fixed" },
     timeoutMs,
     notes:
-      "Synthetic pipe fixtures; source is real editor entry composition or read-only runtime. before uses baseline revision; phase1 uses current geometry only with all other baseline TS; after uses worktree. Benchmark-only instrumentation injects policy and observes addLayer. Timings exclude module loading/network/JSON transfer/fixture preparation. parentData=true uses a real same-origin iframe and native postMessage structured clone from its parent, recording DTO conversion on DataCloneError only (the fallback function extracted from MapIframe.vue with real Vue toRaw), transfer, application and ACK times. With frame=true, both modes use an actual iframe and retain two canonical datasets; server mode keeps an outer canonical copy prepared before timing. Heap values are browser process references, not isolated per-frame allocations. firstAdd/viewportReady describe Leaflet layer addition, not GPU paint completion. Mobile CPU4 is emulation. A timeout is recorded with partial counts and must not be interpreted as completion. Buffer fixture deliberately registers padding candidates first. Short fixture has equal numbers of 3/5/7/10 px pipe segments at zoom14; raising threshold removes real segments. Another-map selects its existing initially-OFF group before waiting.",
+      "Synthetic pipe fixtures; source is real editor entry composition or read-only runtime. before uses baseline revision; phase1 uses current geometry only with all other baseline TS; after uses worktree. Benchmark-only instrumentation injects policy and observes addLayer. Timings exclude module loading/network/JSON transfer/fixture preparation. parentData=true uses a real same-origin iframe and native postMessage structured clone from its parent, recording DTO conversion on DataCloneError only (the fallback function extracted from MapIframe.vue with real Vue toRaw), transfer, application and ACK times. With frame=true, both modes use an actual iframe and retain two canonical datasets; server mode keeps an outer canonical copy prepared before timing. Heap values are browser process references, not isolated per-frame allocations. firstAdd/viewportReady describe Leaflet layer addition, not GPU paint completion. Mobile CPU4 is emulation. A timeout is recorded with partial counts and must not be interpreted as completion. Buffer fixture deliberately registers padding candidates first. Short fixture has equal numbers of 3/5/7/10 px pipe segments at zoom14; raising threshold removes real segments. Zoom-policy fixtures have equal numbers of 3.25/5.25/7.25/10.25/16.25 CSS px segments at their initial zoom (32,000 in the viewport and 8,000 in its buffer), record the candidate size/vertex distribution, and return to the initial view after zooming into the next policy tier (or one level in detailed views). The default current-source policy is zoom-dependent; --min-pixel fixes the threshold for a controlled comparison. Initial diagnostics describe wanted candidates after generation, not an independent measurement of GPU rendering. Another-map selects its existing initially-OFF group before waiting.",
     results,
   };
   const output = resolve(
