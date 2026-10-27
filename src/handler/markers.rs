@@ -2,7 +2,7 @@ use crate::error::AppError;
 use crate::model::{
     MarkerCreateRequestParams, MarkerCreatedResponse, MarkerDeleteResponse,
     MarkerInfoUpdateJsonData, MarkerMoveRequestParams, MarkerObject, MarkerQuerySearchParams,
-    MarkerReadQueryPrams, MessageApi, ReturningId,
+    MarkerReadQueryPrams, MarkerUpdatedResponse,
 };
 use crate::utils::{check_ismaster_handler, vec_to_hashmap};
 use axum::{
@@ -93,58 +93,28 @@ pub async fn create_marker_handler(
         (Some(layer_id), Some(latitude), Some(longitude)) => {
             let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
             super::layer_forms::ensure_owned(&mut tx, &user_id, &layer_id).await?;
-            let blank_text = "".to_string();
-            let new_id = query_as!(
-                ReturningId,
-                r#"
-                INSERT INTO marker_info_model (
-                    id,
-                    user_id,
-                    layer_id,
-                    marker_name,
-                    latitude,
-                    longitude,
-                    detail,
-                    create_at,
-                    update_at
-                )
-                VALUES (
-                    $1,
-                    $2,
-                    $3,
-                    $4,
-                    $5,
-                    $6,
-                    $7,
-                    $8,
-                    $9
-                )
-                RETURNING
-                    id
-                "#,
-                new_marker_id,
-                user_id,
-                layer_id,
-                blank_text,
-                latitude,
-                longitude,
-                blank_text,
-                now,
-                now,
+            let saved = sqlx::query_as::<_, MarkerObject>(
+                "INSERT INTO marker_info_model (id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,layer_id,marker_name,latitude,longitude,detail,update_at"
             )
+            .bind(&new_marker_id)
+            .bind(&user_id)
+            .bind(&layer_id)
+            .bind("")
+            .bind(latitude)
+            .bind(longitude)
+            .bind("")
+            .bind(now)
+            .bind(now)
             .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "database error.");
-                AppError::Sqlx(e)
-            })?;
+            .await?;
 
             super::layer_forms::sync_object(&mut tx, &user_id, "marker", &new_marker_id, &layer_id)
                 .await?;
             tx.commit().await?;
             Ok(Json(MarkerCreatedResponse {
-                id: new_id.id,
+                id: saved.id.clone(),
                 message: "Marker Created.".to_string(),
+                object: saved,
             }))
         },
         _ => Err(AppError::BadRequest),
@@ -156,7 +126,7 @@ pub async fn update_marker_position_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
     Query(params): Query<MarkerMoveRequestParams>,
-) -> Result<Json<MessageApi>, AppError> {
+) -> Result<Json<MarkerUpdatedResponse>, AppError> {
     // 現在時刻を取得
     let now = Utc::now().naive_utc();
 
@@ -171,40 +141,22 @@ pub async fn update_marker_position_handler(
                 restricted,
                 old_lat != latitude || old_lon != longitude,
             )?;
-            let query_result = query!(
-                r#"
-                UPDATE marker_info_model
-                SET
-                    latitude = $1,
-                    longitude = $2,
-                    update_at = $3
-                WHERE id = $4
-                    AND user_id = $5
-                "#,
-                latitude,
-                longitude,
-                now,
-                marker_id,
-                user_id,
+            let saved = sqlx::query_as::<_, MarkerObject>(
+                "UPDATE marker_info_model SET latitude=$1,longitude=$2,update_at=$3 WHERE id=$4 AND user_id=$5 RETURNING id,layer_id,marker_name,latitude,longitude,detail,update_at"
             )
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "database error.");
-                AppError::Sqlx(e)
-            })?;
-
-            let affected_rows = query_result.rows_affected();
-            if affected_rows > 0 {
-                tx.commit().await?;
-                Ok(Json(MessageApi {
-                    message: "Update Ok.".to_string(),
-                }))
-            } else {
-                Err(AppError::Validation(
-                    "Failed to marker location update.".into(),
-                ))
-            }
+            .bind(latitude)
+            .bind(longitude)
+            .bind(now)
+            .bind(&marker_id)
+            .bind(&user_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| AppError::Validation("Failed to marker location update.".into()))?;
+            tx.commit().await?;
+            Ok(Json(MarkerUpdatedResponse {
+                message: "Update Ok.".to_string(),
+                object: saved,
+            }))
         },
         _ => Err(AppError::BadRequest),
     }
@@ -216,7 +168,7 @@ pub async fn update_marker_info_handler(
     Extension(pool): Extension<SqlitePool>,
     Path(marker_id): Path<String>,
     Json(payload): Json<MarkerInfoUpdateJsonData>,
-) -> Result<Json<MessageApi>, AppError> {
+) -> Result<Json<MarkerUpdatedResponse>, AppError> {
     let mut tx = super::answer_sqlite::begin_write(&pool).await?;
     let (previous_layer, previous_detail): (String, String) =
         sqlx::query_as("SELECT layer_id, detail FROM marker_info_model WHERE id=$1 AND user_id=$2")
@@ -253,49 +205,28 @@ pub async fn update_marker_info_handler(
     )?;
     super::layer_forms::ensure_owned(&mut tx, &user_id, &payload.layer_id).await?;
 
-    let query_result = query!(
-        r#"
-        UPDATE marker_info_model
-        SET
-            marker_name = $1,
-            layer_id = $2,
-            detail = $3,
-            update_at = $4
-        WHERE id = $5 AND user_id = $6
-        "#,
-        payload.name,
-        payload.layer_id,
-        detail,
-        now,
-        marker_id,
-        user_id,
+    let saved = sqlx::query_as::<_, MarkerObject>(
+        "UPDATE marker_info_model SET marker_name=$1,layer_id=$2,detail=$3,update_at=$4 WHERE id=$5 AND user_id=$6 RETURNING id,layer_id,marker_name,latitude,longitude,detail,update_at"
     )
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
+    .bind(&payload.name)
+    .bind(&payload.layer_id)
+    .bind(detail)
+    .bind(now)
+    .bind(&marker_id)
+    .bind(&user_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::Validation("Failed to update marker info.".into()))?;
 
-    let affected_rows = query_result.rows_affected();
-    if affected_rows > 0 {
-        if previous_layer != payload.layer_id {
-            super::layer_forms::sync_object(
-                &mut tx,
-                &user_id,
-                "marker",
-                &marker_id,
-                &payload.layer_id,
-            )
+    if previous_layer != payload.layer_id {
+        super::layer_forms::sync_object(&mut tx, &user_id, "marker", &marker_id, &payload.layer_id)
             .await?;
-        }
-        tx.commit().await?;
-        Ok(Json(MessageApi {
-            message: "Update Ok.".to_string(),
-        }))
-    } else {
-        Err(AppError::Validation("Failed to update marker info.".into()))
     }
+    tx.commit().await?;
+    Ok(Json(MarkerUpdatedResponse {
+        message: "Update Ok.".to_string(),
+        object: saved,
+    }))
 }
 
 // マーカー削除ハンドラー

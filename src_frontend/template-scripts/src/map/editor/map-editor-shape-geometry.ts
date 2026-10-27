@@ -135,20 +135,13 @@ async function persistShapeGeometryEdit(layer, snapshot, options = {}) {
         nextShapeType,
         layer.shapeStyle || getDefaultShapeStyle(nextShapeType),
       );
-      await persistShapeMetadata(
+      saved = await persistShapeMetadata(
         layer,
         normalizeShapeName(layer.shapeName || ""),
         targetLayerId,
         nextGeoJson,
         options.shapeType || null,
       );
-      saved = {
-        id: layer.shapeId,
-        layer_id: targetLayerId,
-        shape_type: nextShapeType,
-        name: layer.shapeName || "",
-        geojson: nextGeoJson,
-      };
     } else {
       const response = await fetchWithAuth(`/shape/${layer.shapeId}/geometry`, {
         method: "PUT",
@@ -170,6 +163,8 @@ async function persistShapeGeometryEdit(layer, snapshot, options = {}) {
         throw new Error("invalid shape response");
     }
     applyShapeRecord(layer, saved);
+    if (typeof notifyParentMapObjectChange === "function")
+      notifyParentMapObjectChange({ operation: "upsert", objectType: "shape", object: saved });
     updateShapeNameLabel(layer, saved.name || "");
     refreshShapeMeasurementMarkers(layer);
     setDrawStatus(options.successMessage || "図形編集: 位置を保存しました。");
@@ -770,18 +765,21 @@ function tryAddShapeVertexAtLatLng(event) {
   return tryAddShapeVertex(closestTarget.layer, event, closestTarget.insertion);
 }
 
-// 入力モードで頂点追加できる図形へカーソル用クラスを反映する
+// 追加した図形のカーソル用クラスだけを、地図へ追加された後に反映する
+function updateShapeVertexAddTargetStyle(layer) {
+  const element = layer?.getElement?.();
+  if (!element) {
+    return;
+  }
+  element.classList.toggle(
+    "is-shape-vertex-add-target",
+    currentMapMode === "input" && canAddVertexToShape(layer),
+  );
+}
+
+// モード切替など、全体の同期が必要なときだけ表示済み図形を更新する
 function updateShapeVertexAddTargetStyles() {
-  drawnShapesGroup.eachLayer((layer) => {
-    const element = layer?.getElement?.();
-    if (!element) {
-      return;
-    }
-    element.classList.toggle(
-      "is-shape-vertex-add-target",
-      currentMapMode === "input" && canAddVertexToShape(layer),
-    );
-  });
+  drawnShapesGroup.eachLayer(updateShapeVertexAddTargetStyle);
 }
 
 // 閲覧・入力・移動モードに合わせて図形編集状態を切り替える
@@ -869,7 +867,7 @@ function attachShapeEvents(layer) {
   layer.on("touchend", async function (event) {
     await handleDeleteEvent(event, true);
   });
-  layer.on("add", updateShapeVertexAddTargetStyles);
+  layer.on("add", () => updateShapeVertexAddTargetStyle(layer));
 
   if (layer.shapeType === "circle") {
     layer.on("mousedown", function (event) {

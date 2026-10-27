@@ -262,15 +262,96 @@ describe("lazy shape rendering", () => {
     };
     f.manager.replaceRecords([line("crossing", 139.5, 0.5), line("buffer", 139.805), circle]);
     f.manager.refresh();
-    expect([...f.attached].map((layer) => layer.id)).toEqual(["crossing", "buffer", "circle"]);
+    expect([...f.attached].map((layer) => layer.id)).toEqual(["crossing", "circle", "buffer"]);
+  });
+
+  it("generates pinned and on-screen shapes before earlier buffer records without changing candidates", () => {
+    const f = fixture({ now: () => 0 });
+    f.pinned.add("pinned-a");
+    f.pinned.add("pinned-b");
+    f.pinned.add("hidden-pin");
+    f.manager.replaceRecords([
+      line("buffer-a", 139.805, 0.005),
+      line("pinned-a", 135),
+      line("visible-a"),
+      line("pinned-b", 136),
+      line("visible-b", 139.76),
+      line("buffer-b", 139.68, 0.005),
+      { ...line("hidden-pin", 134), shown: false },
+      line("outside", 133),
+      line("tiny", 139.74, 0.000001),
+    ]);
+    f.manager.refresh();
+    expect(f.create.mock.calls.map(([record]) => record.id)).toEqual([
+      "pinned-a",
+      "pinned-b",
+      "visible-a",
+      "visible-b",
+      "buffer-a",
+      "buffer-b",
+    ]);
+    expect(f.manager.getStats().renderedCount).toBe(6);
+    expect(f.manager.getLayer("hidden-pin")).toBeNull();
+    expect(f.manager.getLayer("outside")).toBeNull();
+    expect(f.manager.getLayer("tiny")).toBeNull();
+  });
+
+  it("removes stale shapes before generating the next view and its buffer", () => {
+    const f = fixture({ maxBatchSize: 1, now: () => 0 });
+    f.manager.replaceRecords([
+      line("old"),
+      line("new-buffer", 135.115, 0.005),
+      line("new-visible", 135),
+    ]);
+    f.manager.refresh();
+    expect([...f.attached].map((layer) => layer.id)).toEqual(["old"]);
+    f.setBounds({ south: 35.6, west: 134.9, north: 35.75, east: 135.1 });
+    f.manager.refresh();
+    expect(f.remove).toHaveBeenCalledOnce();
+    expect(f.attached.size).toBe(0);
+    expect(f.create).toHaveBeenCalledOnce();
+    f.flush();
+    expect(f.create.mock.calls.map(([record]) => record.id)).toEqual([
+      "old",
+      "new-visible",
+      "new-buffer",
+    ]);
+    expect([...f.attached].map((layer) => layer.id)).toEqual(["new-visible", "new-buffer"]);
+  });
+
+  it("waits for pending buffer work even when all viewport shapes have been attached", async () => {
+    const f = fixture({ maxBatchSize: 1, now: () => 0 });
+    f.manager.replaceRecords([
+      line("buffer-a", 139.805, 0.005),
+      line("buffer-b", 139.68, 0.005),
+      line("visible"),
+    ]);
+    f.manager.refresh();
+    expect([...f.attached].map((layer) => layer.id)).toEqual(["visible"]);
+    expect(f.manager.getStats().pendingCount).toBe(2);
+    const resolved = vi.fn();
+    void f.manager.whenIdle().then(resolved);
+    await Promise.resolve();
+    expect(resolved).not.toHaveBeenCalled();
+    const [id, callback] = f.frames.entries().next().value!;
+    f.frames.delete(id);
+    callback();
+    await Promise.resolve();
+    expect(f.manager.getStats().pendingCount).toBe(1);
+    expect(resolved).not.toHaveBeenCalled();
+    f.flush();
+    await f.manager.whenIdle();
+    expect(resolved).toHaveBeenCalledOnce();
+    expect(f.manager.getStats().pendingCount).toBe(0);
   });
 
   it("keeps world-wrapped viewport candidates", () => {
     const f = fixture();
     f.setBounds({ south: 35, west: 180, north: 36, east: 190 });
-    f.manager.replaceRecords([line("wrapped", -175, 0.1)]);
+    f.manager.replaceRecords([line("wrapped-buffer", -169, 0.1), line("wrapped", -175, 0.1)]);
     f.manager.refresh();
-    expect(f.manager.getStats().renderedCount).toBe(1);
+    expect(f.manager.getStats().renderedCount).toBe(2);
+    expect(f.create.mock.calls.map(([record]) => record.id)).toEqual(["wrapped", "wrapped-buffer"]);
   });
 
   it("updates only changed attachments and reuses cached objects when panning back", () => {

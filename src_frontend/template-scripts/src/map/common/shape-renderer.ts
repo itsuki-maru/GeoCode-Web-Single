@@ -422,30 +422,43 @@ export function createShapeRenderManager<TRecord extends ShapeRenderRecord, TLay
       refreshRequested = true;
       return;
     }
-    const viewport = readViewport(map, Math.max(0, padding));
+    const viewport = readViewport(map, 0);
+    const paddedViewport = readViewport(map, Math.max(0, padding));
     const zoom = Number(map.getZoom?.());
     const wanted = new Set<string>();
+    const pinnedAttachments: string[] = [];
+    const viewportAttachments: string[] = [];
+    const bufferedAttachments: string[] = [];
     renderableCount = 0;
     eligibleCount = 0;
     for (const entry of entries.values()) {
       if (entry.info && !entry.failed) renderableCount++;
       if (!eligible(entry)) continue;
       eligibleCount++;
+      const pinned = isPinned(entry.id, entry.layer);
       if (
-        isPinned(entry.id, entry.layer) ||
-        ((!viewport || intersects(entry.info!.bounds, viewport)) &&
-          screenSize(entry.info!.bounds, zoom) >= Math.max(0, minPixelSize))
+        !pinned &&
+        !(
+          (!paddedViewport || intersects(entry.info!.bounds, paddedViewport)) &&
+          screenSize(entry.info!.bounds, zoom) >= Math.max(0, minPixelSize)
+        )
       )
-        wanted.add(entry.id);
+        continue;
+      wanted.add(entry.id);
+      if (attached.has(entry.id)) continue;
+      if (pinned) pinnedAttachments.push(entry.id);
+      else if (!viewport || intersects(entry.info!.bounds, viewport))
+        viewportAttachments.push(entry.id);
+      else bufferedAttachments.push(entry.id);
     }
     logicalStatsDirty = false;
     const operations: Work["operations"] = [];
     for (const id of attached) if (!wanted.has(id)) operations.push({ id, attach: false });
-    for (const id of wanted) {
-      const entry = entries.get(id)!;
-      entry.lastUsed = ++serial;
-      if (!attached.has(id)) operations.push({ id, attach: true });
-    }
+    for (const id of wanted) entries.get(id)!.lastUsed = ++serial;
+    // Keep source order within each priority, without sorting all candidates.
+    // Buffer generation remains part of this work generation and whenIdle().
+    for (const ids of [pinnedAttachments, viewportAttachments, bufferedAttachments])
+      for (const id of ids) operations.push({ id, attach: true });
     if (operations.length) {
       work = { generation, operations, index: 0 };
       runBatch();

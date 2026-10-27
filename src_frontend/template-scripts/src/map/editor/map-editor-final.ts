@@ -1,113 +1,215 @@
-// @ts-nocheck -- Leaflet編集画面の共有スコープを保つ統合境界。
-// Vue 側で更新されたマーカー情報を、既存の Leaflet マーカーへ反映する
-function applyMarkerUpdateFromParent(payload) {
-  const markerId = String(payload?.id || "");
-  const markerKey = `marker-${markerId}`;
-  const marker = markers[markerKey];
-  const current = markersFromAxum[markerId];
-  if (
-    !marker ||
-    !current ||
-    !Number.isFinite(Number(payload.latitude)) ||
-    !Number.isFinite(Number(payload.longitude))
-  ) {
-    return false;
-  }
+// @ts-nocheck -- 編集地図と親画面の差分・初期データ同期境界。
+const editorRuntimeId = "runtime-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+let editorDataReady = window.__GEOCODE_MAP_BOOTSTRAP__?.dataSource !== "parent";
+let editorSnapshotGeneration = 0;
+let editorMutationSequence = 0;
+const pendingParentChanges = new Map();
+const pendingParentWrites = new Map();
+const initialEditorParentOrigin = document.referrer
+  ? new URL(document.referrer).origin
+  : window.location.origin;
+let editorParentOrigin = [
+  window.location.origin,
+  "http://localhost:5173",
+  "http://localhost:3000",
+].includes(initialEditorParentOrigin)
+  ? initialEditorParentOrigin
+  : null;
+function announceEditorRuntime(requestId) {
+  if (window.parent !== window && editorParentOrigin)
+    window.parent.postMessage(
+      { type: "mapRuntimeReady", runtimeId: editorRuntimeId, requestId },
+      editorParentOrigin,
+    );
+}
 
-  const nextRecord = {
-    ...current,
-    id: markerId,
-    layer_id: String(payload.layerId || ""),
-    marker_name: String(payload.name || ""),
-    detail: String(payload.detail || ""),
-    latitude: Number(payload.latitude),
-    longitude: Number(payload.longitude),
+// API保存と親画面の同期は独立させ、ACKが失われても保存を二重実行しない。
+function notifyParentMapObjectChange(change) {
+  if (window.parent === window || !editorParentOrigin) return;
+  const mutationId = editorRuntimeId + "-" + ++editorMutationSequence;
+  const message = {
+    type: "mapObjectChanged",
+    runtimeId: editorRuntimeId,
+    change: { ...change, mutationId },
   };
+  let attempts = 0;
+  const send = () => {
+    window.parent.postMessage(message, editorParentOrigin);
+    const timer = setTimeout(() => {
+      if (!pendingParentChanges.has(mutationId)) return;
+      if (++attempts < 3) send();
+      else {
+        pendingParentChanges.delete(mutationId);
+        setDrawStatus("保存しましたが一覧の同期に失敗しました。再読み込みしてください。", true);
+      }
+    }, 3000);
+    pendingParentChanges.set(mutationId, timer);
+  };
+  send();
+}
+
+function isParentMapObjectWrite(url, method) {
+  const target = new URL(url, window.location.href);
+  if (target.origin !== window.location.origin) return false;
+  const path = target.pathname;
+  return (
+    (method === "POST" && ["/marker", "/shape"].includes(path)) ||
+    (method === "PUT" &&
+      (path === "/marker/update-marker-latlng" ||
+        /^\/marker\/update\/[^/]+$/.test(path) ||
+        /^\/shape\/[^/]+(?:\/geometry)?$/.test(path))) ||
+    (method === "DELETE" &&
+      (/^\/marker\/delete\/[^/]+$/.test(path) || /^\/shape\/[^/]+$/.test(path)))
+  );
+}
+
+function requestParentMapObjectWrite(url, options) {
+  const target = new URL(url, window.location.href);
+  const requestId = editorRuntimeId + "-write-" + ++editorMutationSequence;
+  const body = typeof options.body === "string" ? JSON.parse(options.body) : options.body;
+  return new Promise((resolve, reject) => {
+    pendingParentWrites.set(requestId, { resolve, reject });
+    window.parent.postMessage(
+      {
+        type: "mapObjectWriteRequested",
+        runtimeId: editorRuntimeId,
+        request: {
+          requestId,
+          url: target.pathname + target.search,
+          method: String(options.method || "GET").toUpperCase(),
+          body,
+        },
+      },
+      editorParentOrigin,
+    );
+  });
+}
+
+function applyMarkerUpdateFromParent(payload) {
+  const supplied = payload?.object;
+  const markerId = String(supplied?.id || payload?.id || "");
+  if (!markerId) return false;
+  const markerKey = "marker-" + markerId;
+  const current = markersFromAxum[markerId];
+  const nextRecord = supplied
+    ? { ...supplied }
+    : {
+        ...current,
+        id: markerId,
+        layer_id: String(payload.layerId || ""),
+        marker_name: String(payload.name || ""),
+        detail: String(payload.detail || ""),
+        latitude: Number(payload.latitude),
+        longitude: Number(payload.longitude),
+      };
+  if (
+    !Number.isFinite(Number(nextRecord.latitude)) ||
+    !Number.isFinite(Number(nextRecord.longitude))
+  )
+    return false;
+  let marker = markers[markerKey];
+  const wasPopupOpen = Boolean(marker?.isPopupOpen?.());
+  if (!marker) {
+    marker = L.marker(
+      [nextRecord.latitude, nextRecord.longitude],
+      markerOptionsForLayer(nextRecord.layer_id, layersFromAxum, { draggable: false }),
+    );
+    marker.id = markerId;
+    marker.on("dragend", (event) => {
+      const position = event.target.getLatLng();
+      updateServer(markerId, position.lat, position.lng);
+    });
+    marker.on("popupopen", () => setupDetailsLazyImages(document, renderMapMarkdown));
+    markers[markerKey] = marker;
+    markersClusterGroup.addLayer(marker);
+  }
   markersFromAxum[markerId] = nextRecord;
   syncMarkerInputRestriction(marker, nextRecord);
   marker.setLatLng([nextRecord.latitude, nextRecord.longitude]);
-
-  const wasPopupOpen = typeof marker.isPopupOpen === "function" && marker.isPopupOpen();
   marker.unbindTooltip();
   marker.unbindPopup();
   marker.bindTooltip(
-    nextRecord.marker_name
-      ? `<div class="custom-tooltip">${escapeHtml(nextRecord.marker_name)}</div>`
-      : `<div class="custom-tooltip">No Name</div>`,
+    '<div class="custom-tooltip">' + escapeHtml(nextRecord.marker_name || "No Name") + "</div>",
   );
-  if (typeof popupContent !== "undefined") {
-    marker.bindPopup(
-      popupContent.render({
-        kind: "marker",
-        id: markerId,
-        name: nextRecord.marker_name,
-        body: nextRecord.detail,
-      }),
-    );
-  } else if (nextRecord.detail) {
-    const mdText = `# ${nextRecord.marker_name}\n\n${nextRecord.detail}`;
-    const cleanHtml = renderMapMarkdown(mdText);
-    marker.bindPopup(`<div class="md-detail-contents">${cleanHtml}</div>`);
-  }
-
-  const markerOptions = markerOptionsForLayer(nextRecord.layer_id, layersFromAxum);
-  marker.setIcon(markerOptions.icon || new L.Icon.Default());
-  const markerElement = marker.getElement();
-  if (markerElement) {
-    markerElement.id = markerKey;
-  }
-  if (wasPopupOpen && (nextRecord.detail || typeof popupContent !== "undefined")) {
-    marker.openPopup();
-  }
+  marker.bindPopup(
+    popupContent.render({
+      kind: "marker",
+      id: markerId,
+      name: nextRecord.marker_name || "",
+      body: nextRecord.detail || "",
+    }),
+  );
+  const options = markerOptionsForLayer(nextRecord.layer_id, layersFromAxum);
+  marker.setIcon(options.icon || new L.Icon.Default());
+  const element = marker.getElement();
+  if (element) element.id = markerKey;
+  if (
+    typeof isTooltipVisible !== "undefined" &&
+    isTooltipVisible &&
+    map.hasLayer(markersClusterGroup) &&
+    markersClusterGroup.hasLayer(marker)
+  )
+    marker.openTooltip();
+  if (wasPopupOpen) marker.openPopup();
   return true;
 }
 
-// Vue 側で削除されたマーカーを、地図の管理データと表示グループから除去する
 function applyMarkerDeleteFromParent(markerIdValue) {
   const markerId = String(markerIdValue || "");
-  const markerKey = `marker-${markerId}`;
+  if (!markerId) return false;
+  const markerKey = "marker-" + markerId;
   const marker = markers[markerKey];
-  if (!markerId || !marker || !markersFromAxum[markerId]) {
-    return false;
+  if (marker) {
+    marker.closePopup?.();
+    marker.closeTooltip?.();
+    markersClusterGroup.removeLayer(marker);
+    marker.off?.();
+    popupContent?.release?.("marker", markerId);
   }
-
-  if (typeof marker.closePopup === "function") marker.closePopup();
-  if (typeof marker.closeTooltip === "function") marker.closeTooltip();
-  markersClusterGroup.removeLayer(marker);
   delete markers[markerKey];
   delete markersFromAxum[markerId];
   if (editorEntryProfile.isMobile) renderVisibleMarkers();
   return true;
 }
 
-// Vue 側で更新された図形情報を、既存の Leaflet レイヤへ反映する
+function applyShapeDeleteFromParent(id) {
+  const shapeId = String(id || "");
+  if (!shapeId) return false;
+  editorShapeRecords.delete(shapeId);
+  shapeRenderManager?.remove(shapeId);
+  renderVisibleShapes();
+  return true;
+}
+
 function applyShapeUpdateFromParent(payload) {
-  const shapeId = String(payload?.id || "");
+  const supplied = payload?.object;
+  const shapeId = String(supplied?.id || payload?.id || "");
+  if (!shapeId) return false;
   const current = editorShapeRecords.get(shapeId);
-  if (!current || !payload?.geojson || current.shape_type !== payload.shapeType) {
-    return false;
-  }
-  const nextRecord = {
-    ...current,
-    id: shapeId,
-    layer_id: String(payload.layerId || ""),
-    shape_type: payload.shapeType,
-    name: String(payload.name || ""),
-    geojson: payload.geojson,
-  };
+  const nextRecord = supplied
+    ? { ...supplied }
+    : {
+        ...current,
+        id: shapeId,
+        layer_id: String(payload.layerId || ""),
+        shape_type: payload.shapeType,
+        name: String(payload.name || ""),
+        geojson: payload.geojson,
+      };
+  if (!nextRecord.geojson || !nextRecord.shape_type) return false;
+  deletedShapeIds.delete(shapeId);
   const targetLayer = shapeRenderManager?.getLayer(shapeId);
-  if (!targetLayer) {
+  if (!targetLayer || (current && current.shape_type !== nextRecord.shape_type)) {
     editorShapeRecords.set(shapeId, nextRecord);
     shapeRenderManager?.upsert(nextRecord);
     renderVisibleShapes();
     return true;
   }
-
-  if (JSON.stringify(current.geojson?.geometry) !== JSON.stringify(payload.geojson.geometry)) {
-    const geometry = payload.geojson.geometry;
-    if (payload.shapeType === "circle" && geometry?.type === "Point") {
+  if (JSON.stringify(current?.geojson?.geometry) !== JSON.stringify(nextRecord.geojson.geometry)) {
+    const geometry = nextRecord.geojson.geometry;
+    if (nextRecord.shape_type === "circle" && geometry?.type === "Point") {
       targetLayer.setLatLng([geometry.coordinates[1], geometry.coordinates[0]]);
-      targetLayer.setRadius(getCircleRadiusFromGeoJson(payload.geojson));
+      targetLayer.setRadius(getCircleRadiusFromGeoJson(nextRecord.geojson));
     } else if (geometry?.type === "LineString" || geometry?.type === "Polygon") {
       targetLayer.setLatLngs(
         L.GeoJSON.coordsToLatLngs(geometry.coordinates, geometry.type === "Polygon" ? 1 : 0),
@@ -115,7 +217,7 @@ function applyShapeUpdateFromParent(payload) {
     } else return false;
   }
   applyShapeRecord(targetLayer, nextRecord);
-  updateShapeNameLabel(targetLayer, payload.name || "");
+  updateShapeNameLabel(targetLayer, nextRecord.name || "");
   applyShapeStyle(targetLayer, activeDrawMode === "delete");
   refreshShapeMeasurementMarkers(targetLayer);
   renderVisibleShapes();
@@ -124,13 +226,76 @@ function applyShapeUpdateFromParent(payload) {
 }
 
 function applyMapObjectUpdateFromParent(payload) {
-  if (payload?.objectType === "marker") {
-    return applyMarkerUpdateFromParent(payload);
-  }
-  if (payload?.objectType === "shape") {
-    return applyShapeUpdateFromParent(payload);
-  }
+  if (payload?.objectType === "marker") return applyMarkerUpdateFromParent(payload);
+  if (payload?.objectType === "shape") return applyShapeUpdateFromParent(payload);
   return false;
+}
+
+async function applyEditorMapSnapshot(snapshot) {
+  if (
+    !snapshot ||
+    !snapshot.markers ||
+    typeof snapshot.markers !== "object" ||
+    !Array.isArray(snapshot.shapes)
+  )
+    return false;
+  const markerRecords = Object.values(snapshot.markers);
+  if (
+    markerRecords.some(
+      (record) =>
+        !record?.id ||
+        !Number.isFinite(Number(record.latitude)) ||
+        !Number.isFinite(Number(record.longitude)),
+    ) ||
+    snapshot.shapes.some((record) => !record?.id || !record.geojson)
+  )
+    return false;
+  const generation = ++editorSnapshotGeneration;
+  const selectedShapeIds =
+    typeof measurementSelectedShapes !== "undefined"
+      ? [...measurementSelectedShapes].map((shape) => String(shape.shapeId))
+      : [];
+  const selectedShapeType =
+    typeof measurementSelectionType !== "undefined" ? measurementSelectionType : null;
+  editorDataReady = false;
+  clearShapeGeometryEditing();
+  closeShapeNameEditor();
+  markersClusterGroup.clearLayers();
+  for (const [key, marker] of Object.entries(markers)) {
+    marker.off?.();
+    popupContent?.release?.("marker", String(marker.id));
+    delete markers[key];
+  }
+  for (const id of Object.keys(markersFromAxum)) delete markersFromAxum[id];
+  // Register marker batches between frames; no repeated JSON encoding of all records.
+  for (let offset = 0; offset < markerRecords.length; offset += 500) {
+    if (generation !== editorSnapshotGeneration) return false;
+    for (const record of markerRecords.slice(offset, offset + 500))
+      applyMarkerUpdateFromParent({ objectType: "marker", object: record });
+    if (offset + 500 < markerRecords.length) await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  if (generation !== editorSnapshotGeneration) return false;
+  shapesFromAxum = snapshot.shapes;
+  window.__GEOCODE_MAP_BOOTSTRAP__.markers = markersFromAxum;
+  window.__GEOCODE_MAP_BOOTSTRAP__.shapes = shapesFromAxum;
+  editorShapeRecords.clear();
+  for (const record of snapshot.shapes) editorShapeRecords.set(String(record.id), record);
+  deletedShapeIds.clear();
+  shapeRenderManager.replaceRecords(editorShapeRecords.values());
+  if (typeof measurementSelectedShapes !== "undefined") {
+    measurementSelectedShapes.clear();
+    for (const id of selectedShapeIds) {
+      const record = editorShapeRecords.get(id);
+      if (record && (!selectedShapeType || record.shape_type === selectedShapeType)) {
+        const selected = shapeRenderManager.ensureLayer(id);
+        if (selected) measurementSelectedShapes.add(selected);
+      }
+    }
+  }
+  renderVisibleShapes();
+  if (editorEntryProfile.isMobile) renderVisibleMarkers();
+  editorDataReady = true;
+  return true;
 }
 
 // 埋め込み表示の PC 版編集画面だけ、印刷処理をアプリケーション側へ委ねる。
@@ -153,7 +318,8 @@ if (!editorEntryProfile.isMobile && window.parent !== window) {
       )
         return;
       event.preventDefault();
-      if (!event.repeat) window.parent.postMessage({ type: "printOpen" }, printParentOrigin);
+      if (!event.repeat && editorDataReady)
+        window.parent.postMessage({ type: "printOpen" }, printParentOrigin);
     });
   }
 }
@@ -165,9 +331,57 @@ window.addEventListener("message", function (event) {
   const isSameOrigin = event.origin === window.location.origin;
 
   if (event.source === window.parent && (allowOrigins.includes(event.origin) || isSameOrigin)) {
+    editorParentOrigin = event.origin;
     const messageData = event.data;
     if (!messageData || typeof messageData !== "object") return;
-    if (messageData.type === "mapViewRequest") {
+    if (messageData.type === "mapRuntimeProbe") {
+      announceEditorRuntime(messageData.requestId);
+    } else if (messageData.type === "mapObjectWriteResult") {
+      if (messageData.runtimeId !== editorRuntimeId) return;
+      const pending = pendingParentWrites.get(messageData.requestId);
+      if (!pending) return;
+      pendingParentWrites.delete(messageData.requestId);
+      const status = Number(messageData.status);
+      pending.resolve({
+        status,
+        ok: status >= 200 && status < 300,
+        json: async () => messageData.data,
+        text: async () => JSON.stringify(messageData.data),
+      });
+    } else if (messageData.type === "mapObjectChangedResult") {
+      if (messageData.runtimeId !== editorRuntimeId) return;
+      const timer = pendingParentChanges.get(messageData.mutationId);
+      if (timer) clearTimeout(timer);
+      pendingParentChanges.delete(messageData.mutationId);
+      if (messageData.success !== true)
+        setDrawStatus("保存しましたが一覧を更新できませんでした。再読み込みしてください。", true);
+    } else if (messageData.type === "mapObjectsInitialize") {
+      if (messageData.runtimeId !== editorRuntimeId || !messageData.requestId) return;
+      void applyEditorMapSnapshot(messageData.snapshot)
+        .then((success) => {
+          event.source.postMessage(
+            {
+              type: "mapObjectsInitializeResult",
+              requestId: messageData.requestId,
+              runtimeId: editorRuntimeId,
+              success,
+            },
+            event.origin,
+          );
+        })
+        .catch((error) => {
+          console.error("Map snapshot failed:", error);
+          event.source.postMessage(
+            {
+              type: "mapObjectsInitializeResult",
+              requestId: messageData.requestId,
+              runtimeId: editorRuntimeId,
+              success: false,
+            },
+            event.origin,
+          );
+        });
+    } else if (messageData.type === "mapViewRequest") {
       const center = map.getCenter();
       window.parent.postMessage(
         {
@@ -192,6 +406,13 @@ window.addEventListener("message", function (event) {
           syncMarkerInputRestriction(marker, markersFromAxum[key.slice(7)]);
       }
     } else if (messageData.type === "printStateRequest" && !editorEntryProfile.isMobile) {
+      if (!editorDataReady) {
+        event.source.postMessage(
+          { type: "printStateResult", requestId: messageData.requestId, error: "map-data-loading" },
+          event.origin,
+        );
+        return;
+      }
       const center = map.getCenter();
       window.parent.postMessage(
         {
@@ -257,7 +478,10 @@ window.addEventListener("message", function (event) {
     } else if (messageData["type"] === "mapObjectDelete") {
       let success = false;
       try {
-        success = applyMarkerDeleteFromParent(messageData["id"]);
+        success =
+          messageData.objectType === "shape"
+            ? applyShapeDeleteFromParent(messageData.id)
+            : applyMarkerDeleteFromParent(messageData.id);
       } catch (error) {
         console.error("Map object delete from parent failed:", error);
       }
@@ -303,6 +527,13 @@ function callParentImagePreview(url) {
 
 // トークンの認可管理と新規発行（認証切れ時の再試行を含めた fetch ラッパー）
 async function fetchWithAuth(url, options = {}) {
+  if (
+    window.__GEOCODE_MAP_BOOTSTRAP__?.dataSource === "parent" &&
+    window.parent !== window &&
+    editorParentOrigin &&
+    isParentMapObjectWrite(url, String(options.method || "GET").toUpperCase())
+  )
+    return requestParentMapObjectWrite(url, options);
   let response = await fetch(url, {
     ...options,
     credentials: "include", // `httpOnly` クッキーを送信
@@ -344,3 +575,14 @@ async function refreshToken() {
 function logout() {
   callParentLogin();
 }
+
+announceEditorRuntime();
+map.on("unload", () => {
+  ++editorSnapshotGeneration;
+  pendingParentChanges.forEach(clearTimeout);
+  pendingParentChanges.clear();
+  pendingParentWrites.forEach(({ reject }) => {
+    reject(new Error("Map frame closed"));
+  });
+  pendingParentWrites.clear();
+});

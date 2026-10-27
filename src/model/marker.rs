@@ -38,6 +38,7 @@ pub struct MarkerCreateRequestParams {
 pub struct MarkerCreatedResponse {
     pub id: String,
     pub message: String,
+    pub object: MarkerObject,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -71,4 +72,11 @@ pub struct MarkerObjectFromRow {
     pub latitude: f64,
     pub longitude: f64,
     pub detail: String,
+}
+
+/// 保存確定後のレコードを一覧・地図の差分同期に利用する。
+#[derive(Debug, Deserialize, Serialize)]
+pub struct MarkerUpdatedResponse {
+    pub message: String,
+    pub object: MarkerObject,
 }

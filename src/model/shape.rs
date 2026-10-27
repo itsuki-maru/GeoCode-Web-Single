@@ -55,4 +55,12 @@ pub struct ShapeGeometryUpdateData {
 pub struct ShapeCreatedResponse {
     pub id: String,
     pub message: String,
+    pub object: ShapeObject,
+}
+
+/// 保存確定後の本文・更新日時を返す。
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ShapeUpdatedResponse {
+    pub message: String,
+    pub object: ShapeObject,
 }

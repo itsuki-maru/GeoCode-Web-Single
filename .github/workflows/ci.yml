@@ -45,10 +45,17 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+          cache-dependency-path: |
+            ${{ matrix.app }}/package-lock.json
+            src_frontend/template-scripts/package-lock.json
 
       - name: Install dependencies
         run: npm ci --prefix ${{ matrix.app }}
+
+      # Frontend tests import the sibling template sources; jobs do not share node_modules.
+      - name: Install template test dependencies
+        if: matrix.app == 'src_frontend/frontend'
+        run: npm ci --prefix src_frontend/template-scripts
 
       - name: Type-check
         run: npm run type-check --prefix ${{ matrix.app }}

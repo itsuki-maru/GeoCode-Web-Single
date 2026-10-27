@@ -109,17 +109,24 @@ Tera変数の正本とJSON埋め込み処理は [テンプレート仕様](../..
 | `mapViewRequest` | requestId | `mapViewResult`。編集地図の現在の中心とズームを取得 |
 | `mapObjectFilter` | markerIds、shapeIds（配列またはnull） | 一覧に対応する絞り込み。応答なし |
 | `markerFilter` | ids | 地図側に残るマーカー用受信処理 |
-| `mapObjectUpdate` | requestId、payload | `mapObjectUpdateResult` |
-| `mapObjectDelete` | requestId、id | `mapObjectDeleteResult`。現在の受信処理はマーカー削除を適用 |
+| `mapObjectUpdate` | requestId、payload（既存の更新値またはobjectType＋完全object） | `mapObjectUpdateResult`。未生成対象も追加・更新 |
+| `mapObjectDelete` | requestId、id、objectType（省略時marker） | `mapObjectDeleteResult`。図形・マーカーを冪等に除去 |
 | `tileOverlaysUpdate` | requestId、tiles | `tileOverlaysUpdateResult` |
+| `mapRuntimeProbe` | requestId | 同じnonceの`mapRuntimeReady`でruntimeIdを確認 |
+| `mapObjectsInitialize` | requestId、runtimeId、snapshot | `mapObjectsInitializeResult`。初期原本の登録 |
+| `mapObjectChangedResult` | mutationId、runtimeId、success | 保存済み差分の受領確認 |
+| `mapObjectWriteResult` | requestId、runtimeId、status、data | 親が所有する保存HTTPの結果 |
 
-結果メッセージはrequestIdとsuccessを返す。更新payloadは各Vueの [MapObjectUpdatePayload](../frontend/src/interface.ts) を参照し、マーカー／図形の識別と更新値を渡す。Vue側は2秒で未応答をfalseとし、画面破棄時も待機を解除する。要求送信自体はDB更新ではなく、親で更新したデータを地図表示へ反映するために使用する。
+結果メッセージはrequestIdとsuccessを返す。更新payloadは各Vueの [MapObjectUpdatePayload](../frontend/src/interface.ts) を参照し、マーカー／図形の識別と更新値を渡す。Vue側は通常の表示差分は2秒、初期化は30秒で未応答をfalseとし、画面破棄時も待機を解除する。保存要求は固定タイムアウトで自動再送せず、親で完了まで管理する。要求送信自体はDB更新ではなく、親で更新したデータを地図表示へ反映するために使用する。
 
 ### 6.2 地図から親画面
 
 | type | データ・用途 |
 | --- | --- |
-| `callParentReload` | layerId（省略・null可）、message。親の一覧・地図更新要求 |
+| `mapRuntimeReady` | requestId、runtimeId。probe応答で現runtimeを確認。再生成時は親の最新原本を要求 |
+| `mapObjectChanged` | operation、objectType、object／id、mutationId。保存済み差分 |
+| `mapObjectWriteRequested` | requestId、runtimeId、url、method、body。親へ保存通信を委譲 |
+| `callParentReload` | layerId（省略・null可）、message。互換・復旧用の再取得要求。通常の保存では使用しない |
 | `callParentLoginRedirect` | message。ログイン画面への遷移要求 |
 | `callParentFunction` | messageに画像URL等。PC用画像表示 |
 | `callParentImagePreview` | messageに画像URL等。モバイル用画像表示 |
@@ -149,11 +156,19 @@ PCの [PrintMapModal.vue](../frontend/src/components/map/PrintMapModal.vue) が�
 
 ## 7. 設定保存と表示
 
+### 通常編集地図の親原本同期
+
+`data_source=parent` のPC・モバイル編集地図は、空のbootstrapでruntimeを準備し、`mapRuntimeReady` → `mapObjectsInitialize` → 適用結果の確認で原本を登録する。iframeのnative loadだけでは地図初期化完了としない。初期化中の作成・印刷を止め、図形の分割描画と印刷用whenIdleの待機条件を維持する。直接アクセスの既定モードは従来のサーバー埋め込みを利用する。
+
+親はアカウント・取得範囲ごとのPinia原本を持つ。子で確定した変更は `mapObjectChanged` と受領確認で同期する。埋め込みモードの図形・マーカーPOST/PUT/DELETEは `mapObjectWriteRequested` で親へ委譲し、親がHTTP結果と原本の更新を所有する。子の破棄によって保存済み変更をキャッシュから欠落させず、保存要求を自動再送しない。再生成時は `mapDataRequested` で親の最新原本を要求し、古い固定スナップショットを使い回さない。
+
+初期データと差分は送信元origin・window・runtimeId・requestIdを確認する。通常のJSON原本はnative structured cloneで渡し、DataCloneErrorの場合だけネストしたVue proxyをDTOへ変換して再送する。送信に失敗したcloneは相手へ届かず、全量JSON文字列化と再解析の重複も避ける。原本の再適用では計測選択をIDで引き継ぎ、削除された対象は解除する。
+
 ### 図形本体の遅延描画
 
 `shape-renderer.ts` は取得済みの図形をIDごとに保持し、外接矩形と頂点数を登録・形状更新時に計算する。Leaflet生成は、論理表示条件・表示範囲（周囲20%）・投影後の長辺4 CSS px以上を満たす図形に限る。細長い線は幅・高さの両方を要求せず、円は半径を含む範囲を使用する。
 
-`replaceRecords` / `upsert` は登録だけを行い、一括登録後に一度だけ `refresh` する。通常更新は差分を8ms・500操作・新規生成10000頂点を目安に分割し、移動・ズームの古い世代を破棄する。単一の巨大図形の内部生成までは分割しない。非表示・非固定のキャッシュだけを256件・50000頂点以内へ削減し、HTML・イベント・ラベルも解放する。
+`replaceRecords` / `upsert` は登録だけを行い、一括登録後に一度だけ `refresh` する。通常更新は差分を8ms・500操作・新規生成10000頂点を目安に分割し、不要図形の除去後、固定対象・余白なしの画面内・周囲の余白の順で追加する。各区分内の元の順序と対象集合を保ち、移動・ズームの古い世代を破棄する。whenIdleとpendingCountは余白を含む全処理が完了するまで待機状態を維持する。編集用カーソルクラスは各図形のaddイベントで当該図形だけを同期し、全体走査はモード切替などに限定する。単一の巨大図形の内部生成までは分割しない。非表示・非固定のキャッシュだけを256件・50000頂点以内へ削減し、HTML・イベント・ラベルも解放する。
 
 図形の総件数による初期OFFは行わない。通常編集地図と別画面地図は保存済みの図形・図形名表示設定に従い、未保存ならONにする。初期化では保存設定を書き換えない。回答地図・共有地図・印刷の表示状態の引き継ぎは維持する。初期表示にも同じ遅延描画を適用し、原本データの全件取得と保存形式・API・DBは従来どおり。
 

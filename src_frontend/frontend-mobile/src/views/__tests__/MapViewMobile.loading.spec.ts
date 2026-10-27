@@ -2,13 +2,19 @@ import { createPinia, setActivePinia } from "pinia";
 import { shallowMount, flushPromises, type VueWrapper } from "@vue/test-utils";
 import { defineComponent, ref } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), isAxiosError: vi.fn(() => false) }));
+const api = vi.hoisted(() => ({
+  get: vi.fn(),
+  post: vi.fn(),
+  request: vi.fn(),
+  isAxiosError: vi.fn(() => false),
+}));
 vi.mock("@/axiosClient", () => ({ default: api }));
 vi.mock("vue-router", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 import MapView from "@/views/MapViewMobile.vue";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useLayersStore } from "@/stores/layers";
 import { useShapeStore } from "@/stores/shapes";
+import { useAuthStore } from "@/stores/auth";
 import { LAST_ACTIVE_LAYER_STORAGE_KEY } from "@/composables/useLastActiveLayer";
 import { getLayersUrl, getMasterLayerIdUrl, getMapObjectsUrl, shapesUrl } from "@/router/urls";
 
@@ -55,13 +61,23 @@ let layerResponse: Promise<{ data: typeof layers }>;
 let getMarkers: (id: string) => Promise<{ data: Record<string, ReturnType<typeof marker>> }>;
 let getShapes: (id: string) => Promise<{ data: ReturnType<typeof shape>[] }>;
 
+const initializeFrame = vi.fn();
 const updateFrame = vi.fn();
 const frame = defineComponent({
   name: "MapIframe",
   props: ["srcUrl", "height", "allowedOrigins", "inputPolicies"],
-  emits: ["mapLoaded"],
+  emits: [
+    "mapLoaded",
+    "mapObjectChanged",
+    "mapReloadRequested",
+    "mapDataRequested",
+    "mapObjectWriteRequested",
+  ],
   setup(_, { expose }) {
     expose({
+      initializeMapObjects: initializeFrame,
+      upsertMapObject: vi.fn().mockResolvedValue(true),
+      deleteMapObject: vi.fn().mockResolvedValue(true),
       filterMapObjects: vi.fn(),
       reloadMapFrame: () => true,
       updateMapObject: updateFrame,
@@ -90,6 +106,8 @@ const changeLayer = async (id: string) => {
 };
 
 beforeEach(() => {
+  initializeFrame.mockReset().mockResolvedValue(true);
+  api.request.mockReset();
   updateFrame.mockReset().mockResolvedValue(true);
   setActivePinia(createPinia());
   localStorage.clear();
@@ -239,38 +257,33 @@ describe("selected layer startup", () => {
     };
     await changeLayer("b");
     expect(spinner()).toBe(false);
-    expect(frameComponent().props("srcUrl")).toBe("");
+    expect(frameComponent().props("srcUrl")).toContain("layer=a&");
+    expect([...useMapObjectStore().mapObjectList.keys()]).toEqual(["a"]);
+    expect([...useShapeStore().shapeList.keys()]).toEqual(["a"]);
     expect(localStorage.getItem(LAST_ACTIVE_LAYER_STORAGE_KEY)).toBe("a");
   });
 
-  it("ignores an aborted response even after switching from A to B and back to A", async () => {
+  it("shares pending data safely across A to B and back to A", async () => {
     localStorage.setItem(LAST_ACTIVE_LAYER_STORAGE_KEY, "a");
     const firstMarkers = deferred<{ data: Record<string, ReturnType<typeof marker>> }>();
     const firstShapes = deferred<{ data: ReturnType<typeof shape>[] }>();
-    let markerCalls = 0,
-      shapeCalls = 0;
     getMarkers = (id) =>
-      id === "a" && ++markerCalls === 1
-        ? firstMarkers.promise
-        : Promise.resolve({ data: { [id]: marker(id) } });
-    getShapes = (id) =>
-      id === "a" && ++shapeCalls === 1
-        ? firstShapes.promise
-        : Promise.resolve({ data: [shape(id)] });
+      id === "a" ? firstMarkers.promise : Promise.resolve({ data: { [id]: marker(id) } });
+    getShapes = (id) => (id === "a" ? firstShapes.promise : Promise.resolve({ data: [shape(id)] }));
     mountView();
     await flushPromises();
-    const firstSignal = dataRequests()[0]![1].signal as AbortSignal;
     await changeLayer("b");
-    expect(firstSignal.aborted).toBe(true);
-    await changeLayer("a");
-    const latestUrl = frameComponent().props("srcUrl");
-    firstMarkers.resolve({ data: { stale: marker("stale") } });
-    firstShapes.resolve({ data: [shape("stale")] });
+    expect([...useMapObjectStore().mapObjectList.keys()]).toEqual(["b"]);
+    firstMarkers.resolve({ data: { a: marker("a") } });
+    firstShapes.resolve({ data: [shape("a")] });
     await flushPromises();
+    expect([...useMapObjectStore().mapObjectList.keys()]).toEqual(["b"]);
+    expect([...useShapeStore().shapeList.keys()]).toEqual(["b"]);
+    await changeLayer("a");
+    expect(dataRequests()).toHaveLength(4);
     expect([...useMapObjectStore().mapObjectList.keys()]).toEqual(["a"]);
     expect([...useShapeStore().shapeList.keys()]).toEqual(["a"]);
-    expect(frameComponent().props("srcUrl")).toBe(latestUrl);
-    expect(localStorage.getItem(LAST_ACTIVE_LAYER_STORAGE_KEY)).toBe("a");
+    const latestUrl = frameComponent().props("srcUrl");
     frameComponent().vm.$emit("mapLoaded", "old-map-url");
     await flushPromises();
     expect(spinner()).toBe(true);
@@ -311,5 +324,286 @@ describe("selected layer startup", () => {
     );
     await flushPromises();
     expect(useMapObjectStore().mapObjectList.has("hidden")).toBe(false);
+  });
+});
+
+describe("cached map data and mutation synchronization", () => {
+  it("supplies the same initial records to the parent-mode map and reuses a visited layer", async () => {
+    localStorage.setItem(LAST_ACTIVE_LAYER_STORAGE_KEY, "a");
+    mountView();
+    await flushPromises();
+    expect(new URL(frameComponent().props("srcUrl")).searchParams.get("data_source")).toBe(
+      "parent",
+    );
+    expect(initializeFrame).toHaveBeenCalledWith(
+      expect.objectContaining({
+        markers: { a: marker("a") },
+        shapes: [shape("a")],
+        scopeKey: "a",
+      }),
+    );
+    await changeLayer("b");
+    expect(dataRequests()).toHaveLength(4);
+    await changeLayer("a");
+    expect(dataRequests()).toHaveLength(4);
+    expect([...useMapObjectStore().mapObjectList.keys()]).toEqual(["a"]);
+    expect([...useShapeStore().shapeList.keys()]).toEqual(["a"]);
+  });
+
+  it("applies map additions and deletions to the original records without fetching either list", async () => {
+    mountView();
+    await flushPromises();
+    const count = dataRequests().length;
+    const acknowledge = vi.fn();
+    const added = { ...marker("new"), layer_id: "master" };
+    frameComponent().vm.$emit(
+      "mapObjectChanged",
+      {
+        operation: "upsert",
+        objectType: "marker",
+        object: added,
+        mutationId: "add-1",
+      },
+      acknowledge,
+    );
+    await flushPromises();
+    expect(acknowledge).toHaveBeenCalledWith(true);
+    expect(useMapObjectStore().getById("new")).toEqual(added);
+    frameComponent().vm.$emit(
+      "mapObjectChanged",
+      {
+        operation: "delete",
+        objectType: "shape",
+        id: "master",
+        mutationId: "delete-1",
+      },
+      acknowledge,
+    );
+    await flushPromises();
+    expect(useShapeStore().getById("master")).toBeUndefined();
+    expect(dataRequests()).toHaveLength(count);
+    // A retried notification is safe and does not repeat the server mutation.
+    frameComponent().vm.$emit(
+      "mapObjectChanged",
+      {
+        operation: "delete",
+        objectType: "shape",
+        id: "master",
+        mutationId: "delete-1",
+      },
+      acknowledge,
+    );
+    await flushPromises();
+    expect(dataRequests()).toHaveLength(count);
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("re-supplies cached records after a map update failure without fetching the lists", async () => {
+    mountView();
+    await flushPromises();
+    const count = dataRequests().length;
+    updateFrame.mockResolvedValueOnce(false);
+    const object = { ...marker("master"), detail: "保存済みの本文" };
+    window.dispatchEvent(new CustomEvent("geocode-answer-updated", { detail: object }));
+    await flushPromises();
+    expect(initializeFrame).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        markers: { master: object },
+      }),
+    );
+    expect(dataRequests()).toHaveLength(count);
+  });
+});
+
+describe("map lifecycle while data changes", () => {
+  it("uses the latest original records when the iframe asks to initialize again", async () => {
+    mountView();
+    await flushPromises();
+    const requests = dataRequests().length;
+    frameComponent().vm.$emit(
+      "mapObjectChanged",
+      {
+        operation: "delete",
+        objectType: "shape",
+        id: "master",
+        mutationId: "gone",
+      },
+      vi.fn(),
+    );
+    frameComponent().vm.$emit("mapDataRequested");
+    await flushPromises();
+    expect(initializeFrame).toHaveBeenLastCalledWith(expect.objectContaining({ shapes: [] }));
+    expect(dataRequests()).toHaveLength(requests);
+  });
+
+  it("restores the previous cached scope and URL if the new iframe cannot apply data", async () => {
+    localStorage.setItem(LAST_ACTIVE_LAYER_STORAGE_KEY, "a");
+    mountView();
+    await flushPromises();
+    initializeFrame.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    await changeLayer("b");
+    expect(frameComponent().props("srcUrl")).toContain("layer=a&");
+    expect([...useMapObjectStore().mapObjectList.keys()]).toEqual(["a"]);
+    expect([...useShapeStore().shapeList.keys()]).toEqual(["a"]);
+    expect(dataRequests()).toHaveLength(4);
+    expect(localStorage.getItem(LAST_ACTIVE_LAYER_STORAGE_KEY)).toBe("a");
+  });
+
+  it("retains a saved change from the visible old map when the next scope fetch fails", async () => {
+    localStorage.setItem(LAST_ACTIVE_LAYER_STORAGE_KEY, "a");
+    mountView();
+    await flushPromises();
+    const pending = deferred<{ data: ReturnType<typeof shape>[] }>();
+    getShapes = (id) => (id === "b" ? pending.promise : Promise.resolve({ data: [shape(id)] }));
+    await changeLayer("b");
+    frameComponent().vm.$emit(
+      "mapObjectChanged",
+      {
+        operation: "upsert",
+        objectType: "marker",
+        object: { ...marker("added"), layer_id: "a" },
+        mutationId: "during-fetch",
+      },
+      vi.fn(),
+    );
+    await flushPromises();
+    pending.reject(new Error("offline"));
+    await flushPromises();
+    expect(frameComponent().props("srcUrl")).toContain("layer=a&");
+    expect(useMapObjectStore().mapObjectList.has("added")).toBe(true);
+    expect(dataRequests()).toHaveLength(4);
+  });
+
+  it("finishes a parent-owned save after its source map has been replaced", async () => {
+    mountView();
+    await flushPromises();
+    const pending = deferred<{ status: number; data: unknown }>();
+    api.request.mockReturnValue(pending.promise);
+    const reply = vi.fn();
+    frameComponent().vm.$emit(
+      "mapObjectWriteRequested",
+      {
+        url: "/marker?layer_id=master&latitude=35&longitude=139",
+        method: "POST",
+        requestId: "write-old-frame",
+      },
+      reply,
+    );
+    await flushPromises();
+    await changeLayer("a");
+    const saved = { ...marker("saved"), layer_id: "master", update_at: "2026-10-27T00:00:00" };
+    pending.resolve({ status: 201, data: { id: "saved", message: "Created", object: saved } });
+    await flushPromises();
+    expect(useMapObjectStore().getById("saved")).toEqual(saved);
+    expect(useMapObjectStore().mapObjectList.has("saved")).toBe(false);
+    expect(api.request).toHaveBeenCalledTimes(1);
+    await changeLayer("master");
+    expect(useMapObjectStore().mapObjectList.has("saved")).toBe(true);
+    expect(dataRequests()).toHaveLength(2);
+    expect(reply).toHaveBeenCalledWith(expect.objectContaining({ status: 201 }));
+  });
+
+  it("updates search matches locally after a map mutation", async () => {
+    mountView();
+    await flushPromises();
+    api.get.mockResolvedValueOnce({ data: { markers: {}, shape_ids: [] } });
+    await useMapObjectStore().queryWordMapObject("needle", "", "master");
+    const requests = api.get.mock.calls.length;
+    const added = { ...marker("matching"), layer_id: "master", marker_name: "needle" };
+    frameComponent().vm.$emit(
+      "mapObjectChanged",
+      { operation: "upsert", objectType: "marker", object: added, mutationId: "match" },
+      vi.fn(),
+    );
+    await flushPromises();
+    expect(useMapObjectStore().mapObjectList.has("matching")).toBe(true);
+    frameComponent().vm.$emit(
+      "mapObjectChanged",
+      {
+        operation: "upsert",
+        objectType: "marker",
+        object: { ...added, marker_name: "other" },
+        mutationId: "unmatch",
+      },
+      vi.fn(),
+    );
+    await flushPromises();
+    expect(useMapObjectStore().mapObjectList.has("matching")).toBe(false);
+    expect(api.get.mock.calls).toHaveLength(requests);
+  });
+});
+
+describe("search responses during layer navigation", () => {
+  it("does not restore another layer with the previous layer's delayed query", async () => {
+    localStorage.setItem(LAST_ACTIVE_LAYER_STORAGE_KEY, "a");
+    mountView();
+    await flushPromises();
+    const pending = deferred<{
+      data: { markers: Record<string, ReturnType<typeof marker>>; shape_ids: string[] };
+    }>();
+    api.get.mockReturnValueOnce(pending.promise);
+    wrapper!
+      .getComponent({ name: "MapObjectTable" })
+      .vm.$emit("mapObjectSearch", { query1: "old query", query2: "" }, false);
+    await flushPromises();
+    await changeLayer("b");
+    pending.resolve({ data: { markers: {}, shape_ids: [] } });
+    await flushPromises();
+    getShapes = async () => {
+      throw new Error("offline");
+    };
+    await changeLayer("a");
+    expect(frameComponent().props("srcUrl")).toContain("layer=a&");
+    // A was cached, so force a new, unavailable scope to exercise old-display restore.
+    await changeLayer("b");
+    useMapObjectStore().invalidateCache();
+    useShapeStore().invalidateCache();
+    await changeLayer("a");
+    expect(frameComponent().props("srcUrl")).toContain("layer=b&");
+    expect(useMapObjectStore().search).toBeNull();
+    expect(useMapObjectStore().mapObjectList.has("b")).toBe(true);
+  });
+});
+
+describe("map account boundary", () => {
+  it("removes the previous account's map and rejects its delayed writes after logout", async () => {
+    mountView();
+    await flushPromises();
+    const count = dataRequests().length;
+    useAuthStore().logout();
+    await flushPromises();
+    expect(frameComponent().props("srcUrl")).toBe("");
+    expect(useMapObjectStore().getById("master")).toBeUndefined();
+    const reply = vi.fn();
+    frameComponent().vm.$emit(
+      "mapObjectWriteRequested",
+      { url: "/shape", method: "POST", body: {}, requestId: "old-user" },
+      reply,
+    );
+    await flushPromises();
+    expect(api.request).not.toHaveBeenCalled();
+    expect(reply).toHaveBeenCalledWith(expect.objectContaining({ status: 409 }));
+    expect(dataRequests()).toHaveLength(count);
+  });
+});
+
+describe("delayed answer results from another scope", () => {
+  it("updates the cached old record without adding its marker to the current map", async () => {
+    localStorage.setItem(LAST_ACTIVE_LAYER_STORAGE_KEY, "a");
+    mountView();
+    await flushPromises();
+    await changeLayer("b");
+    const count = dataRequests().length;
+    updateFrame.mockClear();
+    window.dispatchEvent(
+      new CustomEvent("geocode-answer-updated", {
+        detail: { ...marker("a"), detail: "saved after navigation" },
+      }),
+    );
+    await flushPromises();
+    expect(useMapObjectStore().getById("a")?.detail).toBe("saved after navigation");
+    expect([...useMapObjectStore().mapObjectList.keys()]).toEqual(["b"]);
+    expect(updateFrame).not.toHaveBeenCalled();
+    expect(dataRequests()).toHaveLength(count);
   });
 });

@@ -667,6 +667,7 @@
     </body>
     <script>
         window.__GEOCODE_MAP_BOOTSTRAP__ = {
+            dataSource: {{ mapDataSource | default(value="server") | json_encode_for_html | safe }},
             page: "map-mobile",
             selectedLayer: "{{ layer }}",
             isMaster: {{ is_master }},

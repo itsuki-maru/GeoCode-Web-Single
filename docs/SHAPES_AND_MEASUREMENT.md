@@ -66,6 +66,18 @@ PCとモバイルの編集地図で描画・編集する。別画面と共有ペ
 
 別画面・共有ページはレイヤのチェックと図形表示の両方に従う。図形名のチェックも独立して持ち、レイヤを隠すと対応する測定ラベルも隠れる。
 
+## 編集地図の原本・取得と差分同期
+
+通常のPC・モバイル編集地図では、親画面のPiniaストアが一覧と地図の共通原本を保持する。ログイン中のメモリキャッシュであり、アカウントごとに分離し、ログアウトで破棄する。全レイヤ／個別レイヤの取得済み状態を区別し、空の成功結果も再利用する。原本はIDで一元保持し、検索結果は別のID集合として扱う。同時取得は共有し、取得途中に成功した追加・更新・削除は、古い取得応答へ重ねて適用する。
+
+取得済み範囲への切替とiframeの再生成では原本を再利用し、通常の作成・更新・削除・復元後に一覧全件のGETを行わない。検索中の変更は変更対象だけを同じ条件で再判定する。ユーザーの検索操作による検索APIは維持する。非選択範囲はLRUで解放し、通常は最大8範囲を保持する。表示中・取得中・切替完了待ちの範囲を件数上限だけで破棄しない。
+
+埋め込み地図は `/map?data_source=parent` で開き、サーバーの図形・マーカーSELECTとHTMLへの原本埋め込みを省略する。親が既存 `/marker/read/all` と `/shapes` を初回に各1回取得し、runtime準備完了→原本適用→適用確認の順で地図を利用可能にする。初期データ適用の確認と、全図形の遅延生成完了は分離し、印刷では引き続き生成完了を待つ。通常の直接 `/map` アクセスはサーバー埋め込みで自己完結する。
+
+埋め込み地図の保存通信は親画面が管理し、保存中にiframeが消えても保存済みレコードを原本へ反映する。POSTと通常PUTはサーバーの保存結果を使用し、削除は成功したIDを除去する。差分通知と応答は送信元window・origin・runtime世代・要求IDを確認し、再通知で保存APIを二重実行しない。古い更新応答や削除済みIDの遅延通知による復活も防ぐ。
+
+手動再読み込み、JSON取り込み、レイヤ一括削除では対象を無効化して再取得する。他端末の更新は手動再読み込みで反映する。取得・適用に失敗した場合は取得済み原本を保持し、再保存せず表示を再同期する。別画面・共有・回答・印刷地図は既存の取得範囲とスナップショットの仕組みを維持する。
+
 ## API・削除と復元
 
 いずれもアカウント認証と所有者確認を行う。
@@ -76,6 +88,8 @@ PCとモバイルの編集地図で描画・編集する。別画面と共有ペ
 | POST `/shape` | 新規作成・削除後の復元 |
 | PUT `/shape/{shape_id}` | 形状・名前・所属・スタイル・メモの更新 |
 | DELETE `/shape/{shape_id}` | 削除 |
+
+作成応答は既存の `id`・`message`に保存済みの `object`を追加する。通常の図形・マーカー情報更新とマーカー位置更新も `object`を返し、サーバーが確定した本文・所属・更新日時を差分反映に使用する。図形座標更新の完全レコード応答は維持する。取得APIと保存形式を変えず、DBマイグレーションは追加しない。
 
 「元に戻す」はフロントエンドの一時メモリを使用する。再読み込みで削除履歴は消える。復元は新規作成となり、名前やスタイルを引き継ぐがIDは変わる。削除で失われた公開フォームや投稿履歴を復元する操作ではない。
 
@@ -141,6 +155,39 @@ node scripts/measure-initial-shape-visibility.mjs --samples=3 --playwright-path=
 
 同じ表示条件では自動初期ONと手動ONの生成数は一致し、生成完了時間も同程度だった。高密度の編集地図では完了まで数秒かかる条件が残るため、総件数制限の撤廃だけで、表示中の図形数や頂点数に起因する負荷まで解消するものではない。詳細な初期同期時間・長いタスク・多頂点条件・移動後の結果は [計測JSON](performance/shape-initial-visibility.json) に保存する。
 
+### 原本供給方式の検証
+
+2026-10-27に、共通フロントエンドのPostgreSQL作業ツリーから実際の編集runtimeを組み立て、Chromeの同一origin iframeとnative postMessageで4万件の合成管路を検証した。DB・通信・API応答解析・巨大なHTML内JSON解析は計測外である。両方式とも同じiframe・同じ画面寸法とズーム14を使い、親側と地図側に2つの原本を保持する条件を揃えた。`server`は準備済みbootstrap、`parent`は空のbootstrapへ親から初期データを適用する方式である。実データやアプリ全体の起動時間の比較ではない。
+
+各3回、計24試行が60秒枠内で完了した。以下は初期化開始からLeaflet生成完了までの中央値（ms）。GPUの描画完了時刻ではない。PCは1024×768、モバイル幅は390×844・CPU4倍制限のエミュレーションであり、実端末の計測ではない。
+
+| 条件 | server供給ms | parent供給ms | 両方式の生成数 |
+|---|---:|---:|---:|
+| PC・4万件中80件表示 | 53.2 | 150.1 | 80 |
+| モバイル幅・同条件 | 331.4 | 712.6 | 80 |
+| PC・4万件表示 | 2,598.5 | 2,657.9 | 40,000 |
+| モバイル幅・4万件表示 | 17,180.2 | 19,184.9 | 40,000 |
+
+親供給には初回の転送コストが残る。4万件中80件表示の転送時間はPC87.7ms・モバイル幅386.3ms、受信後の登録は28.3ms・112.9msだった。転送時間に含まれるnative clone送信の同期部分は34.7ms・159.1ms。通常原本ではDTO変換は0msで、Vue proxyが混ざる場合だけ同期DataCloneErrorから変換して再送する。このfallbackは別の単体テストで確認する。
+
+範囲内80件の初期ヒープ参考値はserver／parentでPC73.1／71.9MB、モバイル幅72.7／73.2MB。ヒープはブラウザープロセスの参考値で、フレーム単体の使用量や一定の上限を保証しない。密集条件でも生成は各4万回で、生成の重複はなかった。refresh回数と5000件単位の進捗はJSONへ記録する。表示中の件数が多い場合のSVG生成時間は引き続き残る。
+
+この比較は重複するDB照会・HTTP転送・JSON解析を含まないため、取得一本化によるアプリ全体の高速化率として扱わない。通常操作後・キャッシュ再利用時の全件GET抑制、4万件保持中の単一変更で原本の全件走査を行わないことは、別途ストア・画面・ハンドラーのテストで検証する。
+
+- [server供給・範囲内80件](performance/shape-data-initial-server-spread.json) / [parent供給・範囲内80件](performance/shape-data-initial-parent-spread.json)
+- [server供給・密集](performance/shape-data-initial-server-dense.json) / [parent供給・密集](performance/shape-data-initial-parent-dense.json)
+- [保持条件調整前の30秒診断](performance/shape-data-initial-parent-dense-30s-diagnostic.json)はモバイル幅の1試行が未完了。最終24試行や3回成功の中央値には含めない。
+
+再現には既存の [measure-shape-render-tuning.mjs](../src_frontend/frontend/scripts/measure-shape-render-tuning.mjs) を使用する。下記は同じiframe・2原本の比較。`--entry=editor-mobile`、`--case=dense`へ置き換えて同じ条件を実行できる。計測中は別のビルド・テストを止め、`--playwright-path`を環境に合わせる。
+
+```powershell
+# src_frontend/frontend で実行
+node scripts/measure-shape-render-tuning.mjs --stage=after --entry=editor-pc --case=spread --framed=true --initial-only=true --samples=3 --timeout-ms=60000 --playwright-path=C:/path/to/playwright/index.mjs --output=target/shape-data-server.json
+node scripts/measure-shape-render-tuning.mjs --stage=after --entry=editor-pc --case=spread --parent-data=true --framed=true --initial-only=true --samples=3 --timeout-ms=60000 --playwright-path=C:/path/to/playwright/index.mjs --output=target/shape-data-parent.json
+```
+
 ## 関連する実装
+
+[原本キャッシュ](../src_frontend/frontend/src/stores/map-record-cache.ts)、[保存通信の仲介](../src_frontend/frontend/src/composables/useMapObjectWriter.ts)、[編集地図の同期境界](../src_frontend/template-scripts/src/map/editor/map-editor-final.ts)。
 
 [図形API](../src/handler/shapes.rs)、[GeoJSON検証](../src/shape_validation.rs)、[編集処理](../src_frontend/template-scripts/src/map/editor/)、[測定処理](../src_frontend/template-scripts/src/map/common/shape-measurement.ts)、[表示制御](../src_frontend/template-scripts/src/map/common/shape-viewport.ts)。

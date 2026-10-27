@@ -96,6 +96,7 @@ function applyShapeRecord(layer, shapeRecord, syncRecord = true) {
   }
 
   layer.options.shapeRecord = {
+    ...shapeRecord,
     id: shapeRecord.id || null,
     layer_id: shapeRecord.layer_id || null,
     shape_type: shapeRecord.shape_type,
@@ -276,6 +277,16 @@ async function persistShapeMetadata(
     if (!response.ok) {
       throw new Error("shape update failed");
     }
+    const data = typeof response.json === "function" ? await response.json() : {};
+    return (
+      data.object || {
+        ...(layer.options?.shapeRecord || {}),
+        name: nextName,
+        layer_id: nextLayerId,
+        shape_type: nextShapeType || layer.shapeType,
+        geojson: nextGeoJson || layer.options?.shapeRecord?.geojson,
+      }
+    );
   } finally {
     endSavingShape(layer.shapeId);
   }
@@ -536,7 +547,7 @@ function openShapeNameEditor(layer) {
         ? layer.options.shapeRecord.geojson
         : buildShapeGeoJson(layer, layer.shapeType, nextShapeStyle, nextMemo);
       try {
-        await persistShapeMetadata(
+        const savedRecord = await persistShapeMetadata(
           layer,
           nextName,
           nextLayerId,
@@ -544,23 +555,19 @@ function openShapeNameEditor(layer) {
           null,
           bodyEdit,
         );
-        applyShapeRecord(layer, {
-          id: layer.shapeId,
-          layer_id: nextLayerId,
-          shape_type: layer.shapeType,
-          name: nextName,
-          geojson: nextGeoJson,
-        });
+        applyShapeRecord(layer, savedRecord);
         updateShapeNameLabel(layer, nextName);
         setSelectedShapeColor(nextShapeStyle.color);
         applyShapeStyle(layer);
         refreshShapeMeasurementMarkers(layer);
         closeShapeNameEditor();
-        if (editorEntryProfile.isMobile) {
-          if (previousLayerId !== nextLayerId) callParentReload(nextLayerId);
-        } else {
-          callParentReload(previousLayerId !== nextLayerId ? nextLayerId : null);
-        }
+        if (typeof notifyParentMapObjectChange === "function")
+          notifyParentMapObjectChange({
+            operation: "upsert",
+            objectType: "shape",
+            object: savedRecord,
+            previousLayerId,
+          });
         if (!is_master && nextLayerId !== getCurrentShapeLayerId()) {
           removeShapeMeasurementMarkers(layer);
           drawnShapesGroup.removeLayer(layer);

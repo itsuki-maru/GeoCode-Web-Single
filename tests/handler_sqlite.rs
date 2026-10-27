@@ -266,7 +266,26 @@ async fn marker_handlers_cover_create_read_update_delete() {
     .await
     .expect("marker should be created");
 
-    let _ = update_marker_position_handler(
+    assert_eq!(created.id, created.object.id);
+    assert_eq!(created.object.marker_name, "");
+    assert_eq!(created.object.layer_id, Some(layer_id.clone()));
+    assert_eq!(created.object.latitude, 35.681236);
+    let Json(initial_markers) = marker_get_handler(
+        Extension(user_id.clone()),
+        Extension(pool.clone()),
+        Query(MarkerReadQueryPrams {
+            layer: Some(layer_id.clone()),
+            is_master: Some(false),
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(&created.object).unwrap(),
+        serde_json::to_value(initial_markers.get(&created.id).unwrap()).unwrap()
+    );
+
+    let Json(moved) = update_marker_position_handler(
         Extension(user_id.clone()),
         Extension(pool.clone()),
         Query(MarkerMoveRequestParams {
@@ -278,7 +297,12 @@ async fn marker_handlers_cover_create_read_update_delete() {
     .await
     .expect("marker position should be updated");
 
-    let _ = update_marker_info_handler(
+    assert_eq!(moved.object.id, created.id);
+    assert_eq!(moved.object.latitude, 35.0);
+    assert_eq!(moved.object.longitude, 139.0);
+    assert!(moved.object.update_at >= created.object.update_at);
+
+    let Json(updated) = update_marker_info_handler(
         Extension(user_id.clone()),
         Extension(pool.clone()),
         Path(created.id.clone()),
@@ -304,6 +328,10 @@ async fn marker_handlers_cover_create_read_update_delete() {
     .await
     .expect("markers should be returned");
     let marker = markers.get(&created.id).unwrap();
+    assert_eq!(
+        serde_json::to_value(&updated.object).unwrap(),
+        serde_json::to_value(marker).unwrap()
+    );
     assert_eq!(marker.marker_name, "Tokyo");
     assert_eq!(marker.latitude, 35.0);
 
@@ -462,9 +490,13 @@ async fn shape_handlers_cover_create_read_delete_and_validation() {
     .expect("shapes should be returned");
     assert_eq!(shapes.len(), 1);
     assert_eq!(shapes[0].id, created.id);
+    assert_eq!(
+        serde_json::to_value(&created.object).unwrap(),
+        serde_json::to_value(&shapes[0]).unwrap()
+    );
 
     let valid_polygon = valid_polygon_geojson();
-    let _ = update_shape_handler(
+    let Json(updated) = update_shape_handler(
         Extension(user_id.clone()),
         Extension(pool.clone()),
         Path(created.id.clone()),
@@ -490,6 +522,10 @@ async fn shape_handlers_cover_create_read_delete_and_validation() {
     )
     .await
     .expect("updated shapes should be returned");
+    assert_eq!(
+        serde_json::to_value(&updated.object).unwrap(),
+        serde_json::to_value(&updated_shapes[0]).unwrap()
+    );
     assert_eq!(updated_shapes[0].shape_type, "polygon");
     assert_eq!(updated_shapes[0].geojson, valid_polygon);
 
@@ -1055,6 +1091,7 @@ async fn map_handlers_render_templates_with_sqlite_data() {
         Extension(pool.clone()),
         Extension(test_tera()),
         Query(MapReadQueryPrams {
+            data_source: None,
             marker_id: None,
             latitude: None,
             longitude: None,
@@ -1492,4 +1529,50 @@ async fn totp_handlers_cover_setup_verify_login_and_disable() {
     let disabled_message: serde_json::Value =
         serde_json::from_slice(&disable_body).expect("disable response should be JSON");
     assert_eq!(disabled_message["message"], "Success TOTP 2FA disabled.");
+}
+
+// 親供給モードだけオブジェクト埋め込みを省き、直接アクセスとPC/モバイルを維持する。
+#[tokio::test]
+async fn map_parent_data_mode_omits_objects_and_keeps_direct_access() {
+    let pool = common::test_pool().await;
+    let user_id = common::create_test_user(&pool, "map-parent-data-user").await;
+    let layer_id = common::master_layer_id(&pool, &user_id).await;
+    insert_marker(&pool, &user_id, &layer_id).await;
+    insert_shape(&pool, &user_id, &layer_id).await;
+    let mut tera = Tera::default();
+    for name in ["map.html", "map-mobile.html"] {
+        tera.add_raw_template(name, "{{ mapDataSource }}|{{ markersFromAxum | length }}|{{ shapesFromAxum | length }}|{{ layersFromAxum | length }}").unwrap();
+    }
+    let tera = Arc::new(Mutex::new(tera));
+    for mobile in [false, true] {
+        for (data_source, expected) in [
+            (None, "server|1|1|1"),
+            (Some("parent".to_string()), "parent|0|0|1"),
+        ] {
+            let mut headers = HeaderMap::new();
+            if mobile {
+                headers.insert(header::USER_AGENT, "Test Mobile".parse().unwrap());
+            }
+            let response = map_get_handler(
+                Extension(user_id.clone()),
+                Extension(pool.clone()),
+                Extension(tera.clone()),
+                Query(MapReadQueryPrams {
+                    marker_id: None,
+                    latitude: None,
+                    longitude: None,
+                    layer: Some(layer_id.clone()),
+                    is_master: Some(true),
+                    data_source,
+                }),
+                headers,
+            )
+            .await
+            .unwrap()
+            .into_response();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            assert_eq!(String::from_utf8(body.to_vec()).unwrap(), expected);
+        }
+    }
 }

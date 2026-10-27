@@ -519,6 +519,7 @@ function resetDrawingState(message = "図形描画: オフ", isError = false) {
 
 // 指定モードで図形描画を開始する
 function beginDrawing(mode) {
+  if (typeof editorDataReady !== "undefined" && !editorDataReady) return;
   clearMeasurementSelection();
   closeShapeNameEditor();
   clearShapeGeometryEditing();

@@ -1,49 +1,110 @@
 import { defineStore } from "pinia";
+import { markRaw } from "vue";
 import type { ShapeData, ShapeGeoJson } from "@/interface";
 import { shapeUrl, shapesUrl } from "@/router/urls";
 import apiClient from "@/axiosClient";
-
-interface State {
-  loadRevision: number;
-  shapeList: Map<string, ShapeData>;
-}
+import { MapRecordCache } from "./map-record-cache";
 
 export const useShapeStore = defineStore("shapes", {
-  state: (): State => ({ shapeList: new Map<string, ShapeData>(), loadRevision: 0 }),
+  state: () => ({
+    loadRevision: 0,
+    shapeList: new Map<string, ShapeData>(),
+    activeLayerId: "",
+    activeIsMaster: true,
+    mutationRevision: 0,
+    mutationVersions: new Map<string, number>(),
+    dirtyIds: new Set<string>(),
+    recordCache: markRaw(new MapRecordCache<ShapeData>()),
+  }),
   getters: {
     getById:
       (state) =>
       (id: string): ShapeData | undefined =>
-        state.shapeList.get(id),
+        state.recordCache.records.get(id) ?? state.shapeList.get(id),
   },
   actions: {
-    clearShapeList(): void {
+    setAccount(id: string) {
+      if (this.recordCache.setAccount(id)) {
+        this.clearShapeList();
+        this.mutationVersions.clear();
+        this.dirtyIds.clear();
+      }
+    },
+    clearShapeList() {
       ++this.loadRevision;
       this.shapeList.clear();
     },
+    resetCache() {
+      this.recordCache.reset();
+      this.clearShapeList();
+      this.mutationVersions.clear();
+      this.dirtyIds.clear();
+    },
+    invalidateCache() {
+      this.recordCache.invalidate();
+      ++this.loadRevision;
+    },
+    getScopeRecords(layerId?: string, isMaster?: boolean): ShapeData[] {
+      return this.recordCache.getRecords(
+        layerId ?? this.activeLayerId,
+        isMaster ?? this.activeIsMaster,
+      );
+    },
+    activateScope(layerId: string, isMaster: boolean) {
+      this.activeLayerId = layerId;
+      this.activeIsMaster = isMaster;
+      this.recordCache.setActive(layerId, isMaster);
+      this.refreshVisibleRecords();
+    },
+    refreshVisibleRecords() {
+      this.shapeList = new Map(
+        this.getScopeRecords()
+          .map((record) => [record.id, record] as const)
+          .reverse(),
+      );
+    },
+    upsertRecord(record: ShapeData) {
+      if (!this.recordCache.upsert(record)) return false;
+      this.mutationVersions.set(record.id, ++this.mutationRevision);
+      this.dirtyIds.add(record.id);
+      if (this.activeIsMaster || record.layer_id === this.activeLayerId)
+        this.shapeList.set(record.id, record);
+      else this.shapeList.delete(record.id);
+      return true;
+    },
+    removeRecord(id: string) {
+      this.recordCache.remove(id);
+      this.mutationVersions.set(id, ++this.mutationRevision);
+      this.dirtyIds.add(id);
+      this.shapeList.delete(id);
+    },
     async queryShapes(
-      layerId?: string,
-      isMaster: boolean = true,
+      layerId = "",
+      isMaster = true,
       signal?: AbortSignal,
+      force = false,
     ): Promise<boolean> {
       const revision = ++this.loadRevision;
-      try {
-        const params = new URLSearchParams({ is_master: String(isMaster) });
-        if (layerId) params.set("layer_id", layerId);
-        const requestUrl = `${shapesUrl}?${params.toString()}`;
-        const response = signal
-          ? await apiClient.get<ShapeData[]>(requestUrl, { signal })
-          : await apiClient.get<ShapeData[]>(requestUrl);
-        if (signal?.aborted || revision !== this.loadRevision) return false;
-        this.shapeList = new Map(
-          response.data.map((shape): [string, ShapeData] => [shape.id, shape]).reverse(),
-        );
-        return true;
-      } catch (error) {
-        if (signal?.aborted || revision !== this.loadRevision) return false;
-        console.error("Shapes Store: Query Error.", error);
-        return false;
-      }
+      this.activeLayerId = layerId;
+      this.activeIsMaster = isMaster;
+      this.recordCache.setActive(layerId, isMaster);
+      const params = new URLSearchParams({ is_master: String(isMaster) });
+      if (layerId) params.set("layer_id", layerId);
+      const loaded = await this.recordCache.load(
+        layerId,
+        isMaster,
+        async (transportSignal) => {
+          const url = `${shapesUrl}?${params}`;
+          const response = signal
+            ? await apiClient.get<ShapeData[]>(url, { signal: transportSignal })
+            : await apiClient.get<ShapeData[]>(url);
+          return response.data;
+        },
+        force,
+      );
+      if (!loaded || signal?.aborted || revision !== this.loadRevision) return false;
+      this.refreshVisibleRecords();
+      return true;
     },
     async updateShape(
       id: string,
@@ -52,26 +113,28 @@ export const useShapeStore = defineStore("shapes", {
       geojson?: ShapeGeoJson,
       bodyEdit?: { free_text: string; body_token: string },
     ): Promise<ShapeData | null> {
+      const generation = this.recordCache.generation;
       try {
-        await apiClient.put(`${shapeUrl}${id}`, {
+        const response = await apiClient.put(`${shapeUrl}${id}`, {
           name,
           layer_id: layerId,
           geojson,
           ...bodyEdit,
         });
-        const current = this.shapeList.get(id);
-        if (current) {
-          const updated: ShapeData = {
+        if (generation !== this.recordCache.generation) return null;
+        const current = this.getById(id);
+        const updated: ShapeData | undefined =
+          response.data?.object ??
+          (current && {
             ...current,
             name: name.trim() || null,
             layer_id: layerId,
             geojson: geojson ?? current.geojson,
             updated_at: new Date().toISOString(),
-          };
-          this.shapeList.set(id, updated);
-          return updated;
-        }
-        return null;
+          });
+        if (!updated) return null;
+        this.upsertRecord(updated);
+        return this.getById(id) ?? null;
       } catch (error) {
         console.error("Shapes Store: Update Error.", error);
         return null;

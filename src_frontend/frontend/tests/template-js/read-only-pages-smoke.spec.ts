@@ -662,6 +662,7 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
       const dom = smokeLoadPage(pages.find((page) => page.templateName === templateName)!, {
         parentWindow,
       });
+      parentWindow.postMessage.mockClear();
       const press = (extra = {}) => {
         const event = new dom.window.KeyboardEvent("keydown", {
           key: "p",
@@ -880,8 +881,183 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
     }));
   const editorState = (dom: JSDOM) =>
     new Script(
-      "({map, shapeRenderManager, drawnShapesGroup, applyShapeUpdateFromParent, createShapeLayer, saveShape, deleteShape, undoDeletedShape})",
+      "({map, shapeRenderManager, drawnShapesGroup, applyShapeUpdateFromParent, applyMarkerUpdateFromParent, applyMarkerDeleteFromParent, applyShapeDeleteFromParent, applyEditorMapSnapshot, createShapeLayer, saveShape, deleteShape, undoDeletedShape})",
     ).runInContext(dom.getInternalVMContext()) as any;
+  it.each(["map.html", "map-mobile.html"])(
+    "%sは親の原本スナップショットを再取得なしで適用し、遅延描画と差分追加・削除を維持する",
+    async (templateName) => {
+      const page = pages.find((page) => page.templateName === templateName)!;
+      const dom = smokeLoadPage(
+        { ...page, globals: { ...page.globals, markersFromAxum: {}, shapesFromAxum: [] } },
+        { lastMapView: { latitude: 35.681, longitude: 139.767, zoom: 14 } },
+      );
+      const state = editorState(dom);
+      const fetch = vi.fn();
+      Object.assign(dom.window, { fetch });
+      const records = editorShapes().map((record) => ({
+        ...record,
+        created_at: "2026-10-27T00:00:00",
+        updated_at: "2026-10-27T00:00:00",
+        user_id: "account",
+      }));
+      expect(
+        await state.applyEditorMapSnapshot({
+          markers: structuredClone(markerRecords),
+          shapes: records,
+        }),
+      ).toBe(true);
+      await state.shapeRenderManager.whenIdle();
+      expect(state.shapeRenderManager.getStats().recordCount).toBe(3);
+      expect(state.shapeRenderManager.getStats().createdCount).toBe(1);
+      new Script(
+        'isTooltipVisible = true; measurementSelectedShapes.add(shapeRenderManager.getLayer("near")); measurementSelectionType = "polyline";',
+      ).runInContext(dom.getInternalVMContext());
+      state.applyMarkerUpdateFromParent({
+        objectType: "marker",
+        object: { ...markerRecords["marker-1"], marker_name: "restored label" },
+      });
+      expect(
+        new Script('markers["marker-marker-1"].isTooltipOpen()').runInContext(
+          dom.getInternalVMContext(),
+        ),
+      ).toBe(true);
+      const originalSelected = state.shapeRenderManager.getLayer("near");
+      expect(
+        await state.applyEditorMapSnapshot({
+          markers: structuredClone(markerRecords),
+          shapes: structuredClone(records),
+        }),
+      ).toBe(true);
+      await state.shapeRenderManager.whenIdle();
+      expect(
+        new Script("measurementSelectedShapes.size").runInContext(dom.getInternalVMContext()),
+      ).toBe(1);
+      expect(
+        new Script("[...measurementSelectedShapes][0]").runInContext(dom.getInternalVMContext()),
+      ).toBe(state.shapeRenderManager.getLayer("near"));
+      expect(state.shapeRenderManager.getLayer("near")).not.toBe(originalSelected);
+      const added = {
+        ...records[0],
+        id: "added",
+        name: "canonical",
+        updated_at: "2026-10-27T01:00:00",
+      };
+      expect(state.applyShapeUpdateFromParent({ objectType: "shape", object: added })).toBe(true);
+      await state.shapeRenderManager.whenIdle();
+      expect(state.shapeRenderManager.getRecord("added").updated_at).toBe(added.updated_at);
+      expect(state.applyShapeDeleteFromParent("added")).toBe(true);
+      expect(state.applyShapeDeleteFromParent("added")).toBe(true);
+      expect(state.shapeRenderManager.getRecord("added")).toBeNull();
+      const newMarker = {
+        ...markerRecords["marker-1"],
+        id: "new-marker",
+        marker_name: "canonical marker",
+      };
+      expect(state.applyMarkerUpdateFromParent({ objectType: "marker", object: newMarker })).toBe(
+        true,
+      );
+      expect(state.applyMarkerDeleteFromParent("new-marker")).toBe(true);
+      expect(state.applyMarkerDeleteFromParent("new-marker")).toBe(true);
+      expect(await state.applyEditorMapSnapshot({ markers: {}, shapes: [] })).toBe(true);
+      await state.shapeRenderManager.whenIdle();
+      expect(state.shapeRenderManager.getStats().recordCount).toBe(0);
+      expect(state.drawnShapesGroup.getLayers()).toHaveLength(0);
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["map.html", "map-mobile.html"])(
+    "%sは保存を親へ委譲し、保存済みレコードを再取得なしで差分通知する",
+    async (templateName) => {
+      const page = pages.find((page) => page.templateName === templateName)!;
+      const parentWindow = { postMessage: vi.fn() };
+      const dom = smokeLoadPage(
+        { ...page, globals: { ...page.globals, shapesFromAxum: [] } },
+        { parentWindow },
+      );
+      const canonical = {
+        ...editorShapes()[0],
+        id: "saved",
+        user_id: "account",
+        created_at: "server-created",
+        updated_at: "server-updated",
+      };
+      (dom.window as any).__GEOCODE_MAP_BOOTSTRAP__.dataSource = "parent";
+      const fetch = vi.fn();
+      Object.assign(dom.window, { fetch });
+      parentWindow.postMessage.mockImplementation((message) => {
+        const data =
+          message.type === "mapObjectWriteRequested"
+            ? {
+                type: "mapObjectWriteResult",
+                runtimeId: message.runtimeId,
+                requestId: message.request.requestId,
+                status: 201,
+                data: { id: canonical.id, message: "success", object: canonical },
+              }
+            : message.type === "mapObjectChanged"
+              ? {
+                  type: "mapObjectChangedResult",
+                  runtimeId: message.runtimeId,
+                  mutationId: message.change.mutationId,
+                  success: true,
+                }
+              : null;
+        if (data)
+          queueMicrotask(() =>
+            dom.window.dispatchEvent(
+              new dom.window.MessageEvent("message", {
+                origin: "https://example.test",
+                source: parentWindow as any,
+                data,
+              }),
+            ),
+          );
+      });
+      const state = editorState(dom);
+      const line = state.createShapeLayer("polyline", canonical.geojson, "pipe");
+      await state.saveShape("polyline", line, "pipe", "layer-1");
+      await state.shapeRenderManager.whenIdle();
+      const write = parentWindow.postMessage.mock.calls.find(
+        ([message]) => message.type === "mapObjectWriteRequested",
+      )![0];
+      expect(write.request).toMatchObject({
+        method: "POST",
+        url: "/shape",
+        body: { layer_id: "layer-1" },
+      });
+      const delta = parentWindow.postMessage.mock.calls.find(
+        ([message]) => message.type === "mapObjectChanged",
+      )![0];
+      expect(delta.change.object.updated_at).toBe("server-updated");
+      expect(state.shapeRenderManager.getRecord("saved").updated_at).toBe("server-updated");
+      expect(fetch).not.toHaveBeenCalled();
+      expect(
+        parentWindow.postMessage.mock.calls.some(
+          ([message]) => message.type === "callParentReload",
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it("親から受信した4万件も全件をLeaflet化せず原本へ登録する", async () => {
+    const page = pages[0]!;
+    const dom = smokeLoadPage(
+      { ...page, globals: { ...page.globals, markersFromAxum: {}, shapesFromAxum: [] } },
+      { lastMapView: { latitude: 35.681, longitude: 139.767, zoom: 14 } },
+    );
+    const state = editorState(dom);
+    const far = editorShapes()[1]!;
+    const shapes = Array.from({ length: 40000 }, (_, i) => ({ ...far, id: "far-" + i }));
+    expect(await state.applyEditorMapSnapshot({ markers: {}, shapes })).toBe(true);
+    await state.shapeRenderManager.whenIdle();
+    expect(state.shapeRenderManager.getStats()).toMatchObject({
+      recordCount: 40000,
+      createdCount: 0,
+      pendingCount: 0,
+    });
+  }, 15000);
+
   it.each(["map.html", "map-mobile.html"])(
     "%sは範囲外・微小図形を初期生成せず、移動・ズームで必要な図形だけ表示する",
     async (templateName) => {
@@ -906,6 +1082,46 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
       state.map.setView([35.681, 139.767], 5, { animate: false });
       await manager.whenIdle();
       expect(manager.getStats().renderedCount).toBe(0);
+    },
+  );
+  it.each(["map.html", "map-mobile.html"])(
+    "%sは追加・再表示した図形の編集カーソルを現在のモードと図形種別に合わせる",
+    async (templateName) => {
+      const page = pages.find((page) => page.templateName === templateName)!;
+      const circle = {
+        ...shapeRecord,
+        id: "circle",
+        shape_type: "circle",
+        geojson: {
+          type: "Feature",
+          properties: { radius: 200 },
+          geometry: { type: "Point", coordinates: [139.767, 35.681] },
+        },
+      };
+      const dom = smokeLoadPage(
+        { ...page, globals: { ...page.globals, shapesFromAxum: [...editorShapes(), circle] } },
+        { lastMapView: { latitude: 35.681, longitude: 139.767, zoom: 14 } },
+      );
+      const state = new Script(
+        "({map,shapeRenderManager,setShapeGeometryEditingMode})",
+      ).runInContext(dom.getInternalVMContext()) as any;
+      const manager = state.shapeRenderManager;
+      await manager.whenIdle();
+      const near = manager.getLayer("near");
+      const hasEditCursor = (layer: any) =>
+        layer.getElement()?.classList.contains("is-shape-vertex-add-target");
+      expect(hasEditCursor(near)).toBe(false);
+      state.setShapeGeometryEditingMode("input");
+      expect(hasEditCursor(near)).toBe(true);
+      expect(hasEditCursor(manager.getLayer("circle"))).toBe(false);
+      state.map.setView([34.69, 135.5], 14, { animate: false });
+      await manager.whenIdle();
+      expect(state.map.hasLayer(near)).toBe(false);
+      state.setShapeGeometryEditingMode("view");
+      state.map.setView([35.681, 139.767], 14, { animate: false });
+      await manager.whenIdle();
+      expect(manager.getLayer("near")).toBe(near);
+      expect(hasEditCursor(near)).toBe(false);
     },
   );
   const shapeVisibilityPageNames = ["map.html", "map-mobile.html", "map-anather.html"];
