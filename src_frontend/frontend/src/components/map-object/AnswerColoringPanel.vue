@@ -241,7 +241,7 @@ const openPanel = (event: Event) => {
 </script>
 
 <template>
-  <details ref="panel" class="color-panel" @toggle="openPanel">
+  <details ref="panel" class="color-panel" open @toggle="openPanel">
     <summary>地図で色分け</summary>
     <fieldset :disabled="disabled || loading">
       <label class="color-form"

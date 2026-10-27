@@ -106,6 +106,7 @@ pub struct AnswerPage {
     pub editing_supported: bool,
     pub rows: Vec<AnswerRow>,
     pub total: i64,
+    pub target_count: i64,
     pub as_of: DateTime<Utc>,
     pub next_cursor: Option<AnswerCursor>,
 }
@@ -543,15 +544,16 @@ pub async fn search_answers_handler(
     validate(&q)?;
     let at = q.as_of.unwrap_or_else(Utc::now);
     let mut tx = super::answer_sqlite::begin_read(&pool).await?;
-    let total = build_query(&user, &q, at)
+    let (total, target_count): (i64, i64) = build_query(&user, &q, at)
         .push(
             r#"
             SELECT
-                count(*)
+                count(*),
+                count(DISTINCT target_type || ':' || target_id)
             FROM filtered
             "#,
         )
-        .build_query_scalar::<i64>()
+        .build_query_as()
         .fetch_one(&mut *tx)
         .await?;
     let size = q.limit.unwrap_or(50);
@@ -591,6 +593,7 @@ pub async fn search_answers_handler(
         editing_supported: true,
         rows,
         total,
+        target_count,
         as_of: at,
         next_cursor,
     }))

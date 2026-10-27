@@ -132,12 +132,14 @@ async fn owned_history_latest_typed_filters_and_csv_agree() {
         sqlx::query(&format!("INSERT INTO {kind}_form_submission_model(id,{kind}_id,create_at,submitted_values,rendered_markdown,source_form,form_snapshot) VALUES($1,$2,$3,$4,'',$5,$6)"))
             .bind(id.to_string()).bind(target.to_string()).bind(base+Duration::seconds(offset)).bind(values).bind(source).bind(definition).execute(&pool).await.unwrap();
     }
-    assert_eq!(search(&pool, user, json!({})).await.total, 6);
+    let history = search(&pool, user, json!({})).await;
+    assert_eq!((history.total, history.target_count), (6, 3));
     assert_eq!(search(&pool, other, json!({})).await.total, 1);
     assert_eq!(search(&pool, user, json!({"mode":"latest"})).await.total, 5);
     let condition = |id: &str, typ: &str, op: &str, value: Value| json!({"field_id":id,"field_type":typ,"op":op,"value":value});
     let latest=search(&pool,user,json!({"mode":"latest","common_form_id":form,"conditions":[condition("state","select","in",json!(["要対応"]))]})).await;
     assert_eq!(latest.total, 2);
+    assert_eq!(latest.target_count, 2);
     assert!(latest.rows.iter().all(|r| r.target_id != a.to_string()));
     assert_eq!(
         search(
@@ -200,6 +202,7 @@ async fn owned_history_latest_typed_filters_and_csv_agree() {
     let at = first.as_of;
     let mut keys = vec![];
     loop {
+        assert_eq!(first.target_count, 3);
         keys.extend(
             first
                 .rows

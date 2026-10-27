@@ -37,6 +37,7 @@ const options = {
 const result = {
   rows: [row],
   total: 60,
+  target_count: 1,
   as_of: "2026-01-02T00:00:00Z",
   next_cursor: { id: "answer", at: row.create_at, target_type: "marker" },
 };
@@ -142,6 +143,35 @@ describe("回答一覧", () => {
     expect(button(wrapper, "地図で確認").attributes("disabled")).toBeDefined();
     wrapper.unmount();
   });
+  it.each([
+    { total: 10_000, target_count: 10_000, disabled: false },
+    { total: 10_001, target_count: 10_001, disabled: true },
+    { total: 20_000, target_count: 2, disabled: false },
+    { total: 10_001, target_count: undefined, disabled: true },
+  ])("地図の上限を重複のない対象数で判定する: %j", async ({ total, target_count, disabled }) => {
+    api.post.mockImplementation(async (url: string) => ({
+      data: url.endsWith("options") ? options : { ...result, total, target_count },
+    }));
+    const wrapper = await open();
+    expect((button(wrapper, "地図で確認").element as HTMLButtonElement).disabled).toBe(disabled);
+    expect(wrapper.text().includes("地図で確認できる対象は10,000件までです")).toBe(disabled);
+    wrapper.unmount();
+  });
+  it("地図の上限判定は表示中の条件を使い、絞り込みを反映すると有効に戻る", async () => {
+    api.post.mockImplementation(async (url: string) => ({
+      data: url.endsWith("options") ? options : { ...result, total: 10_001, target_count: 10_001 },
+    }));
+    const wrapper = await open();
+    await select(wrapper, "共通フォームを選択").setValue("common");
+    await flushPromises();
+    expect(button(wrapper, "地図で確認").attributes("disabled")).toBeDefined();
+    api.post.mockResolvedValueOnce({ data: result });
+    await wrapper.get("form.search-form").trigger("submit");
+    await flushPromises();
+    expect(button(wrapper, "地図で確認").attributes("disabled")).toBeUndefined();
+    expect(wrapper.text()).not.toContain("地図で確認できる対象は10,000件までです");
+    wrapper.unmount();
+  });
   it("APIのフォーム入力順を表示項目とテーブル列に維持する", async () => {
     const fields = [
       { id: "z-last-id", label: "最初の質問", field_type: "text", choices: [] },
@@ -172,6 +202,13 @@ describe("回答一覧", () => {
       .findAll("button")
       .find((b) => b.text().startsWith("絞り込み"))!
       .trigger("click");
+    expect(
+      wrapper
+        .findAll(".search-grid > label")
+        .map((label) => label.element.firstChild?.textContent?.trim()),
+    ).toEqual(["共通フォームを選択", "適用元の版", "対象種別", "レイヤ"]);
+    expect(wrapper.text()).not.toMatch(/詳しい条件|回答日時・開始|回答日時・終了/);
+    expect(wrapper.find(".search-grid input").exists()).toBe(false);
     expect(
       wrapper
         .get(".filter-actions")
@@ -355,17 +392,19 @@ describe("回答一覧", () => {
   });
   it("条件クリアでも呼び出し元の対象範囲を保持する", async () => {
     const wrapper = await open({ targetId: "target", targetType: "marker" });
-    await wrapper
-      .findAll("label")
-      .find((l) => l.text().startsWith("対象名"))!
-      .get("input")
-      .setValue("検索語");
+    await select(wrapper, "レイヤ").setValue("layer");
+    await button(wrapper, "条件を追加").trigger("click");
     await button(wrapper, "条件をクリア").trigger("click");
     await wrapper.get("form.search-form").trigger("submit");
     await flushPromises();
     expect(api.post).toHaveBeenLastCalledWith(
       "/form-answers/search",
-      expect.objectContaining({ target_id: "target", target_type: "marker", target_name: null }),
+      expect.objectContaining({
+        target_id: "target",
+        target_type: "marker",
+        layer_id: null,
+        conditions: [],
+      }),
     );
     wrapper.unmount();
   });
