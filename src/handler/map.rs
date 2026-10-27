@@ -143,6 +143,7 @@ pub async fn map_get_handler(
     let longitude = params.longitude.unwrap_or(138.500);
     let layer = params.layer;
     let is_master = params.is_master.unwrap_or(true);
+    let parent_data = params.data_source.as_deref() == Some("parent");
 
     let render_html = if is_mobile {
         "map-mobile.html"
@@ -163,7 +164,9 @@ pub async fn map_get_handler(
         },
     };
 
-    let markers = if is_master {
+    let markers = if parent_data {
+        Ok(Vec::new())
+    } else if is_master {
         query_as!(
             MarkerObject,
             r#"
@@ -267,7 +270,9 @@ pub async fn map_get_handler(
         ORDER BY created_at ASC
         "#
     });
-    let shapes = if is_master {
+    let shapes = if parent_data {
+        Ok(Vec::new())
+    } else if is_master {
         shapes.bind(&user_id).fetch_all(&pool).await
     } else {
         shapes
@@ -292,6 +297,10 @@ pub async fn map_get_handler(
     context.insert(
         "tileOverlays",
         &crate::handler::tile_overlays::selected_tiles(&pool, &user_id).await?,
+    );
+    context.insert(
+        "mapDataSource",
+        if parent_data { "parent" } else { "server" },
     );
     context.insert("layersFromAxum", &layers_hash_map);
     context.insert("markersFromAxum", &markers_hash_map);

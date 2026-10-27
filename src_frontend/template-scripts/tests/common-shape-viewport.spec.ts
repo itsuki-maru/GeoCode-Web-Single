@@ -3,20 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import { createShapeViewportRuntime } from "../src/map/common/shape-viewport";
 
 describe("map common shape viewport", () => {
-  it("suppresses initial rendering only above the configured threshold", () => {
-    const { runtime } = createRuntime();
-
-    expect(runtime.shouldSuppressInitialShapeRendering(new Array(400))).toBe(
-      false,
-    );
-    expect(runtime.shouldSuppressInitialShapeRendering(new Array(401))).toBe(
-      true,
-    );
-    expect(
-      runtime.shouldSuppressInitialShapeRendering({ a: {}, b: {} }, 1),
-    ).toBe(true);
-  });
-
   it("binds labels only at a detailed zoom and inside the viewport", () => {
     let zoom = 7;
     const inside = createLabelLayer(true);
@@ -31,8 +17,7 @@ describe("map common shape viewport", () => {
     const { runtime } = createRuntime();
     const manager = runtime.createViewportShapeLabelManager({
       bindLabel,
-      getLabelLatLng: (layer) =>
-        (layer as ReturnType<typeof createLabelLayer>).point,
+      getLabelLatLng: (layer) => (layer as ReturnType<typeof createLabelLayer>).point,
       getLayers: () => [inside, outside],
       map,
     });
@@ -45,6 +30,33 @@ describe("map common shape viewport", () => {
     expect(bindLabel).toHaveBeenCalledExactlyOnceWith(inside, inside.point);
     expect(inside.openTooltip).toHaveBeenCalledOnce();
     expect(outside.openTooltip).not.toHaveBeenCalled();
+  });
+
+  it("keeps the name-label limit at 50 and restores labels when candidates decrease", () => {
+    const layers = Array.from({ length: 49 }, () => createLabelLayer(true));
+    const bindLabel = vi.fn((layer: ReturnType<typeof createLabelLayer>) => {
+      layer.tooltip = {};
+    });
+    const manager = createShapeViewportRuntime().createViewportShapeLabelManager({
+      bindLabel,
+      getLabelLatLng: (layer) => (layer as ReturnType<typeof createLabelLayer>).point,
+      getLayers: () => layers,
+      map: createMap(),
+    });
+
+    manager.refresh();
+    expect(layers.every((layer) => layer.getTooltip())).toBe(true);
+    expect(bindLabel).toHaveBeenCalledTimes(49);
+
+    layers.push(createLabelLayer(true));
+    manager.refresh();
+    expect(layers.every((layer) => !layer.getTooltip())).toBe(true);
+    expect(bindLabel).toHaveBeenCalledTimes(49);
+
+    layers.pop();
+    manager.refresh();
+    expect(layers.every((layer) => layer.getTooltip())).toBe(true);
+    expect(bindLabel).toHaveBeenCalledTimes(98);
   });
 
   it("shows a focused named layer even when ordinary labels are disabled", () => {
@@ -92,10 +104,7 @@ describe("map common shape viewport", () => {
 
     manager.setEnabled(true);
     manager.refresh();
-    expect(attachMarkers).toHaveBeenCalledExactlyOnceWith(
-      inside,
-      expect.any(Object),
-    );
+    expect(attachMarkers).toHaveBeenCalledExactlyOnceWith(inside, expect.any(Object));
     expect(removeMarkers).toHaveBeenCalledWith(inside);
     expect(removeMarkers).toHaveBeenCalledWith(outside);
     expect(removeMarkers).toHaveBeenCalledWith(hidden);
@@ -138,12 +147,6 @@ function createRuntime({
 }: { scheduleFrame?: (callback: () => void) => number } = {}) {
   const runtime = createShapeViewportRuntime({
     cancelFrame: vi.fn(),
-    getShapeRecords: (records) => {
-      if (Array.isArray(records)) return records;
-      return records && typeof records === "object"
-        ? Object.values(records)
-        : [];
-    },
     scheduleFrame,
   });
   return { runtime };

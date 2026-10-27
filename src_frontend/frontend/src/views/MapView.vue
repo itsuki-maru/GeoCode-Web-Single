@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from "vue";
+import { nextTick, ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { AxiosError } from "axios";
 import { useRouter } from "vue-router";
 import type {
@@ -13,6 +13,8 @@ import type {
 } from "@/interface";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useShapeStore } from "@/stores/shapes";
+import { useAuthStore } from "@/stores/auth";
+import { useMapObjectWriter } from "@/composables/useMapObjectWriter";
 import { useLayersStore } from "@/stores/layers";
 import { useImageStore } from "@/stores/images";
 import { authCheckUrl, getMasterLayerIdUrl, exportJsonUrl, disableTokenUrl } from "@/router/urls";
@@ -82,6 +84,7 @@ const layerInputPolicies = computed(() =>
 const mapobjStore = useMapObjectStore();
 const markerList = computed((): Map<string, MapObjectData> => mapobjStore.mapObjectList);
 const shapeStore = useShapeStore();
+const authStore = useAuthStore();
 mapobjStore.clearMapObject();
 shapeStore.clearShapeList();
 const shapeList = computed((): Map<string, ShapeData> => shapeStore.shapeList);
@@ -114,6 +117,33 @@ const isMasterLayer = computed((): boolean => activeLayer.value === masterLayerI
 let mapReloadSequence = 0;
 let mapReloadController: AbortController | null = null;
 let disposed = false;
+let mapDataRevision = 0;
+let initializedAccountId = "";
+let displayedLayerId = "";
+let displayedMapUrl = "";
+let displayedQuery: QueryForm = { query1: "", query2: "" };
+let mapInstanceRevision = 0;
+let mapSearchSequence = 0;
+const receivedMutations = new Set<string>();
+watch(
+  () => authStore.accountId,
+  (accountId, previousAccountId) => {
+    if (!previousAccountId || accountId === previousAccountId) return;
+    initializedAccountId = "";
+    displayedLayerId = "";
+    displayedMapUrl = "";
+    displayedQuery = { query1: "", query2: "" };
+    receivedMutations.clear();
+    srcUrl.value = "";
+    isMapFrameLoading.value = false;
+  },
+);
+
+const parentMapUrl = (value: string): string => {
+  const target = new URL(value, window.location.origin);
+  target.searchParams.set("data_source", "parent");
+  return target.toString();
+};
 
 onUnmounted(() => {
   disposed = true;
@@ -176,6 +206,13 @@ watch(activeLayer, async (): Promise<void> => {
     return;
   if (synchronized) {
     saveLastActiveLayerId(selectedLayerId);
+  } else if (displayedLayerId && layersStore.layersList.has(displayedLayerId)) {
+    suppressNextActiveLayerReload = true;
+    activeLayer.value = displayedLayerId;
+    if (srcUrl.value !== displayedMapUrl) await reloadMap(displayedMapUrl);
+    showMessage(
+      "地図データを更新できませんでした。現在の表示を保持しています。再読み込みしてください。",
+    );
   } else if (selectedLayerId !== masterLayerId.value) {
     activeLayer.value = masterLayerId.value;
   } else {
@@ -183,11 +220,12 @@ watch(activeLayer, async (): Promise<void> => {
   }
 });
 
-// 読み込みごとに対象レイヤを保持し、最新の読み込みだけが現在の画面を更新できるようにする。
+// 一覧と地図は同じ取得済み原本を使い、古い範囲の応答は現在の画面へ反映しない。
 const reloadMap = async (
   mapUrl: string,
   absolute: boolean = false,
   forceIframeReload: boolean = false,
+  forceDataReload: boolean = false,
 ): Promise<boolean> => {
   const selectedLayerId = activeLayer.value;
   if (!selectedLayerId || disposed) return false;
@@ -201,48 +239,122 @@ const reloadMap = async (
     !controller.signal.aborted &&
     sequence === mapReloadSequence &&
     activeLayer.value === selectedLayerId;
-  if (absolute) {
-    showProgressModal.value = true;
-    mapobjStore.clearMapObject();
-    shapeStore.clearShapeList();
-  }
+  const previousDisplay = {
+    accountId: authStore.accountId,
+    search:
+      displayedQuery.query1 || displayedQuery.query2
+        ? { ...displayedQuery, layerId: displayedLayerId }
+        : null,
+    query: { ...displayedQuery },
+    markerLayer: displayedLayerId || mapobjStore.activeLayerId,
+    markerMaster: displayedLayerId
+      ? displayedLayerId === masterLayerId.value
+      : mapobjStore.activeIsMaster,
+    shapeLayer: displayedLayerId || shapeStore.activeLayerId,
+    shapeMaster: displayedLayerId
+      ? displayedLayerId === masterLayerId.value
+      : shapeStore.activeIsMaster,
+  };
+  const releaseMarkers = mapobjStore.recordCache.retainScope(
+    previousDisplay.markerLayer,
+    previousDisplay.markerMaster,
+  );
+  const releaseShapes = shapeStore.recordCache.retainScope(
+    previousDisplay.shapeLayer,
+    previousDisplay.shapeMaster,
+  );
+  const restoreDisplay = () => {
+    if (previousDisplay.accountId !== authStore.accountId) return;
+    shapeStore.activateScope(previousDisplay.shapeLayer, previousDisplay.shapeMaster);
+    mapobjStore.activateScope(
+      previousDisplay.markerLayer,
+      previousDisplay.markerMaster,
+      previousDisplay.search,
+    );
+    mapObjectQueryFormData.value = previousDisplay.query;
+    filterMapObjects();
+  };
+  if (absolute) showProgressModal.value = true;
   try {
-    await apiClient.get(authCheckUrl, { signal: controller.signal });
+    const auth = await apiClient.get(authCheckUrl, { signal: controller.signal });
     if (!isCurrent()) return false;
+    const accountId = auth.data?.id ?? layersStore.layersList.get(masterLayerId.value)?.user_id;
+    if (!accountId) throw new Error("Account identity is unavailable");
+    if (authStore.accountId !== String(accountId)) {
+      initializedAccountId = "";
+      receivedMutations.clear();
+    }
+    authStore.setAccount(String(accountId));
     if (absolute) {
+      if (forceDataReload) {
+        mapobjStore.invalidateCache();
+        shapeStore.invalidateCache();
+      }
       const [markersLoaded, shapesLoaded] = await Promise.all([
-        mapobjStore.queryMapObject(selectedLayerId, isMaster, controller.signal),
-        shapeStore.queryShapes(selectedLayerId, isMaster, controller.signal),
+        mapobjStore.queryMapObject(selectedLayerId, isMaster, controller.signal, forceDataReload),
+        shapeStore.queryShapes(selectedLayerId, isMaster, controller.signal, forceDataReload),
       ]);
       if (!isCurrent()) return false;
       if (!markersLoaded || !shapesLoaded) {
-        mapobjStore.clearMapObject();
-        shapeStore.clearShapeList();
-        srcUrl.value = "";
+        restoreDisplay();
         isMapFrameLoading.value = false;
         return false;
       }
       isReload.value = true;
       mapObjectQueryFormData.value = { query1: "", query2: "" };
+      mapobjStore.refreshSearchResults();
       mapIframeRef.value?.filterMapObjects(null, null);
     }
-    const shouldForceIframeReload = forceIframeReload && srcUrl.value === mapUrl;
-    if (srcUrl.value !== mapUrl || shouldForceIframeReload) isMapFrameLoading.value = true;
-    srcUrl.value = mapUrl;
-    if (shouldForceIframeReload) {
-      const reloaded = mapIframeRef.value?.reloadMapFrame() ?? false;
-      if (!reloaded) isMapFrameLoading.value = false;
-      return reloaded;
+    const destination = parentMapUrl(mapUrl);
+    const shouldForceIframeReload = forceIframeReload && srcUrl.value === destination;
+    if (srcUrl.value !== destination || shouldForceIframeReload) {
+      isMapFrameLoading.value = true;
+      ++mapInstanceRevision;
     }
-    return true;
+    srcUrl.value = destination;
+    await nextTick();
+    if (!isCurrent()) return false;
+    if (shouldForceIframeReload && !mapIframeRef.value?.reloadMapFrame()) {
+      isMapFrameLoading.value = false;
+      return false;
+    }
+    // 再生成や同期失敗からの復旧も、取得済み原本を送り直して行う。
+    let synchronized = false;
+    do {
+      const revision = mapDataRevision;
+      synchronized =
+        (await mapIframeRef.value?.initializeMapObjects({
+          markers: Object.fromEntries(
+            mapobjStore
+              .getScopeRecords(selectedLayerId, isMaster)
+              .map((record) => [record.id, record]),
+          ),
+          shapes: shapeStore.getScopeRecords(selectedLayerId, isMaster),
+          scopeKey: isMaster ? "all" : selectedLayerId,
+          revision,
+        })) ?? false;
+      if (!isCurrent()) return false;
+      if (!synchronized || revision === mapDataRevision) break;
+    } while (isCurrent());
+    if (!synchronized) {
+      restoreDisplay();
+      isMapFrameLoading.value = false;
+    } else {
+      initializedAccountId = String(accountId);
+      displayedLayerId = selectedLayerId;
+      displayedMapUrl = destination;
+      if (absolute) displayedQuery = { query1: "", query2: "" };
+    }
+    return synchronized;
   } catch (error) {
     if (!isCurrent()) return false;
-    if (absolute) {
-      srcUrl.value = "";
-      isMapFrameLoading.value = false;
-    }
+    isMapFrameLoading.value = false;
+    if (apiClient.isAxiosError(error) && (error as AxiosError).response?.status === 401)
+      authStore.logout();
     throw error;
   } finally {
+    releaseMarkers();
+    releaseShapes();
     if (isCurrent() && absolute) showProgressModal.value = false;
   }
 };
@@ -259,6 +371,7 @@ const handleUploadProgressChange = (progress: UploadProgressState): void => {
 
 const getMarker = (id: string): void => {
   const marker = mapobjStore.getById(id);
+  if (!marker) return;
   const isMaster = activeLayer.value === masterLayerId.value;
   reloadMap(
     `${baseUrl}/map?marker_id=${marker.id}&latitude=${marker.latitude}&longitude=${marker.longitude}&layer=${activeLayer.value}&is_master=${isMaster}`,
@@ -267,6 +380,34 @@ const getMarker = (id: string): void => {
 
 const mapIframeRef = ref<InstanceType<typeof MapIframe> | null>(null);
 const liveLocationSharingRef = ref<InstanceType<typeof LiveLocationSharing> | null>(null);
+
+const onMapDataRequested = async (): Promise<void> => {
+  if (disposed || initializedAccountId !== authStore.accountId) return;
+  ++mapInstanceRevision;
+  const requestedUrl = srcUrl.value;
+  const mapUrl = new URL(requestedUrl);
+  const selectedLayerId = mapUrl.searchParams.get("layer") || "";
+  const accountId = authStore.accountId;
+  const isMaster = mapUrl.searchParams.get("is_master") === "true";
+  let synchronized = false;
+  do {
+    const revision = mapDataRevision;
+    synchronized =
+      (await mapIframeRef.value?.initializeMapObjects({
+        markers: Object.fromEntries(
+          mapobjStore
+            .getScopeRecords(selectedLayerId, isMaster)
+            .map((record) => [record.id, record]),
+        ),
+        shapes: shapeStore.getScopeRecords(selectedLayerId, isMaster),
+        scopeKey: isMaster ? "all" : selectedLayerId,
+        revision,
+      })) ?? false;
+    if (disposed || accountId !== authStore.accountId || srcUrl.value !== requestedUrl) return;
+    if (!synchronized || revision === mapDataRevision) break;
+  } while (!disposed);
+  if (!synchronized) showMessage("地図の同期に失敗しました。再読み込みしてください。");
+};
 
 const getMapObjectFocusPosition = (
   payload: MapObjectUpdatePayload,
@@ -302,8 +443,9 @@ const receiveAnswerUpdate = (event: Event) => {
   if (!object?.id) return;
   let payload: MapObjectUpdatePayload;
   if ("geojson" in object) {
-    if (!shapeStore.shapeList.has(object.id)) return;
-    shapeStore.shapeList.set(object.id, object);
+    if (!shapeStore.getById(object.id)) return;
+    shapeStore.upsertRecord(object);
+    ++mapDataRevision;
     payload = {
       objectType: "shape",
       id: object.id,
@@ -313,8 +455,9 @@ const receiveAnswerUpdate = (event: Event) => {
       geojson: object.geojson,
     };
   } else {
-    if (!mapobjStore.mapObjectList.has(object.id)) return;
-    mapobjStore.mapObjectList.set(object.id, object);
+    if (!mapobjStore.getById(object.id)) return;
+    mapobjStore.upsertRecord(object);
+    ++mapDataRevision;
     payload = {
       objectType: "marker",
       id: object.id,
@@ -325,14 +468,19 @@ const receiveAnswerUpdate = (event: Event) => {
       longitude: object.longitude,
     };
   }
+  if (!isMasterLayer.value && object.layer_id !== activeLayer.value) {
+    mapobjStore.refreshSearchResults();
+    filterMapObjects();
+    return;
+  }
   void (async () => {
     const updated = (await mapIframeRef.value?.updateMapObject(payload)) ?? false;
     if (!updated) {
       await reloadMapObjectFallback(payload);
       return;
     }
-    if (mapObjectQueryFormData.value.query1 || mapObjectQueryFormData.value.query2)
-      await handleMapObjectSearch(mapObjectQueryFormData.value);
+    mapobjStore.refreshSearchResults();
+    filterMapObjects();
   })();
 };
 window.addEventListener("geocode-answer-updated", receiveAnswerUpdate);
@@ -342,10 +490,16 @@ const handleMapObjectUpdated = async (
   payload: MapObjectUpdatePayload,
   previousLayerId: string,
 ): Promise<void> => {
+  ++mapDataRevision;
+  mapobjStore.refreshSearchResults();
   const isMaster = activeLayer.value === masterLayerId.value;
-  if (payload.layerId !== previousLayerId && !isMaster) {
+  if (payload.layerId !== previousLayerId && !isMaster && activeLayer.value === previousLayerId) {
     pendingLayerMapUrl.value = getMapObjectMapUrl(payload, payload.layerId, false);
     activeLayer.value = payload.layerId;
+    return;
+  }
+  if (!isMaster && payload.layerId !== activeLayer.value) {
+    filterMapObjects();
     return;
   }
 
@@ -355,9 +509,8 @@ const handleMapObjectUpdated = async (
     return;
   }
 
-  if (mapObjectQueryFormData.value.query1 || mapObjectQueryFormData.value.query2) {
-    await handleMapObjectSearch(mapObjectQueryFormData.value);
-  }
+  mapobjStore.refreshSearchResults();
+  filterMapObjects();
 
   const focusPosition = getMapObjectFocusPosition(payload);
   if (focusPosition) {
@@ -371,6 +524,9 @@ const handleMapObjectUpdated = async (
 };
 
 const removeMarkerFromMap = async (id: string): Promise<boolean> => {
+  ++mapDataRevision;
+  mapobjStore.refreshSearchResults();
+  filterMapObjects();
   const removed = (await mapIframeRef.value?.deleteMapObject(id)) ?? false;
   if (removed) return true;
 
@@ -400,26 +556,43 @@ const focusObject = (type: "marker" | "shape", id: string, lat: number, lng: num
 };
 
 const filterMapObjects = (): void => {
+  if (!mapobjStore.search?.query1 && !mapobjStore.search?.query2) {
+    mapIframeRef.value?.filterMapObjects(null, null);
+    return;
+  }
   const markerIds = [...mapobjStore.mapObjectList.keys()];
   mapIframeRef.value?.filterMapObjects(markerIds, mapobjStore.filteredShapeIds);
 };
 
 const handleMapObjectSearch = async (query: QueryForm, reset: boolean = false): Promise<void> => {
+  const layerId = activeLayer.value;
+  const mapSequence = mapReloadSequence;
+  const searchSequence = ++mapSearchSequence;
+  const isCurrent = () =>
+    !disposed &&
+    layerId === activeLayer.value &&
+    mapSequence === mapReloadSequence &&
+    searchSequence === mapSearchSequence;
   try {
     mapObjectQueryFormData.value = { ...query };
-    if (reset) {
-      await mapobjStore.queryWordMapObject("", "", activeLayer.value);
-    } else {
-      await mapobjStore.queryWordMapObject(query.query1, query.query2, activeLayer.value);
+    const applied = reset ? { query1: "", query2: "" } : { ...query };
+    const loaded = await mapobjStore.queryWordMapObject(applied.query1, applied.query2, layerId);
+    if (!isCurrent()) return;
+    if (!loaded) {
+      showMessage("検索結果を取得できませんでした。再試行してください。");
+      return;
     }
+    displayedQuery = applied;
     filterMapObjects();
   } catch (error) {
+    if (!isCurrent()) return;
     console.error(error);
+    showMessage("検索結果を取得できませんでした。再試行してください。");
   }
 };
-
 // --- ログイン画面への遷移 ---
 async function loginRedirect(): Promise<void> {
+  authStore.logout();
   try {
     await apiClient.post(disableTokenUrl);
   } catch (error) {
@@ -553,6 +726,7 @@ const confirmLayerDelete = async (): Promise<void> => {
       `${baseUrl}/map?layer=${masterLayerId.value}&is_master=true`,
       true,
       true,
+      true,
     );
     if (objectsSynchronized) saveLastActiveLayerId(masterLayerId.value);
     if (objectsSynchronized) {
@@ -663,7 +837,7 @@ const syncJsonImportView = async (): Promise<void> => {
   try {
     const results = await Promise.allSettled([
       layersStore.initList(),
-      reloadMap(`${baseUrl}/map?layer=${selectedLayerId}&is_master=${isMaster}`, true, true),
+      reloadMap(`${baseUrl}/map?layer=${selectedLayerId}&is_master=${isMaster}`, true, true, true),
     ]);
     if (disposed) return;
     const synchronized = results.every((result) => result.status === "fulfilled" && result.value);
@@ -834,6 +1008,123 @@ onUnmounted(() => {
   window.removeEventListener("keydown", handleKeyDown);
 });
 
+// 保存処理を親で継続し、保存中に地図が切り替わっても原本へ結果を反映する。
+const writeMapObject = useMapObjectWriter();
+const onMapObjectWriteRequested: typeof writeMapObject = async (request, reply) => {
+  if (disposed || !authStore.isAuthenticated || initializedAccountId !== authStore.accountId) {
+    reply?.({
+      status: 409,
+      data: { message: "地図のログイン状態が変更されました。再読み込みしてください。" },
+    });
+    return;
+  }
+  const sourceFrame = mapInstanceRevision;
+  await writeMapObject(request, (result) => {
+    if (result.change) {
+      onMapObjectChanged(result.change);
+      if (!disposed && sourceFrame !== mapInstanceRevision) {
+        const change = result.change;
+        void (async () => {
+          let updated = false;
+          if (change.operation === "delete" && change.id)
+            updated =
+              (await mapIframeRef.value?.deleteMapObject(change.id, change.objectType)) ?? false;
+          else if (change.object) {
+            const current =
+              change.objectType === "shape"
+                ? shapeStore.getById(change.object.id)
+                : mapobjStore.getById(change.object.id);
+            if (!current)
+              updated =
+                (await mapIframeRef.value?.deleteMapObject(change.object.id, change.objectType)) ??
+                false;
+            else if (!isMasterLayer.value && current.layer_id !== activeLayer.value) updated = true;
+            else
+              updated =
+                (await mapIframeRef.value?.upsertMapObject(change.objectType, current)) ?? false;
+          }
+          if (!updated && !isMapFrameLoading.value) await onMapDataRequested();
+        })();
+      }
+    }
+    reply?.({ status: result.status, data: result.data });
+  });
+};
+
+// 地図内で保存済みの差分を一覧原本へ反映し、保存リクエストの再実行なしに受領を返す。
+const onMapObjectChanged = (
+  change: {
+    operation: "upsert" | "delete";
+    objectType: "marker" | "shape";
+    object?: MapObjectData | ShapeData;
+    id?: string;
+    previousLayerId?: string | null;
+    mutationId: string;
+  },
+  acknowledge: (success: boolean) => void = () => {},
+): void => {
+  if (disposed || !authStore.isAuthenticated || initializedAccountId !== authStore.accountId) {
+    acknowledge(false);
+    return;
+  }
+  if (receivedMutations.has(change.mutationId)) {
+    acknowledge(true);
+    return;
+  }
+  try {
+    if (change.operation === "upsert" && change.object?.id) {
+      let adopted = false;
+      if (change.objectType === "shape" && "geojson" in change.object)
+        adopted = shapeStore.upsertRecord(change.object);
+      else if (change.objectType === "marker" && "marker_name" in change.object)
+        adopted = mapobjStore.upsertRecord(change.object);
+      else {
+        acknowledge(false);
+        return;
+      }
+      if (!adopted) {
+        receivedMutations.add(change.mutationId);
+        if (receivedMutations.size > 1024)
+          receivedMutations.delete(receivedMutations.values().next().value!);
+        acknowledge(true);
+        const current =
+          change.objectType === "shape"
+            ? shapeStore.getById(change.object.id)
+            : mapobjStore.getById(change.object.id);
+        if (current) void mapIframeRef.value?.upsertMapObject(change.objectType, current);
+        else void mapIframeRef.value?.deleteMapObject(change.object.id, change.objectType);
+        return;
+      }
+    } else if (change.operation === "delete" && change.id) {
+      if (change.objectType === "shape") shapeStore.removeRecord(change.id);
+      else mapobjStore.removeRecord(change.id);
+    } else {
+      acknowledge(false);
+      return;
+    }
+    receivedMutations.add(change.mutationId);
+    if (receivedMutations.size > 1024)
+      receivedMutations.delete(receivedMutations.values().next().value!);
+    ++mapDataRevision;
+    mapobjStore.refreshSearchResults();
+    filterMapObjects();
+    acknowledge(true);
+    const nextLayer = change.object?.layer_id;
+    if (
+      nextLayer &&
+      change.previousLayerId &&
+      nextLayer !== change.previousLayerId &&
+      activeLayer.value === change.previousLayerId &&
+      !isMasterLayer.value &&
+      layersStore.layersList.has(nextLayer)
+    )
+      activeLayer.value = nextLayer;
+  } catch (error) {
+    console.error(error);
+    acknowledge(false);
+  }
+};
+
 // --- iFrame からの地図再読み込み要求 ---
 const onMapReloadRequested = async (layerId?: string | null): Promise<void> => {
   if (layerId && layerId !== activeLayer.value) {
@@ -842,7 +1133,12 @@ const onMapReloadRequested = async (layerId?: string | null): Promise<void> => {
   }
 
   const isMaster = activeLayer.value === masterLayerId.value;
-  await reloadMap(`${baseUrl}/map?layer=${activeLayer.value}&is_master=${isMaster}`, true);
+  await reloadMap(
+    `${baseUrl}/map?layer=${activeLayer.value}&is_master=${isMaster}`,
+    true,
+    false,
+    true,
+  );
 };
 
 // --- 一覧からの画像削除 ---
@@ -876,7 +1172,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
     @printMap="isOpenPrintMapModal = true"
     @exportJson="exportJsonData"
     @importJson="showJsonUploadModal = true"
-    @reloadMap="reloadMap"
+    @reloadMap="(url, absolute) => reloadMap(url, absolute, false, true)"
     @layerList="openLayerList()"
     @mapObjectSearch="handleMapObjectSearch"
     @update:mapObjectQueryFormData="mapObjectQueryFormData = $event"
@@ -894,6 +1190,9 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
           :height="divHeight"
           :allowedOrigins="allowedOriginsRef"
           @mapReloadRequested="onMapReloadRequested"
+          @mapObjectChanged="onMapObjectChanged"
+          @mapDataRequested="onMapDataRequested"
+          @mapObjectWriteRequested="onMapObjectWriteRequested"
           @mapLoaded="onMapLoaded"
           @printMap="isOpenPrintMapModal = true"
           @loginRedirect="loginRedirect()"

@@ -18,6 +18,10 @@ vi.mock("@/stores/images", () => ({
   useImageStore: () => ({ initList: dependencies.imagesInit }),
 }));
 
+// 認証ガードの検証では、遷移先画面とその依存コンポーネントを読み込まない。
+vi.mock("@/views/AppTop.vue", () => ({ default: { render: () => null } }));
+vi.mock("@/views/MapView.vue", () => ({ default: { render: () => null } }));
+vi.mock("@/views/auth/LoginView.vue", () => ({ default: { render: () => null } }));
 import router from "@/router";
 
 beforeEach(async () => {

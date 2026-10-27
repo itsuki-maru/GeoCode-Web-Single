@@ -59,6 +59,8 @@ PR CI では以下を確認する。
 - `cargo fmt --check`
 - `cargo test --locked`
 
+通常フロントエンドのテストは `../template-scripts/src` を直接読み込むため、`frontend` のmatrixジョブでも `template-scripts` の依存を `npm ci` で準備する。各ジョブの `node_modules` は独立しており、別の `template-scripts` ジョブでインストールしても共有されない。通常フロントエンドのnpmキャッシュキーには、両プロジェクトのlockファイルを含める。
+
 `cargo clippy` は既存警告の整理後に必須化する。導入時は `continue-on-error` ではなく、警告を解消してから必須チェックへ追加する。
 
 ## PR 前のローカル確認

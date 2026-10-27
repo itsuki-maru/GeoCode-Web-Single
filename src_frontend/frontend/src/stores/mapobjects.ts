@@ -1,4 +1,5 @@
 import { defineStore } from "pinia";
+import { markRaw } from "vue";
 import type { MapObjectData, MapObjectQueryResponse } from "@/interface";
 import {
   getMapObjectsUrl,
@@ -7,55 +8,224 @@ import {
   mapQueryObjectsUrl,
 } from "@/router/urls";
 import apiClient from "@/axiosClient";
+import { useShapeStore } from "./shapes";
+import { MapRecordCache, matchesMapSearch } from "./map-record-cache";
 
-interface State {
-  loadRevision: number;
-  mapObjectList: Map<string, MapObjectData>;
-  filteredShapeIds: string[] | null;
-}
-
+const ordered = (records: MapObjectData[]) =>
+  new Map(records.sort((a, b) => b.id.localeCompare(a.id)).map((record) => [record.id, record]));
 export const useMapObjectStore = defineStore("mapobjects", {
-  state: (): State => {
-    return {
-      loadRevision: 0,
-      mapObjectList: new Map<string, MapObjectData>(),
-      filteredShapeIds: null,
-    };
-  },
+  state: () => ({
+    loadRevision: 0,
+    mapObjectList: new Map<string, MapObjectData>(),
+    filteredShapeIds: null as string[] | null,
+    activeLayerId: "",
+    activeIsMaster: true,
+    search: null as { query1: string; query2: string; layerId: string } | null,
+    recordCache: markRaw(new MapRecordCache<MapObjectData>()),
+    mutationRevision: 0,
+    mutationVersions: new Map<string, number>(),
+    dirtyIds: new Set<string>(),
+  }),
   getters: {
-    getById: (state) => {
-      return (id: string): MapObjectData => {
-        const mapobj = state.mapObjectList.get(id) as MapObjectData;
-        return mapobj;
-      };
-    },
+    getById:
+      (state) =>
+      (id: string): MapObjectData =>
+        (state.recordCache.records.get(id) ?? state.mapObjectList.get(id)) as MapObjectData,
   },
   actions: {
-    async initList(): Promise<void> {
-      const revision = ++this.loadRevision;
-      try {
-        const response = await apiClient.get(getMapObjectsUrl);
-        if (revision !== this.loadRevision) return;
-        this.mapObjectList.clear();
+    setAccount(id: string) {
+      if (this.recordCache.setAccount(id)) {
+        this.clearMapObject();
+        this.mutationVersions.clear();
+      }
+    },
+    clearMapObject() {
+      ++this.loadRevision;
+      this.mapObjectList.clear();
+      this.clearSearch();
+    },
+    clearSearch() {
+      this.search = null;
+      this.filteredShapeIds = null;
+      this.dirtyIds.clear();
+    },
+    resetCache() {
+      this.recordCache.reset();
+      this.clearMapObject();
+      this.mutationVersions.clear();
+    },
+    invalidateCache() {
+      this.recordCache.invalidate();
+      ++this.loadRevision;
+    },
+    getScopeRecords(layerId?: string, isMaster?: boolean): MapObjectData[] {
+      return this.recordCache.getRecords(
+        layerId ?? this.activeLayerId,
+        isMaster ?? this.activeIsMaster,
+      );
+    },
+    activateScope(
+      layerId: string,
+      isMaster: boolean,
+      search?: { query1: string; query2: string; layerId: string } | null,
+    ) {
+      this.activeLayerId = layerId;
+      this.activeIsMaster = isMaster;
+      this.recordCache.setActive(layerId, isMaster);
+      if (search !== undefined) this.search = search;
+      this.refreshSearchResults(true);
+    },
+    refreshSearchResults(rebuild = false) {
+      const shapes = useShapeStore();
+      if (!this.search) {
+        if (rebuild) this.mapObjectList = ordered(this.getScopeRecords());
+        else
+          for (const id of this.dirtyIds) {
+            const record = this.recordCache.records.get(id);
+            if (record && (this.activeIsMaster || record.layer_id === this.activeLayerId))
+              this.mapObjectList.set(id, record);
+            else this.mapObjectList.delete(id);
+          }
         this.filteredShapeIds = null;
-        const mapObjData = response.data;
-        for (let key in mapObjData) {
-          this.mapObjectList.set(mapObjData[key]["id"], {
-            id: mapObjData[key]["id"],
-            layer_id: mapObjData[key]["layer_id"],
-            marker_name: mapObjData[key]["marker_name"],
-            latitude: mapObjData[key]["latitude"],
-            longitude: mapObjData[key]["longitude"],
-            detail: mapObjData[key]["detail"],
-            update_at: mapObjData[key]["update_at"],
-          });
-        }
-        let sortedDsc = new Map(
-          [...this.mapObjectList.entries()].sort((a, b) => (a[0] > b[0] ? 1 : -1)).reverse(),
+      } else if (rebuild) {
+        const terms = [this.search.query1, this.search.query2];
+        this.mapObjectList = ordered(
+          this.getScopeRecords().filter((record) =>
+            matchesMapSearch([record.marker_name, record.detail], terms),
+          ),
         );
-        this.mapObjectList = sortedDsc;
+        this.filteredShapeIds = shapes
+          .getScopeRecords(this.activeLayerId, this.activeIsMaster)
+          .filter((record) =>
+            matchesMapSearch([record.name, String(record.geojson?.properties?.memo ?? "")], terms),
+          )
+          .map((record) => record.id);
+      } else {
+        const terms = [this.search.query1, this.search.query2];
+        for (const id of this.dirtyIds) {
+          const record = this.recordCache.records.get(id);
+          if (
+            record &&
+            (this.activeIsMaster || record.layer_id === this.activeLayerId) &&
+            matchesMapSearch([record.marker_name, record.detail], terms)
+          )
+            this.mapObjectList.set(id, record);
+          else this.mapObjectList.delete(id);
+        }
+        if (shapes.dirtyIds.size) {
+          const ids = new Set(this.filteredShapeIds ?? []);
+          for (const id of shapes.dirtyIds) {
+            const record = shapes.recordCache.records.get(id);
+            if (
+              record &&
+              (this.activeIsMaster || record.layer_id === this.activeLayerId) &&
+              matchesMapSearch([record.name, String(record.geojson?.properties?.memo ?? "")], terms)
+            )
+              ids.add(id);
+            else ids.delete(id);
+          }
+          this.filteredShapeIds = [...ids];
+        }
+      }
+      this.dirtyIds.clear();
+      shapes.dirtyIds.clear();
+    },
+    upsertRecord(record: MapObjectData) {
+      if (!this.recordCache.upsert(record)) return false;
+      this.mutationVersions.set(record.id, ++this.mutationRevision);
+      this.dirtyIds.add(record.id);
+      this.refreshSearchResults();
+      return true;
+    },
+    removeRecord(id: string) {
+      this.recordCache.remove(id);
+      this.mutationVersions.set(id, ++this.mutationRevision);
+      this.dirtyIds.add(id);
+      this.refreshSearchResults();
+    },
+    addMapObject(record: MapObjectData) {
+      this.upsertRecord(record);
+    },
+    async initList(): Promise<void> {
+      await this.queryMapObject("", true);
+    },
+    async queryMapObject(
+      layerId: string,
+      isMaster: boolean,
+      signal?: AbortSignal,
+      force = false,
+    ): Promise<boolean> {
+      const revision = ++this.loadRevision;
+      this.activeLayerId = layerId;
+      this.activeIsMaster = isMaster;
+      this.recordCache.setActive(layerId, isMaster);
+      const url = layerId
+        ? `${getMapObjectsUrl}?layer=${encodeURIComponent(layerId)}&is_master=${isMaster}`
+        : getMapObjectsUrl;
+      const loaded = await this.recordCache.load(
+        layerId,
+        isMaster,
+        async (transportSignal) => {
+          const response = signal
+            ? await apiClient.get<Record<string, MapObjectData>>(url, { signal: transportSignal })
+            : await apiClient.get<Record<string, MapObjectData>>(url);
+          return Object.values(response.data);
+        },
+        force,
+      );
+      if (!loaded || signal?.aborted || revision !== this.loadRevision) return false;
+      this.clearSearch();
+      this.refreshSearchResults(true);
+      return true;
+    },
+    async queryWordMapObject(query1 = "", query2 = "", activeLayer: string): Promise<boolean> {
+      const revision = ++this.loadRevision,
+        mutationRevision = this.mutationRevision;
+      const shapeStore = useShapeStore(),
+        shapeMutationRevision = shapeStore.mutationRevision;
+      const terms = [query1, query2];
+      try {
+        const params = new URLSearchParams({ query1, query2, layer: activeLayer });
+        const response = await apiClient.get<MapObjectQueryResponse>(
+          `${mapQueryObjectsUrl}?${params}`,
+        );
+        if (revision !== this.loadRevision) return false;
+        this.search = { query1, query2, layerId: activeLayer };
+        // Search returns a view, not a replacement for the canonical full-scope records.
+        const records = new Map<string, MapObjectData>();
+        for (const record of Object.values(response.data.markers)) {
+          if ((this.mutationVersions.get(record.id) ?? 0) <= mutationRevision) {
+            const accepted = this.recordCache.upsert(record);
+            const canonical = this.recordCache.records.get(record.id);
+            if (
+              accepted ||
+              (canonical &&
+                (this.activeIsMaster || canonical.layer_id === this.activeLayerId) &&
+                matchesMapSearch([canonical.marker_name, canonical.detail], terms))
+            )
+              records.set(record.id, canonical!);
+          }
+        }
+        for (const [id, version] of this.mutationVersions)
+          if (version > mutationRevision) {
+            const record = this.recordCache.records.get(id);
+            if (
+              record &&
+              (this.activeIsMaster || record.layer_id === this.activeLayerId) &&
+              matchesMapSearch([record.marker_name, record.detail], terms)
+            )
+              records.set(id, record);
+            else records.delete(id);
+          }
+        this.mapObjectList = ordered([...records.values()]);
+        this.filteredShapeIds = [...response.data.shape_ids];
+        for (const [id, version] of shapeStore.mutationVersions)
+          if (version > shapeMutationRevision) shapeStore.dirtyIds.add(id);
+        this.refreshSearchResults();
+        return true;
       } catch (error) {
-        console.log(`Mapobjects Store: Init List Error.`);
+        console.log(error);
+        return false;
       }
     },
     async updateMapObject(
@@ -65,130 +235,44 @@ export const useMapObjectStore = defineStore("mapobjects", {
       layer_id: string,
       bodyEdit?: { free_text: string; body_token: string },
     ): Promise<MapObjectData | null> {
-      const updateURL = `${updateMapObjectUrl}${id}`;
-      const payload = {
-        name: name,
-        detail: detail,
-        layer_id: layer_id,
-        ...bodyEdit,
-      };
-
+      const generation = this.recordCache.generation;
       try {
-        await apiClient.put(updateURL, payload);
-        const current = this.mapObjectList.get(id);
-        if (!current) return null;
-        const updated: MapObjectData = {
-          ...current,
-          marker_name: name,
+        const response = await apiClient.put(`${updateMapObjectUrl}${id}`, {
+          name,
           detail,
           layer_id,
-          update_at: new Date().toISOString(),
-        };
-        this.mapObjectList.set(id, updated);
-        return updated;
+          ...bodyEdit,
+        });
+        if (generation !== this.recordCache.generation) return null;
+        const current = this.getById(id);
+        const updated: MapObjectData | undefined =
+          response.data?.object ??
+          (current && {
+            ...current,
+            marker_name: name,
+            detail,
+            layer_id,
+            update_at: new Date().toISOString(),
+          });
+        if (!updated) return null;
+        this.upsertRecord(updated);
+        return this.getById(id) ?? null;
       } catch (error) {
         console.log(error);
         return null;
       }
     },
-    async queryMapObject(
-      layer_id: string,
-      is_master: boolean,
-      signal?: AbortSignal,
-    ): Promise<boolean> {
-      const revision = ++this.loadRevision;
-      try {
-        const requestUrl = `${getMapObjectsUrl}?layer=${layer_id}&is_master=${is_master}`;
-        const response = signal
-          ? await apiClient.get(requestUrl, { signal })
-          : await apiClient.get(requestUrl);
-        if (signal?.aborted || revision !== this.loadRevision) return false;
-        this.mapObjectList.clear();
-        this.filteredShapeIds = null;
-        const mapObjData = response.data;
-        for (let key in mapObjData) {
-          this.mapObjectList.set(mapObjData[key]["id"], {
-            id: mapObjData[key]["id"],
-            layer_id: mapObjData[key]["layer_id"],
-            marker_name: mapObjData[key]["marker_name"],
-            latitude: mapObjData[key]["latitude"],
-            longitude: mapObjData[key]["longitude"],
-            detail: mapObjData[key]["detail"],
-            update_at: mapObjData[key]["update_at"],
-          });
-        }
-        let sortedDsc = new Map(
-          [...this.mapObjectList.entries()].sort((a, b) => (a[0] > b[0] ? 1 : -1)).reverse(),
-        );
-        this.mapObjectList = sortedDsc;
-        return true;
-      } catch (error) {
-        return false;
-      }
-    },
-
-    async queryWordMapObject(
-      query1: string = "",
-      query2: string = "",
-      activeLayer: string,
-    ): Promise<void> {
-      const revision = ++this.loadRevision;
-      try {
-        const searchParams = new URLSearchParams({ query1, query2, layer: activeLayer });
-        const response = await apiClient.get<MapObjectQueryResponse>(
-          `${mapQueryObjectsUrl}?${searchParams.toString()}`,
-        );
-        if (revision !== this.loadRevision) return;
-        this.mapObjectList.clear();
-        const mapObjData = response.data.markers;
-        this.filteredShapeIds = response.data.shape_ids;
-        for (const mapObject of Object.values(mapObjData)) {
-          this.mapObjectList.set(mapObject.id, {
-            id: mapObject.id,
-            layer_id: mapObject.layer_id,
-            marker_name: mapObject.marker_name,
-            latitude: mapObject.latitude,
-            longitude: mapObject.longitude,
-            detail: mapObject.detail,
-            update_at: mapObject.update_at,
-          });
-        }
-        let sortedDsc = new Map(
-          [...this.mapObjectList.entries()].sort((a, b) => (a[0] > b[0] ? 1 : -1)).reverse(),
-        );
-        this.mapObjectList = sortedDsc;
-      } catch (error) {
-        console.log(error);
-      }
-    },
-
-    addMapObject(mapobje: MapObjectData): void {
-      this.mapObjectList.set(mapobje.id, {
-        id: mapobje.id,
-        marker_name: mapobje.marker_name,
-        layer_id: mapobje.layer_id,
-        latitude: mapobje.latitude,
-        longitude: mapobje.longitude,
-        detail: mapobje.detail,
-        update_at: mapobje.update_at,
-      });
-    },
     async deleteMapObject(id: string): Promise<boolean> {
-      const deleteURL = `${deleteMapObjectUrl}${id}`;
+      const generation = this.recordCache.generation;
       try {
-        await apiClient.delete(deleteURL);
-        this.mapObjectList.delete(id);
+        await apiClient.delete(`${deleteMapObjectUrl}${id}`);
+        if (generation !== this.recordCache.generation) return false;
+        this.removeRecord(id);
         return true;
       } catch (error) {
         console.log(error);
         return false;
       }
-    },
-
-    clearMapObject(): void {
-      ++this.loadRevision;
-      this.mapObjectList.clear();
-      this.filteredShapeIds = null;
     },
   },
 });

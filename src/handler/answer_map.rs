@@ -11,7 +11,7 @@ use axum::{
     response::{Html, IntoResponse, Response},
 };
 use chrono::Utc;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::SqlitePool;
 use std::{
@@ -67,6 +67,26 @@ pub struct AnswerMapRequest {
     pub request_id: String,
     #[serde(default)]
     pub analysis: Option<String>,
+    #[serde(default)]
+    pub initial_view: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct InitialAnswerMapView {
+    latitude: f64,
+    longitude: f64,
+    zoom: f64,
+}
+
+fn parse_initial_map_view(raw: Option<&str>) -> Option<InitialAnswerMapView> {
+    let view: InitialAnswerMapView = serde_json::from_str(raw?).ok()?;
+    (view.latitude.is_finite()
+        && (-90.0..=90.0).contains(&view.latitude)
+        && view.longitude.is_finite()
+        && (-180.0..=180.0).contains(&view.longitude)
+        && view.zoom.is_finite()
+        && (0.0..=30.0).contains(&view.zoom))
+    .then_some(view)
 }
 
 #[derive(Debug)]
@@ -269,7 +289,11 @@ pub async fn answer_map_handler(
         context.insert("markersFromAxum", &markers);
         context.insert("shapesFromAxum", &data.shapes);
         context.insert("popupBodies", &data.popup_bodies);
-        context.insert("answerPreview", &json!({"answerCount":data.answer_count,"targetCount":data.target_count,"parentOrigin":request.parent_origin,"requestId":request.request_id,"query":q,"targets":targets}));
+        let mut preview = json!({"answerCount":data.answer_count,"targetCount":data.target_count,"parentOrigin":request.parent_origin,"requestId":request.request_id,"query":q,"targets":targets});
+        if let Some(view) = parse_initial_map_view(request.initial_view.as_deref()) {
+            preview["initialView"] = json!(view);
+        }
+        context.insert("answerPreview", &preview);
         Ok::<_,AppError>(())
     }.await;
     let (template, status) = match result {
@@ -298,4 +322,32 @@ pub async fn answer_map_handler(
             AppError::InternalServerError
         })?;
     Ok((status, [(header::CACHE_CONTROL, "no-store")], Html(html)).into_response())
+}
+
+#[cfg(test)]
+mod initial_map_view_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_center_and_zoom_from_the_parent_map() {
+        let raw = json!({"latitude": 35.6812, "longitude": 139.7671, "zoom": 14.5});
+        let view = parse_initial_map_view(Some(&raw.to_string())).unwrap();
+        assert_eq!(json!(view), raw);
+    }
+
+    #[test]
+    fn ignores_missing_or_invalid_views() {
+        assert!(parse_initial_map_view(None).is_none());
+        for raw in [
+            "",
+            "not-json",
+            r#"{"latitude":91,"longitude":139,"zoom":10}"#,
+            r#"{"latitude":35,"longitude":181,"zoom":10}"#,
+            r#"{"latitude":35,"longitude":139,"zoom":31}"#,
+            r#"{"latitude":"35","longitude":139,"zoom":10}"#,
+            r#"{"latitude":35,"longitude":139}"#,
+        ] {
+            assert!(parse_initial_map_view(Some(raw)).is_none(), "{raw}");
+        }
+    }
 }

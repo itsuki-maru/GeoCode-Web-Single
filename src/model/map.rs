@@ -26,6 +26,8 @@ pub struct MapReadQueryPrams {
     pub longitude: Option<f64>,
     pub layer: Option<String>,
     pub is_master: Option<bool>,
+    /// parent の場合、オブジェクト原本は埋め込み元から受け取る。
+    pub data_source: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

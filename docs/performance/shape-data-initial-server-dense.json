@@ -1,0 +1,570 @@
+{
+  "stage": "after",
+  "baseline": "cbf61f2e8245314e445f910da3da28fd8590563e",
+  "gitHead": "cbf61f2e8245314e445f910da3da28fd8590563e",
+  "parentData": false,
+  "initialOnly": true,
+  "framed": true,
+  "canonicalCopies": 2,
+  "browser": "155.0.8059.85",
+  "samples": 3,
+  "policy": {
+    "padding": 0.2,
+    "minPixelSize": 4
+  },
+  "timeoutMs": 60000,
+  "notes": "Synthetic pipe fixtures; source is real editor entry composition or read-only runtime. before uses baseline revision; phase1 uses current geometry only with all other baseline TS; after uses worktree. Benchmark-only instrumentation injects policy and observes addLayer. Timings exclude module loading/network/JSON transfer/fixture preparation. parentData=true uses a real same-origin iframe and native postMessage structured clone from its parent, recording DTO conversion on DataCloneError only (the fallback function extracted from MapIframe.vue with real Vue toRaw), transfer, application and ACK times. With frame=true, both modes use an actual iframe and retain two canonical datasets; server mode keeps an outer canonical copy prepared before timing. Heap values are browser process references, not isolated per-frame allocations. firstAdd/viewportReady describe Leaflet layer addition, not GPU paint completion. Mobile CPU4 is emulation. A timeout is recorded with partial counts and must not be interpreted as completion. Buffer fixture deliberately registers padding candidates first. Short fixture has equal numbers of 3/5/7/10 px pipe segments at zoom14; raising threshold removes real segments. Another-map selects its existing initially-OFF group before waiting.",
+  "results": [
+    {
+      "configuration": {
+        "label": "editor-pc",
+        "entry": "map",
+        "viewport": {
+          "width": 1024,
+          "height": 768
+        },
+        "cpuRate": 1
+      },
+      "name": "dense-40000",
+      "count": 40000,
+      "kind": "dense",
+      "vertices": 2,
+      "zoom": 14,
+      "summary": {
+        "completed": 3,
+        "snapshotDtoMs": null,
+        "snapshotTransferMs": null,
+        "snapshotRegistrationMs": null,
+        "snapshotAckMs": null,
+        "snapshotSendSyncMs": null,
+        "initialHeapBytes": 195683567,
+        "firstAddMs": 50.1,
+        "firstViewportAddMs": 50.1,
+        "viewportReadyMs": 2597.2,
+        "readyMs": 2598.5,
+        "elapsedMs": 2598.5,
+        "creations": 40000,
+        "expected": {
+          "total": 40000,
+          "viewport": 40000,
+          "smallSegmentsOmitted": 0
+        }
+      },
+      "trials": [
+        {
+          "status": "complete",
+          "expected": {
+            "total": 40000,
+            "viewport": 40000,
+            "smallSegmentsOmitted": 0
+          },
+          "initial": {
+            "initSyncMs": 63.6,
+            "snapshotDtoMs": null,
+            "snapshotTransferMs": null,
+            "snapshotRegistrationMs": null,
+            "snapshotAckMs": null,
+            "snapshotSendSyncMs": null,
+            "heapBeforeBytes": 47638852,
+            "initialHeapBytes": 195694639,
+            "firstAddMs": 46.5,
+            "firstViewportAddMs": 46.5,
+            "viewportReadyMs": 2625.1,
+            "readyMs": 2626.5,
+            "elapsedMs": 2626.5,
+            "viewportAdded": 40000,
+            "refreshCount": 83,
+            "creationProgress": [
+              {
+                "added": 5000,
+                "elapsedMs": 379.6
+              },
+              {
+                "added": 10000,
+                "elapsedMs": 724.2
+              },
+              {
+                "added": 15000,
+                "elapsedMs": 1034.9
+              },
+              {
+                "added": 20000,
+                "elapsedMs": 1374.8
+              },
+              {
+                "added": 25000,
+                "elapsedMs": 1687.7
+              },
+              {
+                "added": 30000,
+                "elapsedMs": 1999.8
+              },
+              {
+                "added": 35000,
+                "elapsedMs": 2312.9
+              },
+              {
+                "added": 40000,
+                "elapsedMs": 2625.1
+              }
+            ],
+            "actualZoom": 14,
+            "viewportWidth": 1024,
+            "viewportHeight": 768,
+            "creations": 40000,
+            "paths": 40000,
+            "recordCount": 40000,
+            "renderableCount": 40000,
+            "eligibleCount": 40000,
+            "renderedCount": 40000,
+            "cachedCount": 40000,
+            "cachedVertices": 80000,
+            "inactiveCachedCount": 0,
+            "inactiveCachedVertices": 0,
+            "pendingCount": 0,
+            "createdCount": 40000,
+            "disposedCount": 0
+          },
+          "afterMove": null,
+          "longTaskCount": 1,
+          "maxLongTaskMs": 66,
+          "heapBytes": 196689096
+        },
+        {
+          "status": "complete",
+          "expected": {
+            "total": 40000,
+            "viewport": 40000,
+            "smallSegmentsOmitted": 0
+          },
+          "initial": {
+            "initSyncMs": 68.2,
+            "snapshotDtoMs": null,
+            "snapshotTransferMs": null,
+            "snapshotRegistrationMs": null,
+            "snapshotAckMs": null,
+            "snapshotSendSyncMs": null,
+            "heapBeforeBytes": 47601144,
+            "initialHeapBytes": 195683567,
+            "firstAddMs": 50.1,
+            "firstViewportAddMs": 50.1,
+            "viewportReadyMs": 2563.6,
+            "readyMs": 2565.1,
+            "elapsedMs": 2565.1,
+            "viewportAdded": 40000,
+            "refreshCount": 82,
+            "creationProgress": [
+              {
+                "added": 5000,
+                "elapsedMs": 349.2
+              },
+              {
+                "added": 10000,
+                "elapsedMs": 661.8
+              },
+              {
+                "added": 15000,
+                "elapsedMs": 973.3
+              },
+              {
+                "added": 20000,
+                "elapsedMs": 1313
+              },
+              {
+                "added": 25000,
+                "elapsedMs": 1626.1
+              },
+              {
+                "added": 30000,
+                "elapsedMs": 1938.4
+              },
+              {
+                "added": 35000,
+                "elapsedMs": 2251.1
+              },
+              {
+                "added": 40000,
+                "elapsedMs": 2563.6
+              }
+            ],
+            "actualZoom": 14,
+            "viewportWidth": 1024,
+            "viewportHeight": 768,
+            "creations": 40000,
+            "paths": 40000,
+            "recordCount": 40000,
+            "renderableCount": 40000,
+            "eligibleCount": 40000,
+            "renderedCount": 40000,
+            "cachedCount": 40000,
+            "cachedVertices": 80000,
+            "inactiveCachedCount": 0,
+            "inactiveCachedVertices": 0,
+            "pendingCount": 0,
+            "createdCount": 40000,
+            "disposedCount": 0
+          },
+          "afterMove": null,
+          "longTaskCount": 1,
+          "maxLongTaskMs": 71,
+          "heapBytes": 196678204
+        },
+        {
+          "status": "complete",
+          "expected": {
+            "total": 40000,
+            "viewport": 40000,
+            "smallSegmentsOmitted": 0
+          },
+          "initial": {
+            "initSyncMs": 70.4,
+            "snapshotDtoMs": null,
+            "snapshotTransferMs": null,
+            "snapshotRegistrationMs": null,
+            "snapshotAckMs": null,
+            "snapshotSendSyncMs": null,
+            "heapBeforeBytes": 48034784,
+            "initialHeapBytes": 193624379,
+            "firstAddMs": 52,
+            "firstViewportAddMs": 52,
+            "viewportReadyMs": 2597.2,
+            "readyMs": 2598.5,
+            "elapsedMs": 2598.5,
+            "viewportAdded": 40000,
+            "refreshCount": 83,
+            "creationProgress": [
+              {
+                "added": 5000,
+                "elapsedMs": 409
+              },
+              {
+                "added": 10000,
+                "elapsedMs": 722.9
+              },
+              {
+                "added": 15000,
+                "elapsedMs": 1035.7
+              },
+              {
+                "added": 20000,
+                "elapsedMs": 1348.1
+              },
+              {
+                "added": 25000,
+                "elapsedMs": 1659.9
+              },
+              {
+                "added": 30000,
+                "elapsedMs": 1972.2
+              },
+              {
+                "added": 35000,
+                "elapsedMs": 2284.4
+              },
+              {
+                "added": 40000,
+                "elapsedMs": 2597.2
+              }
+            ],
+            "actualZoom": 14,
+            "viewportWidth": 1024,
+            "viewportHeight": 768,
+            "creations": 40000,
+            "paths": 40000,
+            "recordCount": 40000,
+            "renderableCount": 40000,
+            "eligibleCount": 40000,
+            "renderedCount": 40000,
+            "cachedCount": 40000,
+            "cachedVertices": 80000,
+            "inactiveCachedCount": 0,
+            "inactiveCachedVertices": 0,
+            "pendingCount": 0,
+            "createdCount": 40000,
+            "disposedCount": 0
+          },
+          "afterMove": null,
+          "longTaskCount": 1,
+          "maxLongTaskMs": 73,
+          "heapBytes": 194617032
+        }
+      ]
+    },
+    {
+      "configuration": {
+        "label": "editor-mobile",
+        "entry": "map-mobile",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "cpuRate": 4,
+        "mobile": true
+      },
+      "name": "dense-40000",
+      "count": 40000,
+      "kind": "dense",
+      "vertices": 2,
+      "zoom": 14,
+      "summary": {
+        "completed": 3,
+        "snapshotDtoMs": null,
+        "snapshotTransferMs": null,
+        "snapshotRegistrationMs": null,
+        "snapshotAckMs": null,
+        "snapshotSendSyncMs": null,
+        "initialHeapBytes": 188973955,
+        "firstAddMs": 225.8,
+        "firstViewportAddMs": 225.8,
+        "viewportReadyMs": 17174.2,
+        "readyMs": 17180.2,
+        "elapsedMs": 17180.2,
+        "creations": 40000,
+        "expected": {
+          "total": 40000,
+          "viewport": 40000,
+          "smallSegmentsOmitted": 0
+        }
+      },
+      "trials": [
+        {
+          "status": "complete",
+          "expected": {
+            "total": 40000,
+            "viewport": 40000,
+            "smallSegmentsOmitted": 0
+          },
+          "initial": {
+            "initSyncMs": 278.2,
+            "snapshotDtoMs": null,
+            "snapshotTransferMs": null,
+            "snapshotRegistrationMs": null,
+            "snapshotAckMs": null,
+            "snapshotSendSyncMs": null,
+            "heapBeforeBytes": 48111270,
+            "initialHeapBytes": 189334999,
+            "firstAddMs": 231.3,
+            "firstViewportAddMs": 231.3,
+            "viewportReadyMs": 17174.2,
+            "readyMs": 17180.2,
+            "elapsedMs": 17180.2,
+            "viewportAdded": 40000,
+            "refreshCount": 336,
+            "creationProgress": [
+              {
+                "added": 5000,
+                "elapsedMs": 1661.4
+              },
+              {
+                "added": 10000,
+                "elapsedMs": 2974.9
+              },
+              {
+                "added": 15000,
+                "elapsedMs": 4520.8
+              },
+              {
+                "added": 20000,
+                "elapsedMs": 6343.9
+              },
+              {
+                "added": 25000,
+                "elapsedMs": 8427.1
+              },
+              {
+                "added": 30000,
+                "elapsedMs": 10933.8
+              },
+              {
+                "added": 35000,
+                "elapsedMs": 14018.5
+              },
+              {
+                "added": 40000,
+                "elapsedMs": 17174.2
+              }
+            ],
+            "actualZoom": 14,
+            "viewportWidth": 390,
+            "viewportHeight": 844,
+            "creations": 40000,
+            "paths": 40000,
+            "recordCount": 40000,
+            "renderableCount": 40000,
+            "eligibleCount": 40000,
+            "renderedCount": 40000,
+            "cachedCount": 40000,
+            "cachedVertices": 80000,
+            "inactiveCachedCount": 0,
+            "inactiveCachedVertices": 0,
+            "pendingCount": 0,
+            "createdCount": 40000,
+            "disposedCount": 0
+          },
+          "afterMove": null,
+          "longTaskCount": 146,
+          "maxLongTaskMs": 294,
+          "heapBytes": 176825376
+        },
+        {
+          "status": "complete",
+          "expected": {
+            "total": 40000,
+            "viewport": 40000,
+            "smallSegmentsOmitted": 0
+          },
+          "initial": {
+            "initSyncMs": 270.3,
+            "snapshotDtoMs": null,
+            "snapshotTransferMs": null,
+            "snapshotRegistrationMs": null,
+            "snapshotAckMs": null,
+            "snapshotSendSyncMs": null,
+            "heapBeforeBytes": 48531678,
+            "initialHeapBytes": 188973955,
+            "firstAddMs": 225.8,
+            "firstViewportAddMs": 225.8,
+            "viewportReadyMs": 16878.2,
+            "readyMs": 16883.7,
+            "elapsedMs": 16883.7,
+            "viewportAdded": 40000,
+            "refreshCount": 335,
+            "creationProgress": [
+              {
+                "added": 5000,
+                "elapsedMs": 1881.7
+              },
+              {
+                "added": 10000,
+                "elapsedMs": 3221.3
+              },
+              {
+                "added": 15000,
+                "elapsedMs": 4705.5
+              },
+              {
+                "added": 20000,
+                "elapsedMs": 6489.9
+              },
+              {
+                "added": 25000,
+                "elapsedMs": 8518.1
+              },
+              {
+                "added": 30000,
+                "elapsedMs": 10923.2
+              },
+              {
+                "added": 35000,
+                "elapsedMs": 13803.8
+              },
+              {
+                "added": 40000,
+                "elapsedMs": 16878.2
+              }
+            ],
+            "actualZoom": 14,
+            "viewportWidth": 390,
+            "viewportHeight": 844,
+            "creations": 40000,
+            "paths": 40000,
+            "recordCount": 40000,
+            "renderableCount": 40000,
+            "eligibleCount": 40000,
+            "renderedCount": 40000,
+            "cachedCount": 40000,
+            "cachedVertices": 80000,
+            "inactiveCachedCount": 0,
+            "inactiveCachedVertices": 0,
+            "pendingCount": 0,
+            "createdCount": 40000,
+            "disposedCount": 0
+          },
+          "afterMove": null,
+          "longTaskCount": 141,
+          "maxLongTaskMs": 285,
+          "heapBytes": 176799888
+        },
+        {
+          "status": "complete",
+          "expected": {
+            "total": 40000,
+            "viewport": 40000,
+            "smallSegmentsOmitted": 0
+          },
+          "initial": {
+            "initSyncMs": 260.7,
+            "snapshotDtoMs": null,
+            "snapshotTransferMs": null,
+            "snapshotRegistrationMs": null,
+            "snapshotAckMs": null,
+            "snapshotSendSyncMs": null,
+            "heapBeforeBytes": 48130558,
+            "initialHeapBytes": 174279467,
+            "firstAddMs": 211.7,
+            "firstViewportAddMs": 211.7,
+            "viewportReadyMs": 17770.5,
+            "readyMs": 17775.3,
+            "elapsedMs": 17775.3,
+            "viewportAdded": 40000,
+            "refreshCount": 346,
+            "creationProgress": [
+              {
+                "added": 5000,
+                "elapsedMs": 1692.3
+              },
+              {
+                "added": 10000,
+                "elapsedMs": 3192.6
+              },
+              {
+                "added": 15000,
+                "elapsedMs": 4581.4
+              },
+              {
+                "added": 20000,
+                "elapsedMs": 6485.6
+              },
+              {
+                "added": 25000,
+                "elapsedMs": 8539.2
+              },
+              {
+                "added": 30000,
+                "elapsedMs": 11325.7
+              },
+              {
+                "added": 35000,
+                "elapsedMs": 14498.8
+              },
+              {
+                "added": 40000,
+                "elapsedMs": 17770.5
+              }
+            ],
+            "actualZoom": 14,
+            "viewportWidth": 390,
+            "viewportHeight": 844,
+            "creations": 40000,
+            "paths": 40000,
+            "recordCount": 40000,
+            "renderableCount": 40000,
+            "eligibleCount": 40000,
+            "renderedCount": 40000,
+            "cachedCount": 40000,
+            "cachedVertices": 80000,
+            "inactiveCachedCount": 0,
+            "inactiveCachedVertices": 0,
+            "pendingCount": 0,
+            "createdCount": 40000,
+            "disposedCount": 0
+          },
+          "afterMove": null,
+          "longTaskCount": 151,
+          "maxLongTaskMs": 275,
+          "heapBytes": 175279076
+        }
+      ]
+    }
+  ]
+}

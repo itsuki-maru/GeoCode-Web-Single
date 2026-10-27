@@ -26,24 +26,27 @@ async function saveShape(shapeType, layer, shapeName = "", forcedLayerId = null)
   }
 
   const data = await response.json();
-  applyShapeRecord(layer, {
+  // 保存直後は確認のため表示し、次の地図操作で通常の範囲・縮尺判定へ戻す。
+  recentlyCreatedShapeId = String(data.id);
+  const savedRecord = data.object || {
     id: data.id,
     layer_id: targetLayerId,
     shape_type: shapeType,
     name: shapeName,
     geojson: nextGeoJson,
-  });
+  };
+  applyShapeRecord(layer, savedRecord);
   applyShapeStyle(layer, activeDrawMode === "delete");
   updateShapeNameLabel(layer, shapeName);
   attachShapeEvents(layer);
-  drawnShapesGroup.addLayer(layer);
-  renderVisibleShapes();
   if (!map.hasLayer(drawnShapesGroup)) {
     drawnShapesGroup.addTo(map);
   }
+  renderVisibleShapes();
   applyMeasurementVisibilityToDrawnShapesGroup();
   setDrawStatus("図形描画: 保存しました。");
-  if (!editorEntryProfile.isMobile) callParentReload();
+  if (typeof notifyParentMapObjectChange === "function")
+    notifyParentMapObjectChange({ operation: "upsert", objectType: "shape", object: savedRecord });
 }
 
 // 直前に削除した図形を同じレイヤへ再作成する
@@ -202,10 +205,11 @@ async function updateServer(id, lat, lng) {
       { method: "PUT" },
     );
     if (!response.ok) throw new Error("marker move failed");
-    if (record) {
-      record.latitude = lat;
-      record.longitude = lng;
-    }
+    const data = await response.json();
+    const saved = data.object || { ...record, latitude: lat, longitude: lng };
+    markersFromAxum[id] = saved;
+    if (typeof notifyParentMapObjectChange === "function")
+      notifyParentMapObjectChange({ operation: "upsert", objectType: "marker", object: saved });
   } catch {
     if (record && marker) marker.setLatLng([record.latitude, record.longitude]);
     setDrawStatus("マーカーを移動できませんでした。入力制限を確認してください。", true);
@@ -263,6 +267,7 @@ function handleShapeDrawLatLng(latlng) {
 
 // 地図クリック時にサーバーに情報を送信しマーカー描画
 map.on("click", async function (e) {
+  if (typeof editorDataReady !== "undefined" && !editorDataReady) return;
   if (isPropagatedMapClickSuppressed(e)) {
     return;
   }
@@ -307,35 +312,17 @@ map.on("click", async function (e) {
       return response.json(); // 必要に応じて JSON 形式でレスポンスを受け取る
     })
     .then((data) => {
-      // サーバーからid, 緯度, 経度を受け取りマーカーとして描画
-      var marker = L.marker(
-        e.latlng,
-        markerOptionsForLayer(layer, layersFromAxum, { draggable: false }),
-      )
-        .addTo(markersClusterGroup)
-        .on("dragend", function (event) {
-          var movedMarker = event.target;
-          var position = movedMarker.getLatLng();
-          updateServer(movedMarker.id, position.lat, position.lng);
-        });
-      const markerKey = `marker-${data["id"]}`;
-      marker.id = data["id"];
-      const markerElement = marker.getElement();
-      if (markerElement) {
-        markerElement.id = markerKey;
-      }
-      markers[markerKey] = marker;
-      markersFromAxum[data["id"]] = {
-        id: data["id"],
+      const record = data.object || {
+        id: data.id,
         layer_id: layer,
         marker_name: "",
+        detail: "",
         latitude: e.latlng.lat,
         longitude: e.latlng.lng,
-        detail: "",
       };
-
-      // 再描画用の管理データへ登録してから、親画面の一覧を更新する
-      callParentReload();
+      applyMarkerUpdateFromParent({ object: record, objectType: "marker" });
+      if (typeof notifyParentMapObjectChange === "function")
+        notifyParentMapObjectChange({ operation: "upsert", objectType: "marker", object: record });
     })
     .catch((error) => {
       const logError = editorEntryProfile.isMobile ? console.log : console.error;

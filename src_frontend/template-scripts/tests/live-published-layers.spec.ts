@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Marked } from "marked";
 import { addPublishedLayerControl, type PublishedLayers } from "../src/live-map/published-layers";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
@@ -77,17 +78,10 @@ function setup() {
       disableClickPropagation: vi.fn(),
     },
   };
-  const marked = {
-    Renderer: class {
-      link() {
-        return "";
-      }
-    },
-    use: vi.fn(),
-    setOptions: vi.fn(),
-    parse: vi.fn((text: string) => text),
-  };
-  const filterXSS = vi.fn(() => "<p>sanitized memo</p>");
+  const marked = new Marked();
+  const filterXSS = vi.fn((html: string) => html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/\s+on\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, ""));
   vi.stubGlobal("marked", marked);
   vi.stubGlobal("filterXSS", filterXSS);
   const map = {
@@ -98,6 +92,22 @@ function setup() {
     hasLayer: (layer: unknown) => visible.has(layer) || groups.some(g => visible.has(g) && g.items.includes(layer)),
   };
   return { leaflet, map, groups, visible, objects, control, container, marked, filterXSS, cluster, clusterItems };
+}
+
+function openPublishedPopup(layer: any) {
+  const element = document.createElement("div");
+  element.className = "leaflet-popup";
+  element.innerHTML = layer.bindPopup.mock.calls[0][0];
+  document.body.append(element);
+  const popup = { getElement: () => element, update: vi.fn() };
+  layer.on.mock.calls.find(([event]: [string]) => event === "popupopen")[1]({ popup });
+  return {
+    element,
+    close: () => {
+      layer.on.mock.calls.find(([event]: [string]) => event === "popupclose")[1]();
+      element.remove();
+    },
+  };
 }
 
 describe("live published layers", () => {
@@ -145,7 +155,7 @@ describe("live published layers", () => {
   });
   it.each([false, true])(
     "renders selected groups read-only, with shapes, sanitized content and escaped labels (mobile=%s)",
-    (mobile) => {
+    async (mobile) => {
       const runtime = setup();
       const data: PublishedLayers = {
         layers: [
@@ -159,7 +169,7 @@ describe("live published layers", () => {
             marker_name: "<script>name</script>",
             latitude: 35,
             longitude: 139,
-            detail: "memo",
+            detail: 'memo\n\n<img src="/static/images/test.png" onerror="alert(1)">',
           },
           {
             id: "hidden",
@@ -218,11 +228,23 @@ describe("live published layers", () => {
       expect(runtime.objects[0].bindPopup.mock.calls[0][0]).toContain(
         "&lt;script&gt;name&lt;/script&gt;",
       );
-      expect(runtime.objects[0].bindPopup.mock.calls[0][0]).toContain("sanitized memo");
+      expect(runtime.objects[0].bindPopup.mock.calls[0][0]).not.toContain("<p>memo");
+      expect(runtime.objects[0].bindPopup.mock.calls[0][0]).toContain('class="geocode-progressive-content"');
       expect(runtime.objects[0].bindPopup.mock.calls[0][0]).toContain('class="md-detail-contents"');
       expect(runtime.objects[0].bindPopup.mock.calls[0][0]).toContain("<h1>&lt;script&gt;name&lt;/script&gt;</h1>");
       expect(runtime.objects[0].bindPopup.mock.calls[0][1].className).toBe("live-published-popup");
-      expect(runtime.filterXSS).toHaveBeenCalled();
+      expect(runtime.filterXSS).not.toHaveBeenCalled();
+      const popup = openPublishedPopup(runtime.objects[0]);
+      try {
+        await vi.waitFor(() => {
+          expect(popup.element.querySelector(".geocode-content-body")?.textContent).toContain("memo");
+          expect(popup.element.querySelector("img")?.getAttribute("src")).toBe("/static/images/test.png");
+        });
+        expect(popup.element.querySelector("img")?.hasAttribute("onerror")).toBe(false);
+        expect(runtime.filterXSS).toHaveBeenCalled();
+      } finally {
+        popup.close();
+      }
       expect(runtime.container.querySelector("img")).toBeNull();
       expect(runtime.container.textContent).toContain("<img onerror=alert(1)>");
       expect(runtime.objects.every((obj) => !obj.editing && !obj.dragging)).toBe(true);
@@ -259,23 +281,25 @@ it("updates a single cluster across groups without including shapes or live acco
 });
 
 
-it("does not open an image preview when a published popup image is clicked", () => {
+it("does not open an image preview when a published popup image is clicked", async () => {
   const r = setup();
-  r.filterXSS.mockReturnValue('<img class="marker-preview-image" src="/static/images/test.png" data-preview-src="/images/html/test.png">');
   const open = vi.spyOn(window, "open").mockImplementation(() => null);
   addPublishedLayerControl(r.leaflet, r.map, {
     layers: [{ id: "a", layer_name: "A" }],
-    markers: [{ id: "m", layer_id: "a", marker_name: "画像", latitude: 35, longitude: 139, detail: "画像" }],
+    markers: [{ id: "m", layer_id: "a", marker_name: "画像", latitude: 35, longitude: 139, detail: "![画像](/static/images/test.png)" }],
     shapes: [],
   }, false);
-  const popup = document.createElement("div");
-  popup.innerHTML = r.objects[0].bindPopup.mock.calls[0][0];
-  document.body.append(popup);
+  expect(r.objects[0].bindPopup.mock.calls[0][0]).not.toContain("<img");
+  const popup = openPublishedPopup(r.objects[0]);
   try {
-    popup.querySelector("img")!.click();
+    await vi.waitFor(() => expect(popup.element.querySelector("img")).not.toBeNull());
+    const image = popup.element.querySelector("img")!;
+    expect(image.className).toBe("marker-preview-image");
+    expect(image.getAttribute("data-preview-src")).toBe("/images/html/test.png");
+    image.click();
     expect(open).not.toHaveBeenCalled();
   } finally {
-    popup.remove();
+    popup.close();
     open.mockRestore();
   }
 });

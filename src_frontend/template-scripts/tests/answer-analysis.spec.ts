@@ -61,6 +61,26 @@ const setup = () => {
   return { runtime, leaflet, data, marker, shape, cluster, visible, handlers };
 };
 describe("回答値の地図表示", () => {
+  it("未生成の図形を論理表示の件数へ含め、生成時に分析スタイルを適用する", () => {
+    const s = setup();
+    let created: ((layer: any, record: { id: string }) => void) | undefined;
+    const unsubscribe = vi.fn();
+    Object.assign(s.runtime, {
+      isShapeLogicallyVisible: (id: string) => id === "same",
+      onShapeLayerCreated: (listener: typeof created) => {
+        created = listener;
+        return unsubscribe;
+      },
+    });
+    delete (s.runtime.shapeLayers as Record<string, unknown>)["shape-same"];
+    const analysis = installAnswerAnalysis(s.runtime, s.data, s.leaflet, vi.fn());
+    expect(analysis.visibleCounts()).toEqual([2, 0]);
+    created?.(s.shape, { id: "same" });
+    expect(s.shape.setStyle).toHaveBeenCalledWith(expect.objectContaining({ color: "#0072b2" }));
+    s.handlers.unload();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
   it("keeps analysis separate from selectable bodies in owner popups", () => {
     const s = setup();
     (s.runtime as any).popupContent = { setAnalysis: vi.fn() };

@@ -4,6 +4,11 @@ const authCheck = vi.hoisted(() => vi.fn());
 
 vi.mock("@/axiosClient", () => ({ default: { get: authCheck } }));
 
+// 認証ガードの検証を、実画面の初回読み込み・変換時間から独立させる。
+vi.mock("@/views/users/AdminUsersList.vue", () => ({ default: { render: () => null } }));
+vi.mock("@/views/auth/LoginViewAdmin.vue", () => ({ default: { render: () => null } }));
+vi.mock("@/views/NotFoundAdmin.vue", () => ({ default: { render: () => null } }));
+
 import router from "@/router";
 
 beforeEach(async () => {

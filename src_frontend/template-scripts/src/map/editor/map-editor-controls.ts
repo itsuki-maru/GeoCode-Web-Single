@@ -144,14 +144,14 @@ const DrawShapeControl = L.Control.extend({
 const drawShapeControl = new DrawShapeControl();
 map.addControl(drawShapeControl);
 if (editorEntryProfile.isMobile) registerHideableMapControl(drawShapeControl);
-const suppressInitialShapeRendering = shouldSuppressInitialShapeRendering(shapesFromAxum);
 restoreSavedShapes();
-if (!suppressInitialShapeRendering && getInitialShapeLayerVisibility()) {
+if (getInitialShapeLayerVisibility()) {
   drawnShapesGroup.addTo(map);
 }
+initializeEditorShapeRendering();
 applyMeasurementVisibilityToDrawnShapesGroup();
 const shapeNameVisibilityLayer = L.layerGroup();
-if (!suppressInitialShapeRendering && getInitialShapeNameVisibility()) {
+if (getInitialShapeNameVisibility()) {
   shapeNameVisibilityLayer.addTo(map);
 }
 shapeNameLabelManager = createViewportShapeLabelManager({
@@ -249,6 +249,7 @@ map.on("overlayremove", function (event) {
     clearMeasurementSelection();
     clearShapeGeometryEditing();
     saveShapeLayerVisibility(false);
+    renderVisibleShapes();
   }
 });
 

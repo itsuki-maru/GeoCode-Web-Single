@@ -60,7 +60,10 @@ const ID_RE = /^[\w-]{11}$/;
 
 // ネスト対応トークナイザの共通関数
 // それぞれのトークンを生成
-const detailsToken = createNestedTokenizer("details");
+const detailsToken = createNestedTokenizer("details", {
+  renderDeferredBody: (text, links) =>
+    renderProgressiveMarkdown(text, (html) => renderIframe(filterXSS(html, xssOptions)), links),
+});
 const noteToken = createNestedTokenizer("note");
 const warningToken = createNestedTokenizer("warning");
 
@@ -194,12 +197,12 @@ let xssOptions = {
     img: ["src", "alt", "class", "data-preview-src"],
     video: ["src", "controls", "preload", "poster"],
     p: [],
-    div: ["class"],
+    div: ["class", "data-progressive-content"],
     span: [],
     li: [],
     strong: [],
     ul: [],
-    ol: [],
+    ol: ["start"],
     li: [],
     blockquote: [],
     code: [],
@@ -208,7 +211,7 @@ let xssOptions = {
     th: [],
     td: [],
     tr: [],
-    details: ["class"],
+    details: ["class", "data-deferred-details"],
     summary: [],
     "app-youtube": ["video-id", "data-src"],
     "app-camera": ["data-camera-src"],
@@ -350,7 +353,7 @@ let markers = {};
 popupContent = createPopupContentRuntime({
   map,
   sanitizeHtml: (html) => filterXSS(html, xssOptions),
-  renderMarkdown: (text) => renderIframe(filterXSS(marked.parse(text), xssOptions)),
+  renderMarkdown: renderMapMarkdown,
   setupImages: setupDetailsLazyImages,
   loadBody: async (kind, id) => {
     const response = await fetchWithAuth(`/${kind}/${id}/form/body`, { cache: "no-store" });
@@ -378,7 +381,7 @@ for (const key in markersFromAxum) {
 
   // ポップアップオープン時に遅延読み込みの処理を追加
   marker.on("popupopen", () => {
-    setupDetailsLazyImages(document);
+    setupDetailsLazyImages(document, renderMapMarkdown);
   });
 
   // マークダウンをパース

@@ -1,7 +1,7 @@
 use crate::error::AppError;
 use crate::model::{
     MessageApi, ShapeCreateJsonData, ShapeCreatedResponse, ShapeGeometryUpdateData, ShapeObject,
-    ShapeReadQueryParams, ShapeUpdateJsonData,
+    ShapeReadQueryParams, ShapeUpdateJsonData, ShapeUpdatedResponse,
 };
 use crate::shape_validation::validate_shape_geojson;
 use axum::{
@@ -118,7 +118,7 @@ pub async fn create_shape_handler(
     let new_shape_id = Uuid::now_v7().to_string();
     let now = Utc::now().naive_utc();
 
-    let inserted_id: (String,) = sqlx::query_as(
+    let saved = sqlx::query_as::<_, ShapeObject>(
         r#"
         INSERT INTO shape_model (
             id,
@@ -131,7 +131,7 @@ pub async fn create_shape_handler(
             updated_at
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING id
+        RETURNING id,user_id,layer_id,shape_type,name,geojson,created_at,updated_at
         "#,
     )
     .bind(&new_shape_id)
@@ -153,8 +153,9 @@ pub async fn create_shape_handler(
         .await?;
     tx.commit().await?;
     Ok(Json(ShapeCreatedResponse {
-        id: inserted_id.0.to_string(),
+        id: saved.id.clone(),
         message: "Shape Created.".to_string(),
+        object: saved,
     }))
 }
 
@@ -239,7 +240,7 @@ pub async fn update_shape_handler(
     Extension(pool): Extension<SqlitePool>,
     Path(shape_id): Path<String>,
     Json(payload): Json<ShapeUpdateJsonData>,
-) -> Result<Json<MessageApi>, AppError> {
+) -> Result<Json<ShapeUpdatedResponse>, AppError> {
     let mut tx = super::answer_sqlite::begin_write(&pool).await?;
     let previous_layer: String =
         sqlx::query_scalar("SELECT layer_id FROM shape_model WHERE id=$1 AND user_id=$2")
@@ -349,7 +350,7 @@ pub async fn update_shape_handler(
         }
     }
 
-    let query_result = sqlx::query(
+    let saved = sqlx::query_as::<_, ShapeObject>(
         r#"
         UPDATE shape_model
         SET
@@ -359,6 +360,7 @@ pub async fn update_shape_handler(
             geojson = COALESCE($4, geojson),
             updated_at = $5
         WHERE id = $6 AND user_id = $7
+        RETURNING id,user_id,layer_id,shape_type,name,geojson,created_at,updated_at
         "#,
     )
     .bind(normalized_name)
@@ -368,16 +370,14 @@ pub async fn update_shape_handler(
     .bind(Utc::now().naive_utc())
     .bind(&shape_id)
     .bind(&user_id)
-    .execute(&mut *tx)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "database error.");
         AppError::Sqlx(e)
     })?;
 
-    if query_result.rows_affected() == 0 {
-        return Err(AppError::Validation("Failed to update shape.".into()));
-    }
+    let saved = saved.ok_or_else(|| AppError::Validation("Failed to update shape.".into()))?;
 
     if let Some(layer) = next_layer_id {
         if previous_layer != layer {
@@ -385,7 +385,8 @@ pub async fn update_shape_handler(
         }
     }
     tx.commit().await?;
-    Ok(Json(MessageApi {
+    Ok(Json(ShapeUpdatedResponse {
         message: "Shape Updated.".to_string(),
+        object: saved,
     }))
 }

@@ -1,6 +1,21 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from "vue";
-import type { MapObjectUpdatePayload } from "@/interface";
+import { onMounted, onUnmounted, ref, watch, toRaw } from "vue";
+import type { MapObjectUpdatePayload, MapObjectData, ShapeData } from "@/interface";
+
+type MapObjectChange = {
+  operation: "upsert" | "delete";
+  objectType: "marker" | "shape";
+  object?: MapObjectData | ShapeData;
+  id?: string;
+  previousLayerId?: string | null;
+  mutationId: string;
+};
+type MapObjectSnapshot = {
+  markers: Record<string, MapObjectData>;
+  shapes: ShapeData[];
+  scopeKey?: string;
+  revision?: number;
+};
 
 const props = defineProps<{
   srcUrl: string;
@@ -11,6 +26,12 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   mapReloadRequested: [layerId?: string | null];
+  mapDataRequested: [];
+  mapObjectWriteRequested: [
+    request: { url: string; method: string; body?: unknown; requestId: string },
+    reply: (result: { status: number; data: unknown }) => void,
+  ];
+  mapObjectChanged: [change: MapObjectChange, acknowledge: (success: boolean) => void];
   loginRedirect: [];
   mapLoaded: [url: string];
   printMap: [];
@@ -24,6 +45,32 @@ const filteredObjectIds = ref<{ markerIds: string[] | null; shapeIds: string[] |
   shapeIds: null,
 });
 let mapObjectRequestSequence = 0;
+let runtimeId: string | null = null;
+let transportLoaded = false;
+let runtimeProbeId: string | null = null;
+let initializationSequence = 0;
+let hasInitializedData = false;
+let initializationPending = false;
+let disposed = false;
+const runtimeWaiters = new Set<(ready: boolean) => void>();
+const receivedMutations = new Set<string>();
+const usesParentData = () =>
+  new URL(props.srcUrl, window.location.origin).searchParams.get("data_source") === "parent";
+const cancelPending = () => {
+  runtimeId = null;
+  runtimeProbeId = null;
+  transportLoaded = false;
+  initializationPending = false;
+  ++initializationSequence;
+  receivedMutations.clear();
+  runtimeWaiters.forEach((resolve) => resolve(false));
+  runtimeWaiters.clear();
+  pendingMapObjectRequests.forEach(({ resolve, timer }) => {
+    window.clearTimeout(timer);
+    resolve(false);
+  });
+  pendingMapObjectRequests.clear();
+};
 const pendingMapObjectRequests = new Map<
   string,
   { resolve: (updated: boolean) => void; timer: number }
@@ -38,8 +85,24 @@ const postMessageToMap = (messageData: Record<string, unknown>): boolean => {
   const iframe = getMapIframe();
   if (!iframe?.contentWindow) return false;
   const targetOrigin = new URL(props.srcUrl, window.location.origin).origin;
-  iframe.contentWindow.postMessage(messageData, targetOrigin);
-  return true;
+  try {
+    iframe.contentWindow.postMessage(messageData, targetOrigin);
+    return true;
+  } catch (error) {
+    if (
+      !error ||
+      typeof error !== "object" ||
+      !("name" in error) ||
+      error.name !== "DataCloneError"
+    )
+      return false;
+    try {
+      iframe.contentWindow.postMessage(plainMessageValue(messageData), targetOrigin);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 };
 
 // The parent owns layer state; legacy callers may omit policies.
@@ -49,25 +112,35 @@ const syncInputPolicies = (): boolean => {
 };
 watch(() => props.inputPolicies, syncInputPolicies, { deep: true });
 
+watch(
+  () => props.srcUrl,
+  () => {
+    cancelPending();
+    hasInitializedData = false;
+  },
+);
+
 const reloadMapFrame = (): boolean => {
   const iframe = getMapIframe();
   if (!iframe) return false;
+  cancelPending();
   iframe.src = props.srcUrl;
   return true;
 };
 
 const requestMapObjectMutation = (
-  type: "mapObjectUpdate" | "mapObjectDelete" | "tileOverlaysUpdate",
+  type: "mapObjectUpdate" | "mapObjectDelete" | "tileOverlaysUpdate" | "mapObjectsInitialize",
   messageData: Record<string, unknown>,
+  timeoutMs = 2000,
 ): Promise<boolean> => {
   const requestId = `map-object-${Date.now()}-${++mapObjectRequestSequence}`;
   return new Promise((resolve) => {
     const timer = window.setTimeout(() => {
       pendingMapObjectRequests.delete(requestId);
       resolve(false);
-    }, 2000);
+    }, timeoutMs);
     pendingMapObjectRequests.set(requestId, { resolve, timer });
-    if (!postMessageToMap({ type, requestId, ...messageData })) {
+    if (!postMessageToMap({ type, requestId, runtimeId, ...messageData })) {
       window.clearTimeout(timer);
       pendingMapObjectRequests.delete(requestId);
       resolve(false);
@@ -76,12 +149,76 @@ const requestMapObjectMutation = (
 };
 
 const updateMapObject = (payload: MapObjectUpdatePayload): Promise<boolean> => {
-  const cloneablePayload = JSON.parse(JSON.stringify(payload)) as MapObjectUpdatePayload;
+  const cloneablePayload = payload;
   return requestMapObjectMutation("mapObjectUpdate", { payload: cloneablePayload });
 };
 
-const deleteMapObject = (id: string): Promise<boolean> => {
-  return requestMapObjectMutation("mapObjectDelete", { id });
+const upsertMapObject = (
+  objectType: "marker" | "shape",
+  object: MapObjectData | ShapeData,
+): Promise<boolean> =>
+  requestMapObjectMutation("mapObjectUpdate", {
+    payload: { objectType, object },
+  });
+
+const deleteMapObject = (
+  id: string,
+  objectType: "marker" | "shape" = "marker",
+): Promise<boolean> => {
+  return requestMapObjectMutation("mapObjectDelete", { id, objectType });
+};
+
+// Unwrap Vue proxies without repeated stringify/parse of the complete dataset.
+function plainMessageValue(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  const raw = toRaw(value);
+  if (Array.isArray(raw)) return raw.map(plainMessageValue);
+  return Object.fromEntries(
+    Object.entries(raw).map(([key, entry]) => [key, plainMessageValue(entry)]),
+  );
+}
+
+const probeRuntime = (): void => {
+  runtimeProbeId = `map-runtime-${Date.now()}-${++mapObjectRequestSequence}`;
+  postMessageToMap({ type: "mapRuntimeProbe", requestId: runtimeProbeId });
+};
+
+const waitForRuntime = (): Promise<boolean> => {
+  if (runtimeId && !runtimeProbeId) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const finish = (ready: boolean) => {
+      window.clearTimeout(timer);
+      runtimeWaiters.delete(finish);
+      resolve(ready);
+    };
+    const timer = window.setTimeout(() => finish(false), 30000);
+    runtimeWaiters.add(finish);
+    probeRuntime();
+  });
+};
+
+const initializeMapObjects = async (snapshot: MapObjectSnapshot): Promise<boolean> => {
+  if (!usesParentData()) return true;
+  const sequence = ++initializationSequence;
+  initializationPending = true;
+  if (!(await waitForRuntime()) || disposed || sequence !== initializationSequence) {
+    if (sequence === initializationSequence) initializationPending = false;
+    return false;
+  }
+  const url = props.srcUrl;
+  const success = await requestMapObjectMutation(
+    "mapObjectsInitialize",
+    {
+      snapshot,
+    },
+    30000,
+  );
+  if (sequence === initializationSequence) initializationPending = false;
+  if (!success || disposed || sequence !== initializationSequence || props.srcUrl !== url)
+    return false;
+  hasInitializedData = true;
+  completeMapLoad();
+  return true;
 };
 
 const focusObject = (
@@ -113,6 +250,15 @@ const handleIframeLoad = (event: Event): void => {
     event.target.getAttribute("src") !== props.srcUrl
   )
     return;
+  transportLoaded = true;
+  if (usesParentData()) {
+    probeRuntime();
+    return;
+  }
+  completeMapLoad();
+};
+
+const completeMapLoad = (): void => {
   emit("mapLoaded", props.srcUrl);
   syncInputPolicies();
   if (filteredObjectIds.value.markerIds !== null || filteredObjectIds.value.shapeIds !== null) {
@@ -145,6 +291,77 @@ const handleMessage = async (event: MessageEvent): Promise<void> => {
   const iframe = getMapIframe();
   if (!iframe?.contentWindow || event.source !== iframe.contentWindow) return;
   if (!event.data || typeof event.data !== "object") return;
+  if (event.data.type === "mapRuntimeReady") {
+    if (usesParentData() && !transportLoaded) return;
+    if (typeof event.data.runtimeId !== "string") return;
+    if (!event.data.requestId) {
+      probeRuntime();
+      return;
+    }
+    if (!runtimeProbeId || event.data.requestId !== runtimeProbeId) return;
+    runtimeProbeId = null;
+    const previousRuntime = runtimeId;
+    runtimeId = event.data.runtimeId;
+    const shouldRestore =
+      previousRuntime !== runtimeId && hasInitializedData && !initializationPending;
+    runtimeWaiters.forEach((resolve) => resolve(true));
+    runtimeWaiters.clear();
+    if (shouldRestore) emit("mapDataRequested");
+    return;
+  }
+  if (event.data.runtimeId && event.data.runtimeId !== runtimeId) return;
+  if (event.data.type === "mapObjectWriteRequested") {
+    if (!runtimeId || event.data.runtimeId !== runtimeId) return;
+    const request = event.data.request;
+    if (
+      !request ||
+      typeof request.requestId !== "string" ||
+      typeof request.url !== "string" ||
+      typeof request.method !== "string"
+    )
+      return;
+    const receivedRuntime = runtimeId;
+    emit("mapObjectWriteRequested", request, (result) => {
+      if (disposed || runtimeId !== receivedRuntime) return;
+      postMessageToMap({
+        type: "mapObjectWriteResult",
+        runtimeId,
+        requestId: request.requestId,
+        status: result.status,
+        data: result.data,
+      });
+    });
+    return;
+  }
+  if (event.data.type === "mapObjectChanged") {
+    if (!runtimeId || event.data.runtimeId !== runtimeId) return;
+    const change = event.data.change as MapObjectChange;
+    if (
+      !change ||
+      typeof change.mutationId !== "string" ||
+      !["marker", "shape"].includes(change.objectType) ||
+      !["upsert", "delete"].includes(change.operation)
+    )
+      return;
+    const receivedRuntime = runtimeId;
+    const acknowledge = (success: boolean) => {
+      if (receivedRuntime !== runtimeId || disposed) return;
+      if (success) {
+        receivedMutations.add(change.mutationId);
+        if (receivedMutations.size > 512)
+          receivedMutations.delete(receivedMutations.values().next().value!);
+      }
+      postMessageToMap({
+        type: "mapObjectChangedResult",
+        mutationId: change.mutationId,
+        runtimeId,
+        success,
+      });
+    };
+    if (receivedMutations.has(change.mutationId)) acknowledge(true);
+    else emit("mapObjectChanged", change, acknowledge);
+    return;
+  }
   if (event.data.type === "printOpen") {
     emit("printMap");
   } else if (event.data.type === "callParentFunction") {
@@ -154,6 +371,7 @@ const handleMessage = async (event: MessageEvent): Promise<void> => {
   } else if (event.data.type === "callParentLoginRedirect") {
     emit("loginRedirect");
   } else if (
+    event.data.type === "mapObjectsInitializeResult" ||
     event.data.type === "tileOverlaysUpdateResult" ||
     event.data.type === "mapObjectUpdateResult" ||
     event.data.type === "mapObjectDeleteResult"
@@ -175,18 +393,17 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  disposed = true;
   window.removeEventListener("message", handleMessage);
-  pendingMapObjectRequests.forEach(({ resolve, timer }) => {
-    window.clearTimeout(timer);
-    resolve(false);
-  });
-  pendingMapObjectRequests.clear();
+  cancelPending();
 });
 
 const updateTileOverlays = (tiles: unknown[]): Promise<boolean> =>
   requestMapObjectMutation("tileOverlaysUpdate", { tiles: JSON.parse(JSON.stringify(tiles)) });
 
 defineExpose({
+  initializeMapObjects,
+  upsertMapObject,
   updateTileOverlays,
   deleteMapObject,
   focusObject,

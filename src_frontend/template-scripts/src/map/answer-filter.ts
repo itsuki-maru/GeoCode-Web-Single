@@ -1,6 +1,11 @@
 import type { FormAnswerMapBootstrap } from "./types";
 import { createAnswerPrintSnapshot } from "./print/answer-print-state";
 import { isAnswerColoring } from "./answer-coloring";
+import {
+  extendAnswerShapeBounds,
+  hasRenderableAnswerShape,
+  isAnswerShapeVisible,
+} from "./answer-shapes";
 
 /** Only this dedicated iframe accepts answer filters. Cached layers are retained. */
 export function installAnswerFilter(
@@ -13,22 +18,24 @@ export function installAnswerFilter(
   let allowed = initial;
   let lastUpdate = "";
   let printEnabled = false;
-  const layerFor = (key: string) => {
+  const isRenderable = (key: string) => {
     const [kind, id] = key.split(":");
-    return kind === "marker" ? runtime.markers[`marker-${id}`] : runtime.shapeLayers[`shape-${id}`];
+    return kind === "marker"
+      ? Boolean(runtime.markers[`marker-${id}`])
+      : hasRenderableAnswerShape(runtime, id);
   };
   const isVisible = (key: string) => {
-    const layer = layerFor(key);
-    return (
-      !!layer &&
-      (key.startsWith("marker:")
-        ? runtime.map.hasLayer(runtime.visibleMarkerGroup) &&
-          runtime.visibleMarkerGroup.hasLayer(layer)
-        : runtime.map.hasLayer(layer))
+    const [kind, id] = key.split(":");
+    if (kind === "shape") return isAnswerShapeVisible(runtime, id);
+    const layer = runtime.markers[`marker-${id}`];
+    return Boolean(
+      layer &&
+        runtime.map.hasLayer(runtime.visibleMarkerGroup) &&
+        runtime.visibleMarkerGroup.hasLayer(layer),
     );
   };
   const counts = () => ({
-    renderable: [...allowed].filter((key) => !!layerFor(key)).length,
+    renderable: [...allowed].filter(isRenderable).length,
     visible: [...allowed].filter(isVisible).length,
   });
   const send = (type: string, extra: Record<string, unknown> = {}) =>
@@ -41,11 +48,12 @@ export function installAnswerFilter(
     const bounds = leaflet.latLngBounds([]);
     for (const key of allowed) {
       if (!isVisible(key)) continue;
-      const layer = layerFor(key),
-        extent = layer.getBounds?.(),
-        point = layer.getLatLng?.();
-      if (extent?.isValid()) bounds.extend(extent);
-      else if (point) bounds.extend(point);
+      const [kind, id] = key.split(":");
+      if (kind === "shape") extendAnswerShapeBounds(bounds, runtime, id);
+      else {
+        const point = runtime.markers[`marker-${id}`]?.getLatLng?.();
+        if (point) bounds.extend(point);
+      }
     }
     if (bounds.isValid()) runtime.map.fitBounds(bounds, { padding: [32, 32], maxZoom: 16 });
   };
@@ -165,11 +173,13 @@ export function installAnswerFilter(
   };
   window.addEventListener("keydown", onKey);
   runtime.map.on("layeradd layerremove overlayadd overlayremove answerfilterchange", update);
+  runtime.map.on("shaperenderchange", update);
   runtime.map.on("unload", () => {
     clearTimeout(timer);
     window.removeEventListener("keydown", onKey);
     window.removeEventListener("message", onMessage);
     runtime.map.off("layeradd layerremove overlayadd overlayremove answerfilterchange", update);
+    runtime.map.off("shaperenderchange", update);
   });
   return { counts };
 }

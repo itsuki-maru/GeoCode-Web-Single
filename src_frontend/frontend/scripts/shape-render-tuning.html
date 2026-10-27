@@ -1,0 +1,427 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="stylesheet" href="/vendor/leaflet.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+      }
+      #map {
+        width: 100vw;
+        height: 100vh;
+      }
+      .leaflet-control {
+        font: 12px sans-serif;
+      }
+    </style>
+    <script src="/vendor/leaflet.js"></script>
+    <script src="/vendor/cluster.js"></script>
+    <script src="/vendor/marked.js"></script>
+    <script src="/vendor/xss.js"></script>
+  </head>
+  <body>
+    <div id="map"></div>
+    <div id="draw-status" class="is-hidden"></div>
+    <script type="module">
+      const { plainMessageValue } = await import("/benchmark-parent-dto.ts");
+      window.__benchmarkPlainMessageValue = plainMessageValue;
+      const entry = new URLSearchParams(location.search).get("entry");
+      const initialize =
+        entry === "map-anather"
+          ? (await import("/src/map/read-only-page.ts")).initializeReadOnlyMapPage
+          : (await import("/benchmark-" + entry + ".ts")).initializeBenchmarkEditor;
+      Object.defineProperty(navigator, "geolocation", {
+        configurable: true,
+        value: { watchPosition: () => 1, clearWatch() {} },
+      });
+      const originalFetch = window.fetch;
+      window.fetch = (input, options) => {
+        const url = new URL(String(input), location.href);
+        if (url.pathname === "/marker/read/all" || url.pathname === "/shapes")
+          return Promise.resolve(
+            new Response(JSON.stringify(url.pathname === "/shapes" ? [] : {}), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        return originalFetch(input, options);
+      };
+      const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+      const frames = async () => {
+        await frame();
+        await frame();
+      };
+      const round = (n) => Math.round(n * 100) / 100;
+      const longTasks = [];
+      try {
+        new PerformanceObserver((list) =>
+          longTasks.push(
+            ...list.getEntries().map((t) => ({ start: t.startTime, duration: t.duration })),
+          ),
+        ).observe({ type: "longtask", buffered: false });
+      } catch {}
+      let creations = 0;
+      const originalGeoJSON = L.geoJSON;
+      L.geoJSON = function (...args) {
+        creations++;
+        return originalGeoJSON.apply(this, args);
+      };
+      const toggle = (name) => {
+        const label = [...document.querySelectorAll(".leaflet-control-layers label")].find(
+          (el) => el.textContent.trim() === name,
+        );
+        if (!label) throw Error("Missing control " + name);
+        const input = label.querySelector("input");
+        if (!input.checked) input.click();
+      };
+      window.measure = async (test, policy, timeoutMs, parentData = false, initialOnly = false) => {
+        localStorage.clear();
+        const geometryZoom = test.kind === "zoom-policy" ? test.zoom : 14;
+        // Expected candidates are derived from fixture geometry and the selected policy,
+        // independently of the render manager and its diagnostics.
+        const minimumAtZoom = (zoom) => policy.minPixelSize ?? (zoom < 11 ? 8 : zoom < 14 ? 6 : 4);
+        const center = L.latLng(35.681, 139.7615),
+          base = L.CRS.EPSG3857.latLngToPoint(center, geometryZoom),
+          size = L.point(innerWidth, innerHeight);
+        const viewCenter = L.CRS.EPSG3857.latLngToPoint(center, test.zoom),
+          origin = viewCenter.subtract(size.divideBy(2)).round();
+        const viewport = L.latLngBounds(
+          L.CRS.EPSG3857.pointToLatLng(origin, test.zoom),
+          L.CRS.EPSG3857.pointToLatLng(origin.add(size), test.zoom),
+        );
+        const panOffset = Math.round(size.x * 0.12),
+          panOrigin = origin.add(L.point(panOffset, 0));
+        const smallPanViewport = L.latLngBounds(
+          L.CRS.EPSG3857.pointToLatLng(panOrigin, test.zoom),
+          L.CRS.EPSG3857.pointToLatLng(panOrigin.add(size), test.zoom),
+        );
+        const padded = viewport.pad(policy.padding),
+          expectedViewport = new Set(),
+          expectedTotal = new Set(),
+          expectedPanViewport = new Set();
+        let shortOmitted = 0;
+        const fixtureGeometry = [];
+        const shapes = Array.from({ length: test.count }, (_, i) => {
+          const far = test.kind === "spread" && i >= 80;
+          let x,
+            y,
+            length = 12;
+          if (test.kind === "buffer" && i < 32000) {
+            const band = Math.floor(i / 8000);
+            x = size.x / 2 + size.x * (0.025 + 0.05 * band);
+            y = ((i % 200) - 100) * 2;
+          } else if (test.kind === "zoom-policy" && i >= 32000) {
+            x = size.x / 2 + size.x * 0.05;
+            y = ((i % 200) - 100) * 2;
+          } else if (test.kind === "spread" && !far) {
+            x = ((i % 10) - 5) * 16;
+            y = (Math.floor(i / 10) - 4) * 14;
+          } else {
+            x = ((i % 200) - 100) * 1.2;
+            y = ((Math.floor(i / 200) % 200) - 100) * 2;
+          }
+          if (test.kind === "short") length = [3, 5, 7, 10][i % 4];
+          // Stay away from exact thresholds after projection and zooming.
+          if (test.kind === "zoom-policy") length = [3.25, 5.25, 7.25, 10.25, 16.25][i % 5];
+          const anchor = far
+            ? L.CRS.EPSG3857.latLngToPoint(L.latLng(34.69, 135.5), geometryZoom)
+            : base;
+          const coordinates = Array.from({ length: test.vertices }, (_, j) => {
+            const p = L.CRS.EPSG3857.pointToLatLng(
+              L.point(
+                anchor.x + x + (length * j) / (test.vertices - 1),
+                anchor.y + y + 0.2 * Math.sin(j),
+              ),
+              geometryZoom,
+            );
+            return [p.lng, p.lat];
+          });
+          const id = "s-" + i;
+          const first = L.latLng(coordinates[0][1], coordinates[0][0]),
+            last = L.latLng(coordinates.at(-1)[1], coordinates.at(-1)[0]);
+          const bounds = L.latLngBounds(first, last);
+          fixtureGeometry.push({ id, bounds, length });
+          const displayedLength = length * Math.pow(2, test.zoom - geometryZoom);
+          if (displayedLength >= minimumAtZoom(test.zoom)) {
+            if (padded.intersects(bounds)) expectedTotal.add(id);
+            if (viewport.intersects(bounds)) expectedViewport.add(id);
+            if (smallPanViewport.intersects(bounds)) expectedPanViewport.add(id);
+          } else if (viewport.intersects(bounds)) shortOmitted++;
+          return {
+            id,
+            layer_id: "a",
+            name: "",
+            shape_type: "polyline",
+            user_id: "benchmark",
+            geojson: {
+              type: "Feature",
+              properties: {
+                style: { color: "#2468ac", weight: 3, arrowType: i % 5 === 0 ? "end" : "none" },
+              },
+              geometry: { type: "LineString", coordinates },
+            },
+          };
+        });
+        const zoomInZoom = test.zoom < 11 ? 11 : test.zoom < 14 ? 14 : test.zoom + 1;
+        let expectedZoomIn = null;
+        if (test.kind === "zoom-policy" && !initialOnly) {
+          const projected = L.CRS.EPSG3857.latLngToPoint(center, zoomInZoom),
+            zoomOrigin = projected.subtract(size.divideBy(2)).round();
+          const zoomViewport = L.latLngBounds(
+            L.CRS.EPSG3857.pointToLatLng(zoomOrigin, zoomInZoom),
+            L.CRS.EPSG3857.pointToLatLng(zoomOrigin.add(size), zoomInZoom),
+          );
+          const zoomPadded = zoomViewport.pad(policy.padding);
+          let total = 0, visible = 0;
+          for (const shape of fixtureGeometry) {
+            if (shape.length * Math.pow(2, zoomInZoom - geometryZoom) < minimumAtZoom(zoomInZoom))
+              continue;
+            if (zoomPadded.intersects(shape.bounds)) total++;
+            if (zoomViewport.intersects(shape.bounds)) visible++;
+          }
+          expectedZoomIn = { zoom: zoomInZoom, total, viewport: visible };
+        }
+        const tiles = {
+            1: {
+              id: 1,
+              label: "blank",
+              layer_name: "blank",
+              url: "/blank/{z}/{x}/{y}.png",
+              attribution: "benchmark",
+              include_foreign_tiles: true,
+              min_zoom: 0,
+              max_zoom: 20,
+            },
+          },
+          layers = { a: { id: "a", user_id: "benchmark", layer_name: "pipes", is_master: false } };
+        Object.assign(window, {
+          tileServers: tiles,
+          latitude: center.lat,
+          longitude: center.lng,
+          zoom: test.zoom,
+          is_master: true,
+          layer: "a",
+          markerId: "0",
+          layersFromAxum: layers,
+          markersFromAxum: {},
+          shapesFromAxum: parentData ? [] : shapes,
+        });
+        window.__GEOCODE_MAP_BOOTSTRAP__ = {
+          dataSource: parentData ? "parent" : "server",
+          page: entry,
+          initialView: { latitude, longitude, zoom },
+          isMaster: true,
+          selectedLayer: "a",
+          markerId: "0",
+          isCluster: false,
+          tileServers: tiles,
+          layers,
+          markers: {},
+          shapes: parentData ? [] : shapes,
+          tileOverlays: [],
+        };
+        if (!parentData && parent !== window)
+          parent.__benchmarkServerCanonical = structuredClone(shapes);
+        window.__shapeBenchmarkPolicy = policy;
+        let firstAt = null,
+          firstViewportAt = null,
+          viewportAt = null,
+          viewportAdded = 0,
+          added = 0,
+          timer,
+          panPending = null,
+          panViewportAt = null,
+          refreshCount = 0;
+        const creationProgress = [];
+        const pendingViewport = new Set(expectedViewport);
+        window.__shapeBenchmarkObserver = {
+          added(id) {
+            if (panPending?.delete(id) && !panPending.size) panViewportAt = performance.now();
+            added++;
+            if (added % 5000 === 0)
+              creationProgress.push({ added, elapsedMs: round(performance.now() - start) });
+            if (firstAt === null) firstAt = performance.now();
+            if (pendingViewport.delete(id)) {
+              if (firstViewportAt === null) firstViewportAt = performance.now();
+              viewportAdded++;
+              if (!pendingViewport.size && viewportAt === null) viewportAt = performance.now();
+            }
+          },
+          refreshed() {
+            refreshCount++;
+            if (!expectedViewport.size && viewportAt === null) viewportAt = performance.now();
+          },
+        };
+        await frames();
+        creations = 0;
+        longTasks.length = 0;
+        const heapBefore = performance.memory?.usedJSHeapSize ?? null;
+        const start = performance.now();
+        const runtime = initialize(entry),
+          manager = runtime.shapeRenderer;
+        const initSyncMs = performance.now() - start;
+        let snapshotSendSyncMs = null,
+          snapshotDtoMs = null;
+        if (parentData) {
+          window.__shapeSnapshotTiming = { sentAt: performance.now() };
+          const delivery = await parent.__sendBenchmarkSnapshot(
+            window,
+            {
+              type: "mapObjectsInitialize",
+              runtimeId: runtime.runtimeId,
+              requestId: "benchmark-snapshot",
+              snapshot: { markers: {}, shapes },
+            },
+            timeoutMs,
+          );
+          window.__shapeSnapshotTiming.ackAt = performance.now();
+          snapshotSendSyncMs = delivery.sendSyncMs;
+          snapshotDtoMs = delivery.dtoMs;
+        }
+        if (entry === "map-anather") {
+          toggle("pipes");
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          while (runtime.getObjectLoadStatus?.().loading && performance.now() - start < timeoutMs)
+            await frame();
+          if (runtime.getObjectLoadStatus?.().failed) throw Error("Fixture layer load failed");
+        }
+        const remaining = Math.max(0, timeoutMs - (performance.now() - start));
+        let status;
+        try {
+          status = await Promise.race([
+            manager.whenIdle().then(() => "complete"),
+            new Promise((resolve) => {
+              timer = setTimeout(() => resolve("timeout"), remaining);
+            }),
+          ]);
+        } finally {
+          clearTimeout(timer);
+        }
+        const elapsed = performance.now() - start;
+        const initial = {
+          initSyncMs: round(initSyncMs),
+          snapshotDtoMs: parentData ? round(snapshotDtoMs) : null,
+          snapshotTransferMs: parentData
+            ? round(
+                window.__shapeSnapshotTiming.receivedAt -
+                  window.__shapeSnapshotTiming.sentAt -
+                  snapshotDtoMs,
+              )
+            : null,
+          snapshotRegistrationMs: parentData
+            ? round(
+                window.__shapeSnapshotTiming.registeredAt - window.__shapeSnapshotTiming.receivedAt,
+              )
+            : null,
+          snapshotAckMs: parentData
+            ? round(window.__shapeSnapshotTiming.ackAt - window.__shapeSnapshotTiming.sentAt)
+            : null,
+          snapshotSendSyncMs: snapshotSendSyncMs === null ? null : round(snapshotSendSyncMs),
+          heapBeforeBytes: heapBefore,
+          initialHeapBytes: performance.memory?.usedJSHeapSize ?? null,
+          firstAddMs: firstAt === null ? null : round(firstAt - start),
+          firstViewportAddMs: firstViewportAt === null ? null : round(firstViewportAt - start),
+          viewportReadyMs: viewportAt === null ? null : round(viewportAt - start),
+          readyMs: status === "complete" ? round(elapsed) : null,
+          elapsedMs: round(elapsed),
+          viewportAdded,
+          refreshCount,
+          creationProgress: [...creationProgress],
+          actualZoom: runtime.map.getZoom(),
+          viewportWidth: runtime.map.getSize().x,
+          viewportHeight: runtime.map.getSize().y,
+          creations,
+          paths: document.querySelectorAll("#map svg path").length,
+          diagnostics: manager.getDiagnostics?.() ?? null,
+          ...manager.getStats(),
+        };
+        await frames();
+        let afterMove = null, afterZoom = null;
+        if (status === "complete" && expectedZoomIn) {
+          const beforeZoom = creations, zoomStarted = performance.now();
+          runtime.map.setView(center, zoomInZoom, { animate: false });
+          await manager.whenIdle();
+          const zoomedIn = {
+            readyMs: round(performance.now() - zoomStarted),
+            newCreations: creations - beforeZoom,
+            diagnostics: manager.getDiagnostics?.() ?? null,
+            ...manager.getStats(),
+          };
+          if (zoomedIn.renderedCount !== expectedZoomIn.total || zoomedIn.pendingCount !== 0)
+            throw Error("Zoom-in candidate count invariant failed");
+          await frames();
+          const beforeReturn = creations, returnStarted = performance.now();
+          runtime.map.setView(center, test.zoom, { animate: false });
+          await manager.whenIdle();
+          const returned = {
+            readyMs: round(performance.now() - returnStarted),
+            newCreations: creations - beforeReturn,
+            diagnostics: manager.getDiagnostics?.() ?? null,
+            ...manager.getStats(),
+          };
+          if (returned.renderedCount !== expectedTotal.size || returned.pendingCount !== 0)
+            throw Error("Return-zoom candidate count invariant failed");
+          afterZoom = {
+            expected: {
+              zoomedIn: expectedZoomIn,
+              returned: { zoom: test.zoom, total: expectedTotal.size, viewport: expectedViewport.size },
+            },
+            zoomedIn, returned,
+          };
+          await frames();
+        }
+        if (status === "complete" && !initialOnly) {
+          panPending = new Set([...expectedPanViewport].filter((id) => !expectedTotal.has(id)));
+          const before = creations,
+            moved = performance.now();
+          if (!panPending.size) panViewportAt = moved;
+          runtime.map.panBy([panOffset, 0], { animate: false });
+          await manager.whenIdle();
+          if (panPending.size) throw Error("Small-pan viewport remained incomplete");
+          const small = {
+            readyMs: round(performance.now() - moved),
+            viewportReadyMs: round(panViewportAt - moved),
+            newCreations: creations - before,
+            diagnostics: manager.getDiagnostics?.() ?? null,
+            ...manager.getStats(),
+          };
+          await frames();
+          const farMoved = performance.now();
+          runtime.map.setView([20, 125], 14, { animate: false });
+          await manager.whenIdle();
+          afterMove = {
+            smallPan: small,
+            farMoveMs: round(performance.now() - farMoved),
+            final: manager.getStats(),
+            finalDiagnostics: manager.getDiagnostics?.() ?? null,
+          };
+          await frames();
+        }
+        const end = performance.now();
+        await frames();
+        const tasks = longTasks.filter((t) => t.start + t.duration > start && t.start <= end);
+        const result = {
+          status,
+          expected: {
+            total: expectedTotal.size,
+            viewport: expectedViewport.size,
+            smallSegmentsOmitted: shortOmitted,
+          },
+          initial,
+          afterZoom,
+          afterMove,
+          longTaskCount: tasks.length,
+          maxLongTaskMs: round(Math.max(0, ...tasks.map((t) => t.duration))),
+          heapBytes: performance.memory?.usedJSHeapSize ?? null,
+        };
+        runtime.map.remove();
+        window.__shapeBenchmarkObserver = null;
+        return result;
+      };
+      window.ready = true;
+    </script>
+  </body>
+</html>

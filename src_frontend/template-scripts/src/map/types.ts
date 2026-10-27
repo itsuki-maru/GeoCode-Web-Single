@@ -71,6 +71,7 @@ export interface AnotherMapBootstrap extends MapBootstrapBase {
         targetCount: number;
         parentOrigin: string;
         requestId: string;
+        initialView?: InitialMapView;
         analysis?: import("./answer-analysis").AnswerAnalysis;
         query?: Record<string, unknown>;
         targets?: string[];

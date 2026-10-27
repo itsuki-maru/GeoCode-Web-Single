@@ -40,12 +40,11 @@ async fn cached(url: &str, token: &str, identity: Uuid) -> Result<Value, &'stati
     }
     // 待機・接続・本文取得をまとめて制限し、端末側の3秒上限に余裕を残す。
     let started = Instant::now();
-    let value = tokio::time::timeout(Duration::from_millis(1500), async {
+    let value = within_request_deadline(async {
         let _permit = REQUESTS.acquire().await.map_err(|_| "busy")?;
         fetch(url, token).await
     })
-    .await
-    .map_err(|_| "timeout")??;
+    .await?;
     let mut cache = CACHE.lock().await;
     cache.retain(|_, (time, _)| time.elapsed() < CACHE_TTL);
     if cache.len() >= 512 {
@@ -59,6 +58,14 @@ async fn cached(url: &str, token: &str, identity: Uuid) -> Result<Value, &'stati
     }
     cache.insert(cache_key, (started, value.clone()));
     Ok(value)
+}
+
+async fn within_request_deadline(
+    request: impl std::future::Future<Output = Result<Value, &'static str>>,
+) -> Result<Value, &'static str> {
+    tokio::time::timeout(Duration::from_millis(1500), request)
+        .await
+        .map_err(|_| "timeout")?
 }
 
 async fn fetch(url: &str, token: &str) -> Result<Value, &'static str> {
@@ -257,19 +264,18 @@ mod tests {
             task.abort();
         }
     }
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn upstream_wait_is_bounded() {
-        let (url, task) = serve(Router::new().route(
-            "/",
-            post(|| async {
-                tokio::time::sleep(Duration::from_secs(10)).await;
-                (StatusCode::CREATED, Json(response()))
-            }),
-        ))
-        .await;
-        let start = Instant::now();
-        assert!(cached(&url, "test-token", Uuid::new_v4()).await.is_err());
-        assert!(start.elapsed() < Duration::from_secs(3));
-        task.abort();
+        // Exercise the same deadline as cached(), without network or shared cache locks.
+        let request = within_request_deadline(std::future::pending());
+        tokio::pin!(request);
+        assert!(futures_util::poll!(request.as_mut()).is_pending());
+        tokio::time::advance(Duration::from_millis(1499)).await;
+        assert!(futures_util::poll!(request.as_mut()).is_pending());
+        tokio::time::advance(Duration::from_millis(1)).await;
+        assert_eq!(
+            futures_util::poll!(request.as_mut()),
+            std::task::Poll::Ready(Err("timeout"))
+        );
     }
 }

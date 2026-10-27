@@ -86,7 +86,7 @@ function buildShapeArrowTypeOptions(selectedArrowType) {
 }
 
 // 図形レイヤに保存用メタデータをまとめて関連付ける
-function applyShapeRecord(layer, shapeRecord) {
+function applyShapeRecord(layer, shapeRecord, syncRecord = true) {
   if (!layer) {
     return;
   }
@@ -96,6 +96,7 @@ function applyShapeRecord(layer, shapeRecord) {
   }
 
   layer.options.shapeRecord = {
+    ...shapeRecord,
     id: shapeRecord.id || null,
     layer_id: shapeRecord.layer_id || null,
     shape_type: shapeRecord.shape_type,
@@ -112,7 +113,11 @@ function applyShapeRecord(layer, shapeRecord) {
   bindShapeArrowStyle(layer);
   if (shapeRecord.id) {
     searchableShapeLayers.add(layer);
-    renderVisibleShapes();
+    if (syncRecord) {
+      editorShapeRecords.set(String(shapeRecord.id), layer.options.shapeRecord);
+      shapeRenderManager?.upsert(layer.options.shapeRecord, layer);
+      shapeRenderManager?.scheduleRefresh();
+    }
   }
 }
 
@@ -126,39 +131,109 @@ function isShapeVisibleForSearch(layer) {
 }
 
 function renderVisibleShapes() {
-  searchableShapeLayers.forEach((layer) => {
-    const isVisible = editorEntryProfile.isMobile
-      ? isShapeVisibleForSearch(layer)
-      : isShapeVisibleForExternalFilter(layer);
-    if (isVisible) {
-      if (!drawnShapesGroup.hasLayer(layer)) {
-        drawnShapesGroup.addLayer(layer);
-      }
-      if (Array.isArray(layer.measurementMarkers)) {
-        layer.measurementMarkers.forEach((marker) => {
-          if (!drawnShapesGroup.hasLayer(marker)) {
-            drawnShapesGroup.addLayer(marker);
-          }
-          setMeasurementMarkerVisibility(marker, isMeasurementVisible);
-        });
-      }
-      return;
-    }
-
-    drawnShapesGroup.removeLayer(layer);
-    if (Array.isArray(layer.measurementMarkers)) {
-      layer.measurementMarkers.forEach((marker) => {
-        drawnShapesGroup.removeLayer(marker);
-      });
-    }
-  });
-
-  if (map && typeof map.closePopup === "function") {
-    map.closePopup();
-  }
+  shapeRenderManager?.refresh();
   shapeNameLabelManager?.scheduleRefresh();
   pruneMeasurementSelection();
   shapeMeasurementManager?.scheduleRefresh();
+}
+
+function matchesEditorShapeSearch(record) {
+  if (!record || typeof record !== "object") return false;
+  const cached = editorShapeSearchCache.get(record);
+  if (cached && cached.query === localMarkerSearchQuery) return cached.matches;
+  const matches = matchesShapeSearch(record, localMarkerSearchQuery);
+  editorShapeSearchCache.set(record, { query: localMarkerSearchQuery, matches });
+  return matches;
+}
+
+function beginSavingShape(id) {
+  const key = String(id);
+  savingShapeIds.set(key, (savingShapeIds.get(key) || 0) + 1);
+}
+
+function endSavingShape(id) {
+  const key = String(id);
+  const remaining = (savingShapeIds.get(key) || 0) - 1;
+  if (remaining > 0) savingShapeIds.set(key, remaining);
+  else savingShapeIds.delete(key);
+  shapeRenderManager?.scheduleRefresh();
+}
+
+function isEditorShapeRecordVisible(record) {
+  return Boolean(
+    record &&
+      !deletedShapeIds.has(String(record.id)) &&
+      (is_master || record.layer_id === getCurrentShapeLayerId()) &&
+      (!externalShapeFilterIdSet || externalShapeFilterIdSet.has(String(record.id))) &&
+      (!editorEntryProfile.isMobile || matchesEditorShapeSearch(record)),
+  );
+}
+
+function initializeEditorShapeRendering() {
+  shapeRenderManager = createShapeRenderManager({
+    map,
+    records: editorShapeRecords.values(),
+    isRecordVisible: (record) =>
+      map.hasLayer(drawnShapesGroup) && isEditorShapeRecordVisible(record),
+    isPinned: (id, layer) =>
+      String(id) === focusedEditorShapeId ||
+      String(id) === recentlyCreatedShapeId ||
+      savingShapeIds.has(String(id)) ||
+      Boolean(
+        layer &&
+          (layer === geometryEditingShapeLayer ||
+            layer === editingShapeLayer ||
+            layer === circleShapeDragState?.layer ||
+            layer.isDeletingShape ||
+            isEditorShapePopupOpen?.(layer) ||
+            measurementSelectedShapes.has(layer)),
+      ),
+    createLayer: (record) => {
+      const style = getShapeStyleFromGeoJson(record.shape_type, record.geojson);
+      const layer = createLeafletShapeLayer(record.shape_type, record.geojson, style);
+      if (!layer) return null;
+      applyShapeRecord(layer, record, false);
+      applyShapeStyle(layer, activeDrawMode === "delete");
+      updateShapeNameLabel(layer, record.name || "");
+      attachShapeEvents(layer);
+      return layer;
+    },
+    addLayer: (layer) => {
+      drawnShapesGroup.addLayer(layer);
+      applyShapeArrowStyle(layer);
+    },
+    removeLayer: (layer) => {
+      drawnShapesGroup.removeLayer(layer);
+      removeShapeMeasurementMarkers(layer);
+      shapeNameLabelManager?.invalidate(layer);
+    },
+    disposeLayer: (layer) => {
+      removeShapeMeasurementMarkers(layer);
+      shapeNameLabelManager?.invalidate(layer);
+      searchableShapeLayers.delete(layer);
+      releaseShapeMemoLayer?.(layer);
+      if (typeof popupContent !== "undefined")
+        popupContent.release?.("shape", String(layer.shapeId));
+      layer.unbindPopup?.();
+      layer.unbindTooltip?.();
+      layer.off?.();
+    },
+    onRefresh: () => {
+      shapeNameLabelManager?.scheduleRefresh();
+      shapeMeasurementManager?.scheduleRefresh();
+    },
+  });
+  shapeRenderManager.refresh();
+  map.on("movestart zoomstart", () => {
+    recentlyCreatedShapeId = null;
+  });
+  map.on("unload", () => {
+    shapeRenderManager?.destroy();
+    shapeNameLabelManager?.destroy();
+    shapeMeasurementManager?.destroy();
+    savingShapeIds.clear();
+    recentlyCreatedShapeId = null;
+  });
 }
 
 // 図形名と所属レイヤの変更をバックエンドへ保存する
@@ -183,22 +258,37 @@ async function persistShapeMetadata(
   ) {
     throw new Error("入力が制限されています。");
   }
-  const response = await fetchWithAuth(`/shape/${layer.shapeId}`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      name: nextName,
-      layer_id: nextLayerId,
-      shape_type: nextShapeType,
-      geojson: nextGeoJson,
-      ...bodyEdit,
-    }),
-  });
+  beginSavingShape(layer.shapeId);
+  try {
+    const response = await fetchWithAuth(`/shape/${layer.shapeId}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: nextName,
+        layer_id: nextLayerId,
+        shape_type: nextShapeType,
+        geojson: nextGeoJson,
+        ...bodyEdit,
+      }),
+    });
 
-  if (!response.ok) {
-    throw new Error("shape update failed");
+    if (!response.ok) {
+      throw new Error("shape update failed");
+    }
+    const data = typeof response.json === "function" ? await response.json() : {};
+    return (
+      data.object || {
+        ...(layer.options?.shapeRecord || {}),
+        name: nextName,
+        layer_id: nextLayerId,
+        shape_type: nextShapeType || layer.shapeType,
+        geojson: nextGeoJson || layer.options?.shapeRecord?.geojson,
+      }
+    );
+  } finally {
+    endSavingShape(layer.shapeId);
   }
 }
 
@@ -457,7 +547,7 @@ function openShapeNameEditor(layer) {
         ? layer.options.shapeRecord.geojson
         : buildShapeGeoJson(layer, layer.shapeType, nextShapeStyle, nextMemo);
       try {
-        await persistShapeMetadata(
+        const savedRecord = await persistShapeMetadata(
           layer,
           nextName,
           nextLayerId,
@@ -465,23 +555,19 @@ function openShapeNameEditor(layer) {
           null,
           bodyEdit,
         );
-        applyShapeRecord(layer, {
-          id: layer.shapeId,
-          layer_id: nextLayerId,
-          shape_type: layer.shapeType,
-          name: nextName,
-          geojson: nextGeoJson,
-        });
+        applyShapeRecord(layer, savedRecord);
         updateShapeNameLabel(layer, nextName);
         setSelectedShapeColor(nextShapeStyle.color);
         applyShapeStyle(layer);
         refreshShapeMeasurementMarkers(layer);
         closeShapeNameEditor();
-        if (editorEntryProfile.isMobile) {
-          if (previousLayerId !== nextLayerId) callParentReload(nextLayerId);
-        } else {
-          callParentReload(previousLayerId !== nextLayerId ? nextLayerId : null);
-        }
+        if (typeof notifyParentMapObjectChange === "function")
+          notifyParentMapObjectChange({
+            operation: "upsert",
+            objectType: "shape",
+            object: savedRecord,
+            previousLayerId,
+          });
         if (!is_master && nextLayerId !== getCurrentShapeLayerId()) {
           removeShapeMeasurementMarkers(layer);
           drawnShapesGroup.removeLayer(layer);
@@ -554,24 +640,9 @@ function getSavedShapes() {
 
 // サーバーから渡された図形一覧を地図へ復元する
 function restoreSavedShapes() {
+  editorShapeRecords.clear();
   getSavedShapes().forEach((shape) => {
-    const shapeStyle = getShapeStyleFromGeoJson(shape.shape_type, shape.geojson);
-    const shapeLayer = createLeafletShapeLayer(shape.shape_type, shape.geojson, shapeStyle);
-    if (!shapeLayer) {
-      return;
-    }
-
-    applyShapeRecord(shapeLayer, {
-      id: shape.id,
-      layer_id: shape.layer_id,
-      shape_type: shape.shape_type,
-      name: shape.name || "",
-      geojson: shape.geojson,
-    });
-    applyShapeStyle(shapeLayer);
-    updateShapeNameLabel(shapeLayer, shape.name || "");
-    attachShapeEvents(shapeLayer);
-    drawnShapesGroup.addLayer(shapeLayer);
+    if (shape?.id) editorShapeRecords.set(String(shape.id), shape);
   });
 }
 

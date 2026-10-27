@@ -57,6 +57,9 @@ async function deleteShape(layer) {
       clearFocusedShapeFocus(layer);
     }
     removeShapeMeasurementMarkers(layer);
+    editorShapeRecords.delete(shapeId);
+    shapeRenderManager?.remove(shapeId);
+    shapeRenderManager?.scheduleRefresh();
     drawnShapesGroup.removeLayer(layer);
     searchableShapeLayers.delete(layer);
     shapeNameLabelManager?.invalidate(layer);
@@ -70,7 +73,13 @@ async function deleteShape(layer) {
     layer.isDeletingShape = false;
     deletingShapeIds.delete(shapeId);
   }
-  callParentReload();
+  if (typeof notifyParentMapObjectChange === "function")
+    notifyParentMapObjectChange({
+      operation: "delete",
+      objectType: "shape",
+      id: shapeId,
+      previousLayerId: deletedShape.layerId,
+    });
   setDrawStatus("図形描画: 削除しました。");
   return true;
 }

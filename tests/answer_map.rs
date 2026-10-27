@@ -97,6 +97,7 @@ async fn matches_all_pages_deduplicates_and_preserves_owner_and_latest_rules() {
         Extension(templates.clone()),
         Form(AnswerMapRequest {
             analysis: None,
+            initial_view: None,
             query: base.to_string(),
             parent_origin: "http://localhost:5173".into(),
             request_id: "test-map".into(),
@@ -147,6 +148,7 @@ async fn matches_all_pages_deduplicates_and_preserves_owner_and_latest_rules() {
         Extension(templates.clone()),
         Form(AnswerMapRequest {
             analysis: None,
+            initial_view: None,
             query: json!({"target_id":ids[0],"target_type":"marker"}).to_string(),
             parent_origin: "http://localhost:5173".into(),
             request_id: "invalid-position".into(),
@@ -169,6 +171,7 @@ async fn matches_all_pages_deduplicates_and_preserves_owner_and_latest_rules() {
         Extension(templates),
         Form(AnswerMapRequest {
             analysis: None,
+            initial_view: None,
             query: json!({"target_name":"該当しない"}).to_string(),
             parent_origin: "http://localhost:5173".into(),
             request_id: "error-map".into(),
@@ -272,4 +275,107 @@ async fn popup_snapshots_separate_all_answers_and_keep_ambiguous_legacy_read_onl
             .await
             .unwrap();
     assert_eq!(row, ("自由\n回答A\n回答B\n".into(), true));
+}
+
+#[test]
+fn accepts_requests_without_an_initial_map_view() {
+    let request: AnswerMapRequest = serde_json::from_value(json!({
+        "query": "{}",
+        "parent_origin": "http://localhost:5173",
+        "request_id": "legacy-request"
+    }))
+    .unwrap();
+    assert!(request.initial_view.is_none());
+}
+
+#[tokio::test]
+async fn passes_valid_initial_views_to_the_map_without_changing_answer_targets() {
+    let pool = common::test_pool().await;
+    let owner = common::create_test_user(&pool, "initial-view-owner").await;
+    let layer = common::master_layer_id(&pool, &owner).await;
+    let marker = Uuid::new_v4().to_string();
+    sqlx::query("INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES($1,$2,$3,'表示位置確認',35,139,'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
+        .bind(&marker).bind(&owner).bind(&layer).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO marker_form_submission_model(id,marker_id,create_at,submitted_values,rendered_markdown) VALUES($1,$2,$3,'{}','')")
+        .bind(Uuid::new_v4().to_string()).bind(&marker).bind((Utc::now()-Duration::days(1)).naive_utc())
+        .execute(&pool).await.unwrap();
+    let templates = geocode_web_single::build_tera_extension().unwrap();
+    let query = json!({"target_type":"marker","target_id":marker,"as_of":Utc::now()}).to_string();
+    let valid = json!({"latitude": 35.6812, "longitude": 139.7671, "zoom": 14.5});
+    let mut baseline: Option<Value> = None;
+    for (initial_view, expected_view) in [
+        (None, None),
+        (Some(valid.to_string()), Some(valid)),
+        (Some(String::new()), None),
+        (Some("not-json".into()), None),
+        (
+            Some(json!({"latitude":91,"longitude":139,"zoom":14}).to_string()),
+            None,
+        ),
+        (
+            Some(json!({"latitude":35,"longitude":181,"zoom":14}).to_string()),
+            None,
+        ),
+        (
+            Some(json!({"latitude":35,"longitude":139,"zoom":31}).to_string()),
+            None,
+        ),
+        (
+            Some(json!({"latitude":"35","longitude":139,"zoom":14}).to_string()),
+            None,
+        ),
+        (
+            Some(json!({"latitude":35,"longitude":139}).to_string()),
+            None,
+        ),
+    ] {
+        let response = answer_map_handler(
+            Extension(owner.clone()),
+            Extension(pool.clone()),
+            Extension(templates.clone()),
+            Form(AnswerMapRequest {
+                analysis: None,
+                initial_view,
+                query: query.clone(),
+                parent_origin: "http://localhost:5173".into(),
+                request_id: "view-contract".into(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        let html = String::from_utf8(
+            to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        let raw = html
+            .lines()
+            .find_map(|line| {
+                line.trim()
+                    .strip_prefix("answerPreview: ")
+                    .and_then(|value| value.strip_suffix(','))
+            })
+            .expect("answer preview bootstrap should be present");
+        let mut preview: Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            preview.as_object_mut().unwrap().remove("initialView"),
+            expected_view
+        );
+        assert_eq!(preview["answerCount"], 1);
+        assert_eq!(preview["targetCount"], 1);
+        assert_eq!(preview["targets"], json!([format!("marker:{marker}")]));
+        assert_eq!(preview["query"]["target_id"], marker);
+        if let Some(baseline) = &baseline {
+            assert_eq!(
+                &preview, baseline,
+                "initial view must not change search data or message metadata"
+            );
+        } else {
+            baseline = Some(preview);
+        }
+    }
 }

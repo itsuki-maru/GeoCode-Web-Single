@@ -14,7 +14,7 @@ interface MapViewReader {
 
 type MapViewStorage = Pick<Storage, "getItem" | "setItem">;
 
-const isValidMapView = (value: unknown): value is StoredMapView => {
+export const isValidMapView = (value: unknown): value is StoredMapView => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Record<string, unknown>;
   return (

@@ -1,3 +1,5 @@
+import { bindDeferredPopupLayout, releaseDeferredDetails } from "./content";
+
 interface ShapeMemoGeoJson {
   properties?: { memo?: unknown } | null;
 }
@@ -21,8 +23,12 @@ interface ShapeMemoTooltip {
 
 interface ShapeMemoPopup {
   getElement?(): HTMLElement | null;
+  isOpen?(): boolean;
+  remove?(): unknown;
+  update?(): void;
   openOn(map: unknown): ShapeMemoPopup;
-  setContent(content: string): ShapeMemoPopup;
+  setContent(content: string | HTMLElement): ShapeMemoPopup;
+  once?(event: string, callback: () => void): unknown;
   setLatLng(latLng: unknown): ShapeMemoPopup;
 }
 
@@ -74,6 +80,18 @@ export function createShapeMemoRuntime({
   schedule = (callback) => window.setTimeout(callback, 0),
   setupDetailsLazyImages,
 }: ShapeMemoDependencies) {
+  const memoHtml = new WeakMap<ShapeMemoLayer, { name: string; memo: string; html: string }>();
+  const layerPopups = new WeakMap<ShapeMemoLayer, ShapeMemoPopup>();
+  const isShapePopupOpen = (layer: ShapeMemoLayer | null | undefined): boolean =>
+    Boolean(layer && layerPopups.get(layer)?.isOpen?.());
+  const releaseLayer = (layer: ShapeMemoLayer): void => {
+    const popup = layerPopups.get(layer);
+    layerPopups.delete(layer);
+    popup?.remove?.();
+    const cached = memoHtml.get(layer);
+    if (cached) releaseDeferredDetails(cached.html);
+    memoHtml.delete(layer);
+  };
   const renderShapeMemoPopupContent = (shapeName: unknown, memo: unknown): string => {
     const normalizedMemo = normalizeShapeMemo(memo);
     if (!normalizedMemo.trim()) return "";
@@ -85,27 +103,47 @@ export function createShapeMemoRuntime({
     return `<div class="md-detail-contents">${titleHtml}${renderIframe(cleanHtml)}</div>`;
   };
 
+  const preparePopupContent = (layer: ShapeMemoLayer): string => {
+    if (renderPopup) return renderPopup(layer);
+    const name = normalizeShapeName(layer.shapeName);
+    const memo = normalizeShapeMemo(layer.shapeMemo);
+    let cached = memoHtml.get(layer);
+    if (!cached || cached.name !== name || cached.memo !== memo) {
+      if (cached) releaseDeferredDetails(cached.html);
+      cached = { name, memo, html: renderShapeMemoPopupContent(name, memo) };
+      memoHtml.set(layer, cached);
+    }
+    return cached.html;
+  };
+
   const openShapeMemoPopup = (
     layer: ShapeMemoLayer | null | undefined,
     latLng: unknown,
   ): boolean => {
     if (!layer || !latLng) return false;
 
-    const popupContent = renderPopup
-      ? renderPopup(layer)
-      : renderShapeMemoPopupContent(layer.shapeName, layer.shapeMemo);
+    const popupContent = preparePopupContent(layer);
     if (!popupContent) return false;
 
     const popup = getLeaflet().popup().setLatLng(latLng).setContent(popupContent).openOn(getMap());
+    layerPopups.set(layer, popup);
+    popup.once?.("remove", () => {
+      if (layerPopups.get(layer) === popup) layerPopups.delete(layer);
+    });
+    bindDeferredPopupLayout(popup);
     schedule(() => {
+      if (layerPopups.get(layer) !== popup || popup.isOpen?.() === false) return;
       const popupElement = popup.getElement?.() ?? null;
-      setupDetailsLazyImages(popupElement || document);
+      if (popupElement) setupDetailsLazyImages(popupElement);
     });
     return true;
   };
 
   const attachShapeMemoPopup = (layer: ShapeMemoLayer | null | undefined): void => {
     if (!layer || layer.shapeMemoClickBound === true) return;
+    // Prepare the lightweight, collapsed HTML when restoring the shape rather
+    // than adding Markdown work to the first tap.
+    preparePopupContent(layer);
     layer.shapeMemoClickBound = true;
     layer.on("click", (event) => {
       if (onShapeClick?.(layer, event)) return;
@@ -152,6 +190,8 @@ export function createShapeMemoRuntime({
     attachShapeMemoPopup,
     attachShapeMemoTooltipOpen,
     openShapeMemoPopup,
+    isShapePopupOpen,
+    releaseLayer,
     renderShapeMemoPopupContent,
   };
 }
