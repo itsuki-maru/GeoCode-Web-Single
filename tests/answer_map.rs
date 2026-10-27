@@ -1,10 +1,10 @@
 #[allow(dead_code)]
 mod common;
-use axum::{Form, body::to_bytes, extract::Extension};
+use axum::{Form, Json, body::to_bytes, extract::Extension};
 use chrono::{Duration, Utc};
 use geocode_web_single::handler::{
     answer_map::{AnswerMapRequest, answer_map_handler, load_answer_map},
-    form_answers::AnswerQuery,
+    form_answers::{AnswerQuery, search_answers_handler},
 };
 use serde_json::{Value, json};
 use sqlx::SqlitePool;
@@ -66,6 +66,15 @@ async fn matches_all_pages_deduplicates_and_preserves_owner_and_latest_rules() {
         .await
         .unwrap();
     assert_eq!((all.answer_count, all.target_count), (4, 3));
+    let page = search_answers_handler(
+        Extension(owner.to_string()),
+        Extension(pool.clone()),
+        Json(query(json!({"limit":1}))),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!((page.total, page.target_count, page.rows.len()), (4, 3, 1));
     let mut latest = base.clone();
     latest["mode"] = json!("latest");
     let data = load_answer_map(&pool, &owner.to_string(), &query(latest.clone()))

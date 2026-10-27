@@ -55,6 +55,7 @@ interface Page {
   editing_supported?: boolean;
   rows: Answer[];
   total: number;
+  target_count?: number;
   as_of: string;
   next_cursor: Cursor | null;
 }
@@ -81,15 +82,15 @@ const form = ref("");
 const version = ref("");
 const kind = ref("");
 const target = ref("");
-const name = ref("");
 const layer = ref("");
-const from = ref("");
-const until = ref("");
 const conditions = ref<Condition[]>([]);
 const displayFields = ref<string[]>([]);
 const resultFields = ref<Field[]>([]);
 const rows = ref<Answer[]>([]);
 const total = ref(0);
+const targetCount = ref<number | null>(null);
+const mapTargetLimit = 10_000;
+const mapLimitExceeded = computed(() => (targetCount.value ?? total.value) > mapTargetLimit);
 const asOf = ref("");
 const nextCursor = ref<Cursor | null>(null);
 const cursors = ref<(Cursor | null)[]>([null]);
@@ -141,7 +142,7 @@ const exportQuery = ref("");
 const mapOpen = ref(false);
 const mapQuery = ref<Record<string, unknown> | null>(null);
 const openMap = () => {
-  if (busy.value || !applied.value || !total.value) return;
+  if (busy.value || !applied.value || !total.value || mapLimitExceeded.value) return;
   mapQuery.value = { ...applied.value, cursor: null };
   mapOpen.value = true;
 };
@@ -225,10 +226,7 @@ const buildRequest = () => ({
   ...scope(),
   mode: mode.value,
   version: version.value ? Number(version.value) : null,
-  target_name: name.value || null,
   layer_id: layer.value || null,
-  from: from.value ? new Date(from.value).toISOString() : null,
-  until: until.value ? new Date(until.value).toISOString() : null,
   conditions: conditions.value.map((condition) => {
     const field = selectedField(condition)!;
     return {
@@ -254,24 +252,14 @@ const pending = computed(() => {
 });
 const filterCount = computed(
   () =>
-    [
-      form.value,
-      version.value,
-      props.targetId ? "" : kind.value,
-      name.value,
-      layer.value,
-      from.value,
-      until.value,
-    ].filter(Boolean).length + conditions.value.length,
+    [form.value, version.value, props.targetId ? "" : kind.value, layer.value].filter(Boolean)
+      .length + conditions.value.length,
 );
 const clearFilters = () => {
   form.value = props.initialFormId || "";
   version.value = "";
   kind.value = props.targetType || "";
-  name.value = "";
   layer.value = "";
-  from.value = "";
-  until.value = "";
   conditions.value = [];
 };
 const fieldLabel = (field: Field, fields = resultFields.value) => {
@@ -303,6 +291,7 @@ const search = async (cursor: Cursor | null = null, index = 0, fresh = true) => 
       if (fieldsChanged) displayFields.value = resultFields.value.slice(0, 5).map(fieldKey);
     }
     total.value = result.total;
+    targetCount.value = result.target_count ?? null;
     asOf.value = result.as_of;
     nextCursor.value = result.next_cursor;
     page.value = index;
@@ -313,6 +302,7 @@ const search = async (cursor: Cursor | null = null, index = 0, fresh = true) => 
     if (sequence === searchSequence) {
       rows.value = [];
       total.value = 0;
+      targetCount.value = null;
       nextCursor.value = null;
       asOf.value = "";
       applied.value = null;
@@ -363,16 +353,14 @@ watch(
     version.value = "";
     kind.value = props.targetType || "";
     target.value = props.targetId || "";
-    name.value = "";
     layer.value = "";
-    from.value = "";
-    until.value = "";
     conditions.value = [];
     message.value = "";
     rows.value = [];
     resultFields.value = [];
     applied.value = null;
     total.value = 0;
+    targetCount.value = null;
     const success = await loadOptions();
     initialising = false;
     if (success && props.isOpen) await search();
@@ -453,7 +441,13 @@ const imageUrl = (row: Answer, field: Field) => {
 </script>
 
 <template>
-  <BaseModal :isOpen="isOpen" :zIndex="24" :closeOnOverlayClick="false" @close="emit('close')">
+  <BaseModal
+    class="answers-overlay"
+    :isOpen="isOpen"
+    :zIndex="24"
+    :closeOnOverlayClick="false"
+    @close="emit('close')"
+  >
     <div :inert="!!editing" class="answers-modal">
       <header>
         <h2>回答一覧</h2>
@@ -474,7 +468,7 @@ const imageUrl = (row: Answer, field: Field) => {
             <button type="button" :aria-expanded="filtersOpen" @click="filtersOpen = !filtersOpen">
               絞り込み{{ filterCount ? `（${filterCount}）` : "" }}
             </button>
-            <button type="button" :disabled="busy" @click="search()">
+            <button type="button" class="filter-submit" :disabled="busy" @click="search()">
               {{ pending ? "変更を反映" : "更新" }}
             </button>
           </div>
@@ -485,11 +479,14 @@ const imageUrl = (row: Answer, field: Field) => {
         <p v-if="pending" role="status">
           条件が変更されています。「絞り込む」または「変更を反映」で一覧に反映します。
         </p>
+        <p v-if="mapLimitExceeded" class="scope-note" role="status">
+          地図で確認できる対象は10,000件までです。条件を絞り込んでください。
+        </p>
         <form v-show="filtersOpen" class="search-form" @submit.prevent="search()">
           <fieldset :disabled="busy">
             <div class="search-grid">
               <label
-                >共通フォーム<select v-model="form">
+                >共通フォームを選択<select v-model="form">
                   <option value="">すべて</option>
                   <option value="individual">個別フォームのみ</option>
                   <option v-for="item in options.forms" :key="item.id" :value="item.id">
@@ -498,39 +495,29 @@ const imageUrl = (row: Answer, field: Field) => {
                 </select></label
               >
               <label
-                >対象名<input v-model="name" type="text" maxlength="100" placeholder="部分一致"
-              /></label>
-              <label>回答日時・開始<input v-model="from" type="datetime-local" /></label>
-              <label>回答日時・終了<input v-model="until" type="datetime-local" /></label>
+                >適用元の版<select v-model="version" :disabled="!form || form === 'individual'">
+                  <option value="">すべて</option>
+                  <option v-for="item in options.versions" :key="item" :value="String(item)">
+                    第{{ item }}版
+                  </option>
+                </select></label
+              >
+              <label
+                >対象種別<select v-model="kind" :disabled="!!target">
+                  <option value="">すべて</option>
+                  <option value="marker">マーカー</option>
+                  <option value="shape">図形</option>
+                </select></label
+              >
+              <label
+                >レイヤ<select v-model="layer">
+                  <option value="">すべて</option>
+                  <option v-for="item in options.layers" :key="item.id" :value="item.id">
+                    {{ item.name }}
+                  </option>
+                </select></label
+              >
             </div>
-            <details class="advanced-filters">
-              <summary>詳しい条件</summary>
-              <div class="search-grid">
-                <label
-                  >適用元の版<select v-model="version" :disabled="!form || form === 'individual'">
-                    <option value="">すべて</option>
-                    <option v-for="item in options.versions" :key="item" :value="String(item)">
-                      第{{ item }}版
-                    </option>
-                  </select></label
-                >
-                <label
-                  >対象種別<select v-model="kind" :disabled="!!target">
-                    <option value="">すべて</option>
-                    <option value="marker">マーカー</option>
-                    <option value="shape">図形</option>
-                  </select></label
-                >
-                <label
-                  >レイヤ<select v-model="layer">
-                    <option value="">すべて</option>
-                    <option v-for="item in options.layers" :key="item.id" :value="item.id">
-                      {{ item.name }}
-                    </option>
-                  </select></label
-                >
-              </div>
-            </details>
             <div class="condition-heading">
               <strong>回答条件（すべてに一致）</strong>
             </div>
@@ -608,7 +595,9 @@ const imageUrl = (row: Answer, field: Field) => {
                 条件を追加
               </button>
               <button type="button" @click="clearFilters">条件をクリア</button>
-              <button type="submit">{{ loading ? "検索中…" : "絞り込む" }}</button>
+              <button type="submit" class="filter-submit">
+                {{ loading ? "検索中…" : "絞り込む" }}
+              </button>
             </div>
           </fieldset>
         </form>
@@ -625,7 +614,9 @@ const imageUrl = (row: Answer, field: Field) => {
           >
             ?
           </button>
-          <button :disabled="busy || !applied || !total" @click="openMap">地図で確認</button>
+          <button :disabled="busy || !applied || !total || mapLimitExceeded" @click="openMap">
+            地図で確認
+          </button>
           <button
             type="button"
             class="help-button"
@@ -673,7 +664,7 @@ const imageUrl = (row: Answer, field: Field) => {
                 <th v-for="field in visibleFields" :key="fieldKey(field)">
                   {{ fieldLabel(field) }}
                 </th>
-                <th>詳細</th>
+                <th class="actions-column" :class="{ editable: editingSupported }">詳細</th>
               </tr>
             </thead>
             <tbody>
@@ -707,7 +698,7 @@ const imageUrl = (row: Answer, field: Field) => {
                     }}
                   </span>
                 </td>
-                <td>
+                <td class="actions-cell">
                   <div class="row-actions">
                     <button @click="detail = row">詳細を見る</button>
                     <button
@@ -819,8 +810,11 @@ const imageUrl = (row: Answer, field: Field) => {
 </template>
 
 <style scoped>
+.answers-overlay :deep(.base-modal-content) {
+  width: auto;
+}
 .answers-modal {
-  width: min(1200px, calc(100vw - 64px));
+  width: calc(100vw - 96px);
   height: min(86dvh, 1000px);
   display: flex;
   flex-direction: column;
@@ -1118,16 +1112,9 @@ dd {
   padding: 16px;
   border-radius: 8px;
 }
-.advanced-filters {
-  margin: 12px 0;
-}
 summary {
   cursor: pointer;
   padding: 8px 0;
-}
-.advanced-filters .search-grid {
-  margin-top: 12px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .scope-note {
   font-size: 13px;
@@ -1150,7 +1137,8 @@ summary {
 }
 .row-actions {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
+  justify-content: center;
   flex-wrap: wrap;
   gap: 8px;
 }
@@ -1159,6 +1147,20 @@ summary {
   white-space: nowrap;
 }
 @media (min-width: 701px) {
+  .actions-column {
+    width: 104px;
+  }
+  .actions-column.editable {
+    width: 168px;
+  }
+  .actions-column,
+  .actions-cell {
+    min-width: 0;
+    padding: 6px 8px;
+    text-align: center;
+    vertical-align: middle;
+    white-space: normal;
+  }
   .answers-modal {
     height: min(92dvh, 1200px);
     max-height: calc(100dvh - 64px);
@@ -1196,6 +1198,10 @@ button {
   color: #fff;
   border-color: transparent;
 }
+.filter-submit {
+  background: #2165bb;
+  border-color: #2165bb;
+}
 .help-button {
   display: inline-flex;
   align-items: center;
@@ -1227,6 +1233,9 @@ button {
   }
 }
 @media (max-width: 700px) {
+  .answers-modal {
+    width: calc(100vw - 64px);
+  }
   .filter-actions {
     gap: 6px;
   }
@@ -1235,10 +1244,6 @@ button {
     padding: 8px 4px;
     font-size: 12px;
     overflow-wrap: anywhere;
-  }
-  .advanced-filters .search-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(66px, 0.7fr) minmax(0, 1.2fr);
-    gap: 6px;
   }
   .list-toolbar {
     display: grid;
@@ -1264,10 +1269,6 @@ button {
     font-size: 12px;
     padding: 8px 4px;
     min-height: 40px;
-  }
-  .search-grid input[type="datetime-local"] {
-    appearance: none;
-    -webkit-appearance: none;
   }
   .search-grid label {
     font-size: 12px;
