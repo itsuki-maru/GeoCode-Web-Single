@@ -64,6 +64,8 @@ function open(details: HTMLDetailsElement) {
 }
 
 beforeEach(() => {
+  // Verify work and DOM limits independently of CPU/JIT/GC timing.
+  vi.spyOn(performance, "now").mockReturnValue(0);
   frames.clear();
   nextFrame = 0;
   vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
@@ -137,7 +139,6 @@ describe("progressive work limits and raw details", () => {
   });
 
   it("yields even when a 9 MB script body produces no visible DOM", () => {
-    vi.spyOn(performance, "now").mockReturnValue(0);
     const f = mount(`<script>${"x".repeat(9_000_000)}</script><p>safe end</p>`, true);
     expect(f.host.querySelector("script")).toBeNull();
     expect(f.host.querySelector("p")).toBeNull();

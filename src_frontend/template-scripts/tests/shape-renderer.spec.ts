@@ -81,6 +81,8 @@ function fixture(
     }),
   };
   const manager = createShapeRenderManager<Record, Layer>({
+    // Keep count-based assertions independent of CI speed; time-budget tests override this clock.
+    now: () => 0,
     ...options,
     map,
     createLayer: create,

@@ -8,6 +8,7 @@ use chrono::Utc;
 use geocode_web_single::{
     config::CONFIG,
     db::run_migrations,
+    error::AppError,
     handler::live_location::*,
     handler::live_map::update_live_location_permission_handler,
     model::{LiveLocationPositionPayload, UpdateLiveLocationPermissionPayload},
@@ -92,18 +93,31 @@ async fn history_lifecycle_and_types() {
         .await
         .is_err()
     );
-    // 秒の切り替わりに依存せず利用頻度の制限を検証できるよう、時刻を先へ進める。
-    sqlx::query("UPDATE live_location_session SET received_at = datetime('now', '+1 second') WHERE user_id = $1").bind(&user).execute(&pool).await.unwrap();
-    assert!(
+    // 実行負荷で数秒経過しても利用頻度の制限を検証できるよう、保存時刻を先へ進める。
+    let received_at: String =
+        sqlx::query_scalar("SELECT received_at FROM live_location_session WHERE user_id = $1")
+            .bind(&user)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    sqlx::query("UPDATE live_location_session SET received_at = datetime(received_at, '+1 hour') WHERE user_id = $1").bind(&user).execute(&pool).await.unwrap();
+    assert!(matches!(
         update_live_location_session_handler(
             Extension(user.clone()),
             Extension(pool.clone()),
             Path(session.clone()),
             Json(position(2))
         )
+        .await,
+        Err(AppError::TooManyRequests(_))
+    ));
+    // 履歴との一致を検証する前に、元の値を文字列表現も含めて復元する。
+    sqlx::query("UPDATE live_location_session SET received_at = $1 WHERE user_id = $2")
+        .bind(received_at)
+        .bind(&user)
+        .execute(&pool)
         .await
-        .is_err()
-    );
+        .unwrap();
     let mut invalid = position(3);
     invalid.latitude = 91.0;
     assert!(

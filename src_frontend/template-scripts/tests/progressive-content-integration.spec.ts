@@ -10,6 +10,8 @@ import { CONTENT_ELEMENT_BUDGET, CONTENT_TEXT_BUDGET } from "../src/map/common/p
 
 type References = Record<string, { href: string; title: string | null }>;
 const sources: string[] = [];
+const frames = new Map<number, FrameRequestCallback>();
+let nextFrame = 0;
 const imageRenderer = vi.fn(({ href }: { href: string }) => `<img src="${href}">`);
 const sanitize = vi.fn((html: string) =>
   html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "").replace(/\s+onerror="[^"]*"/gi, ""),
@@ -35,19 +37,41 @@ function more(scope: HTMLElement) {
     (button) => !button.hidden && button.closest(".geocode-progressive-content") === scope,
   );
 }
-function loadAll(scope: HTMLElement) {
-  let batches = 0;
-  while (more(scope)) {
-    if (++batches > 1000) throw Error("Progressive content did not finish");
-    more(scope)!.click();
+function drainFrames() {
+  let count = 0;
+  while (frames.size) {
+    if (++count > 2000) throw Error("Progressive continuation did not finish");
+    const [id, callback] = frames.entries().next().value!;
+    frames.delete(id);
+    callback(performance.now());
   }
-  return batches;
+  return count;
+}
+function loadAll(scope: HTMLElement) {
+  for (let batches = 0; batches < 1000; batches++) {
+    drainFrames();
+    const button = more(scope);
+    if (!button) return batches;
+    expect(button.disabled).toBe(false);
+    button.click();
+  }
+  throw Error("Progressive content did not finish");
 }
 function open(details: HTMLDetailsElement) {
   details.open = true;
   details.dispatchEvent(new Event("toggle"));
 }
 beforeEach(() => {
+  // Content and work budgets are deterministic; timing cases override this clock explicitly.
+  vi.spyOn(performance, "now").mockReturnValue(0);
+  frames.clear();
+  nextFrame = 0;
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+    const id = ++nextFrame;
+    frames.set(id, callback);
+    return id;
+  });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => frames.delete(id));
   const marked = new Marked();
   Object.assign(window, { marked });
   imageRenderer.mockClear();
@@ -62,6 +86,8 @@ beforeEach(() => {
 afterEach(() => {
   for (const html of sources.splice(0)) releaseDeferredDetails(html);
   document.body.replaceChildren();
+  frames.clear();
+  vi.restoreAllMocks();
 });
 
 describe("whole popup content through the Markdown renderer", () => {
@@ -80,6 +106,21 @@ describe("whole popup content through the Markdown renderer", () => {
     expect(f.host.querySelectorAll("p").length).toBeGreaterThan(initial);
     expect(first.isConnected).toBe(true);
     expect(f.host.querySelector("p")).toBe(first);
+  });
+  it("resumes an initially empty prefix on the next frame after the time budget is exhausted", () => {
+    vi.spyOn(performance, "now").mockReturnValue(25).mockReturnValueOnce(0);
+    const f = mount(paragraphs(600));
+    expect(f.host.querySelector("p")).toBeNull();
+    expect(more(f.scope)?.disabled).toBe(true);
+    expect(frames.size).toBeGreaterThan(0);
+
+    // Complete pending work before clicking again, even while the control is disabled.
+    expect(loadAll(f.scope)).toBeGreaterThan(0);
+    expect([...f.host.querySelectorAll("p")].map((p) => p.textContent)).toEqual(
+      Array.from({ length: 600 }, (_, i) => `段落 ${i}：太字と強調。`),
+    );
+    expect(frames.size).toBe(0);
+    expect(more(f.scope)).toBeUndefined();
   });
   it("keeps small bodies complete without a visible load-more button", () => {
     const f = mount("## 見出し\n\n短い文章です。");
@@ -231,6 +272,8 @@ describe("whole popup content through the Markdown renderer", () => {
     expect(f.host.querySelector("img")?.hasAttribute("onerror")).toBe(false);
   });
   it("restarts the initial prefix when prepared HTML is mounted again", () => {
+    // Compare reset behavior with the same work budget, independent of CPU/JIT/GC timing.
+    vi.spyOn(performance, "now").mockReturnValue(0);
     const f = mount(paragraphs(600));
     const initial = f.host.querySelectorAll("p").length;
     const first = f.host.querySelector("p")!;
@@ -242,6 +285,45 @@ describe("whole popup content through the Markdown renderer", () => {
     expect(f.host.querySelector("p")?.textContent).toBe("段落 0：太字と強調。");
     expect(first.isConnected).toBe(false);
   });
+  it.each([
+    { initialTick: 0, remountTick: 8 },
+    { initialTick: 8, remountTick: 0 },
+  ])(
+    "restarts from the beginning when timing changes ($initialTick -> $remountTick)",
+    ({ initialTick, remountTick }) => {
+      let elapsed = 0;
+      let tick = initialTick;
+      vi.spyOn(performance, "now").mockImplementation(() => {
+        const now = elapsed;
+        elapsed += tick;
+        return now;
+      });
+      const f = mount(paragraphs(600));
+      const initial = f.host.querySelectorAll("p").length;
+      expect(initial).toBeGreaterThan(0);
+      expect(initial).toBeLessThan(600);
+      const first = f.host.querySelector("p")!;
+      more(f.scope)!.click();
+      expect(f.host.querySelectorAll("p").length).toBeGreaterThan(initial);
+
+      tick = remountTick;
+      f.host.innerHTML = f.html;
+      setupDetailsLazyImages(f.host, render);
+      const restarted = f.host.querySelectorAll("p");
+      // The time budget legitimately changes the prefix length, but not its starting position.
+      expect(restarted.length).toBeGreaterThan(0);
+      expect(restarted.length).toBeLessThan(600);
+      expect(restarted.length).not.toBe(initial);
+      expect(restarted[0]?.textContent).toBe("段落 0：太字と強調。");
+      expect(first.isConnected).toBe(false);
+
+      const scope = f.host.querySelector<HTMLElement>(".geocode-progressive-content")!;
+      loadAll(scope);
+      expect([...f.host.querySelectorAll("p")].map((p) => p.textContent)).toEqual(
+        Array.from({ length: 600 }, (_, i) => `段落 ${i}：太字と強調。`),
+      );
+    },
+  );
   it("does not render sources after their prepared HTML is released", () => {
     const f = mount(paragraphs(400), false);
     releaseDeferredDetails(f.html);

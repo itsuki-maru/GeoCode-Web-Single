@@ -155,7 +155,7 @@ describe("live published layers", () => {
   });
   it.each([false, true])(
     "renders selected groups read-only, with shapes, sanitized content and escaped labels (mobile=%s)",
-    (mobile) => {
+    async (mobile) => {
       const runtime = setup();
       const data: PublishedLayers = {
         layers: [
@@ -236,8 +236,10 @@ describe("live published layers", () => {
       expect(runtime.filterXSS).not.toHaveBeenCalled();
       const popup = openPublishedPopup(runtime.objects[0]);
       try {
-        expect(popup.element.querySelector(".geocode-content-body")?.textContent).toContain("memo");
-        expect(popup.element.querySelector("img")?.getAttribute("src")).toBe("/static/images/test.png");
+        await vi.waitFor(() => {
+          expect(popup.element.querySelector(".geocode-content-body")?.textContent).toContain("memo");
+          expect(popup.element.querySelector("img")?.getAttribute("src")).toBe("/static/images/test.png");
+        });
         expect(popup.element.querySelector("img")?.hasAttribute("onerror")).toBe(false);
         expect(runtime.filterXSS).toHaveBeenCalled();
       } finally {
@@ -279,7 +281,7 @@ it("updates a single cluster across groups without including shapes or live acco
 });
 
 
-it("does not open an image preview when a published popup image is clicked", () => {
+it("does not open an image preview when a published popup image is clicked", async () => {
   const r = setup();
   const open = vi.spyOn(window, "open").mockImplementation(() => null);
   addPublishedLayerControl(r.leaflet, r.map, {
@@ -290,6 +292,7 @@ it("does not open an image preview when a published popup image is clicked", () 
   expect(r.objects[0].bindPopup.mock.calls[0][0]).not.toContain("<img");
   const popup = openPublishedPopup(r.objects[0]);
   try {
+    await vi.waitFor(() => expect(popup.element.querySelector("img")).not.toBeNull());
     const image = popup.element.querySelector("img")!;
     expect(image.className).toBe("marker-preview-image");
     expect(image.getAttribute("data-preview-src")).toBe("/images/html/test.png");

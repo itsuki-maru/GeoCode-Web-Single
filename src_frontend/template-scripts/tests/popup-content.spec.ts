@@ -216,7 +216,7 @@ describe("owner popup content selector", () => {
       expect(f.loadBody).toHaveBeenCalledTimes(1);
     },
   );
-  it("retains the analysis header for every mode and uses frozen print data without requests", () => {
+  it("retains the analysis header for every mode and uses frozen print data without requests", async () => {
     const f = fixture({
       answerMap: true,
       snapshot: {
@@ -225,9 +225,12 @@ describe("owner popup content selector", () => {
     });
     f.runtime.setAnalysis("shape:same", "<strong>分析値</strong>");
     f.open("shape");
+    const analysisText = () =>
+      f.host.querySelector(".popup-content-analysis .geocode-content-body")?.textContent;
+    await vi.waitFor(() => expect(analysisText()).toBe("分析値"));
     for (const mode of ["free", "answers", "normal"]) {
       f.choose(mode);
-      expect(f.host.querySelector(".popup-content-analysis")!.textContent).toBe("分析値");
+      expect(analysisText()).toBe("分析値");
     }
     f.choose("answers");
     expect(f.host.querySelector(".popup-content-note")!.textContent).toContain("すべて");

@@ -613,6 +613,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
     const saved = JSON.stringify(localStorage);
     const post = vi.spyOn(window.parent, "postMessage").mockImplementation(() => {});
     runtime = initializeReadOnlyMapPage("form-answer-map");
+    await runtime.shapeRenderer.whenIdle();
     expect(runtime.map.hasLayer(runtime.markers["marker-m-a"])).toBe(true);
     expect(runtime.map.hasLayer(runtime.shapeLayers["shape-s-a"])).toBe(true);
     for (const id of ["line", "polygon", "rectangle"])
@@ -623,6 +624,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
     await flush();
     expect(fetchData).not.toHaveBeenCalled();
     expect(Object.keys(runtime.markers)).toEqual(["marker-m-a"]);
+    await runtime.shapeRenderer.whenIdle();
     const fit = vi.spyOn(runtime.map, "fitBounds");
     finishAnswerPreview(runtime, bootstrap, leaflet);
     expect(fit).toHaveBeenCalledOnce();
@@ -644,6 +646,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
     const cachedShape = runtime.shapeLayers["shape-s-a"];
     fit.mockClear();
     runtime.setAnswerTargets(["shape:s-a"]);
+    await runtime.shapeRenderer.whenIdle();
     expect(runtime.map.hasLayer(cachedMarker)).toBe(false);
     expect(runtime.map.hasLayer(cachedShape)).toBe(true);
     expect(runtime.map.hasLayer(runtime.shapeLayers["shape-line"])).toBe(false);
@@ -651,11 +654,14 @@ describe("lazy groups in the actual read-only map runtime", () => {
     await flush();
     checkbox("a").click();
     await flush();
+    await runtime.shapeRenderer.whenIdle();
     expect(runtime.map.hasLayer(cachedMarker)).toBe(false);
     expect(runtime.map.hasLayer(runtime.shapeLayers["shape-line"])).toBe(false);
     runtime.setAnswerTargets([]);
+    await runtime.shapeRenderer.whenIdle();
     expect(runtime.map.hasLayer(cachedShape)).toBe(false);
     runtime.setAnswerTargets(bootstrap.answerPreview.targets!);
+    await runtime.shapeRenderer.whenIdle();
     expect(runtime.markers["marker-m-a"]).toBe(cachedMarker);
     expect(runtime.shapeLayers["shape-s-a"]).toBe(cachedShape);
     expect(runtime.map.hasLayer(cachedMarker)).toBe(true);
@@ -675,17 +681,20 @@ describe("lazy groups in the actual read-only map runtime", () => {
       checkbox("a").click();
       await flush();
       expect(fetchData).toHaveBeenCalledTimes(2);
+      await runtime.shapeRenderer.whenIdle();
       const firstMarker = runtime.markers["marker-m-a"],
         firstShape = runtime.shapeLayers["shape-s-a"];
       expect(runtime.map.hasLayer(firstMarker)).toBe(true);
       expect(runtime.map.hasLayer(firstShape)).toBe(true);
       checkbox("a").click();
       await flush();
+      await runtime.shapeRenderer.whenIdle();
       expect(runtime.map.hasLayer(firstMarker)).toBe(false);
       expect(runtime.map.hasLayer(firstShape)).toBe(false);
       checkbox("a").click();
       await flush();
       expect(fetchData).toHaveBeenCalledTimes(2);
+      await runtime.shapeRenderer.whenIdle();
       expect(runtime.markers["marker-m-a"]).toBe(firstMarker);
       expect(runtime.shapeLayers["shape-s-a"]).toBe(firstShape);
       expect(runtime.map.hasLayer(firstShape)).toBe(true);
@@ -746,6 +755,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
     await flush();
     expect(fetchData).toHaveBeenCalledTimes(8);
     expect(Object.keys(runtime.markers)).toHaveLength(3);
+    await runtime.shapeRenderer.whenIdle();
     const measurement = document.querySelector<HTMLButtonElement>(".measurement-control button")!;
     measurement.click();
     await flush();
@@ -773,6 +783,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
         checkbox("b").click();
         await flush();
       }
+      await runtime.shapeRenderer.whenIdle();
       const a = runtime.shapeLayers["shape-s-a"],
         b = runtime.shapeLayers["shape-s-b"];
       const [measureButton, , totalsButton] = document.querySelectorAll<HTMLButtonElement>(
