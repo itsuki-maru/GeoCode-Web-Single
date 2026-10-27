@@ -130,6 +130,7 @@ const saved = async () => {
     @message="(text) => (message = text)"
   />
   <FormAnswersModal
+    v-if="isOpen && answersOpen"
     :isOpen="isOpen && answersOpen"
     :initialFormId="answersFormId"
     @close="answersOpen = false"

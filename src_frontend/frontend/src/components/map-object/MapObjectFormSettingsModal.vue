@@ -595,6 +595,7 @@ const rotateUrl = async (): Promise<void> => {
     @confirm="applyCommonForm"
   />
   <FormAnswersModal
+    v-if="isOpen && answersOpen"
     :isOpen="isOpen && answersOpen"
     :targetType="targetType"
     :targetId="targetId"

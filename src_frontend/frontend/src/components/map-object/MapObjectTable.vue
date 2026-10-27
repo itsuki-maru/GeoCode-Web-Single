@@ -1,117 +1,50 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import type { MapObjectData, ShapeData } from "@/interface";
+import { computed, toRef, watch } from "vue";
 import { useLayersStore } from "@/stores/layers";
-import { getShapeCenter } from "@/composables/useShapeCenter";
+import { useMapObjectStore } from "@/stores/mapobjects";
+import { useMapObjectTableRows } from "@/composables/useMapObjectTableRows";
+import { useVirtualTable, TABLE_ROW_HEIGHT } from "@/composables/useVirtualTable";
+import type { TableRow } from "@/composables/map-object-table-index";
 
-const props = defineProps<{
-  markerList: Map<string, MapObjectData>;
-  shapeList: Map<string, ShapeData>;
-  filteredShapeIds: string[] | null;
-  height: number;
-  activeLayer: string;
-}>();
-
+const props = withDefaults(
+  defineProps<{ height: number; activeLayer: string; active?: boolean }>(),
+  { active: true },
+);
 const emit = defineEmits<{
   editObject: [type: "marker" | "shape", id: string];
   focusObject: [type: "marker" | "shape", id: string, lat: number, lng: number];
 }>();
-
 const layersStore = useLayersStore();
-
-const getLayerForId = (layer_id: string): string => {
-  const layerObj = layersStore.getById(layer_id);
-  if (layerObj) {
-    return layerObj.name;
-  } else {
-    return "Layer Name Get Error";
-  }
-};
-
-function fixFloat(number: number): string {
-  return number.toFixed(5);
-}
-
-interface TableRow {
-  type: "marker" | "shape";
-  id: string;
-  layerId: string;
-  name: string;
-  typeLabel: string;
-  typeSymbol: string;
-  badgeClass: string;
-  latitude: number | null;
-  longitude: number | null;
-  updatedAt: string;
-}
-
-const shapeTypeBadges: Record<
-  ShapeData["shape_type"],
-  { label: string; symbol: string; badgeClass: string }
-> = {
-  circle: { label: "円", symbol: "○", badgeClass: "type-circle" },
-  polyline: { label: "線", symbol: "━", badgeClass: "type-polyline" },
-  polygon: { label: "面", symbol: "◆", badgeClass: "type-polygon" },
-  rectangle: { label: "矩形", symbol: "□", badgeClass: "type-rectangle" },
-};
-
-const compareTableRows = (a: TableRow, b: TableRow): number => {
-  const aHasNoName = a.name.trim().length === 0;
-  const bHasNoName = b.name.trim().length === 0;
-  if (aHasNoName !== bHasNoName) return aHasNoName ? -1 : 1;
-
-  const aUpdatedAt = Date.parse(a.updatedAt.replace(" ", "T")) || 0;
-  const bUpdatedAt = Date.parse(b.updatedAt.replace(" ", "T")) || 0;
-  if (aUpdatedAt !== bUpdatedAt) return bUpdatedAt - aUpdatedAt;
-
-  return `${a.type}:${a.id}`.localeCompare(`${b.type}:${b.id}`);
-};
-
-const tableRows = computed<TableRow[]>(() => {
-  const markerRows = [...props.markerList.values()].map((marker) => ({
-    type: "marker" as const,
-    id: marker.id,
-    layerId: marker.layer_id,
-    name: marker.marker_name,
-    typeLabel: "マーカー",
-    typeSymbol: "●",
-    badgeClass: "type-marker",
-    latitude: marker.latitude,
-    longitude: marker.longitude,
-    updatedAt: marker.update_at,
-  }));
-  const filteredShapeIds = props.filteredShapeIds ? new Set(props.filteredShapeIds) : null;
-  const shapeRows = [...props.shapeList.values()]
-    .filter((shape) => !filteredShapeIds || filteredShapeIds.has(shape.id))
-    .map((shape) => {
-      const center = getShapeCenter(shape);
-      const badge = shapeTypeBadges[shape.shape_type];
-      return {
-        type: "shape" as const,
-        id: shape.id,
-        layerId: shape.layer_id,
-        name: shape.name || "",
-        typeLabel: badge.label,
-        typeSymbol: badge.symbol,
-        badgeClass: badge.badgeClass,
-        latitude: center?.latitude ?? null,
-        longitude: center?.longitude ?? null,
-        updatedAt: shape.updated_at,
-      };
-    });
-  return [...markerRows, ...shapeRows].sort(compareTableRows);
-});
-
+const mapobjStore = useMapObjectStore();
+const active = toRef(props, "active");
+const { count, rows } = useMapObjectTableRows(active);
+const { viewport, range, onScroll, resetScroll } = useVirtualTable(count, active);
+const visibleRows = computed(() => rows(range.value.start, range.value.end));
+watch(
+  () => [props.activeLayer, mapobjStore.search?.query1, mapobjStore.search?.query2],
+  resetScroll,
+);
+const getLayerForId = (id: string) => layersStore.getById(id)?.name ?? "Layer Name Get Error";
+const fixFloat = (value: number) => value.toFixed(5);
 const focusRow = (row: TableRow): void => {
-  if (row.latitude === null || row.longitude === null) return;
-  emit("focusObject", row.type, row.id, row.latitude, row.longitude);
+  if (row.latitude !== null && row.longitude !== null)
+    emit("focusObject", row.type, row.id, row.latitude, row.longitude);
 };
 </script>
 
 <template>
-  <div class="table-area">
-    <div class="table_sticky" :style="{ height: height + 'vh' }">
-      <table>
+  <div
+    v-if="active"
+    ref="viewport"
+    class="table-area"
+    tabindex="0"
+    role="region"
+    aria-label="地図オブジェクト一覧"
+    :style="{ height: height + 'vh', '--map-table-row-height': TABLE_ROW_HEIGHT + 'px' }"
+    @scroll.passive="onScroll"
+  >
+    <div class="table_sticky">
+      <table :aria-rowcount="count + 1">
         <thead>
           <tr>
             <th class="layer-column">Layer</th>
@@ -120,7 +53,17 @@ const focusRow = (row: TableRow): void => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in tableRows" :key="`${row.type}:${row.id}`">
+          <tr v-if="range.top" class="virtual-spacer" aria-hidden="true">
+            <td colspan="3" :style="{ height: range.top + 'px' }"></td>
+          </tr>
+          <tr
+            v-for="row in visibleRows"
+            :key="row.key"
+            :data-row-key="row.key"
+            :aria-rowindex="row.index + 2"
+            class="object-row"
+            :class="{ 'even-row': row.index % 2 === 1 }"
+          >
             <td class="layer-name-td layer-column" :title="getLayerForId(row.layerId)">
               {{ getLayerForId(row.layerId) }}
             </td>
@@ -148,6 +91,9 @@ const focusRow = (row: TableRow): void => {
               <template v-else>--</template>
             </td>
           </tr>
+          <tr v-if="range.bottom" class="virtual-spacer" aria-hidden="true">
+            <td colspan="3" :style="{ height: range.bottom + 'px' }"></td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -156,6 +102,7 @@ const focusRow = (row: TableRow): void => {
 
 <style scoped>
 .table-area {
+  overflow-anchor: none;
   overflow: auto;
 }
 
@@ -166,6 +113,8 @@ const focusRow = (row: TableRow): void => {
 .table_sticky table {
   width: 100%;
   table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 .table_sticky .layer-column {
@@ -178,10 +127,6 @@ const focusRow = (row: TableRow): void => {
 
 .table_sticky .code-column {
   width: 23%;
-}
-
-.table_sticky table tbody tr:hover {
-  background-color: #69a5b8;
 }
 
 .table_sticky thead th {
@@ -276,6 +221,43 @@ const focusRow = (row: TableRow): void => {
 
   .table_sticky .code-column {
     width: 35%;
+  }
+}
+
+/* Fixed CSS-pixel height includes borders and both coordinate lines. */
+.table_sticky .object-row {
+  height: var(--map-table-row-height);
+  background: white;
+}
+.table_sticky .object-row.even-row {
+  background: rgb(238, 238, 238);
+}
+.table_sticky .object-row td {
+  height: var(--map-table-row-height);
+  box-sizing: border-box;
+  line-height: 18px;
+  font-size: 12px;
+  padding: 6px 13px;
+}
+.table_sticky .virtual-spacer,
+.table_sticky .virtual-spacer:hover {
+  border: 0;
+  background: transparent;
+}
+.table_sticky .virtual-spacer td {
+  padding: 0;
+  border: 0;
+  font-size: 0;
+  line-height: 0;
+}
+.table_sticky .object-row:hover {
+  background: #69a5b8;
+}
+
+@media (orientation: portrait) {
+  .table_sticky .object-row td {
+    padding-right: 4px;
+    padding-left: 4px;
   }
 }
 </style>

@@ -222,6 +222,46 @@ node scripts/measure-shape-render-tuning.mjs --stage=after --entry=editor-pc --c
 
 [計測JSON（全52試行、分布・頂点数・各段階の生データ）](performance/shape-zoom-policy.json)。この比較はPostgreSQL作業ツリーの共通フロントエンドで実施し、同一の変更と結果をSQLite版にも反映した。実データに長い管路が多い場合は同じ削減率になるとは限らず、サイズ分布と実機での視認性を併せて判断する。
 
+## 地図オブジェクト一覧の負荷対策
+
+PC・モバイルのVue一覧は、行高56 CSS px、前後各6行の余白で仮想スクロールする。DOMには表示範囲と余白の行だけを置き、ヘッダー・スクロール領域・図形種別バッジ・座標2行表示を維持する。交互の背景色と操作対象は画面内の行番号ではなく、全体の順番と `marker:ID` / `shape:ID` に対応する。アプリ内検索は全原本が対象。ブラウザーのCtrl+FはDOMにない行を検索できないため、一覧の検索欄を使う。
+
+一覧用のモデルはGeoJSONを持たない通常のMapとID配列で、Vueには更新通知用の浅いrefだけを渡す。初期取得・所属範囲／検索の変更・再表示では軽量な属性を一括構築し、無名優先→更新日時降順→種別付きID昇順で並べる。日時の解析は行の生成・更新時に1回だけ行う。通常の作成・更新・削除はストアの同期通知から対象IDをまとめて反映し、全件の中心座標計算や再ソートを行わない。位置決定は二分探索で行うが、ID配列の挿入・削除による移動にはO(N)の処理が残る。同一更新周期で257件以上が変わる一括操作は、個別挿入の繰り返しを避けて一度だけ再構築する。
+
+図形の中心座標は表示・余白に初めて入ったときに既存の算出方法で求め、数値のみをキャッシュする。変更／削除した図形だけ座標キャッシュを破棄する。テーブルを閉じると行DOM・一覧モデル・座標キャッシュを解放し、閉じている間の通知では一覧を計算しない。再表示では最新のストアから構築する。開閉では検索入力とスクロール位置を保持し、検索条件・レイヤ変更では先頭へ戻る。件数減少・画面サイズ変更時にはスクロール位置を範囲内へ補正する。
+
+モバイルのスワイプ削除は種別付きIDに紐づける。対象行が表示範囲と余白から外れた場合、削除された場合、テーブルを閉じた場合、コンポーネントを破棄した場合には、遅延中の確認をキャンセルする。フォーム回答保存もストアの更新アクションを経由し、原本と一覧の双方に反映する。更新通知は `dirtyIds` の消費前に同期的に発行し、一覧側でまとめるため、地図用の差分同期が先にdirtyIdsを消費しても通知を失わない。
+
+今回の変更はフロントエンドのみ。API・DB・原本の取得／キャッシュ寿命は変更せず、一覧のスクロール・開閉・通常の保存後に全件GETや地図iframeの再生成を追加しない。
+
+実装: [軽量インデックス](../src_frontend/frontend/src/composables/map-object-table-index.ts)、[差分購読](../src_frontend/frontend/src/composables/useMapObjectTableRows.ts)、[仮想表示範囲](../src_frontend/frontend/src/composables/useVirtualTable.ts)。PC・モバイルで同じ処理を使用し、同期スクリプトでSQLite版へ反映する。
+
+### 一覧の比較計測
+
+`src_frontend/frontend/scripts/measure-map-table.mjs` は本番ビルドした実際のMapObjectTableとPiniaストアを使用する。`data` は原本ストアへの取得反映のみ、`index` は実コンポーネントのテンプレートだけ件数表示に差し替えて行モデルを評価、`table` は一覧DOMまで、`map-table` は共通のLeaflet図形描画マネージャーも同時に動かす。変更前のSFCは指定したGitリビジョンから読み取り、比較用にソースを上書きしない。
+
+```powershell
+# リポジトリルートで実行。mobile=trueはモバイル版の実コンポーネントを使う。
+node src_frontend/frontend/scripts/measure-map-table.mjs --stage=after --counts=2000,20000,40000 --vertices=2,16 --playwright-path=C:/path/to/playwright/index.mjs
+node src_frontend/frontend/scripts/measure-map-table.mjs --stage=before --baseline=OLD_REVISION --counts=20000 --vertices=2 --samples=3 --mobile=true --playwright-path=C:/path/to/playwright/index.mjs
+node src_frontend/frontend/scripts/measure-map-table.mjs --stage=after --counts=20000 --vertices=2 --modes=data,index,map-table --playwright-path=C:/path/to/playwright/index.mjs
+```
+
+通信はメモリー内のAxiosアダプターに差し替える。検索の計測は、取得済み原本への絞り込みと一覧更新だけを対象とし、実画面の検索API往復は含まない。fixture生成・原本反映時間は分離し、一覧の初期表示からVue更新と2回のrequestAnimationFrameまでを計測する。描画完了時間の上限保証やGPU描画完了の測定ではない。`map-table` は実描画マネージャーとの同時負荷であり、MapView全体・実際のiframe通信・背景タイル・実ネットワークの所要時間を再現するものではない。操作時間にもフレーム待ちを含むため、小さい差はフレーム間隔の影響を受ける。メモリーはCDPでGCした後のJSヒープで、原本・Vue・一覧等を含み、ブラウザープロセス全体のメモリー使用量ではない。CIの機能テストには実行時間の厳密なしきい値を設けない。
+
+代表条件は2万件の管路（各2頂点）で、両条件とも一覧を開いた状態とした。Chrome 156.0.8078.48、本番ビルドの実Vueテーブルを各3回実行した中央値は次のとおり。PCは1280×800、モバイルは390×844・CPU4倍制限のエミュレーションであり、実端末・ユーザーの実データではない。
+
+| 対象 | 初期DOM行数（変更前→後） | Vue更新＋2フレームまでms | 全準備完了ms | 初期JSヒープMiB |
+|---|---:|---:|---:|---:|
+| PC | 20,000→17 | 1,237.0→41.6 | 1,253.7→60.5 | 106.1→11.5 |
+| モバイル幅・CPU4倍制限 | 20,000→16 | 6,990.5→215.2 | 7,064.9→232.4 | 121.3→11.5 |
+
+一覧だけの「全準備完了」はVue更新後の2フレームに加え、地図待ちと共通の経路でさらに2フレーム待つ。通信・fixture生成・原本反映・モジュール読み込みは上の一覧時間に含まない。初期JSヒープは原本も含む。描画対象だけでなく、Vueが全頂点にアクセスしていた処理と全行DOMを減らす効果を確認できた。
+
+地図との同時負荷のPC比較では、同じ2万件の原本から両条件とも18,000図形を生成し、余白込みの全準備完了が1,821.9ms→667.6msだった（各1回、上表の中央値とは別条件）。モバイル幅では同じ条件の原本から両方とも9,400図形を生成し、9,641.2ms→1,884.7msだった（各1回）。アプリ全体の初期表示速度や実端末での改善率を保証する値としては扱わない。
+
+[比較計測JSON](performance/map-table-virtualization.json)。harness内の差分反映・取得済み原本の絞り込み・開閉では取得回数が初期の1回だけであること、閉じた一覧のDOM行数が0になること、仮想表示で末尾の図形まで移動できることもブラウザーで確認した。実画面の検索は既存どおり検索APIを使用し、その通信仕様は変更していない。PC・モバイルの機能テストは、実時間に依存せず表示範囲・座標計算回数・差分反映・操作対象・確認タイマーを検証する。
+
 ## 関連する実装
 
 [原本キャッシュ](../src_frontend/frontend/src/stores/map-record-cache.ts)、[保存通信の仲介](../src_frontend/frontend/src/composables/useMapObjectWriter.ts)、[編集地図の同期境界](../src_frontend/template-scripts/src/map/editor/map-editor-final.ts)。

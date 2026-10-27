@@ -1167,6 +1167,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
           </div>
 
           <MapObjectTable
+            :active="showFunctionContent"
             :activeLayer="activeLayer"
             :mapObjectQueryFormData="mapObjectQueryFormData"
             @editObject="openEditModal"

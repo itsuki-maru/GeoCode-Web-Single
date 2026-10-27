@@ -4,10 +4,12 @@ import type { ShapeData, ShapeGeoJson } from "@/interface";
 import { shapeUrl, shapesUrl } from "@/router/urls";
 import apiClient from "@/axiosClient";
 import { MapRecordCache } from "./map-record-cache";
+import { MapTableChanges } from "./map-table-changes";
 
 export const useShapeStore = defineStore("shapes", {
   state: () => ({
     loadRevision: 0,
+    tableChanges: markRaw(new MapTableChanges()),
     shapeList: new Map<string, ShapeData>(),
     activeLayerId: "",
     activeIsMaster: true,
@@ -33,6 +35,7 @@ export const useShapeStore = defineStore("shapes", {
     clearShapeList() {
       ++this.loadRevision;
       this.shapeList.clear();
+      this.tableChanges.emit({ type: "reset" });
     },
     resetCache() {
       this.recordCache.reset();
@@ -62,6 +65,7 @@ export const useShapeStore = defineStore("shapes", {
           .map((record) => [record.id, record] as const)
           .reverse(),
       );
+      this.tableChanges.emit({ type: "reset" });
     },
     upsertRecord(record: ShapeData) {
       if (!this.recordCache.upsert(record)) return false;
@@ -70,6 +74,7 @@ export const useShapeStore = defineStore("shapes", {
       if (this.activeIsMaster || record.layer_id === this.activeLayerId)
         this.shapeList.set(record.id, record);
       else this.shapeList.delete(record.id);
+      this.tableChanges.emit({ type: "record", kind: "shape", id: record.id });
       return true;
     },
     removeRecord(id: string) {
@@ -77,6 +82,7 @@ export const useShapeStore = defineStore("shapes", {
       this.mutationVersions.set(id, ++this.mutationRevision);
       this.dirtyIds.add(id);
       this.shapeList.delete(id);
+      this.tableChanges.emit({ type: "record", kind: "shape", id });
     },
     async queryShapes(
       layerId = "",

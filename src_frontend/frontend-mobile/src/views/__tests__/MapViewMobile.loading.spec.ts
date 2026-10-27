@@ -63,6 +63,7 @@ let getShapes: (id: string) => Promise<{ data: ReturnType<typeof shape>[] }>;
 
 const initializeFrame = vi.fn();
 const updateFrame = vi.fn();
+const reloadFrame = vi.fn(() => true);
 const frame = defineComponent({
   name: "MapIframe",
   props: ["srcUrl", "height", "allowedOrigins", "inputPolicies"],
@@ -79,7 +80,7 @@ const frame = defineComponent({
       upsertMapObject: vi.fn().mockResolvedValue(true),
       deleteMapObject: vi.fn().mockResolvedValue(true),
       filterMapObjects: vi.fn(),
-      reloadMapFrame: () => true,
+      reloadMapFrame: reloadFrame,
       updateMapObject: updateFrame,
     });
     return () => null;
@@ -109,6 +110,7 @@ beforeEach(() => {
   initializeFrame.mockReset().mockResolvedValue(true);
   api.request.mockReset();
   updateFrame.mockReset().mockResolvedValue(true);
+  reloadFrame.mockReset().mockReturnValue(true);
   setActivePinia(createPinia());
   localStorage.clear();
   layerResponse = Promise.resolve({ data: layers });
@@ -605,5 +607,30 @@ describe("delayed answer results from another scope", () => {
     expect([...useMapObjectStore().mapObjectList.keys()]).toEqual(["b"]);
     expect(updateFrame).not.toHaveBeenCalled();
     expect(dataRequests()).toHaveLength(count);
+  });
+});
+
+describe("table visibility without reloading the map", () => {
+  it("suspends/reopens the table without replacing the iframe or fetching map records", async () => {
+    mountView();
+    await flushPromises();
+    const frameVm = frameComponent().vm;
+    const source = frameComponent().props("srcUrl");
+    const requests = dataRequests().length;
+    const initializations = initializeFrame.mock.calls.length;
+    const reloads = reloadFrame.mock.calls.length;
+    const table = () => wrapper!.getComponent({ name: "MapObjectTable" });
+    expect(table().props("active")).toBe(false);
+    wrapper!.getComponent({ name: "MapToolbar" }).vm.$emit("openFunction");
+    await flushPromises();
+    expect(table().props("active")).toBe(true);
+    await wrapper!.get("#function-close-elm").trigger("click");
+    expect(table().props("active")).toBe(false);
+    await flushPromises();
+    expect(frameComponent().vm).toBe(frameVm);
+    expect(frameComponent().props("srcUrl")).toBe(source);
+    expect(dataRequests()).toHaveLength(requests);
+    expect(initializeFrame).toHaveBeenCalledTimes(initializations);
+    expect(reloadFrame).toHaveBeenCalledTimes(reloads);
   });
 });

@@ -390,7 +390,8 @@ const formSaved = (object: MapObjectData | ShapeData) => {
   let payload: MapObjectUpdatePayload;
   const previousLayerId = activeObjectLayer.value;
   if ("geojson" in object) {
-    shapeStore.shapeList.set(object.id, object);
+    shapeStore.upsertRecord(object);
+    mapobjStore.refreshSearchResults();
     payload = {
       objectType: "shape",
       id: object.id,
@@ -400,7 +401,7 @@ const formSaved = (object: MapObjectData | ShapeData) => {
       geojson: object.geojson,
     };
   } else {
-    mapobjStore.mapObjectList.set(object.id, object);
+    mapobjStore.upsertRecord(object);
     payload = {
       objectType: "marker",
       id: object.id,
