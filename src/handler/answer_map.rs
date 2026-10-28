@@ -290,7 +290,11 @@ pub async fn answer_map_handler(
         Ok::<_,AppError>(())
     }.await;
     let (template, status) = match result {
-        Ok(()) => ("form-answer-map.html", StatusCode::OK),
+        Ok(()) => {
+            context = super::answer_map_transport::encode_context(context)
+                .map_err(|_| AppError::InternalServerError)?;
+            ("form-answer-map.html", StatusCode::OK)
+        },
         Err(error) => {
             let (message, status) = match error {
                 AppError::Validation(message) => (message, StatusCode::BAD_REQUEST),

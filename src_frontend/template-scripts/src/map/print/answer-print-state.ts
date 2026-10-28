@@ -17,6 +17,7 @@ export function isAnswerPrintSnapshot(v: any): v is AnswerPrintSnapshot {
   if (!record(v) || !isPrintMapState(v.state) || !record(v.bootstrap)) return false;
   const b = v.bootstrap;
   if (
+    Object.hasOwn(b, "normalBodyReferences") ||
     b.page !== "form-answer-map" ||
     typeof b.isCluster !== "boolean" ||
     !record(b.layers) ||
@@ -94,6 +95,8 @@ export function createAnswerPrintSnapshot(
   runtime: any,
   keys: string[],
 ): AnswerPrintSnapshot {
+  if (Object.hasOwn(bootstrap, "normalBodyReferences"))
+    throw new Error("印刷対象が不正です。地図を開き直してください。");
   const targets = new Set(keys);
   const markers = Object.fromEntries(
     Object.entries(bootstrap.markers).filter(([, m]) => targets.has(`marker:${m.id}`)),

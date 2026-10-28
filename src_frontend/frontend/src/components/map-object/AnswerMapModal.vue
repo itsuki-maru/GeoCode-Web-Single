@@ -4,6 +4,7 @@ import apiClient from "@/axiosClient";
 import { submitAuthenticatedForm } from "@/utils/authenticated-form";
 import { requestCurrentMapView } from "@/utils/map-view";
 import PrintMapModal from "../map/PrintMapModal.vue";
+import ProgressSpinner from "../common/ProgressSpinner.vue";
 import AnswerColoringPanel from "./AnswerColoringPanel.vue";
 import SaveMapPresetModal from "./SaveMapPresetModal.vue";
 import SavedMapPresetsModal from "./SavedMapPresetsModal.vue";
@@ -1139,7 +1140,10 @@ onBeforeUnmount(() => {
             title="回答条件に一致する対象の地図"
             :class="{ 'is-loading': loading || error }"
           />
-          <p v-if="loading" class="map-state" role="status">地図を読み込んでいます…</p>
+          <div v-if="loading" class="map-state" role="status">
+            <ProgressSpinner :is-open="loading" inline />
+            <span>地図を読み込んでいます…</span>
+          </div>
           <div v-if="error" class="map-state" role="alert">
             <p>{{ error }}</p>
             <button type="button" @click="submit">再試行</button>

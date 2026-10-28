@@ -21,6 +21,36 @@ struct Answer {
     revision: i64,
     edited_at: Option<chrono::NaiveDateTime>,
 }
+
+#[derive(FromRow)]
+struct PopupAnswer {
+    id: String,
+    target_id: String,
+    rendered_markdown: String,
+}
+
+// Body matching needs only these references, including for full editing rows.
+trait AnswerText {
+    fn id(&self) -> &str;
+    fn rendered_markdown(&self) -> &str;
+}
+impl AnswerText for Answer {
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn rendered_markdown(&self) -> &str {
+        &self.rendered_markdown
+    }
+}
+impl AnswerText for PopupAnswer {
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn rendered_markdown(&self) -> &str {
+        &self.rendered_markdown
+    }
+}
+
 pub(crate) struct Document {
     pub body: String,
     pub parts: Option<Vec<BodyPart>>,
@@ -40,14 +70,14 @@ fn invalid(text: &str) -> AppError {
 
 // Text matching is used only to adopt unambiguous legacy data. Afterwards the
 // persisted structure, rather than matching strings, identifies each answer.
-fn adopt(body: &str, answers: &[Answer]) -> Option<Vec<BodyPart>> {
+fn adopt(body: &str, answers: &[impl AnswerText]) -> Option<Vec<BodyPart>> {
     let mut matches = Vec::new();
     for answer in answers {
-        if answer.rendered_markdown.is_empty() {
+        if answer.rendered_markdown().is_empty() {
             return None;
         }
         let positions: Vec<_> = body
-            .match_indices(&answer.rendered_markdown)
+            .match_indices(answer.rendered_markdown())
             .take(2)
             .collect();
         if positions.len() != 1 {
@@ -66,19 +96,19 @@ fn adopt(body: &str, answers: &[Answer]) -> Option<Vec<BodyPart>> {
             text: body[cursor..offset].into(),
         });
         parts.push(BodyPart::Answer {
-            id: answer.id.clone(),
+            id: answer.id().to_owned(),
         });
-        cursor = offset + answer.rendered_markdown.len();
+        cursor = offset + answer.rendered_markdown().len();
     }
     parts.push(BodyPart::Text {
         text: body[cursor..].into(),
     });
     Some(parts)
 }
-fn render(parts: &[BodyPart], answers: &[Answer]) -> Option<String> {
+fn render(parts: &[BodyPart], answers: &[impl AnswerText]) -> Option<String> {
     let by_id: HashMap<_, _> = answers
         .iter()
-        .map(|a| (a.id.as_str(), &a.rendered_markdown))
+        .map(|a| (a.id(), a.rendered_markdown()))
         .collect();
     let mut used = HashSet::new();
     let mut body = String::new();
@@ -217,9 +247,9 @@ pub(crate) async fn popup_bodies(
         .bind(SqlJson(&ids))
         .fetch_all(&mut **tx)
         .await?;
-        let mut by_target: HashMap<String, Vec<Answer>> = HashMap::new();
-        let answers: Vec<Answer> = sqlx::query_as(&format!(
-            "SELECT s.id,s.{kind}_id AS target_id,s.submitted_values,s.form_snapshot,s.rendered_markdown,s.revision,s.edited_at FROM {kind}_form_submission_model s JOIN {} m ON m.id=s.{kind}_id WHERE m.user_id=$1 AND m.id IN (SELECT value FROM json_each($2)) ORDER BY s.create_at COLLATE answer_time,s.id", table(kind)?
+        let mut by_target: HashMap<String, Vec<PopupAnswer>> = HashMap::new();
+        let answers: Vec<PopupAnswer> = sqlx::query_as(&format!(
+            "SELECT s.id,s.{kind}_id AS target_id,s.rendered_markdown FROM {kind}_form_submission_model s JOIN {} m ON m.id=s.{kind}_id WHERE m.user_id=$1 AND m.id IN (SELECT value FROM json_each($2)) ORDER BY s.create_at COLLATE answer_time,s.id", table(kind)?
         )).bind(user).bind(SqlJson(&ids)).fetch_all(&mut **tx).await?;
         for answer in answers {
             by_target

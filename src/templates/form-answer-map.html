@@ -390,24 +390,25 @@
     <body class="answer-preview">
         <div class="folium-map" id="map"></div>
     </body>
-    <script>
-        window.__GEOCODE_MAP_BOOTSTRAP__ = {
-            page: "form-answer-map",
-            popupBodies: {{ popupBodies | json_encode_for_html | safe }},
-            answerPreview: {{ answerPreview | default(value=false) | json_encode_for_html | safe }},
-            isCluster: {{ is_cluster }},
-            initialView: {
-                latitude: {{ latitude }},
-                longitude: {{ longitude }},
-                zoom: {{ zoom }},
+    <script type="application/json" id="geocode-map-bootstrap">
+        {
+            "page": "form-answer-map",
+            "popupBodies": {{ popupBodies | json_encode_for_html | safe }},
+            "answerPreview": {{ answerPreview | default(value=false) | json_encode_for_html | safe }},
+            "isCluster": {{ is_cluster }},
+            "initialView": {
+                "latitude": {{ latitude }},
+                "longitude": {{ longitude }},
+                "zoom": {{ zoom }}
             },
-            tileServers: {{ tileServers | json_encode_for_html | safe }},
-            tileOverlays: {{ tileOverlays | json_encode_for_html | safe }},
-            tileVisibilityAccountId: {{ tileVisibilityAccountId | json_encode_for_html | safe }},
-            layers: {{ layersFromAxum | json_encode_for_html | safe }},
-            markers: {{ markersFromAxum | json_encode_for_html | safe }},
-            shapes: {{ shapesFromAxum | json_encode_for_html | safe }},
-        };
+            "tileServers": {{ tileServers | json_encode_for_html | safe }},
+            "tileOverlays": {{ tileOverlays | json_encode_for_html | safe }},
+            "tileVisibilityAccountId": {{ tileVisibilityAccountId | json_encode_for_html | safe }},
+            "layers": {{ layersFromAxum | json_encode_for_html | safe }},
+            "markers": {{ markersFromAxum | json_encode_for_html | safe }},
+            "shapes": {{ shapesFromAxum | json_encode_for_html | safe }}{% if normalBodyReferences is defined %},
+            "normalBodyReferences": {{ normalBodyReferences | json_encode_for_html | safe }}{% endif %}
+        }
     </script>
     <script type="module" src="/assets/template-form-answer-map.js"></script>
 </html>

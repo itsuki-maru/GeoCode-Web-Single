@@ -1,11 +1,12 @@
 <script setup lang="ts">
 defineProps<{
   isOpen: boolean;
+  inline?: boolean;
 }>();
 </script>
 
 <template>
-  <div class="overlay-progress-bar" v-show="isOpen">
+  <div :class="inline ? 'progress-inline' : 'overlay-progress-bar'" v-show="isOpen">
     <svg class="spinner" width="50" height="50" view-box="0 0 50 50" aria-hidden="true">
       <g transform="rotate(-90 25 25)">
         <circle
@@ -42,6 +43,12 @@ defineProps<{
   transform-box: fill-box;
   animation: spin 1s linear infinite;
   will-change: transform;
+}
+
+.progress-inline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 @keyframes spin {

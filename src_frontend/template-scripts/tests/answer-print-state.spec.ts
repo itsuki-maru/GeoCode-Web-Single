@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readMapBootstrap } from "../src/map/bootstrap";
 import {
   createAnswerPrintSnapshot,
   isAnswerPrintSnapshot,
@@ -54,6 +55,69 @@ function fixture() {
   return { state, bootstrap, runtime: { getPrintState: () => state } };
 }
 describe("frozen answer print snapshot", () => {
+  it("requires canonical bodies in both the snapshot sender and receiver", () => {
+    const f = fixture();
+    f.bootstrap.markers = {};
+    f.bootstrap.popupBodies = { "shape:same": {
+      free_text: "自由𠮷\r\n", managed_markdown: "**全回答🙂**", sync_required: false,
+    } };
+    f.bootstrap.normalBodyReferences = { version: 1, markers: [], shapes: ["same"] };
+    f.bootstrap.answerPreview.targets = ["shape:same"];
+    f.bootstrap.answerPreview.targetCount = 1;
+    expect(isAnswerPrintSnapshot({ state: f.state, bootstrap: f.bootstrap })).toBe(false);
+    expect(() => createAnswerPrintSnapshot(f.bootstrap, f.runtime, ["shape:same"])).toThrow("印刷対象が不正です");
+    delete window.__GEOCODE_MAP_BOOTSTRAP__;
+    const node = document.createElement("script");
+    node.id = "geocode-map-bootstrap";
+    node.type = "application/json";
+    node.textContent = JSON.stringify(f.bootstrap);
+    document.body.append(node);
+    try {
+      const canonical = readMapBootstrap();
+      if (canonical.page !== "form-answer-map") throw Error("Wrong page");
+      const snapshot = createAnswerPrintSnapshot(canonical, f.runtime, ["shape:same"]);
+      expect(snapshot.bootstrap.shapes[0].geojson.properties).toEqual({
+        radius: 10, memo: "自由𠮷\r\n**全回答🙂**",
+      });
+      expect(snapshot.bootstrap).not.toHaveProperty("normalBodyReferences");
+      expect(isAnswerPrintSnapshot(snapshot)).toBe(true);
+    } finally {
+      node.remove();
+      delete window.__GEOCODE_MAP_BOOTSTRAP__;
+    }
+  });
+
+  it("applies the 32MiB byte cap after restoring the full Unicode body", () => {
+    const f = fixture();
+    f.bootstrap.markers = {};
+    const text = "界".repeat(Math.floor(MAX_ANSWER_PRINT_BYTES / 6) + 1);
+    f.bootstrap.popupBodies = { "shape:same": {
+      free_text: text, managed_markdown: "", sync_required: false,
+    } };
+    f.bootstrap.normalBodyReferences = { version: 1, markers: [], shapes: ["same"] };
+    f.bootstrap.answerPreview.targets = ["shape:same"];
+    f.bootstrap.answerPreview.targetCount = 1;
+    const compact = JSON.stringify(f.bootstrap);
+    expect(new TextEncoder().encode(compact).length).toBeLessThan(MAX_ANSWER_PRINT_BYTES);
+    delete window.__GEOCODE_MAP_BOOTSTRAP__;
+    const node = document.createElement("script");
+    node.id = "geocode-map-bootstrap";
+    node.type = "application/json";
+    node.textContent = compact;
+    document.body.append(node);
+    try {
+      const canonical = readMapBootstrap();
+      if (canonical.page !== "form-answer-map") throw Error("Wrong page");
+      expect((canonical.shapes[0].geojson.properties as any).memo).toBe(text);
+      // Both the restored normal body and the complete popup projection belong
+      // to print. The compact wire representation cannot bypass the byte cap.
+      expect(() => createAnswerPrintSnapshot(canonical, f.runtime, ["shape:same"])).toThrow("32MiB");
+    } finally {
+      node.remove();
+      delete window.__GEOCODE_MAP_BOOTSTRAP__;
+    }
+  });
+
   it("includes coloring only when used, restricts it to print targets and freezes applied colors", () => {
     const f = fixture();
     expect(createAnswerPrintSnapshot(f.bootstrap, f.runtime, ["marker:same"])).not.toHaveProperty(
