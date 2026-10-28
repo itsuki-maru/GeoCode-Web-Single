@@ -425,19 +425,21 @@ pub(super) fn build_query(
         .push_bind(name.clone())
         .push(")");
     }
-    b.push(
-        r#"
+    if q.mode == "latest" {
+        b.push(
+            r#"
         ), ranked AS (
             SELECT *, row_number() OVER (
                 PARTITION BY target_type, target_id, COALESCE(source_form ->> 'id', 'individual')
                 ORDER BY create_at COLLATE answer_time DESC, id DESC
             ) AS rn FROM scoped
         ), filtered AS (
-            SELECT * FROM ranked WHERE TRUE
+            SELECT * FROM ranked WHERE rn = 1
         "#,
-    );
-    if q.mode == "latest" {
-        b.push(" AND rn = 1");
+        );
+    } else {
+        // History does not need to rank or sort every answer before filtering.
+        b.push("), filtered AS (SELECT * FROM scoped WHERE TRUE");
     }
     if let Some(v) = q.version {
         b.push(" AND CAST(source_form ->> 'version' AS TEXT) = ")
@@ -687,6 +689,7 @@ pub async fn answer_options_handler(
     validate(&q)?;
     let at = q.as_of.unwrap_or_else(Utc::now);
     let mut tx = super::answer_sqlite::begin_read(&pool).await?;
+    // Gather references once instead of rescanning all owned targets per deleted form.
     let forms: Vec<(String, String, bool)> = sqlx::query_as(
         r#"
         SELECT
@@ -695,7 +698,20 @@ pub async fn answer_options_handler(
             f.deleted
         FROM common_form_model f
         WHERE f.user_id = $1
-            AND ( NOT f.deleted OR EXISTS ( SELECT 1 FROM marker_form_submission_model s JOIN marker_info_model m ON m.id = s.marker_id WHERE m.user_id = $1 AND s.source_form ->> 'id' = f.id ) OR EXISTS ( SELECT 1 FROM shape_form_submission_model s JOIN shape_model m ON m.id = s.shape_id WHERE m.user_id = $1 AND s.source_form ->> 'id' = f.id ) )
+            AND (
+                NOT f.deleted
+                OR f.id IN (
+                    SELECT s.source_form ->> 'id'
+                    FROM marker_form_submission_model s
+                    JOIN marker_info_model m ON m.id = s.marker_id
+                    WHERE m.user_id = $1
+                    UNION
+                    SELECT s.source_form ->> 'id'
+                    FROM shape_form_submission_model s
+                    JOIN shape_model m ON m.id = s.shape_id
+                    WHERE m.user_id = $1
+                )
+            )
         ORDER BY f.update_at DESC,
         f.id
         "#,

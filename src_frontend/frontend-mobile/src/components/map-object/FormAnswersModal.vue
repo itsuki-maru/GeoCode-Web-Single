@@ -235,7 +235,12 @@ const clearFilters = () => {
   layer.value = "";
   conditions.value = [];
 };
-const search = async (cursor: Cursor | null = null, index = 0, fresh = true) => {
+const search = async (
+  cursor: Cursor | null = null,
+  index = 0,
+  fresh = true,
+  initialOptions?: Promise<boolean>,
+) => {
   if (!props.isOpen || disposed) return false;
   const sequence = ++searchSequence;
   loading.value = true;
@@ -243,9 +248,13 @@ const search = async (cursor: Cursor | null = null, index = 0, fresh = true) => 
   detail.value = null;
   try {
     const request = fresh ? buildRequest() : { ...applied.value };
-    const result = (await apiClient.post<Page>("/form-answers/search", { ...request, cursor }))
-      .data;
-    if (sequence !== searchSequence || !props.isOpen || disposed) return false;
+    // Initial requests are independent; wait for both before preparing page columns.
+    const [response, optionsReady] = await Promise.all([
+      apiClient.post<Page>("/form-answers/search", { ...request, cursor }),
+      initialOptions ?? true,
+    ]);
+    if (!optionsReady || sequence !== searchSequence || !props.isOpen || disposed) return false;
+    const result = response.data;
     rows.value = result.rows;
     editingSupported.value = result.editing_supported === true;
     if (fresh) {
@@ -355,10 +364,10 @@ watch(
     applied.value = null;
     total.value = 0;
     targetCount.value = null;
-    const success = await loadOptions();
+    const optionsReady = loadOptions();
+    await Promise.all([optionsReady, search(null, 0, true, optionsReady)]);
     if (disposed || !props.isOpen || session !== openSequence) return;
     initialising = false;
-    if (success && props.isOpen) await search();
   },
   { immediate: true },
 );

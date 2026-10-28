@@ -491,11 +491,81 @@ const mediaScreen = (initial: boolean) => {
 };
 const deferredAnswer = <T>() => {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 };
+describe("回答一覧の初期取得", () => {
+  it.each(["options", "search"])(
+    "%sが先に完了しても、並行取得した回答と項目が揃ってから表示する",
+    async (first) => {
+      const definitions = deferredAnswer<{ data: typeof options }>();
+      const answers = deferredAnswer<{ data: typeof result }>();
+      api.post.mockImplementation((url: string) =>
+        url.endsWith("options") ? definitions.promise : answers.promise,
+      );
+      const wrapper = await open({
+        initialFormId: "common",
+        targetId: "target",
+        targetType: "marker",
+      });
+      expect(api.post.mock.calls.map(([url]) => url)).toEqual([
+        "/form-answers/options",
+        "/form-answers/search",
+      ]);
+      for (const [, request] of api.post.mock.calls)
+        expect(request).toMatchObject({
+          common_form_id: "common",
+          target_id: "target",
+          target_type: "marker",
+        });
+      expect(api.post.mock.calls[1]![1]).toMatchObject({
+        mode: "history",
+        limit: 50,
+        cursor: null,
+      });
+      if (first === "options") definitions.resolve({ data: options });
+      else answers.resolve({ data: result });
+      await flushPromises();
+      expect(wrapper.findAll("tbody tr")).toHaveLength(0);
+      expect(button(wrapper, "更新").attributes("disabled")).toBeDefined();
+      definitions.resolve({ data: options });
+      answers.resolve({ data: result });
+      await flushPromises();
+      expect(wrapper.findAll("tbody tr")).toHaveLength(1);
+      expect(wrapper.get("thead").text()).toContain(field.label);
+      expect(wrapper.get("tbody .answer-value").text()).toBe("0");
+      expect(api.post).toHaveBeenCalledTimes(2);
+      wrapper.unmount();
+    },
+  );
+  it.each(["options", "search"])(
+    "%sの取得失敗後にもう一方が完了しても、一覧を部分表示せずエラーを保持する",
+    async (failed) => {
+      const definitions = deferredAnswer<{ data: typeof options }>();
+      const answers = deferredAnswer<{ data: typeof result }>();
+      api.post.mockImplementation((url: string) =>
+        url.endsWith("options") ? definitions.promise : answers.promise,
+      );
+      const wrapper = await open();
+      if (failed === "options") definitions.reject(new Error("options failed"));
+      else answers.reject(new Error("search failed"));
+      await flushPromises();
+      definitions.resolve({ data: options });
+      answers.resolve({ data: result });
+      await flushPromises();
+      expect(wrapper.findAll("tbody tr")).toHaveLength(0);
+      expect(wrapper.text()).toContain(
+        failed === "options" ? "検索項目を読み込めませんでした。" : "回答を読み込めませんでした。",
+      );
+      expect(button(wrapper, "更新").attributes("disabled")).toBeUndefined();
+      wrapper.unmount();
+    },
+  );
+});
 describe("回答一覧の軽量表示と解放", () => {
   afterEach(() => vi.unstubAllGlobals());
   const manyFields = Array.from({ length: 20 }, (_, index) => ({
@@ -595,7 +665,7 @@ describe("回答一覧の軽量表示と解放", () => {
     expect((wrapper.vm.$.setupState as any).applied).toBeNull();
     wrapper.unmount();
   });
-  it("ignores options from a closed session and does not issue a stale initial search", async () => {
+  it("ignores options from a closed session without applying partial results or starting another search", async () => {
     const old = deferredAnswer<{ data: typeof options }>(),
       current = deferredAnswer<{ data: typeof options }>();
     let requests = 0;
@@ -611,10 +681,11 @@ describe("回答一覧の軽量表示と解放", () => {
     await wrapper.setProps({ isOpen: true });
     old.resolve({ data: { ...options, fields: [{ ...field, label: "古い項目" }] } });
     await flushPromises();
-    expect(api.post.mock.calls.filter(([url]) => url.endsWith("search"))).toHaveLength(0);
+    expect(api.post.mock.calls.filter(([url]) => url.endsWith("search"))).toHaveLength(2);
+    expect(wrapper.findAll("tbody tr")).toHaveLength(0);
     current.resolve({ data: { ...options, fields: [{ ...field, label: "最新項目" }] } });
     await flushPromises();
-    expect(api.post.mock.calls.filter(([url]) => url.endsWith("search"))).toHaveLength(1);
+    expect(api.post.mock.calls.filter(([url]) => url.endsWith("search"))).toHaveLength(2);
     expect(wrapper.get("thead").text()).toContain("最新項目");
     expect(wrapper.text()).not.toContain("古い項目");
     wrapper.unmount();
