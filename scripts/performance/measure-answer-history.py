@@ -1,4 +1,4 @@
-"""Compare default-history SQL from two SQLite revisions in an isolated memory DB."""
+"""Compare shared full-row history SQL from two SQLite revisions in a memory DB."""
 
 import argparse
 import hashlib
@@ -22,7 +22,49 @@ def history_query(source):
     if "QueryBuilder<'static, Sqlite>" not in function:
         raise ValueError("This diagnostic supports the SQLite backend only")
     raw = re.findall(r'r#"([\s\S]*?)"#', function)
-    owner = next(sql for sql in raw if "s.submitted_values" in sql)
+    if "fn append_answer_source(" in function:
+        # The current backend shares these Full-projection fragments with CSV,
+        # answer maps and the bounded detail fetch. Search/count use narrower
+        # projections; this diagnostic deliberately continues measuring Full.
+        helper = function.split("fn append_answer_source(", 1)[1].split(
+            "fn build_query_with_projection(", 1
+        )[0]
+        fragments = re.findall(r'r#"([\s\S]*?)"#', helper)
+
+        def template(description, *markers):
+            matches = [sql for sql in fragments if all(marker in sql for marker in markers)]
+            if len(matches) != 1:
+                raise ValueError(f"Unrecognized Full-projection {description}: {len(matches)} templates")
+            return matches[0]
+
+        core = template("SELECT core", "AS target_type", "AS target_id")
+        if "SELECT" not in core:
+            # Full retains s.id; only the history Count projection omits it.
+            select = re.search(r'b\.push\("(SELECT\s+)"\)', helper)
+            answer_id = re.search(r'b\.push\("(s\.id,\s*)"\)', helper)
+            if not select or not answer_id:
+                raise ValueError("Unrecognized Full-projection SELECT prefix")
+            core = select[1] + answer_id[1] + core
+        full_extra = template("additional columns", "{name} AS target_name", "s.submitted_values", "common_form_deleted")
+        owner_from = template("FROM", "FROM {kind}_form_submission_model s", "{table} m ON m.id = s.{kind}_id")
+        if "{target_join}" in owner_from:
+            # Shared Full history passes keys=None; CROSS JOIN belongs only to
+            # the bounded detail fetch and is outside this diagnostic's scope.
+            target_join = re.search(
+                r'let target_join = if keys\.is_some\(\)\s*\{\s*"CROSS JOIN"\s*\}\s*else\s*\{\s*"(JOIN)"\s*\}',
+                helper,
+            )
+            if not target_join:
+                raise ValueError("Unrecognized Full-projection target join")
+            owner_from = owner_from.replace("{target_join}", target_join[1])
+        full_joins = template("display joins", "LEFT JOIN layer_model", "LEFT JOIN common_form_model")
+        owner_where = re.search(r'b\.push\("(\s*WHERE m\.user_id\s*=\s*)"\)\s*\.push_bind', helper)
+        if not owner_where:
+            raise ValueError("Unrecognized Full-projection owner predicate")
+        owner = core + full_extra + owner_from + full_joins + owner_where[1]
+    else:
+        # Retain the original all-in-one templates, including 47b82c0/ecf2d71.
+        owner = next(sql for sql in raw if "s.submitted_values" in sql)
     branches = []
     for kind in ("marker", "shape"):
         table = "marker_info_model" if kind == "marker" else "shape_model"
@@ -109,7 +151,8 @@ def main():
         "sourceSha256": {stage: hashlib.sha256(source.replace("\r\n", "\n").encode()).hexdigest() for stage, source in sources.items()},
         "samples": args.samples,
         "notes": [
-            "Default unscoped history SQL reconstructed from the production Rust templates; not a full handler or application benchmark.",
+            "Default unscoped shared Full-projection history SQL reconstructed from the production Rust templates; not a full handler or application benchmark.",
+            "This preserves the full-row SQL comparison across revisions. It does not measure the newer Count/Search projections, ID-first pagination, or deferred full-row fetch; use the native handler profiler for those changes.",
             "Synthetic memory DB with the referenced columns and owner/target/form indexes, not an application database. No application data or sources are modified.",
             "Fixed-format UTC timestamps use lexical comparison, excluding production Rust timestamp parsing and mixed formats.",
             "One warm-up per query; before/after samples alternate on the same fixture. Time includes SQLite execution and Python fetchall, excluding fixture setup, HTTP, JSON serialization/transfer, SQLx, and Vue.",
