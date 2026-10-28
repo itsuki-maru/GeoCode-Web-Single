@@ -88,6 +88,89 @@ const click = async (w: ReturnType<typeof mount>, text: string) => {
   await flushPromises();
 };
 describe("回答地図の非同期絞り込み", () => {
+  it("2万対象の初期化・絞り込み・色分けを維持し、CSVは回答数上限で検証する", async () => {
+    const targets = Array.from({ length: 20_000 }, (_, n) => `shape:target-${n}`);
+    post.mockResolvedValue({ data: result(targets) });
+    const w = await open(true);
+    send(w, {
+      type: "answer-map-ready",
+      answerCount: targets.length,
+      targetCount: targets.length,
+      displayed: targets.length,
+      skipped: 0,
+      query,
+      targets,
+    });
+    await flushPromises();
+    expect(post.mock.calls.at(-1)![1]).toMatchObject({ targets, options_only: true });
+    const frame = w.get("iframe").element as HTMLIFrameElement;
+    const message = vi.spyOn(frame.contentWindow!, "postMessage").mockImplementation(() => {});
+    await click(w, "絞り込み実行");
+    const filter = message.mock.calls.at(-1)![0];
+    expect(filter.targets).toEqual(targets);
+    send(w, {
+      type: "answer-map-filter-applied",
+      updateId: filter.updateId,
+      visible: targets.length,
+      renderable: targets.length,
+    });
+    await flushPromises();
+    w.getComponent(AnswerColoringPanel).vm.$emit("apply", {
+      common_form_id: query.common_form_id,
+      rules: [
+        {
+          id: "all",
+          label: "分類",
+          color: "#2166ac",
+          conditions: [{ field_id: "n", field_type: "number", op: "gte", value: "0", upper: null }],
+        },
+      ],
+    });
+    await flushPromises();
+    const colored = message.mock.calls.at(-1)![0];
+    expect(Object.keys(colored.coloring.targets)).toHaveLength(targets.length);
+    send(w, {
+      type: "answer-map-filter-applied",
+      updateId: colored.updateId,
+      visible: targets.length,
+      renderable: targets.length,
+    });
+    await flushPromises();
+    await click(w, "CSV出力");
+    const csv = message.mock.calls.at(-1)![0];
+    post.mockResolvedValueOnce({ data: { count: 20_000 } });
+    send(w, {
+      type: "answer-map-csv-targets",
+      csvRequestId: csv.csvRequestId,
+      updateId: colored.updateId,
+      targets,
+    });
+    await flushPromises();
+    expect(post.mock.calls.at(-1)![0]).toBe("http://localhost:3000/form-answers/map-csv-check");
+    expect((post.mock.calls.at(-1)![1] as { targets: string[] }).targets).toEqual(targets);
+    expect(w.text()).toContain("CSVを出力できませんでした");
+    expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1);
+    w.unmount();
+  });
+  it.each([
+    { targets: [keys[0], keys[0]], targetCount: 2 },
+    { targets: keys, targetCount: 1 },
+    { targets: keys, targetCount: Number.MAX_SAFE_INTEGER + 1 },
+  ])("初期対象の重複・件数不一致・不正件数を拒否する: %j", async (scope) => {
+    const w = await open();
+    send(w, {
+      type: "answer-map-ready",
+      answerCount: 2,
+      displayed: 2,
+      skipped: 0,
+      query,
+      ...scope,
+    });
+    await flushPromises();
+    expect(post).not.toHaveBeenCalled();
+    w.unmount();
+  });
+
   const filterPreset = (): SavedMapPreset => ({
     id: "preset",
     name: "耐用年数",

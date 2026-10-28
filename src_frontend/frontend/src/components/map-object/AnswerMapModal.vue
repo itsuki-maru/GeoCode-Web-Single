@@ -510,7 +510,6 @@ const fetchResult = async (
     if (
       !Number.isSafeInteger(data.target_count) ||
       data.target_count !== data.targets.length ||
-      data.targets.length > 10000 ||
       data.targets.some((k) => !initial.has(k)) ||
       new Set(data.targets).size !== data.targets.length ||
       !Number.isSafeInteger(data.answer_count) ||
@@ -622,7 +621,6 @@ const onMessage = (event: MessageEvent) => {
       data.updateId !== appliedId ||
       !Array.isArray(data.targets) ||
       !data.targets.length ||
-      data.targets.length > 10000 ||
       new Set(data.targets).size !== data.targets.length ||
       data.targets.some((id: unknown) => typeof id !== "string" || !initial.has(id))
     ) {
@@ -689,7 +687,8 @@ const onMessage = (event: MessageEvent) => {
       data.query &&
       typeof data.query.as_of === "string" &&
       Array.isArray(data.targets) &&
-      data.targets.length <= 10000 &&
+      data.targets.length === data.targetCount &&
+      new Set(data.targets).size === data.targets.length &&
       data.targets.every((v: unknown) => typeof v === "string")
     ) {
       baseQuery.value = data.query;

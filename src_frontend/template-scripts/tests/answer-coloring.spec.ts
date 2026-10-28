@@ -65,6 +65,20 @@ function setup() {
 }
 
 describe("answer map coloring", () => {
+  it("2万対象でも分類と所属を検証する", () => {
+    const s = setup();
+    const keys = Array.from({ length: 20_000 }, (_, n) => `shape:target-${n}`);
+    const state = { ...s.state, targets: Object.fromEntries(keys.map((key) => [key, "a"])) };
+    const allowed = new Set(keys);
+    expect(isAnswerColoring(state, allowed)).toBe(true);
+    expect(
+      isAnswerColoring({ ...state, targets: { ...state.targets, "shape:outside": "a" } }, allowed),
+    ).toBe(false);
+    expect(
+      isAnswerColoring({ ...state, targets: { ...state.targets, [keys[0]]: "unknown" } }, allowed),
+    ).toBe(false);
+  });
+
   it("旧分析と色分けを併用しても、遅延生成時の優先順位と解除後の色を維持する", () => {
     const s = setup();
     const created = new Set<(layer: any, record: { id: string }) => void>();

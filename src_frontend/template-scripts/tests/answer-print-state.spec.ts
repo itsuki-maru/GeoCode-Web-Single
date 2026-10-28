@@ -93,21 +93,32 @@ describe("frozen answer print snapshot", () => {
     snapshot.bootstrap.popupBodies!["marker:foreign"] = body;
     expect(isAnswerPrintSnapshot(snapshot)).toBe(false);
   });
-  it("accepts 10,000 objects and rejects excess objects without truncation", () => {
+  it("2万対象と全popup情報を件数で省略せず固定し、所属と重複を検証する", () => {
     const f = fixture();
     f.bootstrap.shapes = [];
     f.bootstrap.markers = Object.fromEntries(
-      Array.from({ length: 10001 }, (_, i) => [
+      Array.from({ length: 20_000 }, (_, i) => [
         String(i),
         { ...f.bootstrap.markers.one, id: String(i) },
       ]),
     );
     const keys = Object.keys(f.bootstrap.markers).map((id) => `marker:${id}`);
-    expect(() => createAnswerPrintSnapshot(f.bootstrap, f.runtime, keys)).toThrow();
-    expect(
-      createAnswerPrintSnapshot(f.bootstrap, f.runtime, keys.slice(0, 10000)).bootstrap
-        .answerPreview.targets,
-    ).toHaveLength(10000);
+    const body = { free_text: "自由", managed_markdown: "回答", sync_required: false };
+    f.bootstrap.popupBodies = Object.fromEntries(keys.map((key) => [key, body]));
+    f.bootstrap.popupAnalysis = Object.fromEntries(keys.map((key) => [key, "分析値"]));
+    (f.runtime as any).popupContent = { getAnalysis: () => f.bootstrap.popupAnalysis };
+    const snapshot = createAnswerPrintSnapshot(f.bootstrap, f.runtime, keys);
+    const printTargets = snapshot.bootstrap.answerPreview.targets;
+    if (!printTargets) throw new Error("印刷対象がありません。");
+    expect(printTargets).toHaveLength(keys.length);
+    expect(Object.keys(snapshot.bootstrap.popupBodies!)).toHaveLength(keys.length);
+    expect(Object.keys(snapshot.bootstrap.popupAnalysis!)).toHaveLength(keys.length);
+    expect(isAnswerPrintSnapshot(snapshot)).toBe(true);
+    snapshot.bootstrap.popupAnalysis!["marker:outside"] = "対象外";
+    expect(isAnswerPrintSnapshot(snapshot)).toBe(false);
+    delete snapshot.bootstrap.popupAnalysis!["marker:outside"];
+    printTargets[1] = printTargets[0];
+    expect(isAnswerPrintSnapshot(snapshot)).toBe(false);
   });
   it("keeps only visible targets, distinguishes marker/shape IDs and preserves the view", () => {
     const f = fixture();

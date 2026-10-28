@@ -5,8 +5,8 @@ use std::{
     cmp::Ordering,
     collections::HashMap,
     sync::{
-        atomic::{AtomicBool, Ordering as AtomicOrdering},
         Mutex,
+        atomic::{AtomicBool, Ordering as AtomicOrdering},
     },
 };
 

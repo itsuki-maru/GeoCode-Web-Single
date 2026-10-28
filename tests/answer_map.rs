@@ -211,23 +211,88 @@ async fn test_layer(pool: &SqlitePool, user: &Uuid) -> Uuid {
 }
 
 #[tokio::test]
-async fn rejects_more_than_ten_thousand_distinct_targets_without_truncation() {
+async fn twenty_thousand_targets_support_map_and_filter_without_truncation() {
     let pool = common::test_pool().await;
     let user = test_user(&pool, "map-limits").await;
     let layer = test_layer(&pool, &user).await;
     sqlx::query(r#"
-        WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<10001)
+        WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<20000)
         INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at)
-        SELECT '00000000-0000-4000-8000-'||printf('%012x',i),$1,$2,'上限確認',35,139,'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP FROM n
+        SELECT '00000000-0000-4000-8000-'||printf('%012x',i),$1,$2,'対象'||i,35,139,'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP FROM n
         "#).bind(user.to_string()).bind(layer.to_string()).execute(&pool).await.unwrap();
+    let form = Uuid::new_v4().to_string();
     sqlx::query(r#"
-        INSERT INTO marker_form_submission_model(id,marker_id,create_at,submitted_values,rendered_markdown)
-        SELECT id,id,'2026-01-01','{}','' FROM marker_info_model
-        "#).execute(&pool).await.unwrap();
-    let error = load_answer_map(&pool, &user.to_string(), &query(json!({})))
-        .await
-        .unwrap_err();
-    assert!(error.to_string().contains("10,000"), "{error:?}");
+        WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<20000)
+        INSERT INTO marker_form_submission_model(id,marker_id,create_at,submitted_values,rendered_markdown,source_form,form_snapshot)
+        SELECT '00000000-0000-4000-8000-'||printf('%012x',i),'00000000-0000-4000-8000-'||printf('%012x',i),
+            '2026-01-01 00:00:00',json_object('n',i),'',json_object('id',$1,'version',1),
+            '{"form_schema":{"fields":[{"id":"n","label":"番号","type":"number"}]}}' FROM n
+        "#).bind(&form).execute(&pool).await.unwrap();
+    let owner = user.to_string();
+    let q = query(json!({"limit":1,"as_of":"2026-10-28T00:00:00Z"}));
+    let data = load_answer_map(&pool, &owner, &q).await.unwrap();
+    assert_eq!(data.answer_count, 20_000);
+    assert_eq!(data.target_count, 20_000);
+    assert_eq!(data.markers.len(), 20_000);
+    assert_eq!(data.popup_bodies.len(), 20_000);
+    let expected: std::collections::BTreeSet<_> = (1..=20_000)
+        .map(|i| format!("marker:00000000-0000-4000-8000-{i:012x}"))
+        .collect();
+    assert_eq!(
+        data.markers
+            .iter()
+            .map(|m| format!("marker:{}", m.id))
+            .collect::<std::collections::BTreeSet<_>>(),
+        expected
+    );
+    let mut request = geocode_web_single::handler::answer_map_filter::MapFilterRequest {
+        query: q,
+        targets: expected.iter().cloned().collect(),
+        common_form_id: Some(form),
+        conditions: vec![],
+        options_only: false,
+    };
+    let filtered =
+        geocode_web_single::handler::answer_map_filter::filter_targets(&pool, &owner, &request)
+            .await
+            .unwrap();
+    assert_eq!(filtered.answer_count, 20_000);
+    assert_eq!(filtered.target_count, 20_000);
+    assert_eq!(
+        filtered
+            .targets
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>(),
+        expected
+    );
+    let csv_request = serde_json::from_value(serde_json::to_value(&request).unwrap()).unwrap();
+    let error = geocode_web_single::handler::answer_map_csv::check_handler(
+        Extension(owner.clone()),
+        Extension(pool.clone()),
+        Json(csv_request),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("CSVは10,000回答"), "{error:?}");
+    request.conditions = serde_json::from_value(json!([
+        {"field_id":"n","field_type":"number","op":"gte","value":10001}
+    ]))
+    .unwrap();
+    let filtered =
+        geocode_web_single::handler::answer_map_filter::filter_targets(&pool, &owner, &request)
+            .await
+            .unwrap();
+    assert_eq!(filtered.answer_count, 10_000);
+    assert_eq!(filtered.target_count, 10_000);
+    assert_eq!(
+        filtered
+            .targets
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>(),
+        (10_001..=20_000)
+            .map(|i| format!("marker:00000000-0000-4000-8000-{i:012x}"))
+            .collect()
+    );
 }
 
 #[tokio::test]

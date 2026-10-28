@@ -145,32 +145,33 @@ describe("回答一覧", () => {
     wrapper.unmount();
   });
   it.each([
-    { total: 10_000, target_count: 10_000, disabled: false },
-    { total: 10_001, target_count: 10_001, disabled: true },
-    { total: 20_000, target_count: 2, disabled: false },
-    { total: 10_001, target_count: undefined, disabled: true },
-  ])("地図の上限を重複のない対象数で判定する: %j", async ({ total, target_count, disabled }) => {
+    { total: 10_000, target_count: 10_000 },
+    { total: 20_000, target_count: 20_000 },
+    { total: 20_000, target_count: 2 },
+    { total: 20_000, target_count: undefined },
+  ])("対象数による上限なく地図を開ける: %j", async ({ total, target_count }) => {
     api.post.mockImplementation(async (url: string) => ({
       data: url.endsWith("options") ? options : { ...result, total, target_count },
     }));
     const wrapper = await open();
-    expect((button(wrapper, "地図で確認").element as HTMLButtonElement).disabled).toBe(disabled);
-    expect(wrapper.text().includes("地図で確認できる対象は10,000件までです")).toBe(disabled);
+    expect((button(wrapper, "地図で確認").element as HTMLButtonElement).disabled).toBe(false);
+    await button(wrapper, "地図で確認").trigger("click");
+    await flushPromises();
+    expect(wrapper.find('iframe[title="回答条件に一致する対象の地図"]').exists()).toBe(true);
     wrapper.unmount();
   });
-  it("地図の上限判定は表示中の条件を使い、絞り込みを反映すると有効に戻る", async () => {
+  it("多数の対象でも入力中の条件変更だけで地図を無効にしない", async () => {
     api.post.mockImplementation(async (url: string) => ({
       data: url.endsWith("options") ? options : { ...result, total: 10_001, target_count: 10_001 },
     }));
     const wrapper = await open();
     await select(wrapper, "共通フォームを選択").setValue("common");
     await flushPromises();
-    expect(button(wrapper, "地図で確認").attributes("disabled")).toBeDefined();
+    expect(button(wrapper, "地図で確認").attributes("disabled")).toBeUndefined();
     api.post.mockResolvedValueOnce({ data: result });
     await wrapper.get("form.search-form").trigger("submit");
     await flushPromises();
     expect(button(wrapper, "地図で確認").attributes("disabled")).toBeUndefined();
-    expect(wrapper.text()).not.toContain("地図で確認できる対象は10,000件までです");
     wrapper.unmount();
   });
   it("APIのフォーム入力順を表示項目とテーブル列に維持する", async () => {

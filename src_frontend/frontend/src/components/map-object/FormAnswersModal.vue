@@ -67,9 +67,6 @@ const displayFields = ref<string[]>([]);
 const resultFields = shallowRef<Field[]>([]);
 const rows = shallowRef<Answer[]>([]);
 const total = ref(0);
-const targetCount = ref<number | null>(null);
-const mapTargetLimit = 10_000;
-const mapLimitExceeded = computed(() => (targetCount.value ?? total.value) > mapTargetLimit);
 const asOf = ref("");
 const nextCursor = ref<Cursor | null>(null);
 const cursors = ref<(Cursor | null)[]>([null]);
@@ -124,7 +121,7 @@ const exportQuery = ref("");
 const mapOpen = ref(false);
 const mapQuery = ref<Record<string, unknown> | null>(null);
 const openMap = () => {
-  if (busy.value || !applied.value || !total.value || mapLimitExceeded.value) return;
+  if (busy.value || !applied.value || !total.value) return;
   mapQuery.value = { ...applied.value, cursor: null };
   mapOpen.value = true;
 };
@@ -265,7 +262,6 @@ const search = async (
       if (fieldsChanged) displayFields.value = resultFields.value.slice(0, 5).map(fieldKey);
     }
     total.value = result.total;
-    targetCount.value = result.target_count ?? null;
     asOf.value = result.as_of;
     nextCursor.value = result.next_cursor;
     page.value = index;
@@ -277,7 +273,6 @@ const search = async (
     if (sequence === searchSequence && props.isOpen && !disposed) {
       rows.value = [];
       total.value = 0;
-      targetCount.value = null;
       nextCursor.value = null;
       asOf.value = "";
       applied.value = null;
@@ -332,7 +327,6 @@ const releaseAnswers = () => {
   cursors.value = [null];
   page.value = 0;
   total.value = 0;
-  targetCount.value = null;
   message.value = "";
 };
 onBeforeUnmount(() => {
@@ -363,7 +357,6 @@ watch(
     resultFields.value = [];
     applied.value = null;
     total.value = 0;
-    targetCount.value = null;
     const optionsReady = loadOptions();
     await Promise.all([optionsReady, search(null, 0, true, optionsReady)]);
     if (disposed || !props.isOpen || session !== openSequence) return;
@@ -446,9 +439,7 @@ const exportCsv = async () => {
               </button>
             </span>
             <span class="result-action">
-              <button :disabled="busy || !applied || !total || mapLimitExceeded" @click="openMap">
-                地図で確認
-              </button>
+              <button :disabled="busy || !applied || !total" @click="openMap">地図で確認</button>
               <button
                 type="button"
                 class="help-button"
@@ -466,9 +457,6 @@ const exportCsv = async () => {
         </p>
         <p v-if="pending" role="status">
           条件が変更されています。「絞り込む」または「変更を反映」で一覧に反映します。
-        </p>
-        <p v-if="mapLimitExceeded" class="scope-note" role="status">
-          地図で確認できる対象は10,000件までです。条件を絞り込んでください。
         </p>
         <form v-show="filtersOpen" class="search-form" @submit.prevent="search()">
           <fieldset :disabled="busy">
@@ -592,7 +580,7 @@ const exportCsv = async () => {
         <p v-if="message" role="status">{{ message }}</p>
         <div v-if="mapHelpOpen" class="usage-help">
           <p>
-            一覧の全ページの該当対象を地図に表示します（重複を除き最大10,000件）。位置・名前などは現在の情報です。
+            一覧の全ページの該当対象を、重複を除いて地図に表示します。位置・名前などは現在の情報です。
           </p>
           <p>
             共通フォームの回答は、地図内でも回答値で絞り込めます。個別フォームの回答条件は、一覧で指定してください。名前検索・レイヤ切替はどちらも利用できます。

@@ -75,7 +75,7 @@ export function installAnswerFilter(
         if (!printEnabled || event.data.updateId !== lastUpdate)
           throw new Error("地図の更新完了後に再試行してください。");
         const targets = visibleTargets();
-        if (!targets.length || targets.length > 10000)
+        if (!targets.length)
           throw new Error("CSVの表示対象がありません。地図の表示を確認してください。");
         send("answer-map-csv-targets", { csvRequestId, updateId: lastUpdate, targets });
       } catch (error) {
@@ -111,7 +111,6 @@ export function installAnswerFilter(
     if (typeof updateId !== "string" || updateId.length > 128) return;
     if (
       !Array.isArray(targets) ||
-      targets.length > 10000 ||
       targets.some((k) => typeof k !== "string" || !initial.has(k)) ||
       new Set(targets).size !== targets.length
     ) {

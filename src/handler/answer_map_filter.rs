@@ -52,9 +52,6 @@ pub(super) struct Scope {
     shapes: Vec<String>,
 }
 pub(super) fn scope(keys: &[String]) -> Result<Scope, AppError> {
-    if keys.len() > 10_000 {
-        return Err(invalid("地図の対象は10,000件までです。"));
-    }
     let mut result = Scope {
         markers: vec![],
         shapes: vec![],
@@ -138,25 +135,9 @@ async fn fields(
             }
         }
     }
-    let definitions: Vec<Value> = base(user, &r.query, at, scope)
-        .push(
-            r#"
-        SELECT field FROM (
-            SELECT f.value AS field,a.create_at,CAST(f.key AS INTEGER) AS position,
-                row_number() OVER(PARTITION BY f.value ORDER BY a.create_at COLLATE answer_time DESC,a.id DESC,a.target_type,CAST(f.key AS INTEGER)) AS definition_rank
-            FROM map_scope a,json_each(a.form_snapshot,'$.form_schema.fields') f
-            WHERE source_form->>'id'=
-    "#,
-        )
-        .push_bind(form.to_string())
-        .push(
-            r#"
-        ) definitions WHERE definition_rank=1 ORDER BY create_at COLLATE answer_time DESC,position,field LIMIT 10001
-    "#,
-        )
-        .build_query_scalar()
-        .fetch_all(&mut **tx)
-        .await?;
+    let mut query = base(user, &r.query, at, scope);
+    append_map_field_definitions(&mut query, form);
+    let definitions: Vec<Value> = query.build_query_scalar().fetch_all(&mut **tx).await?;
     if definitions.len() > 10_000 {
         return Err(invalid(
             "項目定義が多すぎます。一覧で条件を絞ってください。",
@@ -182,6 +163,40 @@ async fn fields(
             )
         })
         .collect())
+}
+
+fn append_map_field_definitions(b: &mut QueryBuilder<'static, Sqlite>, form: &str) {
+    // Group only arrays by their BINARY JSON text. Strings can extract to the
+    // same text; null/missing/object/scalar values must keep their old expansion.
+    b.push(r#", map_field_source AS (
+        SELECT form_snapshot,create_at,id,target_type FROM map_scope
+        WHERE source_form->>'id'=
+    "#).push_bind(form.to_owned()).push(r#"
+    )
+    SELECT field FROM (
+        SELECT f.value AS field,a.create_at,CAST(f.key AS INTEGER) AS position,
+            row_number() OVER (
+                PARTITION BY f.value
+                ORDER BY a.create_at COLLATE answer_time DESC,a.id DESC,
+                    a.target_type ASC,CAST(f.key AS INTEGER)
+            ) AS definition_rank
+        FROM (
+            SELECT form_snapshot,create_at,id,target_type FROM (
+                SELECT form_snapshot,create_at,id,target_type,
+                    row_number() OVER (
+                        PARTITION BY json_extract(form_snapshot,'$.form_schema.fields') COLLATE BINARY
+                        ORDER BY create_at COLLATE answer_time DESC,id DESC,target_type ASC
+                    ) AS snapshot_rank
+                FROM map_field_source
+                WHERE json_type(form_snapshot,'$.form_schema.fields')='array'
+            ) arrays WHERE snapshot_rank=1
+            UNION ALL
+            SELECT form_snapshot,create_at,id,target_type FROM map_field_source
+            WHERE json_type(form_snapshot,'$.form_schema.fields') IS NOT 'array'
+        ) a,json_each(a.form_snapshot,'$.form_schema.fields') f
+    ) definitions WHERE definition_rank=1
+    ORDER BY create_at COLLATE answer_time DESC,position,field LIMIT 10001
+    "#);
 }
 
 pub(super) fn validate_request(r: &MapFilterRequest) -> Result<DateTime<Utc>, AppError> {
@@ -336,4 +351,268 @@ pub async fn filter_handler(
 ) -> Result<Response, AppError> {
     let data = filter_targets(&pool, &user, &r).await?;
     Ok(([(header::CACHE_CONTROL, "no-store")], Json(data)).into_response())
+}
+
+#[cfg(test)]
+mod field_tests {
+    use super::*;
+    use serde_json::json;
+
+    const FORM: &str = "10000000-0000-4000-8000-000000000001";
+    const PREVIOUS: &str = r#"
+        SELECT field FROM (
+            SELECT f.value AS field,a.create_at,CAST(f.key AS INTEGER) AS position,
+                row_number() OVER(PARTITION BY f.value ORDER BY a.create_at COLLATE answer_time DESC,a.id DESC,a.target_type,CAST(f.key AS INTEGER)) AS definition_rank
+            FROM map_scope a,json_each(a.form_snapshot,'$.form_schema.fields') f
+            WHERE source_form->>'id'=
+    "#;
+    const PREVIOUS_END: &str = r#"
+        ) definitions WHERE definition_rank=1
+        ORDER BY create_at COLLATE answer_time DESC,position,field LIMIT 10001
+    "#;
+
+    fn record(id: u128, kind: &str, at: &str, snapshot: Option<Value>) -> Value {
+        json!({"id":Uuid::from_u128(id),"target_type":kind,"create_at":at,
+            "snapshot_text":snapshot.map(|v|v.to_string()),"form_id":FORM,
+            "submitted_values":{"legacy":"must not add unknown fields"}})
+    }
+    fn snapshot(fields: Value) -> Value {
+        json!({"form_schema":{"fields":fields}})
+    }
+    fn field(id: &str, label: &str) -> Value {
+        json!({"id":id,"type":"text","label":label})
+    }
+    async fn pool() -> SqlitePool {
+        sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap()
+    }
+    async fn definitions(
+        pool: &SqlitePool,
+        rows: Value,
+        previous: bool,
+    ) -> Result<Vec<Value>, sqlx::Error> {
+        let mut b = QueryBuilder::new(
+            r#"
+            WITH map_scope AS MATERIALIZED (
+                SELECT json_extract(r.value,'$.id') AS id,
+                    json_extract(r.value,'$.target_type') AS target_type,
+                    json_extract(r.value,'$.create_at') AS create_at,
+                    json_extract(r.value,'$.snapshot_text') AS form_snapshot,
+                    json_object('id',json_extract(r.value,'$.form_id')) AS source_form,
+                    json_extract(r.value,'$.submitted_values') AS submitted_values
+                FROM json_each(
+        "#,
+        );
+        b.push_bind(rows).push(") r) ");
+        if previous {
+            b.push(PREVIOUS)
+                .push_bind(FORM.to_owned())
+                .push(PREVIOUS_END);
+        } else {
+            append_map_field_definitions(&mut b, FORM);
+        }
+        let mut tx = super::super::answer_sqlite::begin_read(pool).await?;
+        let result = b.build_query_scalar().fetch_all(&mut *tx).await;
+        tx.rollback().await?;
+        result
+    }
+    fn merged(
+        definitions: &[Value],
+        seed_current: bool,
+    ) -> BTreeMap<(String, String), FieldOption> {
+        let mut result = BTreeMap::new();
+        let mut order = vec![];
+        if seed_current {
+            merge_field(
+                &mut result,
+                &mut order,
+                serde_json::from_value(json!({
+                    "id":"state","type":"select","label":"現在版","choices":["現行"]
+                }))
+                .unwrap(),
+            );
+        }
+        for definition in definitions {
+            if let Ok(field) = serde_json::from_value::<MarkerFormField>(definition.clone()) {
+                merge_field(&mut result, &mut order, field);
+            }
+        }
+        result
+    }
+
+    #[tokio::test]
+    async fn map_field_representatives_preserve_order_labels_choices_and_legacy() {
+        let pool = pool().await;
+        let old = json!({"id":"state","type":"select","label":"旧名","choices":["旧","共通"]});
+        let current = json!({"id":"state","type":"select","label":"新名","choices":["新","共通"]});
+        let repeated = json!([
+            field("first", "先頭"),
+            old.clone(),
+            old,
+            field("state", "同IDの文字列")
+        ]);
+        let mut rows = vec![];
+        for id in 1..=256 {
+            let mut saved = snapshot(repeated.clone());
+            saved["form_title"] = json!(format!("題名{id}"));
+            rows.push(record(id, "marker", "2026-10-01 08:00:00", Some(saved)));
+        }
+        rows.push(record(
+            500,
+            "marker",
+            "2026-10-02 09:00:00",
+            Some(snapshot(json!([current]))),
+        ));
+        let tie = field("tie", "同時刻の項目");
+        rows.push(record(
+            1000,
+            "marker",
+            "2026-10-03 10:00:00",
+            Some(snapshot(json!([field("a", "a"), tie.clone()]))),
+        ));
+        rows.push(record(
+            1000,
+            "shape",
+            "2026-10-03T19:00:00+09:00",
+            Some(snapshot(json!([tie, field("b", "b")]))),
+        ));
+        rows.push(record(1001, "marker", "2026-10-04 00:00:00", None));
+        rows.push(record(
+            1002,
+            "marker",
+            "2026-10-04 00:00:00",
+            Some(Value::Null),
+        ));
+        rows.push(record(
+            1003,
+            "marker",
+            "2026-10-04 00:00:00",
+            Some(json!({"form_schema":{}})),
+        ));
+        rows.push(record(
+            1004,
+            "marker",
+            "2026-10-04 00:00:00",
+            Some(snapshot(json!([]))),
+        ));
+        let mut foreign = record(
+            2000,
+            "marker",
+            "2026-10-05 00:00:00",
+            Some(snapshot(json!([field("foreign", "別フォーム")]))),
+        );
+        foreign["form_id"] = json!("20000000-0000-4000-8000-000000000002");
+        rows.push(foreign);
+        let rows = json!(rows);
+        let old = definitions(&pool, rows.clone(), true).await.unwrap();
+        let new = definitions(&pool, rows, false).await.unwrap();
+        assert_eq!(new, old);
+        assert_eq!(
+            new.iter()
+                .take(3)
+                .map(|v| v["id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["a", "b", "tie"]
+        );
+        assert!(
+            !new.iter()
+                .any(|v| v["id"] == "legacy" || v["id"] == "foreign")
+        );
+        let presentation = merged(&new, true);
+        let state = &presentation[&("state".into(), "select".into())];
+        assert_eq!(state.label, "現在版");
+        assert_eq!(state.choices, vec!["現行", "新", "共通", "旧"]);
+        assert!(presentation.contains_key(&("state".into(), "text".into())));
+    }
+
+    #[tokio::test]
+    async fn map_field_representatives_preserve_both_definition_limits() {
+        let pool = pool().await;
+        for (count, distinct_ids) in [
+            (200usize, true),
+            (201, true),
+            (10_000, false),
+            (10_001, false),
+            (10_002, false),
+        ] {
+            let fields: Vec<_> = (0..count)
+                .map(|i| {
+                    field(
+                        &if distinct_ids {
+                            format!("field_{i}")
+                        } else {
+                            "shared".into()
+                        },
+                        &format!("label_{i}"),
+                    )
+                })
+                .collect();
+            let rows = json!([record(
+                1,
+                "marker",
+                "2026-10-01 00:00:00",
+                Some(snapshot(json!(fields)))
+            )]);
+            let old = definitions(&pool, rows.clone(), true).await.unwrap();
+            let new = definitions(&pool, rows, false).await.unwrap();
+            assert_eq!(new, old);
+            assert_eq!(new.len(), count.min(10_001));
+            assert_eq!(new.len() > 10_000, count > 10_000);
+            assert_eq!(merged(&new, false).len() > 200, distinct_ids && count > 200);
+        }
+    }
+
+    #[tokio::test]
+    async fn map_field_representatives_preserve_non_array_types_and_errors() {
+        let pool = pool().await;
+        for fields in [
+            Value::Null,
+            json!(false),
+            json!(12),
+            json!("not json"),
+            json!("[]"),
+            json!({"one":field("x","x")}),
+        ] {
+            let rows = json!([record(
+                1,
+                "marker",
+                "2026-10-01 00:00:00",
+                Some(snapshot(fields))
+            )]);
+            match (
+                definitions(&pool, rows.clone(), true).await,
+                definitions(&pool, rows, false).await,
+            ) {
+                (Ok(old), Ok(new)) => assert_eq!(new, old),
+                (Err(old), Err(new)) => {
+                    assert_eq!(std::mem::discriminant(&old), std::mem::discriminant(&new));
+                    assert_eq!(old.to_string(), new.to_string());
+                },
+                other => panic!("Old/new field expansion differs: {other:?}"),
+            }
+        }
+        // JSON string "[]" and array [] extract to identical text, but only
+        // the string contributes a (non-field) definition and consumes the limit.
+        let rows = json!([
+            record(
+                1,
+                "marker",
+                "2026-10-01 00:00:00",
+                Some(snapshot(json!("[]")))
+            ),
+            record(
+                2,
+                "marker",
+                "2026-10-02 00:00:00",
+                Some(snapshot(json!([])))
+            )
+        ]);
+        let old = definitions(&pool, rows.clone(), true).await.unwrap();
+        let new = definitions(&pool, rows, false).await.unwrap();
+        assert_eq!(new, old);
+        assert_eq!(new, vec![json!([])]);
+    }
 }
