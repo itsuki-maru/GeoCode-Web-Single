@@ -1,5 +1,6 @@
 import { mount, flushPromises } from "@vue/test-utils";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { nextTick } from "vue";
 import Input from "../MapObjectFormInputModal.vue";
 import FormAnswersModal from "@/components/map-object/FormAnswersModal.vue";
 const api = vi.hoisted(() => ({ post: vi.fn(), get: vi.fn(), isAxiosError: vi.fn(() => false) }));
@@ -463,5 +464,228 @@ it("一覧と詳細の編集から同じ回答を開き、保存後は基準日�
 it("編集API未対応のバックエンドでは編集操作を表示しない", async () => {
   const wrapper = await open();
   expect(wrapper.findAll("button").some((b) => b.text() === "編集")).toBe(false);
+  wrapper.unmount();
+});
+
+// Responsive rendering and lifecycle checks use explicit media events / deferred requests.
+const mediaScreen = (initial: boolean) => {
+  let narrow = initial;
+  const listeners = new Set<(event: MediaQueryListEvent) => void>();
+  const media = {
+    get matches() {
+      return narrow;
+    },
+    addEventListener: (_: string, listener: (event: MediaQueryListEvent) => void) =>
+      listeners.add(listener),
+    removeEventListener: (_: string, listener: (event: MediaQueryListEvent) => void) =>
+      listeners.delete(listener),
+  };
+  vi.stubGlobal("matchMedia", () => media);
+  return {
+    resize(value: boolean) {
+      narrow = value;
+      for (const listener of listeners) listener({ matches: value } as MediaQueryListEvent);
+    },
+    listeners,
+  };
+};
+const deferredAnswer = <T>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
+describe("回答一覧の軽量表示と解放", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const manyFields = Array.from({ length: 20 }, (_, index) => ({
+    id: `field-${index}`,
+    label: `項目${index}`,
+    field_type: "textarea",
+    choices: [],
+  }));
+  const manyRow = () => ({
+    ...row,
+    form_snapshot: {
+      ...row.form_snapshot,
+      form_schema: {
+        fields: manyFields.map((field) => ({
+          id: field.id,
+          label: field.label,
+          type: field.field_type,
+        })),
+      },
+    },
+    submitted_values: Object.fromEntries(
+      manyFields.map((field) => [field.id, "長文😀".repeat(1000)]),
+    ),
+  });
+  const manyResults = () => {
+    api.post.mockImplementation(async (url: string) => ({
+      data: url.endsWith("options")
+        ? { ...options, fields: manyFields }
+        : { ...result, rows: [manyRow()] },
+    }));
+  };
+  it("creates only three selected answer cells on narrow screens and restores selection on resize", async () => {
+    const media = mediaScreen(true);
+    manyResults();
+    const wrapper = await open();
+    const checks = () =>
+      wrapper
+        .findAll<HTMLInputElement>(".column-options input")
+        .filter((input) => input.element.checked);
+    expect(checks()).toHaveLength(5);
+    expect(wrapper.findAll("tbody .answer-value")).toHaveLength(3);
+    expect(
+      wrapper.findAll("tbody .answer-value").every((cell) => [...cell.text()].length <= 201),
+    ).toBe(true);
+    const calls = api.post.mock.calls.length;
+    media.resize(false);
+    await nextTick();
+    expect(wrapper.findAll("tbody .answer-value")).toHaveLength(5);
+    await wrapper.findAll(".column-options input")[1]!.setValue(false);
+    media.resize(true);
+    await nextTick();
+    expect(
+      wrapper.findAll("tbody .answer-value").map((cell) => cell.attributes("data-label")),
+    ).toEqual(["項目0", "項目2", "項目3"]);
+    media.resize(false);
+    await nextTick();
+    expect(checks()).toHaveLength(4);
+    expect(wrapper.findAll("tbody .answer-value")).toHaveLength(4);
+    expect(api.post).toHaveBeenCalledTimes(calls);
+    wrapper.unmount();
+    expect(media.listeners.size).toBe(0);
+  });
+  it("shows bounded previews in the list and full original text in the detail", async () => {
+    mediaScreen(false);
+    manyResults();
+    const wrapper = await open();
+    expect(wrapper.get("tbody .answer-value").text()).toMatch(/…$/);
+    await button(wrapper, "詳細を見る").trigger("click");
+    expect(wrapper.get(".answer-detail dl dd").text()).toBe("長文😀".repeat(1000));
+    expect(wrapper.findAll(".answer-detail dl dt")).toHaveLength(20);
+    wrapper.unmount();
+  });
+  it("releases the hidden DOM and raw page, without reviving a late response after reopening", async () => {
+    mediaScreen(false);
+    const late = deferredAnswer<{ data: typeof result }>();
+    let searches = 0;
+    api.post.mockImplementation(async (url: string) => {
+      if (url.endsWith("options")) return { data: options };
+      if (++searches === 1) return late.promise;
+      return { data: { ...result, rows: [{ ...row, target_name: "新しい一覧" }] } };
+    });
+    const wrapper = await open();
+    await wrapper.setProps({ isOpen: false });
+    expect(wrapper.find(".answers-modal").exists()).toBe(false);
+    expect((wrapper.vm.$.setupState as any).rows).toEqual([]);
+    expect((wrapper.vm.$.setupState as any).options.fields).toEqual([]);
+    await wrapper.setProps({ isOpen: true });
+    await flushPromises();
+    expect(wrapper.get("tbody").text()).toContain("新しい一覧");
+    late.resolve({ data: { ...result, rows: [{ ...row, target_name: "古い応答" }] } });
+    await flushPromises();
+    expect(wrapper.get("tbody").text()).toContain("新しい一覧");
+    expect(wrapper.text()).not.toContain("古い応答");
+    await wrapper.setProps({ isOpen: false });
+    expect((wrapper.vm.$.setupState as any).rows).toEqual([]);
+    expect((wrapper.vm.$.setupState as any).tableRows).toEqual([]);
+    expect((wrapper.vm.$.setupState as any).applied).toBeNull();
+    wrapper.unmount();
+  });
+  it("ignores options from a closed session and does not issue a stale initial search", async () => {
+    const old = deferredAnswer<{ data: typeof options }>(),
+      current = deferredAnswer<{ data: typeof options }>();
+    let requests = 0;
+    api.post.mockImplementation(async (url: string) =>
+      url.endsWith("options")
+        ? ++requests === 1
+          ? old.promise
+          : current.promise
+        : { data: result },
+    );
+    const wrapper = await open();
+    await wrapper.setProps({ isOpen: false });
+    await wrapper.setProps({ isOpen: true });
+    old.resolve({ data: { ...options, fields: [{ ...field, label: "古い項目" }] } });
+    await flushPromises();
+    expect(api.post.mock.calls.filter(([url]) => url.endsWith("search"))).toHaveLength(0);
+    current.resolve({ data: { ...options, fields: [{ ...field, label: "最新項目" }] } });
+    await flushPromises();
+    expect(api.post.mock.calls.filter(([url]) => url.endsWith("search"))).toHaveLength(1);
+    expect(wrapper.get("thead").text()).toContain("最新項目");
+    expect(wrapper.text()).not.toContain("古い項目");
+    wrapper.unmount();
+  });
+  it("releases pending search state on unmount and keeps typed answer IDs distinct", async () => {
+    api.post.mockImplementation(async (url: string) => ({
+      data: url.endsWith("options")
+        ? options
+        : {
+            ...result,
+            editing_supported: true,
+            rows: [row, { ...row, target_type: "shape", target_id: "shape-target" }],
+          },
+    }));
+    api.get.mockResolvedValue({
+      data: { ...row.form_snapshot, revision: 1, values: row.submitted_values },
+    });
+    const wrapper = await open();
+    expect(wrapper.findAll("tbody tr").map((tr) => tr.attributes("data-answer-key"))).toEqual([
+      "marker:answer",
+      "shape:answer",
+    ]);
+    await wrapper.get('[data-answer-key="shape:answer"]').findAll("button")[1]!.trigger("click");
+    expect(wrapper.getComponent(Input).props()).toMatchObject({
+      targetType: "shape",
+      targetId: "shape-target",
+      answerId: "answer",
+    });
+    wrapper.getComponent(Input).vm.$emit("close");
+    await flushPromises();
+    const pending = deferredAnswer<{ data: typeof result }>();
+    api.post.mockReturnValueOnce(pending.promise);
+    await button(wrapper, "更新").trigger("click");
+    const state = wrapper.vm.$.setupState as any;
+    wrapper.unmount();
+    pending.resolve({ data: result });
+    await flushPromises();
+    expect(state.rows).toEqual([]);
+    expect(state.tableRows).toEqual([]);
+  });
+});
+
+it("保存後の再取得が閉じたセッションへ完了しても、新しい一覧へ通知や詳細を戻さない", async () => {
+  let searches = 0;
+  const late = deferredAnswer<{ data: typeof result }>();
+  api.post.mockImplementation(async (url: string) => {
+    if (url.endsWith("options")) return { data: options };
+    if (++searches === 2) return late.promise;
+    return {
+      data: {
+        ...result,
+        editing_supported: true,
+        rows: [{ ...row, target_name: searches > 2 ? "再表示した回答" : "保存前" }],
+      },
+    };
+  });
+  api.get.mockResolvedValue({
+    data: { ...row.form_snapshot, revision: 1, values: row.submitted_values },
+  });
+  const wrapper = await open();
+  await button(wrapper, "詳細を見る").trigger("click");
+  await button(wrapper, "回答を編集").trigger("click");
+  wrapper.getComponent(Input).vm.$emit("saved", { id: "target", detail: "保存済み" });
+  await nextTick();
+  await wrapper.setProps({ isOpen: false });
+  await wrapper.setProps({ isOpen: true });
+  await flushPromises();
+  late.resolve({ data: result });
+  await flushPromises();
+  expect(wrapper.get("tbody").text()).toContain("再表示した回答");
+  expect(wrapper.text()).not.toContain("回答を更新しました。");
+  expect(wrapper.find(".answer-detail").exists()).toBe(false);
   wrapper.unmount();
 });

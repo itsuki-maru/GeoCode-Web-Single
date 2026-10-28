@@ -1,45 +1,23 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, shallowRef, toRef, watch } from "vue";
 import BaseModal from "@/components/common/BaseModal.vue";
 import MapObjectFormInputModal from "./MapObjectFormInputModal.vue";
 import type { MapObjectData, ShapeData } from "@/interface";
 import AnswerMapModal from "./AnswerMapModal.vue";
+import AnswerResultsTable from "./AnswerResultsTable.vue";
 import apiClient from "@/axiosClient";
 import { submitAuthenticatedForm } from "@/utils/authenticated-form";
 import { baseUrl } from "@/setting";
 
-interface Field {
-  id: string;
-  label: string;
-  field_type: string;
-  choices: string[];
-}
-interface Answer {
-  id: string;
-  target_type: "marker" | "shape";
-  target_id: string;
-  target_name: string;
-  layer_id: string | null;
-  layer_name: string | null;
-  create_at: string;
-  edited_at?: string | null;
-  submitted_values: Record<string, unknown>;
-  form_snapshot: {
-    form_title: string;
-    form_description: string;
-    form_schema: { fields: { id: string; label: string; type: string }[] };
-  } | null;
-  source_form: { id: string; version: number } | null;
-  common_form_name: string | null;
-  common_form_deleted: boolean | null;
-}
-const canEdit = (answer: Answer): boolean => {
-  const fields = answer.form_snapshot?.form_schema.fields;
-  return (
-    !!fields?.length &&
-    Object.keys(answer.submitted_values).every((id) => fields.some((field) => field.id === id))
-  );
-};
+import {
+  answerFieldKey as fieldKey,
+  answerDateLabel as dateLabel,
+  describeAnswerFields,
+  type AnswerField as Field,
+  type FormAnswer as Answer,
+} from "@/utils/answer-presentation";
+import { useAnswerPresentation } from "@/composables/useAnswerPresentation";
+
 interface Options {
   forms: { id: string; name: string; deleted: boolean }[];
   layers: { id: string; name: string }[];
@@ -73,7 +51,8 @@ const props = defineProps<{
   targetType?: "marker" | "shape";
 }>();
 const emit = defineEmits<{ close: [] }>();
-const options = ref<Options>({ forms: [], layers: [], fields: [], versions: [] });
+const emptyOptions = (): Options => ({ forms: [], layers: [], fields: [], versions: [] });
+const options = shallowRef<Options>(emptyOptions());
 const filtersOpen = ref(false);
 const usageHelpOpen = ref(false);
 const mapHelpOpen = ref(false);
@@ -85,8 +64,8 @@ const target = ref("");
 const layer = ref("");
 const conditions = ref<Condition[]>([]);
 const displayFields = ref<string[]>([]);
-const resultFields = ref<Field[]>([]);
-const rows = ref<Answer[]>([]);
+const resultFields = shallowRef<Field[]>([]);
+const rows = shallowRef<Answer[]>([]);
 const total = ref(0);
 const targetCount = ref<number | null>(null);
 const mapTargetLimit = 10_000;
@@ -95,8 +74,8 @@ const asOf = ref("");
 const nextCursor = ref<Cursor | null>(null);
 const cursors = ref<(Cursor | null)[]>([null]);
 const page = ref(0);
-const detail = ref<Answer | null>(null);
-const editing = ref<Answer | null>(null),
+const detail = shallowRef<Answer | null>(null);
+const editing = shallowRef<Answer | null>(null),
   editingSupported = ref(false);
 watch(
   () => [props.isOpen, props.targetId, props.targetType, props.initialFormId],
@@ -105,18 +84,21 @@ watch(
   },
 );
 const answerSaved = async (object: MapObjectData | ShapeData) => {
+  const session = openSequence;
   const fromDetail = !!detail.value,
     answerId = editing.value?.id,
     answerKind = editing.value?.target_type;
   editing.value = null;
   window.dispatchEvent(new CustomEvent("geocode-answer-updated", { detail: object }));
+  if (!props.isOpen || disposed) return;
   if (applied.value) {
     const request = { ...applied.value };
     delete request.as_of;
     applied.value = request;
   }
   cursors.value = [null];
-  await search(null, 0, false);
+  const refreshed = await search(null, 0, false);
+  if (!refreshed || session !== openSequence || !props.isOpen || disposed) return;
   if (fromDetail)
     detail.value =
       rows.value.find((row) => row.id === answerId && row.target_type === answerKind) || null;
@@ -137,7 +119,7 @@ const stopDownload = () => {
   disposeDownload?.();
   disposeDownload = undefined;
 };
-onBeforeUnmount(stopDownload);
+
 const exportQuery = ref("");
 const mapOpen = ref(false);
 const mapQuery = ref<Record<string, unknown> | null>(null);
@@ -148,30 +130,22 @@ const openMap = () => {
 };
 const downloadFrame = `answers-${Math.random().toString(36).slice(2)}`;
 let initialising = false;
+let disposed = false;
+let openSequence = 0;
 let searchSequence = 0;
 let optionsSequence = 0;
 const busy = computed(() => loading.value || optionsLoading.value || exporting.value);
-const fieldKey = (field: Field) => `${field.id}|${field.field_type}`;
-const visibleFields = computed(() =>
-  resultFields.value.filter((field) => displayFields.value.includes(fieldKey(field))),
-);
+const {
+  allColumns: resultColumns,
+  columns,
+  tableRows,
+  detailView,
+} = useAnswerPresentation(rows, resultFields, displayFields, detail, toRef(props, "isOpen"));
+const optionColumns = computed(() => describeAnswerFields(options.value.fields));
+const optionIndex = computed(() => new Map(optionColumns.value.map((field) => [field.key, field])));
 const scoped = computed(() => !!target.value || (!!form.value && form.value !== "individual"));
 const apiUrl = (path: string) =>
   new URL(path, new URL(baseUrl || window.location.origin, window.location.origin)).href;
-const dateLabel = (raw: string) =>
-  new Date(/[zZ]|[+-]\d{2}:\d{2}$/.test(raw) ? raw : `${raw}Z`).toLocaleString();
-const typeLabel = (type: string) =>
-  ({
-    text: "テキスト",
-    textarea: "複数行",
-    number: "数値",
-    date: "日付",
-    select: "選択",
-    radio: "選択",
-    checkbox: "真偽",
-    image: "画像",
-    unknown: "定義情報なし",
-  })[type] || type;
 const errorText = (error: unknown, fallback: string) => {
   if (apiClient.isAxiosError(error)) {
     const data = error.response?.data as { error?: string } | undefined;
@@ -187,7 +161,7 @@ const scope = () => ({
 });
 
 const operatorOptions = (condition: Condition) => {
-  const type = options.value.fields.find((field) => fieldKey(field) === condition.key)?.field_type;
+  const type = optionIndex.value.get(condition.key)?.field_type;
   const common = [
     { value: "filled", label: "回答あり" },
     { value: "empty", label: "未入力" },
@@ -207,8 +181,7 @@ const operatorOptions = (condition: Condition) => {
   if (type === "image") return common;
   return [{ value: "contains", label: "部分一致" }, { value: "eq", label: "完全一致" }, ...common];
 };
-const selectedField = (condition: Condition) =>
-  options.value.fields.find((field) => fieldKey(field) === condition.key);
+const selectedField = (condition: Condition) => optionIndex.value.get(condition.key);
 const resetCondition = (condition: Condition) => {
   condition.op = operatorOptions(condition)[0]!.value;
   condition.value = selectedField(condition)?.field_type === "checkbox" ? "true" : "";
@@ -262,16 +235,8 @@ const clearFilters = () => {
   layer.value = "";
   conditions.value = [];
 };
-const fieldLabel = (field: Field, fields = resultFields.value) => {
-  const index = fields.findIndex((item) => fieldKey(item) === fieldKey(field));
-  if (field.field_type === "unknown") return `項目名不明の項目 ${index + 1}`;
-  const same = fields.filter((item) => item.label === field.label);
-  if (same.length < 2) return field.label;
-  const number = same.findIndex((item) => fieldKey(item) === fieldKey(field)) + 1;
-  return `${field.label}（${typeLabel(field.field_type)}・${number}）`;
-};
-
 const search = async (cursor: Cursor | null = null, index = 0, fresh = true) => {
+  if (!props.isOpen || disposed) return false;
   const sequence = ++searchSequence;
   loading.value = true;
   message.value = "";
@@ -280,7 +245,7 @@ const search = async (cursor: Cursor | null = null, index = 0, fresh = true) => 
     const request = fresh ? buildRequest() : { ...applied.value };
     const result = (await apiClient.post<Page>("/form-answers/search", { ...request, cursor }))
       .data;
-    if (sequence !== searchSequence) return;
+    if (sequence !== searchSequence || !props.isOpen || disposed) return false;
     rows.value = result.rows;
     editingSupported.value = result.editing_supported === true;
     if (fresh) {
@@ -298,8 +263,9 @@ const search = async (cursor: Cursor | null = null, index = 0, fresh = true) => 
     applied.value = { ...request, as_of: result.as_of };
     if (fresh) cursors.value = [null];
     else cursors.value[index] = cursor;
+    return true;
   } catch (error) {
-    if (sequence === searchSequence) {
+    if (sequence === searchSequence && props.isOpen && !disposed) {
       rows.value = [];
       total.value = 0;
       targetCount.value = null;
@@ -308,6 +274,7 @@ const search = async (cursor: Cursor | null = null, index = 0, fresh = true) => 
       applied.value = null;
       message.value = errorText(error, "回答を読み込めませんでした。");
     }
+    return false;
   } finally {
     if (sequence === searchSequence) loading.value = false;
   }
@@ -317,12 +284,12 @@ const loadOptions = async () => {
   optionsLoading.value = true;
   try {
     const data = (await apiClient.post<Options>("/form-answers/options", scope())).data;
-    if (sequence !== optionsSequence) return false;
+    if (sequence !== optionsSequence || !props.isOpen || disposed) return false;
     options.value = data;
     return true;
   } catch (error) {
     if (sequence === optionsSequence) {
-      options.value.fields = [];
+      options.value = { ...options.value, fields: [] };
       message.value = errorText(error, "検索項目を読み込めませんでした。");
     }
     return false;
@@ -330,20 +297,47 @@ const loadOptions = async () => {
     if (sequence === optionsSequence) optionsLoading.value = false;
   }
 };
+const releaseAnswers = () => {
+  stopDownload();
+  ++searchSequence;
+  ++optionsSequence;
+  ++openSequence;
+  initialising = false;
+  loading.value = false;
+  optionsLoading.value = false;
+  exporting.value = false;
+  applied.value = null;
+  conditions.value = [];
+  rows.value = [];
+  resultFields.value = [];
+  displayFields.value = [];
+  options.value = emptyOptions();
+  detail.value = null;
+  editing.value = null;
+  editingSupported.value = false;
+  mapOpen.value = false;
+  mapQuery.value = null;
+  exportQuery.value = "";
+  asOf.value = "";
+  nextCursor.value = null;
+  cursors.value = [null];
+  page.value = 0;
+  total.value = 0;
+  targetCount.value = null;
+  message.value = "";
+};
+onBeforeUnmount(() => {
+  disposed = true;
+  releaseAnswers();
+});
 watch(
   () => props.isOpen,
   async (open) => {
     if (!open) {
-      stopDownload();
-      exporting.value = false;
-      mapOpen.value = false;
-      searchSequence++;
-      optionsSequence++;
-      loading.value = false;
-      optionsLoading.value = false;
-      detail.value = null;
+      releaseAnswers();
       return;
     }
+    const session = ++openSequence;
     initialising = true;
     filtersOpen.value = false;
     usageHelpOpen.value = false;
@@ -362,6 +356,7 @@ watch(
     total.value = 0;
     targetCount.value = null;
     const success = await loadOptions();
+    if (disposed || !props.isOpen || session !== openSequence) return;
     initialising = false;
     if (success && props.isOpen) await search();
   },
@@ -399,50 +394,11 @@ const exportCsv = async () => {
     if (sequence === exportSequence) exporting.value = false;
   }
 };
-const exists = (row: Answer, field: Field) =>
-  row.form_snapshot
-    ? row.form_snapshot.form_schema.fields.some(
-        (item) => item.id === field.id && item.type === field.field_type,
-      )
-    : field.field_type === "unknown" &&
-      Object.prototype.hasOwnProperty.call(row.submitted_values, field.id);
-const formatValue = (value: unknown) =>
-  value === null || value === undefined || value === ""
-    ? "未入力"
-    : typeof value === "boolean"
-      ? value
-        ? "はい"
-        : "いいえ"
-      : typeof value === "object" && value && "filename" in value
-        ? String(value.filename)
-        : typeof value === "object"
-          ? JSON.stringify(value)
-          : String(value);
-const rowFields = (row: Answer): Field[] =>
-  row.form_snapshot
-    ? row.form_snapshot.form_schema.fields.map((field) => ({
-        id: field.id,
-        label: field.label,
-        field_type: field.type,
-        choices: [],
-      }))
-    : Object.keys(row.submitted_values).map((id) => ({
-        id,
-        label: id,
-        field_type: "unknown",
-        choices: [],
-      }));
-const imageUrl = (row: Answer, field: Field) => {
-  if (field.field_type !== "image") return "";
-  const value = row.submitted_values[field.id];
-  const url = typeof value === "object" && value && "url" in value ? String(value.url) : "";
-  return /^\/static\/images\/[a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp)$/.test(url) ? apiUrl(url) : "";
-};
 </script>
 
 <template>
   <BaseModal :isOpen="isOpen" :zIndex="24" :closeOnOverlayClick="false" @close="emit('close')">
-    <div :inert="!!editing" class="answers-modal">
+    <div v-if="isOpen" :inert="!!editing" class="answers-modal">
       <header>
         <h2 class="modal-h2">回答一覧</h2>
         <button class="close-button" @click="emit('close')">閉じる</button>
@@ -549,11 +505,11 @@ const imageUrl = (row: Answer, field: Field) => {
               <label
                 >項目<select v-model="condition.key" @change="resetCondition(condition)">
                   <option
-                    v-for="field in options.fields"
+                    v-for="field in optionColumns"
                     :key="fieldKey(field)"
                     :value="fieldKey(field)"
                   >
-                    {{ fieldLabel(field, options.fields) }}
+                    {{ field.displayLabel }}
                   </option>
                 </select></label
               >
@@ -645,72 +601,23 @@ const imageUrl = (row: Answer, field: Field) => {
         <details v-if="resultFields.length">
           <summary>表示する項目</summary>
           <div class="column-options">
-            <label v-for="field in resultFields" :key="fieldKey(field)"
+            <label v-for="field in resultColumns" :key="fieldKey(field)"
               ><input v-model="displayFields" type="checkbox" :value="fieldKey(field)" />{{
-                fieldLabel(field)
+                field.displayLabel
               }}</label
             >
           </div>
         </details>
         <p v-if="loading">回答を読み込んでいます…</p>
         <p v-else-if="!rows.length">該当する回答はありません。</p>
-        <div v-if="rows.length" class="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>投稿日時</th>
-                <th>対象</th>
-                <th>フォーム</th>
-                <th v-for="field in visibleFields" :key="fieldKey(field)">
-                  {{ fieldLabel(field) }}
-                </th>
-                <th class="actions-column" :class="{ editable: editingSupported }">詳細</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in rows" :key="`${row.target_type}-${row.id}`">
-                <td data-label="投稿日時">{{ dateLabel(row.create_at) }}</td>
-                <td data-label="対象">
-                  {{ row.target_type === "marker" ? "マーカー" : "図形" }}：{{ row.target_name
-                  }}<small>{{ row.layer_name || "レイヤなし" }}</small>
-                </td>
-                <td data-label="フォーム">
-                  {{ row.common_form_name || row.form_snapshot?.form_title || "個別フォーム"
-                  }}{{ row.common_form_deleted ? "（削除済み）" : ""
-                  }}<small v-if="row.source_form">適用元：第{{ row.source_form.version }}版</small
-                  ><small v-if="!row.form_snapshot">投稿時の定義情報なし</small>
-                </td>
-                <td
-                  v-for="field in visibleFields"
-                  :key="fieldKey(field)"
-                  :data-label="fieldLabel(field)"
-                  class="answer-value"
-                >
-                  {{
-                    exists(row, field) ? formatValue(row.submitted_values[field.id]) : "項目なし"
-                  }}
-                </td>
-                <td class="actions-cell">
-                  <div class="row-actions">
-                    <button @click="detail = row">詳細を見る</button>
-                    <button
-                      v-if="editingSupported"
-                      :disabled="!canEdit(row)"
-                      :title="
-                        row.form_snapshot
-                          ? '回答を編集'
-                          : '投稿時のフォーム定義がないため編集できません'
-                      "
-                      @click="editing = row"
-                    >
-                      編集
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <AnswerResultsTable
+          v-if="rows.length"
+          :rows="tableRows"
+          :columns="columns"
+          :editingSupported="editingSupported"
+          @detail="detail = $event"
+          @edit="editing = $event"
+        />
         <nav v-if="rows.length" class="pagination" aria-label="回答のページ">
           <button
             :disabled="busy || !applied || page === 0"
@@ -729,44 +636,45 @@ const imageUrl = (row: Answer, field: Field) => {
     </div>
   </BaseModal>
   <BaseModal :isOpen="isOpen && !!detail" :zIndex="26" @close="detail = null">
-    <div v-if="detail" :inert="!!editing" class="answer-detail">
+    <div v-if="isOpen && detail && detailView" :inert="!!editing" class="answer-detail">
       <header>
         <h2 class="modal-h2">回答の詳細</h2>
         <button class="close-button" @click="detail = null">閉じる</button>
-        <button v-if="editingSupported" :disabled="!canEdit(detail)" @click="editing = detail">
+        <button v-if="editingSupported" :disabled="!detailView.canEdit" @click="editing = detail">
           回答を編集
         </button>
       </header>
       <div class="answer-detail-scroll">
-        <p>{{ detail.target_name }} / {{ dateLabel(detail.create_at) }}</p>
-        <p v-if="detail.edited_at">編集日時：{{ dateLabel(detail.edited_at) }}</p>
+        <p>{{ detail.target_name }} / {{ detailView.dateLabel }}</p>
+        <p v-if="detail.edited_at">編集日時：{{ detailView.editedDateLabel }}</p>
         <details class="management-info">
           <summary>管理用情報</summary>
           <p>対象ID：{{ detail.target_id }}</p>
           <p>回答ID：{{ detail.id }}</p>
           <ul>
-            <li v-for="field in rowFields(detail)" :key="field.id">
-              {{ fieldLabel(field, rowFields(detail)) }}：{{ field.id }}
+            <li v-for="field in detailView.fields" :key="field.key">
+              {{ field.displayLabel }}：{{ field.id }}
             </li>
           </ul>
         </details>
         <h3>{{ detail.form_snapshot?.form_title || "投稿時の定義情報なし" }}</h3>
         <p class="preserve-lines">{{ detail.form_snapshot?.form_description }}</p>
         <dl>
-          <template v-for="field in rowFields(detail)" :key="field.id"
+          <template v-for="field in detailView.fields" :key="field.key"
             ><dt>
-              {{ fieldLabel(field, rowFields(detail)) }}
+              {{ field.displayLabel }}
             </dt>
             <dd>
               <a
-                v-if="imageUrl(detail, field)"
-                :href="imageUrl(detail, field)"
+                v-if="field.imagePath && apiUrl(field.imagePath)"
+                :href="field.imagePath && apiUrl(field.imagePath)"
                 target="_blank"
                 rel="noopener noreferrer"
-                ><img :src="imageUrl(detail, field)" :alt="field.label" loading="lazy" /></a
-              ><span v-else class="preserve-lines">{{
-                formatValue(detail.submitted_values[field.id])
-              }}</span>
+                ><img
+                  :src="field.imagePath && apiUrl(field.imagePath)"
+                  :alt="field.label"
+                  loading="lazy" /></a
+              ><span v-else class="preserve-lines">{{ field.text }}</span>
             </dd></template
           >
         </dl>
@@ -920,47 +828,6 @@ button:disabled {
   flex-direction: row;
   align-items: center;
 }
-.table-scroll {
-  overflow: auto;
-  margin-top: 12px;
-}
-table {
-  border-collapse: collapse;
-  width: 100%;
-  table-layout: fixed;
-  min-width: max(100%, 720px);
-  font-size: 14px;
-}
-th,
-td {
-  border: 1px solid #ccc;
-  padding: 6px 13px;
-  text-align: left;
-  min-width: 120px;
-  max-width: 300px;
-  overflow-wrap: anywhere;
-  vertical-align: top;
-  white-space: pre-wrap;
-}
-th {
-  background: rgb(44, 52, 78);
-  color: whitesmoke;
-}
-tbody tr {
-  background: #fff;
-}
-tbody tr:nth-child(2n) {
-  background: #eee;
-}
-tbody tr:hover {
-  background: #69a5b8;
-}
-small {
-  display: block;
-  color: #5c6778;
-  margin-top: 4px;
-  font-size: 12px;
-}
 .answer-detail {
   position: relative;
   display: flex;
@@ -1028,38 +895,6 @@ dd {
 @media (max-width: 700px) {
   .search-grid {
     grid-template-columns: 1fr;
-  }
-  table,
-  tbody,
-  tr,
-  td {
-    display: block;
-    width: auto;
-  }
-  table {
-    min-width: 0;
-  }
-  thead {
-    display: none;
-  }
-  tr {
-    border: 1px solid #ccd5e1;
-    border-radius: 8px;
-    margin-bottom: 12px;
-    padding: 8px;
-  }
-  td {
-    border: 0;
-    min-width: 0;
-    max-width: none;
-    padding: 6px;
-  }
-  td[data-label]::before {
-    content: attr(data-label);
-    display: block;
-    font-weight: bold;
-    color: #5c6778;
-    margin-bottom: 4px;
   }
   .condition-row > label {
     flex-basis: 100%;
@@ -1129,37 +964,7 @@ summary {
   align-items: center;
   padding: 6px 0;
 }
-.answer-value {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.row-actions {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.row-actions > button {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
 @media (min-width: 701px) {
-  .actions-column {
-    width: 104px;
-  }
-  .actions-column.editable {
-    width: 168px;
-  }
-  .actions-column,
-  .actions-cell {
-    min-width: 0;
-    padding: 6px 8px;
-    text-align: center;
-    vertical-align: middle;
-    white-space: normal;
-  }
   .answers-modal {
     height: min(92dvh, 1200px);
     max-height: calc(100dvh - 64px);
@@ -1176,15 +981,6 @@ summary {
     flex-direction: row;
     align-items: center;
   }
-  .table-scroll {
-    flex: 1 0 min(320px, 52dvh);
-    min-height: min(320px, 52dvh);
-  }
-}
-th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
 }
 .modal-h2 {
   flex: 1;
@@ -1251,18 +1047,6 @@ button {
   }
   .search-form {
     padding: 12px;
-  }
-  .table-scroll {
-    max-height: none;
-    overflow: visible;
-  }
-  td.answer-value {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  td.answer-value:nth-of-type(n + 7) {
-    display: none;
   }
   button:not(.help-button),
   summary {

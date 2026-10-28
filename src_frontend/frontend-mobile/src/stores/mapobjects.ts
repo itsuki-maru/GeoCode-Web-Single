@@ -10,12 +10,14 @@ import {
 import apiClient from "@/axiosClient";
 import { useShapeStore } from "./shapes";
 import { MapRecordCache, matchesMapSearch } from "./map-record-cache";
+import { MapTableChanges } from "./map-table-changes";
 
 const ordered = (records: MapObjectData[]) =>
   new Map(records.sort((a, b) => b.id.localeCompare(a.id)).map((record) => [record.id, record]));
 export const useMapObjectStore = defineStore("mapobjects", {
   state: () => ({
     loadRevision: 0,
+    tableChanges: markRaw(new MapTableChanges()),
     mapObjectList: new Map<string, MapObjectData>(),
     filteredShapeIds: null as string[] | null,
     activeLayerId: "",
@@ -48,6 +50,7 @@ export const useMapObjectStore = defineStore("mapobjects", {
       this.search = null;
       this.filteredShapeIds = null;
       this.dirtyIds.clear();
+      this.tableChanges.emit({ type: "reset" });
     },
     resetCache() {
       this.recordCache.reset();
@@ -126,6 +129,13 @@ export const useMapObjectStore = defineStore("mapobjects", {
           }
           this.filteredShapeIds = [...ids];
         }
+      }
+      if (rebuild) this.tableChanges.emit({ type: "reset" });
+      else {
+        for (const id of this.dirtyIds)
+          this.tableChanges.emit({ type: "record", kind: "marker", id });
+        for (const id of shapes.dirtyIds)
+          this.tableChanges.emit({ type: "record", kind: "shape", id });
       }
       this.dirtyIds.clear();
       shapes.dirtyIds.clear();
@@ -222,6 +232,7 @@ export const useMapObjectStore = defineStore("mapobjects", {
         for (const [id, version] of shapeStore.mutationVersions)
           if (version > shapeMutationRevision) shapeStore.dirtyIds.add(id);
         this.refreshSearchResults();
+        this.tableChanges.emit({ type: "reset" });
         return true;
       } catch (error) {
         console.log(error);

@@ -199,3 +199,54 @@ describe("レイヤ管理と共通パスワード", () => {
     w.unmount();
   });
 });
+
+it("回答一覧を開いている間だけ生成し、閉じる・再表示でインスタンスを作り直す", async () => {
+  const stub = {
+    name: "FormAnswersModal",
+    props: ["isOpen", "initialFormId"],
+    emits: ["close"],
+    template: "<div />",
+  };
+  const wrapper = mount(CommonFormsModal, {
+    props: { isOpen: false },
+    global: { stubs: { FormAnswersModal: stub } },
+  });
+  await wrapper.setProps({ isOpen: true });
+  await flushPromises();
+  expect(wrapper.findComponent({ name: "FormAnswersModal" }).exists()).toBe(false);
+  await wrapper.get('input[value="list"]').setValue(true);
+  await click(wrapper, "回答一覧");
+  const first = wrapper.getComponent({ name: "FormAnswersModal" });
+  expect(first.props("initialFormId")).toBe("template");
+  first.vm.$emit("close");
+  await flushPromises();
+  expect(wrapper.findComponent({ name: "FormAnswersModal" }).exists()).toBe(false);
+  await click(wrapper, "回答一覧");
+  expect(wrapper.getComponent({ name: "FormAnswersModal" }).vm).not.toBe(first.vm);
+  await wrapper.setProps({ isOpen: false });
+  expect(wrapper.findComponent({ name: "FormAnswersModal" }).exists()).toBe(false);
+  wrapper.unmount();
+});
+
+it("個別対象の回答履歴も閉じたときに破棄する", async () => {
+  const stub = {
+    name: "FormAnswersModal",
+    props: ["isOpen", "targetId", "targetType"],
+    emits: ["close"],
+    template: "<div />",
+  };
+  const wrapper = mount(FormSettings, {
+    props: { isOpen: false, targetType: "marker", targetId: "target" },
+    global: { stubs: { FormAnswersModal: stub } },
+  });
+  await wrapper.setProps({ isOpen: true });
+  await flushPromises();
+  expect(wrapper.findComponent({ name: "FormAnswersModal" }).exists()).toBe(false);
+  await click(wrapper, "回答履歴を開く");
+  const answer = wrapper.getComponent({ name: "FormAnswersModal" });
+  expect(answer.props()).toMatchObject({ isOpen: true, targetId: "target", targetType: "marker" });
+  answer.vm.$emit("close");
+  await flushPromises();
+  expect(wrapper.findComponent({ name: "FormAnswersModal" }).exists()).toBe(false);
+  wrapper.unmount();
+});

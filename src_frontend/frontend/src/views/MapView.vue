@@ -82,12 +82,10 @@ const layerInputPolicies = computed(() =>
 );
 
 const mapobjStore = useMapObjectStore();
-const markerList = computed((): Map<string, MapObjectData> => mapobjStore.mapObjectList);
 const shapeStore = useShapeStore();
 const authStore = useAuthStore();
 mapobjStore.clearMapObject();
 shapeStore.clearShapeList();
-const shapeList = computed((): Map<string, ShapeData> => shapeStore.shapeList);
 
 // --- 画面サイズ ---
 const { divHeight } = useWindowSize();
@@ -1203,9 +1201,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
       </div>
       <div id="map-object-table-panel" v-show="isMapObjectTableOpen" class="info-draw">
         <MapObjectTable
-          :markerList="markerList"
-          :shapeList="shapeList"
-          :filteredShapeIds="mapobjStore.filteredShapeIds"
+          :active="isMapObjectTableOpen"
           :height="divHeight"
           :activeLayer="activeLayer"
           @editObject="openEditModal"

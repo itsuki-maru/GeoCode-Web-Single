@@ -645,3 +645,27 @@ describe("delayed answer results from another scope", () => {
     expect(dataRequests()).toHaveLength(count);
   });
 });
+
+describe("table visibility without reloading the map", () => {
+  it("suspends/reopens the table without replacing the iframe or fetching map records", async () => {
+    mountView();
+    await flushPromises();
+    const frameVm = frameComponent().vm;
+    const source = frameComponent().props("srcUrl");
+    const requests = dataRequests().length;
+    const initializations = initializeFrame.mock.calls.length;
+    const reloads = reloadFrame.mock.calls.length;
+    const table = () => wrapper!.getComponent({ name: "MapObjectTable" });
+    expect(table().props("active")).toBe(true);
+    await wrapper!.get(".map-object-table-toggle").trigger("click");
+    expect(table().props("active")).toBe(false);
+    await wrapper!.get(".map-object-table-toggle").trigger("click");
+    expect(table().props("active")).toBe(true);
+    await flushPromises();
+    expect(frameComponent().vm).toBe(frameVm);
+    expect(frameComponent().props("srcUrl")).toBe(source);
+    expect(dataRequests()).toHaveLength(requests);
+    expect(initializeFrame).toHaveBeenCalledTimes(initializations);
+    expect(reloadFrame).toHaveBeenCalledTimes(reloads);
+  });
+});

@@ -105,11 +105,19 @@ describe("編集画面からのフォーム回答", () => {
                 properties: { ...shape.geojson.properties, memo: "メモ\n回答追記" },
               },
             };
+      const notifications: unknown[] = [];
+      const targetStore = kind === "marker" ? markers : shapes;
+      const unsubscribe = targetStore.tableChanges.subscribe((change) =>
+        notifications.push(change),
+      );
       w.findComponent(InputModal).vm.$emit("saved", object);
       await flushPromises();
       expect((w.get("textarea").element as HTMLTextAreaElement).value).toContain("回答追記");
       expect(w.emitted("close")).toHaveLength(1);
       expect(w.emitted("updated")![0]![0]).toMatchObject({ objectType: kind, id: object.id });
+      expect(targetStore.recordCache.records.get(object.id)).toMatchObject(object);
+      expect(notifications).toContainEqual({ type: "record", kind, id: object.id });
+      unsubscribe();
       await w.setProps({ isOpen: false });
       await w.setProps({ isOpen: true });
       await flushPromises();

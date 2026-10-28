@@ -1,16 +1,20 @@
 <script setup lang="ts">
-import { ref, computed, watch } from "vue";
-import type { MapObjectData, QueryForm, ShapeData } from "@/interface";
+import { ref, computed, watch, toRef, onScopeDispose } from "vue";
+import type { QueryForm } from "@/interface";
 import { useMapObjectStore } from "@/stores/mapobjects";
-import { useShapeStore } from "@/stores/shapes";
 import { useLayersStore } from "@/stores/layers";
-import { getShapeCenter } from "@/composables/useShapeCenter";
+import { useMapObjectTableRows } from "@/composables/useMapObjectTableRows";
+import { useVirtualTable, TABLE_ROW_HEIGHT } from "@/composables/useVirtualTable";
+import type { TableRow } from "@/composables/map-object-table-index";
 
-const props = defineProps<{
-  activeLayer: string;
-  mapObjectQueryFormData: QueryForm;
-}>();
-
+const props = withDefaults(
+  defineProps<{
+    activeLayer: string;
+    mapObjectQueryFormData: QueryForm;
+    active?: boolean;
+  }>(),
+  { active: true },
+);
 const emit = defineEmits<{
   editObject: [type: "marker" | "shape", id: string];
   focusObject: [type: "marker" | "shape", id: string, lat: number, lng: number];
@@ -19,87 +23,16 @@ const emit = defineEmits<{
   mapObjectSearch: [query: QueryForm, reset: boolean];
   "update:mapObjectQueryFormData": [query: QueryForm];
 }>();
-
 const mapobjStore = useMapObjectStore();
-const shapeStore = useShapeStore();
 const layersStore = useLayersStore();
-
-const markerList = computed((): Map<string, MapObjectData> => {
-  return mapobjStore.mapObjectList;
-});
-
-interface TableRow {
-  type: "marker" | "shape";
-  id: string;
-  layerId: string;
-  name: string;
-  typeLabel: string;
-  typeSymbol: string;
-  badgeClass: string;
-  latitude: number | null;
-  longitude: number | null;
-  updatedAt: string;
-}
-
-const shapeTypeBadges: Record<
-  ShapeData["shape_type"],
-  { label: string; symbol: string; badgeClass: string }
-> = {
-  circle: { label: "円", symbol: "○", badgeClass: "type-circle" },
-  polyline: { label: "線", symbol: "━", badgeClass: "type-polyline" },
-  polygon: { label: "面", symbol: "◆", badgeClass: "type-polygon" },
-  rectangle: { label: "矩形", symbol: "□", badgeClass: "type-rectangle" },
-};
-
-const compareTableRows = (a: TableRow, b: TableRow): number => {
-  const aHasNoName = a.name.trim().length === 0;
-  const bHasNoName = b.name.trim().length === 0;
-  if (aHasNoName !== bHasNoName) return aHasNoName ? -1 : 1;
-
-  const aUpdatedAt = Date.parse(a.updatedAt.replace(" ", "T")) || 0;
-  const bUpdatedAt = Date.parse(b.updatedAt.replace(" ", "T")) || 0;
-  if (aUpdatedAt !== bUpdatedAt) return bUpdatedAt - aUpdatedAt;
-
-  return `${a.type}:${a.id}`.localeCompare(`${b.type}:${b.id}`);
-};
-
-const tableRows = computed<TableRow[]>(() => {
-  const markerRows = [...markerList.value.values()].map((marker) => ({
-    type: "marker" as const,
-    id: marker.id,
-    layerId: marker.layer_id,
-    name: marker.marker_name,
-    typeLabel: "マーカー",
-    typeSymbol: "●",
-    badgeClass: "type-marker",
-    latitude: marker.latitude,
-    longitude: marker.longitude,
-    updatedAt: marker.update_at,
-  }));
-  const filteredShapeIds = mapobjStore.filteredShapeIds
-    ? new Set(mapobjStore.filteredShapeIds)
-    : null;
-  const shapeRows = [...shapeStore.shapeList.values()]
-    .filter((shape: ShapeData) => !filteredShapeIds || filteredShapeIds.has(shape.id))
-    .map((shape: ShapeData) => {
-      const center = getShapeCenter(shape);
-      const badge = shapeTypeBadges[shape.shape_type];
-      return {
-        type: "shape" as const,
-        id: shape.id,
-        layerId: shape.layer_id,
-        name: shape.name || "",
-        typeLabel: badge.label,
-        typeSymbol: badge.symbol,
-        badgeClass: badge.badgeClass,
-        latitude: center?.latitude ?? null,
-        longitude: center?.longitude ?? null,
-        updatedAt: shape.updated_at,
-      };
-    });
-  return [...markerRows, ...shapeRows].sort(compareTableRows);
-});
-
+const active = toRef(props, "active");
+const { count, rows } = useMapObjectTableRows(active);
+const { viewport, range, onScroll, resetScroll } = useVirtualTable(count, active);
+const visibleRows = computed(() => rows(range.value.start, range.value.end));
+watch(
+  () => [props.activeLayer, mapobjStore.search?.query1, mapobjStore.search?.query2],
+  resetScroll,
+);
 const mapObjectQueryFormData = ref<QueryForm>({ ...props.mapObjectQueryFormData });
 let suppressNextWatchSearch = false;
 
@@ -137,84 +70,67 @@ watch(
   { deep: true },
 );
 
-const getLayerForId = (layer_id: string): string | void => {
-  const layerObj = layersStore.getById(layer_id);
-  if (layerObj) {
-    return layerObj.name;
-  }
-};
-
-function fixFloat(number: number): string {
-  return number.toFixed(5);
-}
-
+const getLayerForId = (id: string) => layersStore.getById(id)?.name;
+const fixFloat = (value: number) => value.toFixed(5);
 const focusRow = (row: TableRow): void => {
-  if (row.latitude === null || row.longitude === null) return;
-  emit("focusObject", row.type, row.id, row.latitude, row.longitude);
+  if (row.latitude !== null && row.longitude !== null)
+    emit("focusObject", row.type, row.id, row.latitude, row.longitude);
 };
 
-// スワイプ削除機能
-const startX = ref<number | null>(null);
-const isSwiping = ref<Record<string, boolean>>({});
-const confirmDelete = ref<Record<string, boolean>>({});
-const rowOffsets = ref<Record<string, number>>({});
-const selectedMarkerId = ref("");
-
-function getRowsStyle(index: string) {
+// One gesture belongs to a typed ID, never to the recycled row position.
+const swipe = ref<{ key: string; offset: number; moving: boolean; confirm: boolean } | null>(null);
+let startX: number | null = null;
+let deleteTimer: ReturnType<typeof setTimeout> | undefined;
+function clearSwipe() {
+  clearTimeout(deleteTimer);
+  deleteTimer = undefined;
+  swipe.value = null;
+  startX = null;
+}
+function getRowsStyle(key: string) {
+  const state = swipe.value?.key === key ? swipe.value : null;
   return {
-    transform: `translateX(${rowOffsets.value[index] || 0}px)`,
-    transition: isSwiping.value[index] ? "none" : "transform 0.3s ease",
+    transform: `translateX(${state?.offset ?? 0}px)`,
+    transition: state?.moving ? "none" : "transform 0.3s ease",
   };
 }
-
-function onTouchStart(index: string, event: TouchEvent) {
-  if (!event.touches[0]) return;
-  selectedMarkerId.value = index;
-  startX.value = event.touches[0].clientX;
-  isSwiping.value[index] = false;
-  confirmDelete.value[index] = false;
+function onTouchStart(row: TableRow, event: TouchEvent) {
+  clearSwipe();
+  if (row.type !== "marker" || !event.touches[0]) return;
+  startX = event.touches[0].clientX;
+  swipe.value = { key: row.key, offset: 0, moving: false, confirm: false };
 }
-
-function onTouchMove(index: string, event: TouchEvent) {
-  if (startX.value === null) {
-    selectedMarkerId.value = "";
+function onTouchMove(row: TableRow, event: TouchEvent) {
+  if (startX === null || swipe.value?.key !== row.key || !event.touches[0]) return;
+  swipe.value.offset = Math.min(0, event.touches[0].clientX - startX);
+  swipe.value.moving = true;
+}
+function onTouchEnd(row: TableRow, event: TouchEvent) {
+  if (startX === null || swipe.value?.key !== row.key || !event.changedTouches[0]) return;
+  const distance = startX - event.changedTouches[0].clientX;
+  startX = null;
+  if (distance <= 100) {
+    clearSwipe();
     return;
   }
-  if (!event.touches[0]) return;
-  const diffX = event.touches[0].clientX - startX.value;
-  if (diffX < 0) {
-    isSwiping.value[index] = true;
-    rowOffsets.value[index] = diffX;
-  }
+  swipe.value.offset = -100;
+  swipe.value.moving = false;
+  swipe.value.confirm = true;
+  deleteTimer = setTimeout(() => {
+    if (
+      active.value &&
+      swipe.value?.key === row.key &&
+      visibleRows.value.some((visible) => visible.key === row.key) &&
+      window.confirm("このマーカーを削除しますか?")
+    )
+      emit("deleteMarker", row.id);
+    clearSwipe();
+  }, 300);
 }
-
-function onTouchEnd(index: string, event: TouchEvent) {
-  if (startX.value === null) {
-    selectedMarkerId.value = "";
-    return;
-  }
-  if (!event.changedTouches?.[0]) return;
-  const diffX = startX.value - event?.changedTouches?.[0].clientX;
-  if (diffX > 100) {
-    confirmDelete.value[index] = true;
-    rowOffsets.value[index] = -100;
-    setTimeout(() => {
-      if (window.confirm("このマーカーを削除しますか?")) {
-        emit("deleteMarker", index);
-        delete rowOffsets.value[index];
-      } else {
-        confirmDelete.value[index] = false;
-        rowOffsets.value[index] = 0;
-      }
-    }, 300);
-  } else {
-    isSwiping.value[index] = false;
-    rowOffsets.value[index] = 0;
-  }
-  startX.value = null;
-  isSwiping.value[index] = false;
-  selectedMarkerId.value = "";
-}
+watch([active, visibleRows], () => {
+  if (!active.value || !visibleRows.value.some((row) => row.key === swipe.value?.key)) clearSwipe();
+});
+onScopeDispose(clearSwipe);
 </script>
 
 <template>
@@ -247,9 +163,18 @@ function onTouchEnd(index: string, event: TouchEvent) {
     />
   </div>
 
-  <div class="table-area">
+  <div
+    v-if="active"
+    ref="viewport"
+    class="table-area"
+    tabindex="0"
+    role="region"
+    aria-label="地図オブジェクト一覧"
+    :style="{ '--map-table-row-height': TABLE_ROW_HEIGHT + 'px' }"
+    @scroll.passive="onScroll"
+  >
     <div class="table_sticky">
-      <table>
+      <table :aria-rowcount="count + 1">
         <thead>
           <tr>
             <th>Layer</th>
@@ -258,15 +183,25 @@ function onTouchEnd(index: string, event: TouchEvent) {
           </tr>
         </thead>
         <tbody>
+          <tr v-if="range.top" class="virtual-spacer" aria-hidden="true">
+            <td colspan="3" :style="{ height: range.top + 'px' }"></td>
+          </tr>
           <tr
-            v-for="row in tableRows"
-            :key="`${row.type}:${row.id}`"
-            :class="{ swiping: isSwiping[row.id], 'confirm-delete': confirmDelete[row.id] }"
-            :style="getRowsStyle(row.id)"
-            id="swipe-tr"
-            @touchstart="row.type === 'marker' && onTouchStart(row.id, $event)"
-            @touchmove="row.type === 'marker' && onTouchMove(row.id, $event)"
-            @touchend="row.type === 'marker' && onTouchEnd(row.id, $event)"
+            v-for="row in visibleRows"
+            :key="row.key"
+            :data-row-key="row.key"
+            :aria-rowindex="row.index + 2"
+            class="object-row swipe-tr"
+            :class="{
+              'even-row': row.index % 2 === 1,
+              swiping: swipe?.key === row.key && swipe.moving,
+              'confirm-delete': swipe?.key === row.key && swipe.confirm,
+            }"
+            :style="getRowsStyle(row.key)"
+            @touchstart="onTouchStart(row, $event)"
+            @touchmove="onTouchMove(row, $event)"
+            @touchend="onTouchEnd(row, $event)"
+            @touchcancel="clearSwipe"
           >
             <td>{{ getLayerForId(row.layerId) }}</td>
             <td
@@ -291,6 +226,9 @@ function onTouchEnd(index: string, event: TouchEvent) {
               </template>
               <template v-else>--</template>
             </td>
+          </tr>
+          <tr v-if="range.bottom" class="virtual-spacer" aria-hidden="true">
+            <td colspan="3" :style="{ height: range.bottom + 'px' }"></td>
           </tr>
         </tbody>
       </table>
@@ -318,6 +256,7 @@ function onTouchEnd(index: string, event: TouchEvent) {
 }
 
 .table-area {
+  overflow-anchor: none;
   overflow: auto;
   margin-top: 20px;
   margin-bottom: 10px;
@@ -406,10 +345,6 @@ table tr {
   padding: 0;
 }
 
-table tr:nth-child(2n) {
-  background-color: rgb(238, 238, 238);
-}
-
 table tr th {
   font-weight: bold;
   border: 1px solid #cccccc;
@@ -427,35 +362,62 @@ table tr td {
   font-size: 14px;
 }
 
-th:nth-child(1) {
-  width: 20%;
-}
-
-th:nth-child(2) {
-  width: auto;
-}
-
-th:nth-child(3) {
-  width: 10%;
-}
-
-#swipe-tr {
+.swipe-tr {
   transition:
     transform 0.3s ease,
     background-color 0.3s ease;
   position: relative;
 }
 
-#swipe-tr.swiping {
-  background-color: #ffcccc;
+.on-focus:active {
+  background-color: black;
 }
 
-#swipe-tr.confirm-delete {
-  background-color: #ff6666;
+/* Fixed CSS-pixel height includes borders and both coordinate lines. */
+.table_sticky table {
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+}
+.table_sticky .object-row {
+  height: var(--map-table-row-height);
+  background: white;
+}
+.table_sticky .object-row.even-row {
+  background: rgb(238, 238, 238);
+}
+.table_sticky .object-row td {
+  height: var(--map-table-row-height);
+  box-sizing: border-box;
+  line-height: 18px;
+  padding: 6px 13px;
+}
+.table_sticky .virtual-spacer,
+.table_sticky .virtual-spacer:hover {
+  border: 0;
+  background: transparent;
+}
+.table_sticky .virtual-spacer td {
+  padding: 0;
+  border: 0;
+  font-size: 0;
+  line-height: 0;
+}
+.table_sticky .swipe-tr.swiping {
+  background: #ffcccc;
+}
+.table_sticky .swipe-tr.confirm-delete {
+  background: #ff6666;
   color: white;
 }
 
-.on-focus:active {
-  background-color: black;
+.table_sticky th:nth-child(1) {
+  width: 20%;
+}
+.table_sticky th:nth-child(2) {
+  width: 45%;
+}
+.table_sticky th:nth-child(3) {
+  width: 35%;
 }
 </style>
