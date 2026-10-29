@@ -191,6 +191,44 @@ async function finishObjectLoads() {
   });
 }
 describe("印刷プレビューと実際のLeaflet", () => {
+  it.each([
+    { markerIds: ["a"], shapeIds: ["shape-a"], markers: 1, shapes: 1 },
+    { markerIds: ["a"], shapeIds: [], markers: 1, shapes: 0 },
+    { markerIds: [], shapeIds: ["shape-a"], markers: 0, shapes: 1 },
+    { markerIds: [], shapeIds: [], markers: 0, shapes: 0 },
+    { markerIds: null, shapeIds: null, markers: 2, shapes: 1 },
+  ])("検索結果を遅延取得・レイヤ再表示・地図移動後も維持する: %j", async (filter) => {
+    preview = createPrintPreview({ ...state, ...filter, layerIds: null }, vi.fn());
+    await finishObjectLoads();
+    const check = () => {
+      const markers: any[] = [];
+      const shapes: any[] = [];
+      preview!.map.eachLayer((layer: any) => {
+        if (layer.options?.icon && layer.getTooltip?.()) markers.push(layer);
+        if (layer.shapeId) shapes.push(layer);
+      });
+      expect(markers).toHaveLength(filter.markers);
+      expect(shapes).toHaveLength(filter.shapes);
+      if (filter.markerIds) {
+        expect(markers.every((m) => String(m.getTooltip().getContent()).includes("避難所A"))).toBe(
+          true,
+        );
+      }
+      if (filter.shapes === 0)
+        expect(document.querySelector("#map")!.textContent).not.toContain("区域");
+    };
+    await vi.waitFor(check);
+    checkbox("避難所").click();
+    checkbox("避難所").click();
+    checkbox("マーカー").click();
+    checkbox("マーカー").click();
+    checkbox("図形").click();
+    checkbox("図形").click();
+    preview.map.setView([35.681, 139.761], 13, { animate: false });
+    await finishObjectLoads();
+    await vi.waitFor(check);
+  });
+
   it("色分け未使用の通常印刷に凡例設定を追加しない", () => {
     preview = createPrintPreview(state, vi.fn());
     expect(document.querySelector(".answer-print-legend")).toBeNull();
@@ -248,14 +286,21 @@ describe("印刷プレビューと実際のLeaflet", () => {
       targetCount: 4,
     };
     const before = JSON.stringify(bootstrap);
-    preview = createPrintPreview(state, vi.fn(), "form-answer-map", undefined, {
-      version: 1,
-      rules: [
-        { id: "r", label: "耐用年数50年以上", color: "#ff0000" },
-        { id: "empty", label: "該当なし", color: "#0000ff" },
-      ],
-      targets: { "marker:a": "r", "marker:c": "r", "shape:s": "r" },
-    });
+    // Top-page filters must never affect the separate common-form print route.
+    preview = createPrintPreview(
+      { ...state, markerIds: [], shapeIds: [] },
+      vi.fn(),
+      "form-answer-map",
+      undefined,
+      {
+        version: 1,
+        rules: [
+          { id: "r", label: "耐用年数50年以上", color: "#ff0000" },
+          { id: "empty", label: "該当なし", color: "#0000ff" },
+        ],
+        targets: { "marker:a": "r", "marker:c": "r", "shape:s": "r" },
+      },
+    );
     const map = preview.map;
     const center = map.getCenter();
     const zoom = map.getZoom();

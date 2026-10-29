@@ -418,7 +418,10 @@ if (getInitialMarkerVisibility()) {
   map.addLayer(markersClusterGroup);
 }
 
+let externalMarkerFilterIds = null;
+
 function applyMarkerFilter(markerIds) {
+  externalMarkerFilterIds = Array.isArray(markerIds) ? markerIds.map(String) : null;
   markersClusterGroup.clearLayers();
 
   if (!Array.isArray(markerIds)) {

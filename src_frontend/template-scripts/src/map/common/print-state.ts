@@ -10,6 +10,9 @@ export interface PrintMapState {
   shapesVisible: boolean;
   shapeNamesVisible: boolean;
   layerIds: string[] | null;
+  // Omitted/null means unrestricted; an empty array means no matches.
+  markerIds?: string[] | null;
+  shapeIds?: string[] | null;
 }
 
 export function isPrintMapState(value: unknown): value is PrintMapState {
@@ -35,6 +38,12 @@ export function isPrintMapState(value: unknown): value is PrintMapState {
       typeof state.markersVisible === "boolean" &&
       typeof state.shapesVisible === "boolean" &&
       typeof state.shapeNamesVisible === "boolean" &&
+      [state.markerIds, state.shapeIds].every(
+        (ids) =>
+          ids === undefined ||
+          ids === null ||
+          (Array.isArray(ids) && ids.every((id) => typeof id === "string")),
+      ) &&
       (state.layerIds === null ||
         (Array.isArray(state.layerIds) && state.layerIds.every((id) => typeof id === "string"))),
   );

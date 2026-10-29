@@ -1,0 +1,5064 @@
+{
+  "purpose": "Validate removal of the answer-map 10,000 target count guard with real SQLite data; retain CSV, field-definition, request-byte and print-byte guards.",
+  "validationDateJst": "2026-10-29",
+  "gitBase": {
+    "postgresql": "f8cbb9e59887275033f2e3a6a910bd4fb6968c03",
+    "sqlite": "b7dd8760b1be7c68d3a54676d8b94438c42af6f0"
+  },
+  "dataset": {
+    "answers": 22537,
+    "targets": 19776,
+    "markers": 0,
+    "shapes": 19776,
+    "htmlBytes": 72597480
+  },
+  "privacy": {
+    "originalDatabaseReadOnly": true,
+    "benchmarkUsesBackupUnderIgnoredTarget": true,
+    "rawIdsCoordinatesContentExcludedFromReport": true,
+    "originalConfigurationAndDatabaseUnmodified": true,
+    "temporaryDatabaseAndPrivateFixturesRemovedAfterRun": true
+  },
+  "conditions": {
+    "backend": "Release Rust/SQLx SQLite handlers, read-only immutable backup, actual map/map-filter/map-print/map-csv-check routes",
+    "frontend": "Production-built real PC/mobile AnswerMapModal and real map/filter/color/print modules; instrumentation injected only by benchmark build",
+    "pc": {
+      "viewport": [
+        1280,
+        800
+      ],
+      "cpuRate": 1
+    },
+    "mobile": {
+      "viewport": [
+        390,
+        844
+      ],
+      "cpuRate": 4,
+      "physicalDevice": false
+    },
+    "samplesPerWorkflowPerStage": 1,
+    "reportedTimesAreMedians": false,
+    "externalTilesIconsMedia": "Blocked and replaced with local placeholders; no real authentication or external tile latency",
+    "concurrentParentEditingMapAndPiniaStoreMounted": false,
+    "memoryMetric": "Chrome JS heap after forced GC; excludes full process memory and native DOM/graphics allocations",
+    "realDatasetContainsLargeMarkerPopulation": false,
+    "postgresqlRealApplicationDatabaseMeasured": false,
+    "noOtherBuildsOrTestsDuringBrowserRuns": true,
+    "timingScope": "Workflow includes API/database, HTTP/JSON, Vue, iframe render and settling plus automation coordination; not backend-only or full product timing",
+    "realClassificationCounts": {
+      "filled": 19776,
+      "empty": 0,
+      "missing": 0
+    },
+    "subsetFilteringCoverage": "Synthetic PostgreSQL/SQLite integration tests filter 20,000 targets to the expected 10,000 target IDs; real filled condition matches all targets."
+  },
+  "retainedLimits": {
+    "csvAnswers": 10000,
+    "completeFieldDefinitions": 10000,
+    "mergedFields": 200,
+    "printSnapshotUtf8Bytes": 33554432,
+    "mapFilterRequestBytes": 1048576
+  },
+  "beforeDescription": "Candidate with target-count guards already removed and original map-filter field expansion SQL from the Git base; shipped product could not open this >10,000-target scope. This is a single-run diagnostic comparison, not a before/after claim for cap removal.",
+  "afterDescription": "Same candidate with identical-field-array representatives selected before map-filter field expansion, preserving map-filter target-type ascending tie order and existing schema/field limits.",
+  "sourceSha256": {
+    "src/handler/answer_map.rs": "cfcf2a80feeb4d746b63612681506f228bbe52f034ef0a1ff410e564fddcb0c0",
+    "src/handler/answer_map_filter.rs": "ef29c6dd54d82a50a7d6b814a74adb94818da2765b0c224d958cae53a954a2f7",
+    "GeoCode-Web-Single/src/handler/answer_map.rs": "324718a5d8ef1a751edb94c460885dc76d6d3ea184d64c1a35c2b1c8676f0cc9",
+    "GeoCode-Web-Single/src/handler/answer_map_filter.rs": "f94b02468bfd21c0834475ea04f0f244926c1d8ebea9443d60408367ac567889",
+    "GeoCode-Web-Single/examples/profile_answer_map.rs": "5712697661c81d9d69c7affc531050b8deabae8e813197e2b0347b069df75b4c",
+    "src_frontend/frontend/scripts/measure-answer-map.mjs": "a742bdd7707fdd300bf2836776af091c9767d9ee2782fa46e17064f9ed36bc8a",
+    "src_frontend/frontend/scripts/answer-map-benchmark-entry.ts": "f30b5981439cc0933a134d9884956c0b4254fe8c2c50f05c2389ddacf7c28ffc",
+    "src_frontend/frontend/scripts/answer-map-runtime-benchmark-entry.ts": "a08c4baa56745ebd5cc85c589be85e5463e215113c1b7e7d7f4bdada03aba5fd"
+  },
+  "before": {
+    "measuredAtUtc": "2026-10-28T20:06:12.753Z",
+    "browser": "156.0.8078.48",
+    "sourceSha256": {
+      "src_frontend/frontend/src/components/map-object/AnswerMapModal.vue": "b12018ab45de07229612602a45d82efe622f2b1fbd48a3b28f7934380cc4bb21",
+      "src_frontend/frontend-mobile/src/components/map-object/AnswerMapModal.vue": "0a56ff874f98df2c74f37fc7b585388591e804871d59151d899ec31b60233a4c",
+      "src_frontend/template-scripts/src/map/read-only-page.ts": "38d172824cd3aefabfa2d50ec58a9aa3c7df9f89d80e87d3f9bf68d0198159b2",
+      "src_frontend/template-scripts/src/map/common/shape-renderer.ts": "0bd5bbc80e1bcb14b4fc1dfd74b87ccd95ddf44b30d9aaa811262243f72c972d",
+      "src_frontend/template-scripts/src/map/answer-filter.ts": "6cb7791d1fa1f3793483aa8599a7fe3329e6e09782e21bb37dc1d78ea0cc195f",
+      "src_frontend/template-scripts/src/map/answer-coloring.ts": "243657081c290e59c9635dd2e53b908d81975d5e9d78e99a5eef5017b035a7ff",
+      "src_frontend/template-scripts/src/map/print/answer-print-state.ts": "b229fa7d8f42b266eb6756de37c7f7f28e335946b6b3b49be10969741d312e45"
+    },
+    "results": [
+      {
+        "mode": "pc",
+        "viewport": [
+          1280,
+          800
+        ],
+        "cpuRate": 1,
+        "completed": true,
+        "pageErrors": 0,
+        "heapBeforeOpen": 1631348,
+        "heapOpenAfterOperations": 80804156,
+        "cycles": [
+          {
+            "cycle": 1,
+            "closedHeap": 2874680,
+            "retainedRuntimes": 0,
+            "iframeCount": 0
+          },
+          {
+            "cycle": 2,
+            "closedHeap": 3509536,
+            "retainedRuntimes": 0,
+            "iframeCount": 0
+          },
+          {
+            "cycle": 3,
+            "closedHeap": 3549652,
+            "retainedRuntimes": 0,
+            "iframeCount": 0
+          }
+        ],
+        "phases": [
+          {
+            "name": "initial",
+            "ms": 5146.2177,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map",
+                "status": 200,
+                "requestBytes": 489,
+                "responseBytes": 72597479,
+                "proxyMs": 3482.199599999999
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890257,
+                "responseBytes": 189,
+                "proxyMs": 588.7728999999999,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 6,
+              "maxMs": 354,
+              "totalMs": 1371
+            }
+          },
+          {
+            "name": "csvAnswerLimit",
+            "ms": 355.39450000000033,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-csv-check",
+                "status": 400,
+                "requestBytes": 890258,
+                "responseBytes": 123,
+                "proxyMs": 216.77870000000075
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "pan",
+            "ms": 393.28060000000005,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "zoomIn",
+            "ms": 738.6783999999989,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 956,
+              "cachedCount": 1012,
+              "cachedVertices": 36533,
+              "inactiveCachedCount": 56,
+              "inactiveCachedVertices": 8808,
+              "pendingCount": 0,
+              "createdCount": 1012,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 956,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 12
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "pan",
+            "ms": 419.8245000000006,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 369,
+              "cachedCount": 625,
+              "cachedVertices": 21451,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 4149,
+              "pendingCount": 0,
+              "createdCount": 1012,
+              "disposedCount": 387,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 369,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 12
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "zoomOut",
+            "ms": 390.6436999999987,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 339,
+              "cachedVertices": 22679,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 9768,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 736,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "filterFilled",
+            "ms": 8170.932999999999,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890291,
+                "responseBytes": 2676,
+                "proxyMs": 2267.9814000000006,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890374,
+                "responseBytes": 892603,
+                "proxyMs": 3213.0892000000003,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890291,
+                "responseBytes": 2676,
+                "proxyMs": 2380.427599999999,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 339,
+              "cachedVertices": 22679,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 9768,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 736,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 20
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "clearFilter",
+            "ms": 1327.0639999999985,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890258,
+                "responseBytes": 890116,
+                "proxyMs": 1111.7573000000011,
+                "optionsOnly": false,
+                "conditionOps": [],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 339,
+              "cachedVertices": 22679,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 9768,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 736,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "threeClassifications",
+            "ms": 11703.362699999998,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890291,
+                "responseBytes": 2676,
+                "proxyMs": 2233.696,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890382,
+                "responseBytes": 892603,
+                "proxyMs": 3286.9557999999997,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890381,
+                "responseBytes": 2676,
+                "proxyMs": 2727.499100000001,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "empty"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890383,
+                "responseBytes": 2676,
+                "proxyMs": 3107.6208000000006,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "missing"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 339,
+              "cachedVertices": 22679,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 9768,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 736,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 3,
+              "coloredTargets": 19776,
+              "coloringClassCounts": [
+                19776,
+                0,
+                0
+              ],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": true,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 20
+            },
+            "longTasks": {
+              "count": 3,
+              "maxMs": 77,
+              "totalMs": 231
+            }
+          },
+          {
+            "name": "filterWhileColored",
+            "ms": 15699.183100000002,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890291,
+                "responseBytes": 2676,
+                "proxyMs": 2258.943299999999,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890374,
+                "responseBytes": 892603,
+                "proxyMs": 3272.7379,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890465,
+                "responseBytes": 892603,
+                "proxyMs": 3616.0818999999974,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled",
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890464,
+                "responseBytes": 2676,
+                "proxyMs": 2611.803199999995,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled",
+                  "empty"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890466,
+                "responseBytes": 2676,
+                "proxyMs": 3543.3211999999985,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled",
+                  "missing"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 339,
+              "cachedVertices": 22679,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 9768,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 736,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 3,
+              "coloredTargets": 19776,
+              "coloringClassCounts": [
+                19776,
+                0,
+                0
+              ],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": true,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 20
+            },
+            "longTasks": {
+              "count": 3,
+              "maxMs": 85,
+              "totalMs": 255
+            }
+          },
+          {
+            "name": "clearFilterWhileColored",
+            "ms": 10502.389799999997,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890258,
+                "responseBytes": 890116,
+                "proxyMs": 913.6892999999982,
+                "optionsOnly": false,
+                "conditionOps": [],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890382,
+                "responseBytes": 892603,
+                "proxyMs": 3463.659400000004,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890381,
+                "responseBytes": 2676,
+                "proxyMs": 2576.6975999999995,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "empty"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890383,
+                "responseBytes": 2676,
+                "proxyMs": 3161.705399999999,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "missing"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 339,
+              "cachedVertices": 22679,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 9768,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 736,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 3,
+              "coloredTargets": 19776,
+              "coloringClassCounts": [
+                19776,
+                0,
+                0
+              ],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": true,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 3,
+              "maxMs": 86,
+              "totalMs": 258
+            }
+          },
+          {
+            "name": "clearColoring",
+            "ms": 190.8784999999989,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 339,
+              "cachedVertices": 22679,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 9768,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 736,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "popup",
+            "ms": 545.9617999999973,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 339,
+              "cachedVertices": 22679,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 9768,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 736,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "printMask1000",
+            "ms": 350.63150000000314,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 1000,
+              "renderedCount": 3,
+              "cachedCount": 259,
+              "cachedVertices": 19785,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 19220,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 816,
+              "logicalVisibleShapes": 1000,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 3,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 1000,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "print1000",
+            "ms": 30772.028499999993,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-print",
+                "status": 200,
+                "requestBytes": 77,
+                "responseBytes": 12136,
+                "proxyMs": 0.7819000000017695
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 1000,
+              "renderedCount": 3,
+              "cachedCount": 259,
+              "cachedVertices": 19785,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 19220,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 816,
+              "logicalVisibleShapes": 1000,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 3,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 1000,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 6,
+              "maxMs": 94,
+              "totalMs": 492
+            }
+          },
+          {
+            "name": "clearPrintMask",
+            "ms": 360.77320000001055,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 259,
+              "cachedVertices": 19785,
+              "inactiveCachedCount": 176,
+              "inactiveCachedVertices": 6874,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 816,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "close1",
+            "ms": 4.349199999996927,
+            "requests": [],
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "reopen1",
+            "ms": 4909.9614,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map",
+                "status": 200,
+                "requestBytes": 489,
+                "responseBytes": 72597479,
+                "proxyMs": 3320.9649000000063
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890257,
+                "responseBytes": 189,
+                "proxyMs": 588.7790999999997,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 6,
+              "maxMs": 356,
+              "totalMs": 1242
+            }
+          },
+          {
+            "name": "close2",
+            "ms": 2.8885000000009313,
+            "requests": [],
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "reopen2",
+            "ms": 4648.814899999998,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map",
+                "status": 200,
+                "requestBytes": 489,
+                "responseBytes": 72597479,
+                "proxyMs": 3056.5032999999967
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890257,
+                "responseBytes": 189,
+                "proxyMs": 604.8742999999959,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 6,
+              "maxMs": 358,
+              "totalMs": 1275
+            }
+          },
+          {
+            "name": "close3",
+            "ms": 2.9464000000007218,
+            "requests": [],
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          }
+        ],
+        "csvLimit": {
+          "requestBytes": 890258,
+          "answerLimitRejected": true
+        },
+        "popup": {
+          "available": true,
+          "opened": true,
+          "expandedDetails": false,
+          "contentCharacters": 510
+        },
+        "fullPrint": {
+          "ms": 428.30000000447035,
+          "targets": 19776,
+          "accepted": false,
+          "bytes": 72585705,
+          "structurallyValid": true,
+          "capacityRejected": true,
+          "capacityBytes": 33554432
+        },
+        "smallPrint": {
+          "targets": 1000,
+          "recordCount": 1000,
+          "renderableCount": 1000,
+          "eligibleCount": 1000,
+          "renderedCount": 1000,
+          "cachedCount": 1000,
+          "cachedVertices": 11629,
+          "inactiveCachedCount": 0,
+          "inactiveCachedVertices": 0,
+          "pendingCount": 0,
+          "createdCount": 1000,
+          "disposedCount": 0
+        }
+      },
+      {
+        "mode": "mobile",
+        "viewport": [
+          390,
+          844
+        ],
+        "cpuRate": 4,
+        "completed": true,
+        "pageErrors": 0,
+        "heapBeforeOpen": 1661080,
+        "heapOpenAfterOperations": 80813828,
+        "cycles": [
+          {
+            "cycle": 1,
+            "closedHeap": 2919428,
+            "retainedRuntimes": 0,
+            "iframeCount": 0
+          },
+          {
+            "cycle": 2,
+            "closedHeap": 3562256,
+            "retainedRuntimes": 0,
+            "iframeCount": 0
+          },
+          {
+            "cycle": 3,
+            "closedHeap": 3619512,
+            "retainedRuntimes": 0,
+            "iframeCount": 0
+          }
+        ],
+        "phases": [
+          {
+            "name": "initial",
+            "ms": 7698.483099999998,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map",
+                "status": 200,
+                "requestBytes": 489,
+                "responseBytes": 72597483,
+                "proxyMs": 3096.671900000001
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890257,
+                "responseBytes": 189,
+                "proxyMs": 585.8604999999952,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 14,
+              "maxMs": 1666,
+              "totalMs": 4896
+            }
+          },
+          {
+            "name": "csvAnswerLimit",
+            "ms": 429.05899999999383,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-csv-check",
+                "status": 400,
+                "requestBytes": 890258,
+                "responseBytes": 123,
+                "proxyMs": 223.37489999999525
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "pan",
+            "ms": 493.8052000000025,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 71,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 12,
+              "inactiveCachedVertices": 2249,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 71,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 4,
+              "maxMs": 109,
+              "totalMs": 404
+            }
+          },
+          {
+            "name": "zoomIn",
+            "ms": 811.3168000000005,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 161,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 76,
+              "inactiveCachedVertices": 11353,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 161,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 12
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 4,
+              "maxMs": 88,
+              "totalMs": 282
+            }
+          },
+          {
+            "name": "pan",
+            "ms": 487.4646999999968,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 0,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 237,
+              "inactiveCachedVertices": 18703,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 0,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 12
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 4,
+              "maxMs": 137,
+              "totalMs": 414
+            }
+          },
+          {
+            "name": "zoomOut",
+            "ms": 602.8552999999956,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 59,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 178,
+              "inactiveCachedVertices": 9358,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 59,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 6,
+              "maxMs": 152,
+              "totalMs": 572
+            }
+          },
+          {
+            "name": "filterFilled",
+            "ms": 9048.979299999992,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890291,
+                "responseBytes": 2676,
+                "proxyMs": 2391.5471000000107,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890374,
+                "responseBytes": 892603,
+                "proxyMs": 3630.3701999999903,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890291,
+                "responseBytes": 2676,
+                "proxyMs": 2365.703999999998,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 59,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 178,
+              "inactiveCachedVertices": 9358,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 59,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 20
+            },
+            "longTasks": {
+              "count": 6,
+              "maxMs": 167,
+              "totalMs": 698
+            }
+          },
+          {
+            "name": "clearFilter",
+            "ms": 1572.2281999999977,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890258,
+                "responseBytes": 890116,
+                "proxyMs": 1026.6321999999927,
+                "optionsOnly": false,
+                "conditionOps": [],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 59,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 178,
+              "inactiveCachedVertices": 9358,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 59,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 4,
+              "maxMs": 180,
+              "totalMs": 534
+            }
+          },
+          {
+            "name": "threeClassifications",
+            "ms": 12893.278699999995,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890291,
+                "responseBytes": 2676,
+                "proxyMs": 2364.959400000007,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890382,
+                "responseBytes": 892603,
+                "proxyMs": 3460.7685000000056,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890381,
+                "responseBytes": 2676,
+                "proxyMs": 2663.6001000000106,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "empty"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890383,
+                "responseBytes": 2676,
+                "proxyMs": 3256.702099999995,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "missing"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 59,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 178,
+              "inactiveCachedVertices": 9358,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 59,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 3,
+              "coloredTargets": 19776,
+              "coloringClassCounts": [
+                19776,
+                0,
+                0
+              ],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": true,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 20
+            },
+            "longTasks": {
+              "count": 8,
+              "maxMs": 395,
+              "totalMs": 1360
+            }
+          },
+          {
+            "name": "filterWhileColored",
+            "ms": 17664.416299999983,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890291,
+                "responseBytes": 2676,
+                "proxyMs": 2454.1444000000192,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890374,
+                "responseBytes": 892603,
+                "proxyMs": 3376.700899999996,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890465,
+                "responseBytes": 892603,
+                "proxyMs": 3989.6839000000036,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled",
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890464,
+                "responseBytes": 2676,
+                "proxyMs": 2846.378700000001,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled",
+                  "empty"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890466,
+                "responseBytes": 2676,
+                "proxyMs": 3701.119000000006,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled",
+                  "missing"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 59,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 178,
+              "inactiveCachedVertices": 9358,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 59,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 3,
+              "coloredTargets": 19776,
+              "coloringClassCounts": [
+                19776,
+                0,
+                0
+              ],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": true,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 20
+            },
+            "longTasks": {
+              "count": 8,
+              "maxMs": 426,
+              "totalMs": 1480
+            }
+          },
+          {
+            "name": "clearFilterWhileColored",
+            "ms": 11734.25039999999,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890258,
+                "responseBytes": 890116,
+                "proxyMs": 1065.826700000005,
+                "optionsOnly": false,
+                "conditionOps": [],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890382,
+                "responseBytes": 892603,
+                "proxyMs": 3421.2983999999997,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890381,
+                "responseBytes": 2676,
+                "proxyMs": 2771.050500000012,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "empty"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890383,
+                "responseBytes": 2676,
+                "proxyMs": 3407.4238999999943,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "missing"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 59,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 178,
+              "inactiveCachedVertices": 9358,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 59,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 3,
+              "coloredTargets": 19776,
+              "coloringClassCounts": [
+                19776,
+                0,
+                0
+              ],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": true,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 8,
+              "maxMs": 434,
+              "totalMs": 1360
+            }
+          },
+          {
+            "name": "clearColoring",
+            "ms": 546.4176000000152,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 59,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 178,
+              "inactiveCachedVertices": 9358,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 59,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 4,
+              "maxMs": 201,
+              "totalMs": 616
+            }
+          },
+          {
+            "name": "popup",
+            "ms": 1076.4302000000025,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 69,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 168,
+              "inactiveCachedVertices": 8489,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 69,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 12,
+              "maxMs": 144,
+              "totalMs": 1178
+            }
+          },
+          {
+            "name": "close1",
+            "ms": 11.070699999982025,
+            "requests": [],
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "reopen1",
+            "ms": 7964.412500000006,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map",
+                "status": 200,
+                "requestBytes": 489,
+                "responseBytes": 72597483,
+                "proxyMs": 3435.761899999983
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890257,
+                "responseBytes": 189,
+                "proxyMs": 584.3628000000026,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 12,
+              "maxMs": 1695,
+              "totalMs": 4576
+            }
+          },
+          {
+            "name": "close2",
+            "ms": 9.307899999985239,
+            "requests": [],
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "reopen2",
+            "ms": 7539.896999999997,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map",
+                "status": 200,
+                "requestBytes": 488,
+                "responseBytes": 72597482,
+                "proxyMs": 3211.7229000000225
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890257,
+                "responseBytes": 189,
+                "proxyMs": 570.988800000021,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 14,
+              "maxMs": 1688,
+              "totalMs": 4586
+            }
+          },
+          {
+            "name": "close3",
+            "ms": 8.487299999978859,
+            "requests": [],
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          }
+        ],
+        "csvLimit": {
+          "requestBytes": 890258,
+          "answerLimitRejected": true
+        },
+        "popup": {
+          "available": true,
+          "opened": true,
+          "expandedDetails": false,
+          "contentCharacters": 390
+        }
+      }
+    ]
+  },
+  "after": {
+    "measuredAtUtc": "2026-10-28T20:19:38.174Z",
+    "browser": "156.0.8078.48",
+    "sourceSha256": {
+      "src_frontend/frontend/src/components/map-object/AnswerMapModal.vue": "b12018ab45de07229612602a45d82efe622f2b1fbd48a3b28f7934380cc4bb21",
+      "src_frontend/frontend-mobile/src/components/map-object/AnswerMapModal.vue": "0a56ff874f98df2c74f37fc7b585388591e804871d59151d899ec31b60233a4c",
+      "src_frontend/template-scripts/src/map/read-only-page.ts": "38d172824cd3aefabfa2d50ec58a9aa3c7df9f89d80e87d3f9bf68d0198159b2",
+      "src_frontend/template-scripts/src/map/common/shape-renderer.ts": "0bd5bbc80e1bcb14b4fc1dfd74b87ccd95ddf44b30d9aaa811262243f72c972d",
+      "src_frontend/template-scripts/src/map/answer-filter.ts": "6cb7791d1fa1f3793483aa8599a7fe3329e6e09782e21bb37dc1d78ea0cc195f",
+      "src_frontend/template-scripts/src/map/answer-coloring.ts": "243657081c290e59c9635dd2e53b908d81975d5e9d78e99a5eef5017b035a7ff",
+      "src_frontend/template-scripts/src/map/print/answer-print-state.ts": "b229fa7d8f42b266eb6756de37c7f7f28e335946b6b3b49be10969741d312e45"
+    },
+    "results": [
+      {
+        "mode": "pc",
+        "viewport": [
+          1280,
+          800
+        ],
+        "cpuRate": 1,
+        "completed": true,
+        "pageErrors": 0,
+        "heapBeforeOpen": 1631348,
+        "heapOpenAfterOperations": 80794212,
+        "cycles": [
+          {
+            "cycle": 1,
+            "closedHeap": 2874136,
+            "retainedRuntimes": 0,
+            "iframeCount": 0
+          },
+          {
+            "cycle": 2,
+            "closedHeap": 3511796,
+            "retainedRuntimes": 0,
+            "iframeCount": 0
+          },
+          {
+            "cycle": 3,
+            "closedHeap": 3552236,
+            "retainedRuntimes": 0,
+            "iframeCount": 0
+          }
+        ],
+        "phases": [
+          {
+            "name": "initial",
+            "ms": 5210.0035,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map",
+                "status": 200,
+                "requestBytes": 488,
+                "responseBytes": 72597478,
+                "proxyMs": 3564.4326
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890257,
+                "responseBytes": 189,
+                "proxyMs": 562.2230999999992,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 6,
+              "maxMs": 365,
+              "totalMs": 1398
+            }
+          },
+          {
+            "name": "csvAnswerLimit",
+            "ms": 333.01970000000074,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-csv-check",
+                "status": 400,
+                "requestBytes": 890258,
+                "responseBytes": 123,
+                "proxyMs": 217.41189999999915
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "pan",
+            "ms": 395.2513999999992,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "zoomIn",
+            "ms": 795.6599999999999,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 956,
+              "cachedCount": 1012,
+              "cachedVertices": 36533,
+              "inactiveCachedCount": 56,
+              "inactiveCachedVertices": 8808,
+              "pendingCount": 0,
+              "createdCount": 1012,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 956,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 12
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "pan",
+            "ms": 423.45880000000034,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 369,
+              "cachedCount": 625,
+              "cachedVertices": 21451,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 4149,
+              "pendingCount": 0,
+              "createdCount": 1012,
+              "disposedCount": 387,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 369,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 12
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "zoomOut",
+            "ms": 389.8119000000006,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 339,
+              "cachedVertices": 22679,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 9768,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 736,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "filterFilled",
+            "ms": 5738.358600000001,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890291,
+                "responseBytes": 2676,
+                "proxyMs": 1479.868699999999,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890374,
+                "responseBytes": 892603,
+                "proxyMs": 2454.9472000000005,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890291,
+                "responseBytes": 2676,
+                "proxyMs": 1445.4298999999992,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 339,
+              "cachedVertices": 22679,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 9768,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 736,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 20
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "clearFilter",
+            "ms": 1203.440999999999,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890258,
+                "responseBytes": 890116,
+                "proxyMs": 988.7955999999976,
+                "optionsOnly": false,
+                "conditionOps": [],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 339,
+              "cachedVertices": 22679,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 9768,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 736,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "threeClassifications",
+            "ms": 8485.8423,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890291,
+                "responseBytes": 2676,
+                "proxyMs": 1493.6849999999977,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890382,
+                "responseBytes": 892603,
+                "proxyMs": 2480.7384999999995,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890381,
+                "responseBytes": 2676,
+                "proxyMs": 1835.6964999999982,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "empty"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890383,
+                "responseBytes": 2676,
+                "proxyMs": 2308.2740999999987,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "missing"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 339,
+              "cachedVertices": 22679,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 9768,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 736,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 3,
+              "coloredTargets": 19776,
+              "coloringClassCounts": [
+                19776,
+                0,
+                0
+              ],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": true,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 20
+            },
+            "longTasks": {
+              "count": 3,
+              "maxMs": 88,
+              "totalMs": 264
+            }
+          },
+          {
+            "name": "filterWhileColored",
+            "ms": 11908.378299999997,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890291,
+                "responseBytes": 2676,
+                "proxyMs": 1491.9532,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890374,
+                "responseBytes": 892603,
+                "proxyMs": 2487.987799999999,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890465,
+                "responseBytes": 892603,
+                "proxyMs": 2976.3745000000017,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled",
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890464,
+                "responseBytes": 2676,
+                "proxyMs": 1844.4265999999989,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled",
+                  "empty"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890466,
+                "responseBytes": 2676,
+                "proxyMs": 2708.6376999999993,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled",
+                  "missing"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 339,
+              "cachedVertices": 22679,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 9768,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 736,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 3,
+              "coloredTargets": 19776,
+              "coloringClassCounts": [
+                19776,
+                0,
+                0
+              ],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": true,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 20
+            },
+            "longTasks": {
+              "count": 3,
+              "maxMs": 86,
+              "totalMs": 258
+            }
+          },
+          {
+            "name": "clearFilterWhileColored",
+            "ms": 8095.855500000005,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890258,
+                "responseBytes": 890116,
+                "proxyMs": 990.4631999999983,
+                "optionsOnly": false,
+                "conditionOps": [],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890382,
+                "responseBytes": 892603,
+                "proxyMs": 2533.986499999999,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890381,
+                "responseBytes": 2676,
+                "proxyMs": 1813.1160000000018,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "empty"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890383,
+                "responseBytes": 2676,
+                "proxyMs": 2372.6152,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "missing"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 339,
+              "cachedVertices": 22679,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 9768,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 736,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 3,
+              "coloredTargets": 19776,
+              "coloringClassCounts": [
+                19776,
+                0,
+                0
+              ],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": true,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 3,
+              "maxMs": 84,
+              "totalMs": 252
+            }
+          },
+          {
+            "name": "clearColoring",
+            "ms": 161.1984999999986,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 339,
+              "cachedVertices": 22679,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 9768,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 736,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "popup",
+            "ms": 551.8502000000008,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 339,
+              "cachedVertices": 22679,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 9768,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 736,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "printMask1000",
+            "ms": 325.09649999999965,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 1000,
+              "renderedCount": 3,
+              "cachedCount": 259,
+              "cachedVertices": 19785,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 19220,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 816,
+              "logicalVisibleShapes": 1000,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 3,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 1000,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "print1000",
+            "ms": 30805.317100000007,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-print",
+                "status": 200,
+                "requestBytes": 77,
+                "responseBytes": 12136,
+                "proxyMs": 0.8352999999988242
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 1000,
+              "renderedCount": 3,
+              "cachedCount": 259,
+              "cachedVertices": 19785,
+              "inactiveCachedCount": 256,
+              "inactiveCachedVertices": 19220,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 816,
+              "logicalVisibleShapes": 1000,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 3,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 1000,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 6,
+              "maxMs": 82,
+              "totalMs": 447
+            }
+          },
+          {
+            "name": "clearPrintMask",
+            "ms": 357.29730000000563,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 259,
+              "cachedVertices": 19785,
+              "inactiveCachedCount": 176,
+              "inactiveCachedVertices": 6874,
+              "pendingCount": 0,
+              "createdCount": 1075,
+              "disposedCount": 816,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "close1",
+            "ms": 3.202000000004773,
+            "requests": [],
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "reopen1",
+            "ms": 4660.3125,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map",
+                "status": 200,
+                "requestBytes": 489,
+                "responseBytes": 72597479,
+                "proxyMs": 3108.6486000000004
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890257,
+                "responseBytes": 189,
+                "proxyMs": 556.950600000011,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 6,
+              "maxMs": 355,
+              "totalMs": 1260
+            }
+          },
+          {
+            "name": "close2",
+            "ms": 5.211800000004587,
+            "requests": [],
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "reopen2",
+            "ms": 4587.319599999988,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map",
+                "status": 200,
+                "requestBytes": 489,
+                "responseBytes": 72597479,
+                "proxyMs": 3044.650999999998
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890257,
+                "responseBytes": 189,
+                "proxyMs": 548.5326999999961,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 6,
+              "maxMs": 367,
+              "totalMs": 1293
+            }
+          },
+          {
+            "name": "close3",
+            "ms": 2.707399999999325,
+            "requests": [],
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          }
+        ],
+        "csvLimit": {
+          "requestBytes": 890258,
+          "answerLimitRejected": true
+        },
+        "popup": {
+          "available": true,
+          "opened": true,
+          "expandedDetails": false,
+          "contentCharacters": 510
+        },
+        "fullPrint": {
+          "ms": 416.6000000014901,
+          "targets": 19776,
+          "accepted": false,
+          "bytes": 72585706,
+          "structurallyValid": true,
+          "capacityRejected": true,
+          "capacityBytes": 33554432
+        },
+        "smallPrint": {
+          "targets": 1000,
+          "recordCount": 1000,
+          "renderableCount": 1000,
+          "eligibleCount": 1000,
+          "renderedCount": 1000,
+          "cachedCount": 1000,
+          "cachedVertices": 11629,
+          "inactiveCachedCount": 0,
+          "inactiveCachedVertices": 0,
+          "pendingCount": 0,
+          "createdCount": 1000,
+          "disposedCount": 0,
+          "incompleteImages": 0,
+          "failedImages": 0,
+          "layers": {
+            "total": 1048,
+            "loading": 1,
+            "failed": 1,
+            "isLoading": 1,
+            "printLoading": 0
+          },
+          "objectLoadStatus": {
+            "loading": false,
+            "failed": false
+          },
+          "timings": {
+            "runtimeReadyMs": 287.33400000000256,
+            "shapesAfterRuntimeMs": 267.8672000000006,
+            "shapesReadyMs": 555.2012000000032,
+            "buttonWaitAfterShapesMs": 30088.793899999997,
+            "buttonReadyMs": 30643.9951
+          },
+          "usedExistingResourceTimeoutFallback": true
+        }
+      },
+      {
+        "mode": "mobile",
+        "viewport": [
+          390,
+          844
+        ],
+        "cpuRate": 4,
+        "completed": true,
+        "pageErrors": 0,
+        "heapBeforeOpen": 1661080,
+        "heapOpenAfterOperations": 80766592,
+        "cycles": [
+          {
+            "cycle": 1,
+            "closedHeap": 2917396,
+            "retainedRuntimes": 0,
+            "iframeCount": 0
+          },
+          {
+            "cycle": 2,
+            "closedHeap": 3559480,
+            "retainedRuntimes": 0,
+            "iframeCount": 0
+          },
+          {
+            "cycle": 3,
+            "closedHeap": 3616688,
+            "retainedRuntimes": 0,
+            "iframeCount": 0
+          }
+        ],
+        "phases": [
+          {
+            "name": "initial",
+            "ms": 7953.366699999999,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map",
+                "status": 200,
+                "requestBytes": 489,
+                "responseBytes": 72597483,
+                "proxyMs": 3177.4376000000047
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890257,
+                "responseBytes": 189,
+                "proxyMs": 566.7090999999928,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 14,
+              "maxMs": 1725,
+              "totalMs": 5078
+            }
+          },
+          {
+            "name": "csvAnswerLimit",
+            "ms": 396.8869999999879,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-csv-check",
+                "status": 400,
+                "requestBytes": 890258,
+                "responseBytes": 123,
+                "proxyMs": 216.93940000000293
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "pan",
+            "ms": 497.2679000000062,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 71,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 12,
+              "inactiveCachedVertices": 2249,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 71,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 4,
+              "maxMs": 114,
+              "totalMs": 404
+            }
+          },
+          {
+            "name": "zoomIn",
+            "ms": 836.4004000000132,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 161,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 76,
+              "inactiveCachedVertices": 11353,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 161,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 12
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 6,
+              "maxMs": 84,
+              "totalMs": 378
+            }
+          },
+          {
+            "name": "pan",
+            "ms": 369.8715999999986,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 0,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 237,
+              "inactiveCachedVertices": 18703,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 0,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 12
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 2,
+              "maxMs": 86,
+              "totalMs": 172
+            }
+          },
+          {
+            "name": "zoomOut",
+            "ms": 559.5411000000022,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 59,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 178,
+              "inactiveCachedVertices": 9358,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 59,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 6,
+              "maxMs": 120,
+              "totalMs": 524
+            }
+          },
+          {
+            "name": "filterFilled",
+            "ms": 6428.055900000007,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890291,
+                "responseBytes": 2676,
+                "proxyMs": 1601.8415999999997,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890374,
+                "responseBytes": 892603,
+                "proxyMs": 2531.6092000000062,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890291,
+                "responseBytes": 2676,
+                "proxyMs": 1632.4245000000083,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 59,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 178,
+              "inactiveCachedVertices": 9358,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 59,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 20
+            },
+            "longTasks": {
+              "count": 6,
+              "maxMs": 181,
+              "totalMs": 732
+            }
+          },
+          {
+            "name": "clearFilter",
+            "ms": 1568.0111999999936,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890258,
+                "responseBytes": 890116,
+                "proxyMs": 993.4114999999874,
+                "optionsOnly": false,
+                "conditionOps": [],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 59,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 178,
+              "inactiveCachedVertices": 9358,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 59,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 6,
+              "maxMs": 170,
+              "totalMs": 648
+            }
+          },
+          {
+            "name": "threeClassifications",
+            "ms": 9677.739099999992,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890291,
+                "responseBytes": 2676,
+                "proxyMs": 1553.9024999999965,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890382,
+                "responseBytes": 892603,
+                "proxyMs": 2645.778099999996,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890381,
+                "responseBytes": 2676,
+                "proxyMs": 1848.1736999999994,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "empty"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890383,
+                "responseBytes": 2676,
+                "proxyMs": 2550.749100000001,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "missing"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 59,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 178,
+              "inactiveCachedVertices": 9358,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 59,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 3,
+              "coloredTargets": 19776,
+              "coloringClassCounts": [
+                19776,
+                0,
+                0
+              ],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": true,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 20
+            },
+            "longTasks": {
+              "count": 12,
+              "maxMs": 415,
+              "totalMs": 1566
+            }
+          },
+          {
+            "name": "filterWhileColored",
+            "ms": 13291.726599999995,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890291,
+                "responseBytes": 2676,
+                "proxyMs": 1605.2048000000068,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890374,
+                "responseBytes": 892603,
+                "proxyMs": 2610.1858000000066,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890465,
+                "responseBytes": 892603,
+                "proxyMs": 3027.0217999999877,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled",
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890464,
+                "responseBytes": 2676,
+                "proxyMs": 2025.167499999996,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled",
+                  "empty"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890466,
+                "responseBytes": 2676,
+                "proxyMs": 2765.985899999985,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled",
+                  "missing"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 59,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 178,
+              "inactiveCachedVertices": 9358,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 59,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 3,
+              "coloredTargets": 19776,
+              "coloringClassCounts": [
+                19776,
+                0,
+                0
+              ],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": true,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 20
+            },
+            "longTasks": {
+              "count": 8,
+              "maxMs": 432,
+              "totalMs": 1474
+            }
+          },
+          {
+            "name": "clearFilterWhileColored",
+            "ms": 9257.927199999976,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890258,
+                "responseBytes": 890116,
+                "proxyMs": 1020.3459000000148,
+                "optionsOnly": false,
+                "conditionOps": [],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890382,
+                "responseBytes": 892603,
+                "proxyMs": 2610.0338000000047,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "filled"
+                ],
+                "resultTargets": 19776,
+                "resultAnswers": 22537
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890381,
+                "responseBytes": 2676,
+                "proxyMs": 1990.6222999999882,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "empty"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890383,
+                "responseBytes": 2676,
+                "proxyMs": 2473.3399999999965,
+                "optionsOnly": false,
+                "conditionOps": [
+                  "missing"
+                ],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 59,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 178,
+              "inactiveCachedVertices": 9358,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 59,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 3,
+              "coloredTargets": 19776,
+              "coloringClassCounts": [
+                19776,
+                0,
+                0
+              ],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": true,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 8,
+              "maxMs": 477,
+              "totalMs": 1458
+            }
+          },
+          {
+            "name": "clearColoring",
+            "ms": 576.4366999999911,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 59,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 178,
+              "inactiveCachedVertices": 9358,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 59,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 4,
+              "maxMs": 206,
+              "totalMs": 626
+            }
+          },
+          {
+            "name": "popup",
+            "ms": 1074.066999999981,
+            "requests": [],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 69,
+              "cachedCount": 237,
+              "cachedVertices": 18703,
+              "inactiveCachedCount": 168,
+              "inactiveCachedVertices": 8489,
+              "pendingCount": 0,
+              "createdCount": 237,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 69,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 12,
+              "maxMs": 170,
+              "totalMs": 1234
+            }
+          },
+          {
+            "name": "close1",
+            "ms": 10.379099999991013,
+            "requests": [],
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "reopen1",
+            "ms": 8715.153699999995,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map",
+                "status": 200,
+                "requestBytes": 489,
+                "responseBytes": 72597483,
+                "proxyMs": 3877.1596000000136
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890257,
+                "responseBytes": 189,
+                "proxyMs": 567.9066999999923,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 14,
+              "maxMs": 2053,
+              "totalMs": 5426
+            }
+          },
+          {
+            "name": "close2",
+            "ms": 6.799299999984214,
+            "requests": [],
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          },
+          {
+            "name": "reopen2",
+            "ms": 7954.04879999999,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map",
+                "status": 200,
+                "requestBytes": 487,
+                "responseBytes": 72597481,
+                "proxyMs": 3118.12950000001
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890257,
+                "responseBytes": 189,
+                "proxyMs": 568.2793999999994,
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 12,
+              "maxMs": 1789,
+              "totalMs": 4746
+            }
+          },
+          {
+            "name": "close3",
+            "ms": 7.728800000011688,
+            "requests": [],
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          }
+        ],
+        "csvLimit": {
+          "requestBytes": 890258,
+          "answerLimitRejected": true
+        },
+        "popup": {
+          "available": true,
+          "opened": true,
+          "expandedDetails": false,
+          "contentCharacters": 308
+        }
+      }
+    ]
+  },
+  "verification": {
+    "postgresqlRust": {
+      "passed": 98,
+      "ignored": 1,
+      "realTemporaryPostgresql": true,
+      "syntheticTargets": 20000,
+      "oldNewFieldSqlDifferentialTests": 3
+    },
+    "sqliteRust": {
+      "passed": 115,
+      "ignored": 2,
+      "syntheticTargets": 20000,
+      "oldNewFieldSqlDifferentialTests": 3
+    },
+    "sqliteProfilerExample": {
+      "passed": 1
+    },
+    "frontendBothRepositories": {
+      "pcRelatedTests": 64,
+      "mobileRelatedTests": 65,
+      "postgresqlTemplateRelatedTests": 28,
+      "postgresqlTemplateFinalRerunTests": 20,
+      "sqliteTemplateAnswerTests": 36,
+      "typeChecksPassed": true,
+      "productionBuildsPassed": true
+    },
+    "print": "Actual full snapshot is structurally valid but exceeds 32MiB and is rejected; actual legend-masked 1,000-target snapshot generates all 1,000 shapes before print is allowed.",
+    "printResourceWait": "Bounded print geometry ready in 555.2ms; one layer stays loading/failed with placeholder resources and uses the existing 30s resource-timeout fallback. Object load status is neither loading nor failed. Do not interpret the ~30.8s print-button phase as geometry-rendering time.",
+    "csv": "Actual >10,000-answer map-csv-check request returns HTTP400 in both browser modes.",
+    "closure": "Both modes close/reopen three times; every closed cycle has zero iframes and zero retained renderer/runtime weak references.",
+    "residualCost": "Initial map still transfers/parses about 72.6MB of HTML; initial real workflow ~5.21s PC/~7.95s CPU4x mobile emulation. Whole-app or physical-device memory/performance is not guaranteed.",
+    "noMigration": true
+  },
+  "reproduction": {
+    "sqliteServer": "cargo run --release --locked --offline --jobs 1 --example profile_answer_map -- --database target/PRIVATE_COPY.sqlite --output-directory target/private-answer-map --serve --port 0",
+    "browserFromParentRoot": "node src_frontend/frontend/scripts/measure-answer-map.mjs --backend=http://127.0.0.1:PORT --manifest=GeoCode-Web-Single/target/private-answer-map/manifest.json --output=target/answer-map-browser --playwright-path=C:/path/to/playwright/index.mjs",
+    "shutdown": "POST http://127.0.0.1:PORT/profile/shutdown (loopback only); then remove only the private database copy"
+  }
+}

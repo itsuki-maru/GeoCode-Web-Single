@@ -170,6 +170,12 @@ export function initializeReadOnlyMapPage(
   const isPrint = isAnother && Boolean(printState);
   const isAnswerPreview =
     expectedPage === "form-answer-map" || (isAnother && Boolean(bootstrap.answerPreview));
+  // Top-page search is independent of the common-form answer/legend filters.
+  const topPagePrint = isPrint && !isAnswerPreview;
+  const printMarkerIds =
+    topPagePrint && Array.isArray(printState?.markerIds) ? new Set(printState.markerIds) : null;
+  const printShapeIds =
+    topPagePrint && Array.isArray(printState?.shapeIds) ? new Set(printState.shapeIds) : null;
   const answerVisibility = createAnswerVisibility(() => {
     layeredMarkerDisplay.rebuildVisibleMarkers();
     layeredShapeDisplay.rebuildVisibleShapes();
@@ -553,6 +559,7 @@ export function initializeReadOnlyMapPage(
   const isShapeRecordVisible = (record) =>
     map.hasLayer(shapeVisibilityLayer) &&
     layeredMarkerDisplay.isLayerVisible(record.layer_id) &&
+    (!printShapeIds || printShapeIds.has(String(record.id))) &&
     answerVisibility.allows(`shape:${record.id}`) &&
     matchesCurrentShapeSearch(record);
   const isShapeLogicallyVisible = (id) => {
@@ -572,7 +579,9 @@ export function initializeReadOnlyMapPage(
     createLayeredMarkerDisplayManager: (options) =>
       createLayeredMarkerDisplayManager({
         ...options,
-        isRecordAllowed: (record) => answerVisibility.allows(`marker:${record.id}`),
+        isRecordAllowed: (record) =>
+          (!printMarkerIds || printMarkerIds.has(String(record.id))) &&
+          answerVisibility.allows(`marker:${record.id}`),
       }),
     escapeHtml,
     layerNames,

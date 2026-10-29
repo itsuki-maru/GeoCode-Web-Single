@@ -1460,6 +1460,8 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
           markersVisible: true,
           shapesVisible: true,
           shapeNamesVisible: true,
+          markerIds: null,
+          shapeIds: null,
         },
       },
       "https://example.test",
@@ -1475,6 +1477,22 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
       }),
       "https://example.test",
     );
+    for (const ids of [["matching"], [], null]) {
+      dom.window.dispatchEvent(
+        new dom.window.MessageEvent("message", {
+          origin: "https://example.test",
+          source: dom.window,
+          data: { type: "mapObjectFilter", markerIds: ids, shapeIds: ids },
+        }),
+      );
+      request("https://example.test");
+      expect(post).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          state: expect.objectContaining({ markerIds: ids, shapeIds: ids }),
+        }),
+        "https://example.test",
+      );
+    }
   });
 
   it("map-anatherは保存された表示位置を復元する", () => {

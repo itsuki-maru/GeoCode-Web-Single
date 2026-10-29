@@ -138,10 +138,18 @@ describe("印刷モーダルの地図連携", () => {
     expect(post).not.toHaveBeenCalled();
     send(source.contentWindow, "printStateResult", {
       requestId: request.requestId,
-      state: { tileServerId: "2" },
+      state: { tileServerId: "2", markerIds: ["matching"], shapeIds: [] },
     });
     expect(post).toHaveBeenCalledWith(
-      { type: "printInitialize", state: { tileServerId: "2", layerIds: ["a"] } },
+      {
+        type: "printInitialize",
+        state: {
+          tileServerId: "2",
+          layerIds: ["a"],
+          markerIds: ["matching"],
+          shapeIds: [],
+        },
+      },
       "http://localhost:3000",
     );
     send(frame.contentWindow, "printInitialized");
