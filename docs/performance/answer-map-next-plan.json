@@ -1,0 +1,296 @@
+{
+  "schemaVersion": 1,
+  "dateJst": "2026-10-29",
+  "purpose": "Remaining answer-map initial-load bottlenecks and next plan after popup-column projection and JSON bootstrap adoption. Product behavior is not changed in this investigation.",
+  "status": "Plan only; byte-only diagnostic experiments are not a production transport implementation or speed/memory comparison.",
+  "sourceSha256": {
+    "src/handler/answer_map.rs": "cfcf2a80feeb4d746b63612681506f228bbe52f034ef0a1ff410e564fddcb0c0",
+    "src/handler/marker_forms/answer_edit.rs": "f4689b24c569f3f1f7c18fefde54e924a14a93969a5f1fd72b8698e7d0be277d",
+    "src/lib.rs": "00aa994092ca4efd8608d10c246023306c8702b24421257f3590ab83a301abf9",
+    "GeoCode-Web-Single/src/handler/answer_map.rs": "324718a5d8ef1a751edb94c460885dc76d6d3ea184d64c1a35c2b1c8676f0cc9",
+    "GeoCode-Web-Single/src/handler/marker_forms/answer_edit.rs": "913ec4d15aca2f6baede0d7e08726938a53641c3943c61907626eeeb1f9e1f1f",
+    "src/templates/form-answer-map.html": "a4346ffa5602dc9b9ff4780a6863e96012e1e51896ee5a09d4e96a92bb1f1e63",
+    "src_frontend/template-scripts/src/map/bootstrap.ts": "9deed7440e4543d8edf5c075ce74dfae88d2313a3ff504190d84369b493be597",
+    "src_frontend/template-scripts/src/map/read-only-page.ts": "38d172824cd3aefabfa2d50ec58a9aa3c7df9f89d80e87d3f9bf68d0198159b2",
+    "src_frontend/template-scripts/src/map/answer-preview.ts": "625cf04ad658d89b2c08a8028d7a05e936fb4294c6a90d30f6cd7d7360c09e15",
+    "src_frontend/frontend/src/components/map-object/AnswerMapModal.vue": "931d18aec6cae738d022ca818a54452c846efa934c8ad079221cb0add1afc8a7",
+    "src_frontend/frontend-mobile/src/components/map-object/AnswerMapModal.vue": "121ac3b2f628796fcc8d13c251d1b8f244755d0de4357fe4be74efd2381a26f7",
+    "scripts/performance/compare-answer-map-bootstrap.py": "ea6c074695e2a03bb34b071922441676769a0adabe1b44b6f82089761ca1a755"
+  },
+  "nativeProfilerExecutableSha256": "eaddc9cd6dc3f37f085326f53ceec056ae52c4c78d475f03c0ac0fc6ba3a91a6",
+  "references": [
+    "answer-map-json-bootstrap.json",
+    "answer-map-popup-projection.json",
+    "../FORM_ANSWERS.md"
+  ],
+  "currentBrowserBaseline": {
+    "source": "answer-map-json-bootstrap.json: live-speed-json, three trials per mode, no continuous memory sampler or process-memory probes during timed opening",
+    "dataset": {
+      "answers": 22537,
+      "targets": 19776,
+      "shapes": 19776,
+      "markers": 0
+    },
+    "medianMs": {
+      "pc": {
+        "loadingCleared": 2953.10009765625,
+        "combinedReady": 3632.2013000000006,
+        "serverHandler": 1876.841,
+        "ttfb": 2336.5,
+        "responseBody": 334.6,
+        "jsonBlockBeforeAfter": 326.7,
+        "jsonParse": 131.4,
+        "runtimeSynchronous": 62.4,
+        "shapeRegistration": 14.0,
+        "optionsAfterReady": 595.6
+      },
+      "mobileEmulation": {
+        "loadingCleared": 4901.89990234375,
+        "combinedReady": 5761.649299999997,
+        "serverHandler": 1853.4,
+        "ttfb": 2308.6,
+        "responseBody": 1400.4,
+        "jsonBlockBeforeAfter": 1374.1,
+        "jsonParse": 466.8,
+        "runtimeSynchronous": 308.8,
+        "shapeRegistration": 58.4,
+        "optionsAfterReady": 706.3
+      }
+    },
+    "counts": {
+      "logicalShapes": 19776,
+      "initialGeneratedShapes": 83,
+      "pendingShapesAtMeasuredIdle": 0
+    },
+    "scope": [
+      "All real-data native measurements use the SQLite readonly immutable copy. PostgreSQL real database speed is not measured.",
+      "PC1280x800; mobile390x844 CPU4x Chrome emulation, not a physical phone. Chrome156.0.8078.48.",
+      "External tiles/icons/images use placeholders; real authentication and concurrent ordinary editing map/Pinia raw store are excluded. Backend/OS caches are not reset.",
+      "TTFB includes the diagnostic proxy, including full-body receive and HTML rewriting overhead of roughly440-448ms. Do not subtract a fixed amount to infer product timings.",
+      "Response-body and JSON-block spans overlap strongly. Nested spans and separately computed medians must not be added into an exclusive CPU breakdown.",
+      "Loading-cleared is the application ready signal, not proof of GPU paint or options completion."
+    ]
+  },
+  "nativeReinvestigation": {
+    "method": "Existing rebuilt Release profile_answer_map, readonly immutable backup, no HTTP server. Preliminary load, one warmup handler, then three sequential actual handler calls. No product/source changes.",
+    "columns": [
+      "trial",
+      "handlerMs",
+      "sqlxObservedMs",
+      "renderMs",
+      "jsonEncodeMs",
+      "residualMs",
+      "answerCountSqlxMs",
+      "shapeRecordsSqlxMs",
+      "popupPartsSqlxMs",
+      "popupAnswersSqlxMs"
+    ],
+    "samples": [
+      [
+        1,
+        2027.482,
+        1430.6366,
+        205.1685,
+        178.5569,
+        391.6769,
+        275.0475,
+        820.4257,
+        80.8565,
+        253.5429
+      ],
+      [
+        2,
+        1898.0032,
+        1277.5886,
+        207.588,
+        181.5347,
+        412.8266,
+        207.7659,
+        728.7514,
+        77.0908,
+        263.1527
+      ],
+      [
+        3,
+        2414.6589,
+        1653.0956,
+        287.7395,
+        254.6678,
+        473.8238,
+        216.2814,
+        900.4208,
+        151.4608,
+        383.5211
+      ]
+    ],
+    "medianMs": {
+      "handlerMs": 2027.482,
+      "sqlxObservedMs": 1430.6366,
+      "renderMs": 207.588,
+      "jsonEncodeMs": 181.5347,
+      "residualMs": 412.8266,
+      "answerCountSqlxMs": 216.2814,
+      "shapeRecordsSqlxMs": 820.4257,
+      "popupPartsSqlxMs": 80.8565,
+      "popupAnswersSqlxMs": 263.1527
+    },
+    "htmlUtf8Bytes": 72597521,
+    "jsonEscapedSectionBytes": {
+      "shapes": 44040907,
+      "popupBodies": 27645776
+    },
+    "interpretation": "This confirms the remaining shape fetch/decode and large-data handling costs. It is a new diagnostic run, not a before/after speed improvement or regression. SQLx can include setup/fetch/row conversion; residual includes Context conversion, body validation/assembly, scheduling, lock waits, unobserved work and cleanup. JSON encoding is inside rendering, and rendering is inside handler wall time. Each median is calculated separately."
+  },
+  "transportAnalysis": {
+    "dataset": {
+      "answers": 22537,
+      "targets": 19776,
+      "shapes": 19776,
+      "markers": 0
+    },
+    "matchesPreviousNativeJsonSnapshotExceptAsOf": true,
+    "allElevenSectionValuesCompared": true,
+    "htmlBytes": 72597521,
+    "popupBytes": 27645776,
+    "bodyFields": {
+      "normal": {
+        "utf8Bytes": 23625096,
+        "escapedJsonTokenBytes": 25589071,
+        "nonempty": 19776
+      },
+      "free_text": {
+        "utf8Bytes": 4766016,
+        "escapedJsonTokenBytes": 4805568,
+        "nonempty": 19776
+      },
+      "managed_markdown": {
+        "utf8Bytes": 18859080,
+        "escapedJsonTokenBytes": 20823055,
+        "nonempty": 19776
+      }
+    },
+    "equalities": {
+      "freeEqualsNormalNonempty": 0,
+      "managedEqualsNormalNonempty": 0,
+      "freeEqualsManagedNonempty": 0,
+      "syncRequired": 0
+    },
+    "allTextOccurrences": 59328,
+    "uniqueExactTextValues": 39553,
+    "zeroOverheadExactStringPoolMaximumSavedTokenBytes": 4805325,
+    "sameTargetNormalBodyReferenceEstimate": {
+      "references": 0,
+      "candidatePopupBytes": 27645776,
+      "versionMarkerBytes": 41,
+      "estimatedHtmlBytesIncludingMarker": 72597562,
+      "savedHtmlBytes": -41,
+      "savedHtmlRatio": -5.647575762263287e-07,
+      "restoredAllPopupFieldsExactly": true,
+      "runtimeOrNativeImplementationTested": false,
+      "scope": "Byte-only encoding experiment: nonempty popup strings exactly equal to the same target normal body become a typed reference. No parts reinterpretation or string concatenation. Full shapes/normal bodies remain unchanged. Proposed version marker is estimation overhead, not an adopted protocol."
+    },
+    "verifiedWholeNormalReconstructionEstimate": {
+      "matches": {
+        "freeThenManaged": 19776,
+        "managedThenFree": 0,
+        "neither": 0
+      },
+      "referenceBytesPerMemo": 47,
+      "proposedVersionMarkerBytes": 33,
+      "estimatedHtmlBytes": 47937955,
+      "savedHtmlBytes": 24659566,
+      "savedHtmlRatio": 0.33967504207202887,
+      "exactWholeStringEqualityRequiredForEachTarget": true,
+      "nonmatchingBodyRetainedInFull": true,
+      "runtimeOrNativeImplementationTested": false,
+      "scope": "Byte-only, not implementation. Replace a normal memo only after exact whole-string equality with a specified order of its existing free/managed strings; all other memos stay unchanged. No answer-boundary inference or parts rewrite. A future decoder must restore all canonical bodies before consumers and print capacity checks."
+    },
+    "gzipSizeOnly": {
+      "level1": 9440845,
+      "level6": 6856430
+    },
+    "gzipScope": "Diagnostic size only, not an HTTP implementation or CPU/speed result; decoded HTML and browser parsing remain full size.",
+    "scope": "Current readonly immutable SQLite copy, aggregate strings/counts/bytes only. No raw data or individual identifiers/hashes are exported. Data shape matches previous counts and byte sizes; whole-section digest comparison additionally checks all values except generated as_of."
+  },
+  "transportMethod": [
+    "Existing non-eval bootstrap parser with Decimal/integer preservation checks all11section values against the previous native JSON snapshot, excluding only generated query.as_of. They match.",
+    "Measure original UTF8 bytes and the exact current json_encode_for_html string escaping; canonical ASCII fingerprint byte counts are not transmission sizes.",
+    "Compare each full normal body with its same-target free_text and managed_markdown in each fixed concatenation order. Equality is verified, never inferred from parts or answer position.",
+    "Byte estimate replaces only a verified equal normal-body JSON token with a47byte reference and includes33bytes for a proposed version marker. It is not the finalized protocol or runtime; final metadata/whitespace/validation overhead may change its size.",
+    "Simple whole-field aliasing yields no matches in this dataset. A global exact-string pool can save at most4,805,325bytes before any dictionary/reference overhead; it is lower priority than verified normal-body reconstruction.",
+    "Size-only gzip of the current uncompressed HTML is9,440,845bytes at level1 and6,856,430bytes at level6. This does not establish HTTP performance or change decoded parser workload."
+  ],
+  "priorities": [
+    {
+      "rank": 1,
+      "change": "Prototype verified same-target normal-body reconstruction in transport only",
+      "why": "Full HTML remains72.6MB. This dataset has19,776 exact reconstruction matches; the byte-only estimate is47.94MB, saving24.66MB/33.97%. It may reduce transport and parsing work on PC/mobile while retaining all geometry and answer strings; runtime restoration has not been measured.",
+      "requiredDesign": [
+        "Keep one authenticated native POST response and the same transaction/snapshot. Do not replace popup snapshots with later database fetches.",
+        "Server verifies the entire original string per target in a fixed known order, and encodes only when the escaped JSON becomes smaller. Preserve nonmatching, nonstring or missing memo values and all sync_required flags exactly. Compare borrowed slices without allocating an extra concatenation where possible. Do not alter stored parts, trim, normalize Unicode, insert newlines or infer answer boundaries.",
+        "Use an explicit version and a transport envelope that cannot collide with arbitrary GeoJSON properties or user strings; the47byte marker is only a sizing example.",
+        "Decoder accepts only fixed same-target references, own entries and string leaves. Reject missing/invalid/unknown references, cycles, alternate target paths and unsupported versions without publishing partial data.",
+        "Restore encoded memo/detail values to canonical strings and complete bootstrap before original validation, runtime, search, popup or ready notification. Remove transport-only metadata from canonical data. Publish/cache and remove source DOM only after complete success. Keep legacy bootstrap compatibility.",
+        "Print receives fully restored canonical snapshots; enforce the existing32MiB limit on reconstructed full content, never compressed/encoded bytes."
+      ],
+      "measure": "Record exact wire bytes, server equality/encoding cost, browser JSON.parse plus restore time, loading-cleared and combined-ready, observed heap boundaries and fresh-Chrome private commit. Speed and memory are separate runs. Confirm all11canonical sections after decoding.",
+      "effectStatus": "Data-size opportunity quantified. No new browser/native codec is implemented; no latency or memory savings are claimed."
+    },
+    {
+      "rank": 2,
+      "change": "Separate backend copy/Context costs, then remove demonstrated redundant copies",
+      "why": "Current native handler median is2027ms, including shape fetch/decode820ms and residual413ms. Current popup_targets clones each body, Context::insert converts owned models into JSON Values, and the HTML-safe filter performs repeated replacements.",
+      "sequence": [
+        "Add fixed-label spans for popup target preparation, parts validation/free-text/managed assembly, Context construction, Tera mutex wait and escaping. Separate DB execution/fetch/GeoJSON conversion as available.",
+        "First compare borrowing popup body slices instead of owning copies. Then consider ownership-preserving Context construction or escaping only where measured. Do not treat the entire residual as removable.",
+        "Inspect repeated answer-scope query plans only after row conversion is distinguished. Do not add an index or replace snapshots with range fetch merely because shape SQLx time is large."
+      ],
+      "effectStatus": "Specific per-step costs and savings are not yet isolated. Likely narrower than the full transport opportunity; fallback to isolated low-risk copy removal if transport reconstruction fails compatibility/memory checks."
+    },
+    {
+      "rank": 3,
+      "change": "Improve the post-ready initial options path as a separate interaction-readiness target",
+      "why": "Options complete about596/706ms after ready; request is about890KB while response is189bytes. This does not explain the loading-cleared time.",
+      "sequence": [
+        "Measure ID validation, Set construction, Vue wrapping/copies, request serialization, endpoint scope/query execution and response application.",
+        "Compare shallow immutable target storage and reuse of validated membership indexes without removing message-origin/request checks.",
+        "Consider earlier start only once exactly the same renderable/authorized scope is fixed. Keep map-ready semantics, request count, as_of, failure behavior and stale-response cancellation; verify any yield or contention does not slow first display."
+      ],
+      "effectStatus": "Runtime overlap is at most the measured post-parse initialization window, roughly a few hundred ms on emulated mobile; it cannot remove the whole0.7second path."
+    }
+  ],
+  "deferredCandidates": [
+    {
+      "change": "modulepreload",
+      "reason": "Low-risk isolated experiment, but local current marks leave only a short post-block gap and static module timing is not separately recorded. Measure resource timing before prioritizing."
+    },
+    {
+      "change": "HTTP compression",
+      "reason": "Potential remote-network byte reduction, but current app/router and bundled nginx config show no explicit compression layer. External deployment configuration is unknown. Test real Content-Encoding, transfer size and compression/decompression CPU separately; local SQLite may see limited benefit and decoded72.6MB remains."
+    },
+    {
+      "change": "Initial geometry summary/refresh consolidation",
+      "reason": "All-record summaries and pre-fit/post-fit refresh remain, but initial registration14/58ms and runtime62/309ms are smaller than acquisition/data transport. Preserve inherited view, invalid shapes, circles and print rendering."
+    },
+    {
+      "change": "Canvas, Worker, spatial index, tiling/range fetch, on-open popup API",
+      "reason": "Not prioritized for this iteration. The measured scene generates83shapes initially, and retrieval/snapshot and response processing dominate; larger designs need separate evidence and compatibility evaluation."
+    }
+  ],
+  "validationPlan": [
+    "Freeze the same readonly copy, query/as_of, target set, parent view and source revision. Run before/after sequentially with other builds/tests stopped.",
+    "For each independent candidate, measure frozen-HTML browser behavior and actual native/live behavior, PC/mobile each3trials. Record every trial and median; do not add overlapping spans.",
+    "Run memory separately with periodic/boundary samples plus fresh-Chrome after-GC private commit and JS heap. Private commit is resident-or-paged committed allocation; WorkingSet sum may duplicate shared pages; neither observed samples nor checkpoints prove instantaneous peak.",
+    "Validate exact normal/free/all-answer text, current geometry/name, owner/latest/as_of/filters, inherited view, authentication retry and stale responses, search/color/CSV, full canonical print snapshots and close-time iframe/runtime release.",
+    "Cover interleaved or repeated text, multiple/empty answers, ambiguous legacy bodies, missing stored parts, sync_required, marker and shape, CRLF/control characters, emoji/combining characters, script-breakout strings, own __proto__ keys, unsupported version/type/reference and partial failure.",
+    "Keep CSV10,000answers, complete definitions10,000, merged fields200, print33,554,432bytes and request1,048,576bytes. Do not introduce timing assertions into functional tests.",
+    "Adopt only candidates with measured user-visible or retained-memory benefit and full compatibility. If restoration overhead or memory worsens enough to cancel the benefit, retain the current JSON implementation and compare isolated backend copy removal next."
+  ],
+  "cleanup": {
+    "originalDatabaseAndSettingsUnmodified": true,
+    "httpServerNotStarted": true,
+    "privateHtmlConditionsManifestAndDatabaseCopyRemoved": true,
+    "exactWorkspaceTargetPathsValidatedBeforeDeletion": true,
+    "reportsExcludeRawIdsNamesAnswersCoordinatesUrlsAndCredentials": true
+  }
+}

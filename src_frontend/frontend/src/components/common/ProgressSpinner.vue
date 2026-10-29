@@ -1,11 +1,12 @@
 <script setup lang="ts">
 defineProps<{
   isOpen: boolean;
+  inline?: boolean;
 }>();
 </script>
 
 <template>
-  <div class="progress-overlay" v-show="isOpen">
+  <div :class="inline ? 'progress-inline' : 'progress-overlay'" v-show="isOpen">
     <svg class="spinner" width="50" height="50" view-box="0 0 50 50" aria-hidden="true">
       <g transform="rotate(-90 25 25)">
         <circle
@@ -20,6 +21,7 @@ defineProps<{
         />
       </g>
     </svg>
+    <slot name="controls" />
   </div>
 </template>
 
@@ -42,6 +44,27 @@ defineProps<{
   transform-box: fill-box;
   animation: spin 1s linear infinite;
   will-change: transform;
+}
+
+.progress-inline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+:is(.progress-overlay, .overlay-progress-bar) :slotted(.progress-close-button) {
+  position: fixed;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  z-index: 1;
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: #5f5f5f;
+  color: white;
+  font: inherit;
+  cursor: pointer;
 }
 
 @keyframes spin {

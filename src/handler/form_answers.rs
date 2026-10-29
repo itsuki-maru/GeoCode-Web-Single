@@ -349,48 +349,125 @@ pub(super) fn build_query(
     q: &AnswerQuery,
     at: DateTime<Utc>,
 ) -> QueryBuilder<'static, Sqlite> {
-    let mut b = QueryBuilder::new(
-        r#"
-        WITH owned AS (
-        "#,
-    );
-    for (index, kind) in ["marker", "shape"].iter().enumerate() {
-        if index > 0 {
+    build_query_with_projection(user, q, at, AnswerProjection::Full)
+}
+
+#[derive(Clone, Copy)]
+enum AnswerProjection<'a> {
+    Full,
+    Search(&'a AnswerQuery),
+    Count(&'a AnswerQuery),
+}
+
+#[derive(FromRow)]
+struct AnswerKey {
+    id: String,
+    target_type: String,
+}
+
+/// Share ownership and the complete row projection with the bounded detail
+/// fetch. Only search planning omits display joins and unused JSON columns.
+fn append_answer_source(
+    b: &mut QueryBuilder<'static, Sqlite>,
+    user: &str,
+    projection: AnswerProjection<'_>,
+    keys: Option<&[AnswerKey]>,
+) {
+    let mut first = true;
+    for kind in ["marker", "shape"] {
+        if keys.is_some_and(|keys| !keys.iter().any(|key| key.target_type == kind)) {
+            continue;
+        }
+        if !first {
             b.push(" UNION ALL ");
         }
-        let (table, name) = if *kind == "marker" {
+        first = false;
+        let (table, name) = if kind == "marker" {
             ("marker_info_model", "m.marker_name")
         } else {
             ("shape_model", "COALESCE(m.name, '名称なし')")
         };
+        b.push("SELECT ");
+        // History counts need no answer ID, so target/create indexes can
+        // cover the submission scan. Latest ranking still breaks ties by ID.
+        if !matches!(projection, AnswerProjection::Count(q) if q.mode != "latest") {
+            b.push("s.id, ");
+        }
         b.push(format!(
             r#"
-            SELECT
-                s.id,
-                '{kind}' AS target_type,
-                m.id AS target_id,
-                {name} AS target_name,
-                m.layer_id,
-                l.layer_name,
-                s.create_at COLLATE answer_time AS create_at,
-                s.edited_at,
-                s.revision,
-                s.submitted_values,
-                s.form_snapshot,
-                s.source_form,
-                cf.form_title AS common_form_name,
-                cf.deleted AS common_form_deleted
-            FROM {kind}_form_submission_model s
-            JOIN {table} m ON m.id = s.{kind}_id
-            LEFT JOIN layer_model l ON l.id = m.layer_id
-                AND l.user_id = m.user_id
-            LEFT JOIN common_form_model cf ON cf.id = s.source_form ->> 'id'
-                AND cf.user_id = m.user_id
-            WHERE m.user_id =
+            '{kind}' AS target_type, m.id AS target_id
             "#
-        ))
-        .push_bind(user.to_owned());
+        ));
+        match projection {
+            AnswerProjection::Full => {
+                b.push(format!(
+                    r#",
+                    {name} AS target_name, m.layer_id, l.layer_name,
+                    s.create_at COLLATE answer_time AS create_at,
+                    s.edited_at, s.revision, s.submitted_values, s.form_snapshot,
+                    s.source_form, cf.form_title AS common_form_name,
+                    cf.deleted AS common_form_deleted
+                    "#
+                ));
+            },
+            AnswerProjection::Search(q) | AnswerProjection::Count(q) => {
+                b.push(", s.create_at COLLATE answer_time AS create_at");
+                if q.target_name.is_some() {
+                    b.push(format!(", {name} AS target_name"));
+                }
+                if q.layer_id.is_some() {
+                    b.push(", m.layer_id");
+                }
+                if q.mode == "latest"
+                    || q.common_form_id.is_some()
+                    || q.individual_only
+                    || q.version.is_some()
+                {
+                    b.push(", s.source_form");
+                }
+                if !q.conditions.is_empty() {
+                    b.push(", s.submitted_values, s.form_snapshot");
+                }
+            },
+        }
+        // For bounded details, start with submission PK lookups. An ordinary
+        // join can instead scan every owned target before applying s.id IN.
+        let target_join = if keys.is_some() { "CROSS JOIN" } else { "JOIN" };
+        b.push(format!(
+            r#"
+            FROM {kind}_form_submission_model s
+            {target_join} {table} m ON m.id = s.{kind}_id
+            "#
+        ));
+        if matches!(projection, AnswerProjection::Full) {
+            b.push(
+                r#"
+                LEFT JOIN layer_model l ON l.id = m.layer_id AND l.user_id = m.user_id
+                LEFT JOIN common_form_model cf ON cf.id = s.source_form ->> 'id'
+                    AND cf.user_id = m.user_id
+                "#,
+            );
+        }
+        b.push(" WHERE m.user_id = ").push_bind(user.to_owned());
+        if let Some(keys) = keys {
+            b.push(" AND s.id IN (");
+            let mut ids = b.separated(",");
+            for key in keys.iter().filter(|key| key.target_type == kind) {
+                ids.push_bind(key.id.clone());
+            }
+            b.push(")");
+        }
     }
+}
+
+fn build_query_with_projection(
+    user: &str,
+    q: &AnswerQuery,
+    at: DateTime<Utc>,
+    projection: AnswerProjection<'_>,
+) -> QueryBuilder<'static, Sqlite> {
+    let mut b = QueryBuilder::new("WITH owned AS (");
+    append_answer_source(&mut b, user, projection, None);
     b.push("), scoped AS (SELECT * FROM owned WHERE create_at COLLATE answer_time <= ")
         .push_bind(at.naive_utc());
     if let Some(id) = &q.common_form_id {
@@ -425,19 +502,21 @@ pub(super) fn build_query(
         .push_bind(name.clone())
         .push(")");
     }
-    b.push(
-        r#"
+    if q.mode == "latest" {
+        b.push(
+            r#"
         ), ranked AS (
             SELECT *, row_number() OVER (
                 PARTITION BY target_type, target_id, COALESCE(source_form ->> 'id', 'individual')
                 ORDER BY create_at COLLATE answer_time DESC, id DESC
             ) AS rn FROM scoped
         ), filtered AS (
-            SELECT * FROM ranked WHERE TRUE
+            SELECT * FROM ranked WHERE rn = 1
         "#,
-    );
-    if q.mode == "latest" {
-        b.push(" AND rn = 1");
+        );
+    } else {
+        // History does not need to rank or sort every answer before filtering.
+        b.push("), filtered AS (SELECT * FROM scoped WHERE TRUE");
     }
     if let Some(v) = q.version {
         b.push(" AND CAST(source_form ->> 'version' AS TEXT) = ")
@@ -536,36 +615,8 @@ const ROW_COLUMNS: &str = r#"
         source_form, common_form_name, common_form_deleted
     "#;
 
-pub async fn search_answers_handler(
-    Extension(user): Extension<String>,
-    Extension(pool): Extension<SqlitePool>,
-    Json(q): Json<AnswerQuery>,
-) -> Result<Json<AnswerPage>, AppError> {
-    validate(&q)?;
-    let at = q.as_of.unwrap_or_else(Utc::now);
-    let mut tx = super::answer_sqlite::begin_read(&pool).await?;
-    let (total, target_count): (i64, i64) = build_query(&user, &q, at)
-        .push(
-            r#"
-            SELECT
-                count(*),
-                count(DISTINCT target_type || ':' || target_id)
-            FROM filtered
-            "#,
-        )
-        .build_query_as()
-        .fetch_one(&mut *tx)
-        .await?;
-    let size = q.limit.unwrap_or(50);
-    let mut b = build_query(&user, &q, at);
-    b.push(format!(
-        r#"
-        SELECT
-            {ROW_COLUMNS}
-        FROM filtered
-        WHERE TRUE
-        "#
-    ));
+fn append_page_query(b: &mut QueryBuilder<'static, Sqlite>, q: &AnswerQuery, columns: &str) {
+    b.push(format!("SELECT {columns} FROM filtered WHERE TRUE"));
     if let Some(c) = &q.cursor {
         b.push(" AND (create_at COLLATE answer_time,id,target_type) < (")
             .push_bind(c.at)
@@ -576,8 +627,51 @@ pub async fn search_answers_handler(
             .push(")");
     }
     b.push(" ORDER BY create_at COLLATE answer_time DESC,id DESC,target_type DESC LIMIT ")
-        .push_bind(size + 1);
-    let mut rows = b.build_query_as::<AnswerRow>().fetch_all(&mut *tx).await?;
+        .push_bind(q.limit.unwrap_or(50) + 1);
+}
+
+async fn selected_answer_rows(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    user: &str,
+    keys: &[AnswerKey],
+) -> Result<Vec<AnswerRow>, sqlx::Error> {
+    if keys.is_empty() {
+        return Ok(vec![]);
+    }
+    // IDs already reflect all filters and latest-answer decisions. Resolve
+    // only that bounded set, in the same read transaction and ownership scope.
+    let mut b = QueryBuilder::new(format!("SELECT {ROW_COLUMNS} FROM ("));
+    append_answer_source(&mut b, user, AnswerProjection::Full, Some(keys));
+    b.push(") page ORDER BY create_at COLLATE answer_time DESC,id DESC,target_type DESC");
+    b.build_query_as().fetch_all(&mut **tx).await
+}
+
+pub async fn search_answers_handler(
+    Extension(user): Extension<String>,
+    Extension(pool): Extension<SqlitePool>,
+    Json(q): Json<AnswerQuery>,
+) -> Result<Json<AnswerPage>, AppError> {
+    validate(&q)?;
+    let at = q.as_of.unwrap_or_else(Utc::now);
+    let mut tx = super::answer_sqlite::begin_read(&pool).await?;
+    let (total, target_count): (i64, i64) =
+        build_query_with_projection(&user, &q, at, AnswerProjection::Count(&q))
+            .push(
+                r#"
+            SELECT
+                count(*),
+                count(DISTINCT target_type || ':' || target_id)
+            FROM filtered
+            "#,
+            )
+            .build_query_as()
+            .fetch_one(&mut *tx)
+            .await?;
+    let size = q.limit.unwrap_or(50);
+    let mut b = build_query_with_projection(&user, &q, at, AnswerProjection::Search(&q));
+    append_page_query(&mut b, &q, "id, target_type");
+    let keys: Vec<AnswerKey> = b.build_query_as().fetch_all(&mut *tx).await?;
+    let mut rows = selected_answer_rows(&mut tx, &user, &keys).await?;
     tx.commit().await?;
     let next_cursor = if rows.len() > size as usize {
         rows.truncate(size as usize);
@@ -644,15 +738,7 @@ pub(super) async fn fields_from_query(
     source: &'static str,
     order: &mut Vec<(String, String)>,
 ) -> Result<BTreeMap<(String, String), FieldOption>, AppError> {
-    b.push(format!(r#"
-    SELECT
-        field
-    FROM ( SELECT field, observed, position FROM ( SELECT f.value AS field, a.create_at AS observed, CAST(f.key AS INTEGER) AS position, row_number() OVER ( PARTITION BY f.value ORDER BY a.create_at COLLATE answer_time DESC, a.id DESC, a.target_type DESC, CAST(f.key AS INTEGER) ) AS definition_rank FROM {source} a, json_each(a.form_snapshot, '$.form_schema.fields') f ) snapshots WHERE definition_rank = 1 UNION ALL SELECT json_object('id', f.key, 'label', f.key, 'type', 'unknown'), max(a.create_at COLLATE answer_time), NULL FROM {source} a, json_each(a.submitted_values) f WHERE a.form_snapshot IS NULL GROUP BY f.key ) definitions
-    ORDER BY observed COLLATE answer_time DESC,
-    position NULLS LAST,
-    field
-    LIMIT 10001
-    "#));
+    append_field_definitions(&mut b, source);
     let definitions: Vec<Value> = b.build_query_scalar().fetch_all(&mut **tx).await?;
     if definitions.len() > 10_000 {
         return Err(invalid(
@@ -673,6 +759,56 @@ pub(super) async fn fields_from_query(
     Ok(fields)
 }
 
+fn append_field_definitions(b: &mut QueryBuilder<'static, Sqlite>, source: &'static str) {
+    // Only arrays can be grouped by their extracted JSON text. A JSON string
+    // can extract to that same text, and JSON null and a missing path both
+    // extract to SQL NULL. Preserve those values and expand original snapshots.
+    b.push(format!(r#"
+    SELECT
+        field
+    FROM (
+        SELECT field, observed, position
+        FROM (
+            SELECT f.value AS field, a.create_at AS observed,
+                CAST(f.key AS INTEGER) AS position,
+                row_number() OVER (
+                    PARTITION BY f.value
+                    ORDER BY a.create_at COLLATE answer_time DESC, a.id DESC,
+                        a.target_type DESC, CAST(f.key AS INTEGER)
+                ) AS definition_rank
+            FROM (
+                SELECT form_snapshot, create_at, id, target_type
+                FROM (
+                    SELECT form_snapshot, create_at, id, target_type,
+                        row_number() OVER (
+                            PARTITION BY json_extract(form_snapshot, '$.form_schema.fields') COLLATE BINARY
+                            ORDER BY create_at COLLATE answer_time DESC, id DESC, target_type DESC
+                        ) AS snapshot_rank
+                    FROM {source}
+                    WHERE json_type(form_snapshot, '$.form_schema.fields') = 'array'
+                ) arrays
+                WHERE snapshot_rank = 1
+                UNION ALL
+                SELECT form_snapshot, create_at, id, target_type
+                FROM {source}
+                WHERE json_type(form_snapshot, '$.form_schema.fields') IS NOT 'array'
+            ) a, json_each(a.form_snapshot, '$.form_schema.fields') f
+        ) snapshots
+        WHERE definition_rank = 1
+        UNION ALL
+        SELECT json_object('id', f.key, 'label', f.key, 'type', 'unknown'),
+            max(a.create_at COLLATE answer_time), NULL
+        FROM {source} a, json_each(a.submitted_values) f
+        WHERE a.form_snapshot IS NULL
+        GROUP BY f.key
+    ) definitions
+    ORDER BY observed COLLATE answer_time DESC,
+    position NULLS LAST,
+    field
+    LIMIT 10001
+    "#));
+}
+
 pub async fn answer_options_handler(
     Extension(user): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
@@ -687,6 +823,7 @@ pub async fn answer_options_handler(
     validate(&q)?;
     let at = q.as_of.unwrap_or_else(Utc::now);
     let mut tx = super::answer_sqlite::begin_read(&pool).await?;
+    // Gather references once instead of rescanning all owned targets per deleted form.
     let forms: Vec<(String, String, bool)> = sqlx::query_as(
         r#"
         SELECT
@@ -695,7 +832,20 @@ pub async fn answer_options_handler(
             f.deleted
         FROM common_form_model f
         WHERE f.user_id = $1
-            AND ( NOT f.deleted OR EXISTS ( SELECT 1 FROM marker_form_submission_model s JOIN marker_info_model m ON m.id = s.marker_id WHERE m.user_id = $1 AND s.source_form ->> 'id' = f.id ) OR EXISTS ( SELECT 1 FROM shape_form_submission_model s JOIN shape_model m ON m.id = s.shape_id WHERE m.user_id = $1 AND s.source_form ->> 'id' = f.id ) )
+            AND (
+                NOT f.deleted
+                OR f.id IN (
+                    SELECT s.source_form ->> 'id'
+                    FROM marker_form_submission_model s
+                    JOIN marker_info_model m ON m.id = s.marker_id
+                    WHERE m.user_id = $1
+                    UNION
+                    SELECT s.source_form ->> 'id'
+                    FROM shape_form_submission_model s
+                    JOIN shape_model m ON m.id = s.shape_id
+                    WHERE m.user_id = $1
+                )
+            )
         ORDER BY f.update_at DESC,
         f.id
         "#,
@@ -1041,8 +1191,407 @@ pub(super) fn stream_csv(
 }
 
 #[cfg(test)]
+mod search_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    // Independent reference: complete SQLite field text, timestamp collation,
+    // legacy values, ordering and the definition limit must remain unchanged.
+    const PREVIOUS_FIELD_DEFINITIONS: &str = r#"
+        SELECT field FROM (
+            SELECT field, observed, position FROM (
+                SELECT f.value AS field, a.create_at AS observed,
+                    CAST(f.key AS INTEGER) AS position,
+                    row_number() OVER (
+                        PARTITION BY f.value
+                        ORDER BY a.create_at COLLATE answer_time DESC, a.id DESC,
+                            a.target_type DESC, CAST(f.key AS INTEGER)
+                    ) AS definition_rank
+                FROM filtered a, json_each(a.form_snapshot, '$.form_schema.fields') f
+            ) snapshots WHERE definition_rank = 1
+            UNION ALL
+            SELECT json_object('id', f.key, 'label', f.key, 'type', 'unknown'),
+                max(a.create_at COLLATE answer_time), NULL
+            FROM filtered a, json_each(a.submitted_values) f
+            WHERE a.form_snapshot IS NULL GROUP BY f.key
+        ) definitions
+        ORDER BY observed COLLATE answer_time DESC, position NULLS LAST, field
+        LIMIT 10001
+    "#;
+
+    async fn field_test_pool() -> SqlitePool {
+        sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap()
+    }
+
+    fn field_source(rows: Value) -> QueryBuilder<'static, Sqlite> {
+        // Decode fixture records once, like reading stored answer columns.
+        // Inlining would reparse a large snapshot for each expanded field.
+        let mut b = QueryBuilder::new(
+            r#"
+            WITH filtered AS MATERIALIZED (
+                SELECT json_extract(r.value, '$.id') AS id,
+                    json_extract(r.value, '$.target_type') AS target_type,
+                    json_extract(r.value, '$.create_at') AS create_at,
+                    json_extract(r.value, '$.form_snapshot') AS form_snapshot,
+                    json_extract(r.value, '$.submitted_values') AS submitted_values
+                FROM json_each(
+        "#,
+        );
+        b.push_bind(rows).push(") r) ");
+        b
+    }
+
+    fn field_record(id: u128, kind: &str, at: &str, snapshot: Value, values: Value) -> Value {
+        json!({
+            "id": Uuid::from_u128(id), "target_type": kind, "create_at": at,
+            "form_snapshot": snapshot, "submitted_values": values
+        })
+    }
+
+    fn snapshot(fields: Value) -> Value {
+        json!({"form_schema":{"fields":fields}})
+    }
+
+    fn repeated_field_records() -> Value {
+        let first = json!({"id":"first","type":"text","label":"先頭","ignored_number":1});
+        let current = json!({"id":"state","type":"select","label":"新名","choices":["新","共通"]});
+        let text = json!({"id":"state","type":"text","label":"同名の文字列"});
+        let fields = json!([first, current, current, text]);
+        let mut rows = Vec::new();
+        for id in 1..=256 {
+            let mut definition = snapshot(fields.clone());
+            definition["form_title"] = json!(format!("投稿時の題名{id}"));
+            if id % 2 == 0 {
+                definition["form_schema"]["fields"][0]["ignored_number"] = json!(1.0);
+            }
+            rows.push(field_record(
+                id,
+                "marker",
+                "2026-10-01 08:00:00",
+                definition,
+                json!({}),
+            ));
+        }
+        rows.push(field_record(
+            1000,
+            "marker",
+            "2026-10-01 10:00:00",
+            snapshot(json!([current, first, text])),
+            json!({}),
+        ));
+        // Same instant and ID, with a different spelling of the timestamp.
+        rows.push(field_record(
+            1000,
+            "shape",
+            "2026-10-01T19:00:00+09:00",
+            snapshot(fields.clone()),
+            json!({}),
+        ));
+        let mut reversed = fields.as_array().unwrap().clone();
+        reversed.reverse();
+        rows.push(field_record(
+            1001,
+            "marker",
+            "2026-10-01 09:00:00",
+            snapshot(json!(reversed)),
+            json!({}),
+        ));
+        rows.push(field_record(
+            1002,
+            "marker",
+            "2026-10-01 09:00:00",
+            snapshot(json!([
+                {"id":"state","type":"select","label":"旧名","choices":["旧","共通"]},
+                {"id":"retired","type":"date","label":"廃止項目"}
+            ])),
+            json!({}),
+        ));
+        rows.push(field_record(
+            1003,
+            "marker",
+            "2026-10-01 07:00:00",
+            Value::Null,
+            json!({"legacy_one":"旧回答"}),
+        ));
+        rows.push(field_record(
+            1004,
+            "shape",
+            "2026-10-01 06:00:00",
+            Value::Null,
+            json!({"legacy_two":"別の旧回答"}),
+        ));
+        rows.push(field_record(
+            1005,
+            "marker",
+            "2026-10-01 11:00:00",
+            snapshot(json!([])),
+            json!({}),
+        ));
+        rows.push(field_record(
+            1006,
+            "marker",
+            "2026-10-01 12:00:00",
+            json!({"form_schema":{}}),
+            json!({}),
+        ));
+        json!(rows)
+    }
+
+    fn field_definition_query(rows: Value, previous: bool) -> QueryBuilder<'static, Sqlite> {
+        let mut b = field_source(rows);
+        if previous {
+            b.push(PREVIOUS_FIELD_DEFINITIONS);
+        } else {
+            append_field_definitions(&mut b, "filtered");
+        }
+        b
+    }
+
+    async fn field_definitions(
+        pool: &SqlitePool,
+        rows: Value,
+        previous: bool,
+    ) -> Result<Vec<Value>, sqlx::Error> {
+        let mut tx = super::super::answer_sqlite::begin_read(pool).await?;
+        field_definition_query(rows, previous)
+            .build_query_scalar()
+            .fetch_all(&mut *tx)
+            .await
+    }
+
+    #[tokio::test]
+    async fn field_array_representatives_preserve_definitions_and_presentation() {
+        let pool = field_test_pool().await;
+        let rows = repeated_field_records();
+        let previous = field_definitions(&pool, rows.clone(), true).await.unwrap();
+        assert_eq!(
+            field_definitions(&pool, rows.clone(), false).await.unwrap(),
+            previous
+        );
+        let mut tx = super::super::answer_sqlite::begin_read(&pool)
+            .await
+            .unwrap();
+        let mut order = vec![];
+        let fields = fields_from_query(&mut tx, field_source(rows), "filtered", &mut order)
+            .await
+            .unwrap();
+        assert_eq!(
+            order,
+            [
+                ("first", "text"),
+                ("state", "select"),
+                ("state", "text"),
+                ("retired", "date"),
+                ("legacy_one", "unknown"),
+                ("legacy_two", "unknown")
+            ]
+            .map(|(id, kind)| (id.to_owned(), kind.to_owned()))
+        );
+        let state = &fields[&("state".into(), "select".into())];
+        assert_eq!(state.label, "新名");
+        assert_eq!(state.choices, ["新", "共通", "旧"]);
+    }
+
+    #[tokio::test]
+    async fn field_array_representatives_preserve_both_definition_limits() {
+        let pool = field_test_pool().await;
+        for (count, unique_ids, error) in [
+            (200, true, None),
+            (201, true, Some("200件")),
+            (10_000, false, None),
+            (10_001, false, Some("項目定義が多すぎます")),
+        ] {
+            let definitions: Vec<_> = (0..count)
+                .map(|n| {
+                    json!({
+                        "id": if unique_ids { format!("field_{n}") } else { "field".into() },
+                        "type":"text", "label":format!("定義{n}")
+                    })
+                })
+                .collect();
+            let rows = json!([field_record(
+                1,
+                "marker",
+                "2026-10-01 10:00:00",
+                snapshot(json!(definitions)),
+                json!({})
+            )]);
+            assert_eq!(
+                field_definitions(&pool, rows.clone(), false).await.unwrap(),
+                field_definitions(&pool, rows.clone(), true).await.unwrap()
+            );
+            let mut tx = super::super::answer_sqlite::begin_read(&pool)
+                .await
+                .unwrap();
+            let result =
+                fields_from_query(&mut tx, field_source(rows), "filtered", &mut vec![]).await;
+            if let Some(message) = error {
+                assert!(
+                    matches!(result, Err(AppError::Validation(ref text)) if text.contains(message))
+                );
+            } else {
+                assert_eq!(result.unwrap().len(), if unique_ids { count } else { 1 });
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn field_array_representatives_keep_json_types_and_field_text() {
+        let pool = field_test_pool().await;
+        let field = json!({"id":"value","type":"text","label":"配列の項目"});
+        let array = json!([field]);
+        let rows = json!([
+            field_record(
+                1,
+                "marker",
+                "2026-10-01 08:00:00",
+                snapshot(array.clone()),
+                json!({})
+            ),
+            field_record(
+                2,
+                "marker",
+                "2026-10-01 09:00:00",
+                snapshot(json!(array.to_string())),
+                json!({})
+            ),
+            field_record(
+                3,
+                "marker",
+                "2026-10-01 10:00:00",
+                snapshot(Value::Null),
+                json!({})
+            ),
+            field_record(
+                4,
+                "marker",
+                "2026-10-01 11:00:00",
+                json!({"form_schema":{}}),
+                json!({})
+            ),
+            field_record(
+                5,
+                "marker",
+                "2026-10-01 12:00:00",
+                snapshot(json!([])),
+                json!({})
+            ),
+            field_record(
+                6,
+                "marker",
+                "2026-10-01 07:00:00",
+                snapshot(json!({"x":{"id":"object","type":"text","label":"非配列"}})),
+                json!({})
+            ),
+            field_record(
+                7,
+                "marker",
+                "2026-10-01 06:00:00",
+                Value::Null,
+                json!({"legacy":"旧回答"})
+            )
+        ]);
+        let mut results = Vec::new();
+        for previous in [true, false] {
+            let mut tx = super::super::answer_sqlite::begin_read(&pool)
+                .await
+                .unwrap();
+            let values: Vec<Option<String>> = field_definition_query(rows.clone(), previous)
+                .build_query_scalar()
+                .fetch_all(&mut *tx)
+                .await
+                .unwrap();
+            assert_eq!(values.len(), 5);
+            assert_eq!(values[0], None);
+            assert_eq!(values[1].as_deref(), Some(array.to_string().as_str()));
+            results.push(values);
+        }
+        assert_eq!(results[0], results[1]);
+        // Keep key order and numeric spellings significant for SQLite field
+        // text, even when serde_json would decode them to equivalent objects.
+        let rows = json!([
+            field_record(
+                1,
+                "marker",
+                "2026-10-01 08:00:00",
+                json!(
+                    r#"{"form_schema":{"fields":[{"id":"raw","type":"text","label":"表記","ignored":1}]}}"#
+                ),
+                json!({})
+            ),
+            field_record(
+                2,
+                "marker",
+                "2026-10-01 09:00:00",
+                json!(
+                    r#"{"form_schema":{"fields":[{"label":"表記","type":"text","id":"raw","ignored":1.0}]}}"#
+                ),
+                json!({})
+            )
+        ]);
+        let old = field_definitions(&pool, rows.clone(), true).await.unwrap();
+        assert_eq!(old.len(), 2);
+        assert_eq!(field_definitions(&pool, rows, false).await.unwrap(), old);
+    }
+
+    #[tokio::test]
+    #[ignore = "diagnostic benchmark: compares SQL medians without a timing threshold"]
+    async fn measure_field_array_representatives() {
+        let pool = field_test_pool().await;
+        for distinct in [false, true] {
+            let rows: Vec<_> = (0..2_000)
+                .map(|n| {
+                    let fields: Vec<_> = (0..5).map(|f| json!({
+                    "id":format!("field_{f}"), "type":"text", "label":format!("項目{f}"),
+                    "choices": if distinct { vec![format!("回答{n}")] } else { vec!["共通".into()] }
+                })).collect();
+                    field_record(
+                        n + 1,
+                        "marker",
+                        "2026-10-01 10:00:00",
+                        snapshot(json!(fields)),
+                        json!({}),
+                    )
+                })
+                .collect();
+            let rows = json!(rows);
+            let expected = field_definitions(&pool, rows.clone(), true).await.unwrap();
+            assert_eq!(
+                field_definitions(&pool, rows.clone(), false).await.unwrap(),
+                expected
+            );
+            let mut times = [vec![], vec![]];
+            for sample in 0..3 {
+                let modes = if sample % 2 == 0 {
+                    [true, false]
+                } else {
+                    [false, true]
+                };
+                for previous in modes {
+                    let index = if previous { 0 } else { 1 };
+                    let input = rows.clone();
+                    let start = std::time::Instant::now();
+                    let actual = field_definitions(&pool, input, previous).await.unwrap();
+                    times[index].push(start.elapsed().as_secs_f64() * 1000.0);
+                    assert_eq!(actual, expected);
+                }
+            }
+            for samples in &mut times {
+                samples.sort_by(f64::total_cmp);
+            }
+            println!(
+                "fields distinct={distinct}: previous={:.2}ms representatives={:.2}ms (3-sample median, synthetic source and query)",
+                times[0][1], times[1][1]
+            );
+        }
+    }
+
     #[test]
     fn csv_escapes_formula_strings_and_quotes() {
         assert_eq!(csv_cell(" =SUM(A1)", true), "\"' =SUM(A1)\"");

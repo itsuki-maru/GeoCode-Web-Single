@@ -9,6 +9,7 @@ import type { AnotherMapBootstrap } from "../src/map/types";
 import { createPrintPreview } from "../src/map/print/print-preview";
 import { createAnswerPrintSnapshot } from "../src/map/print/answer-print-state";
 import { installAnswerFilter } from "../src/map/answer-filter";
+import { readMapBootstrap } from "../src/map/bootstrap";
 
 // アプリケーションと同じ Leaflet を使用し、jsdom に必要な SVG 機能を補う。
 Object.assign(SVGSVGElement.prototype, { createSVGRect: () => ({}) });
@@ -122,6 +123,102 @@ const status = (id: string) =>
   document.querySelector(`[data-layer-load-id="${id}"] .layer-object-load-state`)!.textContent;
 
 describe("lazy groups in the actual read-only map runtime", () => {
+  it.each([
+    { mobile: false, references: false }, { mobile: true, references: false },
+    { mobile: false, references: true }, { mobile: true, references: true },
+  ])(
+    "回答JSON blockは現在位置・全対象・Unicode本文の切替を維持する（%j）",
+    async ({ mobile, references }) => {
+      const previousUrl = location.href;
+      try {
+        document.body.classList.remove("map-mobile-controls");
+        history.replaceState({}, "", mobile ? "?map_ui=mobile" : "?");
+        const free = "自由漢字𠮷 e\u0301";
+        const answers = "**回答🙂**";
+        const body = `${free}\n\n${answers}`;
+        const record = shape("a");
+        const view = { latitude: 35.68, longitude: 139.76, zoom: 14 };
+        const data = {
+          ...(window.__GEOCODE_MAP_BOOTSTRAP__ as Record<string, unknown>),
+          page: "form-answer-map",
+          markers: { "m-a": { ...marker("a"), detail: body } },
+          shapes: [{ ...record, geojson: { ...record.geojson, properties: { ...record.geojson.properties, memo: body } } }],
+          popupBodies: Object.fromEntries(["marker:m-a", "shape:s-a"].map((id) => [id,
+            { free_text: references ? `${free}\n\n` : free, managed_markdown: answers, sync_required: false },
+          ])),
+          answerPreview: {
+            answerCount: 3, targetCount: 2,
+            query: { mode: "history", as_of: "2026-10-01T00:00:00Z" },
+            targets: ["marker:m-a", "shape:s-a"],
+            initialView: view, parentOrigin: location.origin, requestId: "json-body-runtime",
+          },
+        };
+        if (references) {
+          const transport = data as any;
+          transport.normalBodyReferences = { version: 1, markers: ["m-a"], shapes: ["s-a"] };
+          delete transport.markers["m-a"].detail;
+          delete transport.shapes[0].geojson.properties.memo;
+        }
+        delete window.__GEOCODE_MAP_BOOTSTRAP__;
+        const script = document.createElement("script");
+        script.id = "geocode-map-bootstrap";
+        script.type = "application/json";
+        script.textContent = JSON.stringify(data);
+        document.body.append(script);
+        const bootstrap = readMapBootstrap();
+        if (bootstrap.page !== "form-answer-map") throw Error("Wrong page");
+        const post = vi.spyOn(window.parent, "postMessage").mockImplementation(() => {});
+        runtime = initializeReadOnlyMapPage("form-answer-map");
+        await runtime.shapeRenderer.whenIdle();
+        finishAnswerPreview(runtime, bootstrap, leaflet);
+        expect(readMapBootstrap()).toBe(bootstrap);
+        expect(bootstrap).not.toHaveProperty("normalBodyReferences");
+        expect(bootstrap.markers["m-a"].detail).toBe(body);
+        expect(bootstrap.shapes[0].geojson.geometry).toEqual(record.geojson.geometry);
+        expect((bootstrap.shapes[0].geojson.properties as any).memo).toBe(body);
+        expect(bootstrap.shapes[0].name).toBe(record.name);
+        expect(bootstrap.markers["m-a"].marker_name).toBe(marker("a").marker_name);
+        expect(document.getElementById("geocode-map-bootstrap")).toBeNull();
+        expect(runtime.getVisibleShapeIds()).toEqual(["s-a"]);
+        const actualView = runtime.getPrintState().view;
+        expect(actualView.zoom).toBe(view.zoom);
+        // Leaflet rounds the initial center to map pixels during invalidateSize.
+        expect(runtime.map.project([actualView.latitude, actualView.longitude], view.zoom)
+          .distanceTo(runtime.map.project([view.latitude, view.longitude], view.zoom))).toBeLessThanOrEqual(1);
+        expect(document.body.classList.contains("map-mobile-controls")).toBe(mobile);
+        expect(post).toHaveBeenCalledWith(expect.objectContaining({
+          type: "answer-map-ready", targetCount: 2, answerCount: 3, displayed: 2,
+          query: data.answerPreview.query, targets: data.answerPreview.targets,
+        }), location.origin);
+        runtime.markers["marker-m-a"].getPopup().setLatLng([view.latitude, view.longitude]).openOn(runtime.map);
+        const select = document.querySelector<HTMLSelectElement>(".popup-content-toolbar select")!;
+        await vi.waitFor(() => expect(select.options[0].disabled).toBe(false));
+        for (const mode of ["free", "answers", "normal"]) {
+          select.value = mode;
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+          const rendered = document.querySelector<HTMLElement>(".popup-content-body")!;
+          if (mode === "free") expect(rendered.textContent?.trim()).toBe(free);
+          if (mode === "answers") expect(rendered.querySelector("strong")?.textContent).toBe("回答🙂");
+          if (mode === "normal") {
+            expect(rendered.textContent).toContain(free);
+            expect(rendered.querySelector("strong")?.textContent).toBe("回答🙂");
+          }
+        }
+        runtime.shapeLayers["shape-s-a"].fire("click", { latlng: leaflet.latLng(view.latitude, view.longitude) });
+        await vi.waitFor(() => expect(document.querySelector<HTMLSelectElement>(".popup-content-toolbar select")!.options[0].disabled).toBe(false));
+        expect(document.querySelector(".popup-content-title")?.textContent).toBe(record.name);
+        expect(document.querySelector(".popup-content-body")?.textContent).toContain(free);
+        const snapshot = createAnswerPrintSnapshot(bootstrap, runtime, ["marker:m-a", "shape:s-a"]);
+        expect(snapshot.bootstrap.markers["m-a"].detail).toBe(body);
+        expect((snapshot.bootstrap.shapes[0].geojson.properties as any).memo).toBe(body);
+        expect(snapshot.bootstrap).not.toHaveProperty("normalBodyReferences");
+        expect(fetchData).not.toHaveBeenCalled();
+      } finally {
+        history.replaceState({}, "", previousUrl);
+      }
+    },
+  );
+
   it("縮尺によって図形が省略されても移動・拡大の案内を表示しない", async () => {
     const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
     bootstrap.page = "form-answer-map";

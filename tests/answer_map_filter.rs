@@ -436,7 +436,10 @@ async fn original_scope_options_zero_results_and_validation() {
     assert!(
         filter_targets(&pool, &f.owner.to_string(), &r)
             .await
-            .is_err()
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("重複")
     );
     r.targets = f.targets.clone();
     r.query.conditions.clear();

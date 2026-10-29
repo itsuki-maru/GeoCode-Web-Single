@@ -427,6 +427,8 @@ window.addEventListener("message", function (event) {
             markersVisible: map.hasLayer(markersClusterGroup),
             shapesVisible: map.hasLayer(drawnShapesGroup),
             shapeNamesVisible: map.hasLayer(shapeNameVisibilityLayer),
+            markerIds: externalMarkerFilterIds === null ? null : [...externalMarkerFilterIds],
+            shapeIds: externalShapeFilterIdSet === null ? null : [...externalShapeFilterIdSet],
           },
         },
         event.origin,

@@ -1,0 +1,2015 @@
+{
+  "purpose": "Investigate first-display latency of the real answer map and plan improvements without changing snapshot, filtering, ownership or output-limit behavior. Only spinner UI is changed in production.",
+  "validationDateJst": "2026-10-29",
+  "gitBase": {
+    "postgresql": "6054dd7dc7a9d03bd31ae5e3d59f7e9141bedb7e",
+    "sqlite": "71cc5c53cc5f13377bb7a02d011853f62815b123"
+  },
+  "dataset": {
+    "answers": 22537,
+    "targets": 19776,
+    "markers": 0,
+    "shapes": 19776,
+    "htmlBytes": 72597480
+  },
+  "native": {
+    "backend": "sqlite",
+    "answers": 22537,
+    "targets": 19776,
+    "markers": 0,
+    "shapes": 19776,
+    "htmlBytes": 72597480,
+    "initialProfile": {
+      "medians": {
+        "handlerMs": 2745.5308999999997,
+        "jsonEncodeMs": 173.52429999999998,
+        "renderMs": 200.458,
+        "sqlObservedMs": 1941.0770999999997,
+        "unattributedMs": 602.951
+      },
+      "samples": [
+        {
+          "bodyMaterializeMs": 0.0037,
+          "handlerMs": 2839.3559,
+          "htmlBytes": 72597480,
+          "jsonEncodeMs": 170.4044,
+          "jsonSections": [
+            {
+              "ms": 66.01129999999999,
+              "output_bytes": 27645776,
+              "section": "popupBodies"
+            },
+            {
+              "ms": 2.0828,
+              "output_bytes": 890303,
+              "section": "answerPreview"
+            },
+            {
+              "ms": 0.0109,
+              "output_bytes": 1515,
+              "section": "tileServers"
+            },
+            {
+              "ms": 0.0051,
+              "output_bytes": 354,
+              "section": "tileOverlays"
+            },
+            {
+              "ms": 0.0015,
+              "output_bytes": 38,
+              "section": "tileVisibilityAccountId"
+            },
+            {
+              "ms": 0.0152,
+              "output_bytes": 5600,
+              "section": "layers"
+            },
+            {
+              "ms": 0.001,
+              "output_bytes": 2,
+              "section": "markers"
+            },
+            {
+              "ms": 102.2766,
+              "output_bytes": 44040907,
+              "section": "shapes"
+            }
+          ],
+          "queries": [
+            {
+              "kind": "answer_count",
+              "ms": 195.2099,
+              "rows": 1
+            },
+            {
+              "kind": "marker_records",
+              "ms": 0.256,
+              "rows": 0
+            },
+            {
+              "kind": "shape_records",
+              "ms": 721.5824,
+              "rows": 19776
+            },
+            {
+              "kind": "layers",
+              "ms": 0.1744,
+              "rows": 20
+            },
+            {
+              "kind": "popup_parts_shape",
+              "ms": 79.6062,
+              "rows": 19776
+            },
+            {
+              "kind": "popup_answers_shape",
+              "ms": 1017.6080999999999,
+              "rows": 22537
+            },
+            {
+              "kind": "tile_servers",
+              "ms": 0.111,
+              "rows": 4
+            },
+            {
+              "kind": "tile_overlays",
+              "ms": 0.102,
+              "rows": 1
+            }
+          ],
+          "renderMs": 197.6117,
+          "sqlObservedMs": 2014.65,
+          "trial": 1,
+          "unattributedMs": 627.0941999999999
+        },
+        {
+          "bodyMaterializeMs": 0.0036,
+          "handlerMs": 2733.7657000000004,
+          "htmlBytes": 72597480,
+          "jsonEncodeMs": 173.9764,
+          "jsonSections": [
+            {
+              "ms": 66.8687,
+              "output_bytes": 27645776,
+              "section": "popupBodies"
+            },
+            {
+              "ms": 2.0052,
+              "output_bytes": 890303,
+              "section": "answerPreview"
+            },
+            {
+              "ms": 0.012,
+              "output_bytes": 1515,
+              "section": "tileServers"
+            },
+            {
+              "ms": 0.0040999999999999995,
+              "output_bytes": 354,
+              "section": "tileOverlays"
+            },
+            {
+              "ms": 0.0018,
+              "output_bytes": 38,
+              "section": "tileVisibilityAccountId"
+            },
+            {
+              "ms": 0.0149,
+              "output_bytes": 5600,
+              "section": "layers"
+            },
+            {
+              "ms": 0.001,
+              "output_bytes": 2,
+              "section": "markers"
+            },
+            {
+              "ms": 105.0687,
+              "output_bytes": 44040907,
+              "section": "shapes"
+            }
+          ],
+          "queries": [
+            {
+              "kind": "answer_count",
+              "ms": 203.0891,
+              "rows": 1
+            },
+            {
+              "kind": "marker_records",
+              "ms": 0.31110000000000004,
+              "rows": 0
+            },
+            {
+              "kind": "shape_records",
+              "ms": 728.5604,
+              "rows": 19776
+            },
+            {
+              "kind": "layers",
+              "ms": 0.1905,
+              "rows": 20
+            },
+            {
+              "kind": "popup_parts_shape",
+              "ms": 80.85489999999999,
+              "rows": 19776
+            },
+            {
+              "kind": "popup_answers_shape",
+              "ms": 920.0296999999999,
+              "rows": 22537
+            },
+            {
+              "kind": "tile_servers",
+              "ms": 0.1087,
+              "rows": 4
+            },
+            {
+              "kind": "tile_overlays",
+              "ms": 0.1025,
+              "rows": 1
+            }
+          ],
+          "renderMs": 200.458,
+          "sqlObservedMs": 1933.2468999999999,
+          "trial": 2,
+          "unattributedMs": 600.0608000000005
+        },
+        {
+          "bodyMaterializeMs": 0.1141,
+          "handlerMs": 2745.5308999999997,
+          "htmlBytes": 72597480,
+          "jsonEncodeMs": 173.52429999999998,
+          "jsonSections": [
+            {
+              "ms": 68.1205,
+              "output_bytes": 27645776,
+              "section": "popupBodies"
+            },
+            {
+              "ms": 1.7830000000000001,
+              "output_bytes": 890303,
+              "section": "answerPreview"
+            },
+            {
+              "ms": 0.011399999999999999,
+              "output_bytes": 1515,
+              "section": "tileServers"
+            },
+            {
+              "ms": 0.0046,
+              "output_bytes": 354,
+              "section": "tileOverlays"
+            },
+            {
+              "ms": 0.0013,
+              "output_bytes": 38,
+              "section": "tileVisibilityAccountId"
+            },
+            {
+              "ms": 0.0145,
+              "output_bytes": 5600,
+              "section": "layers"
+            },
+            {
+              "ms": 0.0013,
+              "output_bytes": 2,
+              "section": "markers"
+            },
+            {
+              "ms": 103.5877,
+              "output_bytes": 44040907,
+              "section": "shapes"
+            }
+          ],
+          "queries": [
+            {
+              "kind": "answer_count",
+              "ms": 197.3298,
+              "rows": 1
+            },
+            {
+              "kind": "marker_records",
+              "ms": 0.25310000000000005,
+              "rows": 0
+            },
+            {
+              "kind": "shape_records",
+              "ms": 722.8881,
+              "rows": 19776
+            },
+            {
+              "kind": "layers",
+              "ms": 0.2431,
+              "rows": 20
+            },
+            {
+              "kind": "popup_parts_shape",
+              "ms": 81.05569999999999,
+              "rows": 19776
+            },
+            {
+              "kind": "popup_answers_shape",
+              "ms": 939.0993,
+              "rows": 22537
+            },
+            {
+              "kind": "tile_servers",
+              "ms": 0.1061,
+              "rows": 4
+            },
+            {
+              "kind": "tile_overlays",
+              "ms": 0.10189999999999999,
+              "rows": 1
+            }
+          ],
+          "renderMs": 201.5028,
+          "sqlObservedMs": 1941.0770999999997,
+          "trial": 3,
+          "unattributedMs": 602.951
+        }
+      ],
+      "scope": {
+        "handler": "Actual answer_map_handler await wall time; request construction and response-body materialization/transmission excluded.",
+        "json": "Original json_encode_for_html filter wall time and escaped output UTF-8 bytes, static section names in validated call order; a subset of renderMs, never add to renderMs.",
+        "render": "Empty-output functions immediately before/after production template nodes; includes JSON filters and template output construction, excludes mutex waiting and Tera setup before the first node.",
+        "sql": "SQLx QueryLogger elapsed_secs observations: statement setup/execution/fetch and potentially consumer/row decoding time; not database-only. Unlogged work may remain.",
+        "unattributed": "handlerMs minus summed observed SQL durations minus renderMs; includes Context conversion, body processing, scheduling, lock waits, unobserved setup/cleanup and instrumentation. Not strict pure CPU; overlapping observations may yield negative residuals.",
+        "warmup": "An existing preliminary load_answer_map call precedes one warmup handler call; measured calls are sequential on the same read-only pool and fixed query/as_of."
+      },
+      "warmupHandlerCalls": 1,
+      "queryMediansMs": {
+        "answer_count": 197.3298,
+        "marker_records": 0.256,
+        "shape_records": 722.8881,
+        "layers": 0.1905,
+        "popup_parts_shape": 80.85489999999999,
+        "popup_answers_shape": 939.0993,
+        "tile_servers": 0.1087,
+        "tile_overlays": 0.102
+      }
+    },
+    "bodyLimitBytes": 1048576
+  },
+  "serializedColumnFootprint": {
+    "scope": "Read-only diagnostic of all owned answer targets for the account selected by the profiler; serialized column bytes, not decoded allocation or HTML/HTTP bytes. Actual snapshot query matching is validated separately by the real handler.",
+    "answers": 22537,
+    "answerColumnUtf8Bytes": {
+      "submittedValues": 13925331,
+      "formSnapshot": 77139779,
+      "renderedMarkdown": 18859080
+    },
+    "shapes": 19776,
+    "shapeColumnUtf8Bytes": {
+      "geojson": 39532978,
+      "geometry": 7145437,
+      "memo": 23625096,
+      "formBodyParts": 6846731
+    }
+  },
+  "browserSummaryMedians": {
+    "pc": {
+      "samples": 3,
+      "combinedReadyMs": 4756.6718,
+      "loadingClearedMs": 4025.2998046875,
+      "loadingPaintOpportunityMs": 4094.7998046875,
+      "serverHandlerMs": 2691.324,
+      "spansMs": {
+        "mapViewRequest": 9.599853515625,
+        "bootstrapSeparateScripts": 661.300048828125,
+        "runtimeSynchronous": 73.599853515625,
+        "shapeRegistration": 17.300048828125,
+        "initialRefreshSynchronous": 10.800048828125,
+        "finishPreviewSynchronous": 11.800048828125,
+        "readyMessageDelay": 5.699951171875,
+        "optionsAfterReady": 574.5,
+        "optionsRequestAndApply": 570.39990234375,
+        "shapeIdleAfterRuntime": 14.599853515625
+      },
+      "initialRenderedShapes": 83,
+      "logicalShapes": 19776,
+      "spinnerPassed": true,
+      "closeCollectionPassed": true
+    },
+    "mobile": {
+      "samples": 3,
+      "combinedReadyMs": 8159.7009,
+      "loadingClearedMs": 7124.800048828125,
+      "loadingPaintOpportunityMs": 7425.300048828125,
+      "serverHandlerMs": 2667.536,
+      "spansMs": {
+        "mapViewRequest": 43.199951171875,
+        "bootstrapSeparateScripts": 3126.60009765625,
+        "runtimeSynchronous": 340,
+        "shapeRegistration": 55.5,
+        "initialRefreshSynchronous": 44.300048828125,
+        "finishPreviewSynchronous": 53.5,
+        "readyMessageDelay": 53.5,
+        "optionsAfterReady": 712.800048828125,
+        "optionsRequestAndApply": 694.699951171875,
+        "shapeIdleAfterRuntime": 66.699951171875
+      },
+      "initialRenderedShapes": 83,
+      "logicalShapes": 19776,
+      "spinnerPassed": true,
+      "closeCollectionPassed": true
+    }
+  },
+  "browser": {
+    "measuredAt": "2026-10-28T20:58:42.207Z",
+    "browser": "156.0.8078.48",
+    "initialOnly": true,
+    "samplesPerMode": 3,
+    "dataset": {
+      "answers": 22537,
+      "targets": 19776,
+      "markers": 0,
+      "shapes": 19776,
+      "htmlBytes": 72597480
+    },
+    "sourceSha256": {
+      "src_frontend/frontend/src/components/map-object/AnswerMapModal.vue": "931d18aec6cae738d022ca818a54452c846efa934c8ad079221cb0add1afc8a7",
+      "src_frontend/frontend-mobile/src/components/map-object/AnswerMapModal.vue": "121ac3b2f628796fcc8d13c251d1b8f244755d0de4357fe4be74efd2381a26f7",
+      "src_frontend/frontend/src/components/common/ProgressSpinner.vue": "2894923746a88df4084c6d501c9374e6c9dd189cef67164a40bfb12142883670",
+      "src_frontend/frontend-mobile/src/components/common/ProgressSpinner.vue": "9b93c3c6c684bb2894fb6f2824cdc44d3ec35d37e517c376e5f06ad06e6918ad",
+      "src_frontend/template-scripts/src/map/read-only-page.ts": "38d172824cd3aefabfa2d50ec58a9aa3c7df9f89d80e87d3f9bf68d0198159b2",
+      "src_frontend/template-scripts/src/map/common/shape-renderer.ts": "0bd5bbc80e1bcb14b4fc1dfd74b87ccd95ddf44b30d9aaa811262243f72c972d",
+      "src_frontend/template-scripts/src/map/answer-filter.ts": "6cb7791d1fa1f3793483aa8599a7fe3329e6e09782e21bb37dc1d78ea0cc195f",
+      "src_frontend/template-scripts/src/map/answer-coloring.ts": "243657081c290e59c9635dd2e53b908d81975d5e9d78e99a5eef5017b035a7ff",
+      "src_frontend/template-scripts/src/map/print/answer-print-state.ts": "b229fa7d8f42b266eb6756de37c7f7f28e335946b6b3b49be10969741d312e45"
+    },
+    "results": [
+      {
+        "mode": "pc",
+        "sample": 1,
+        "initialOnly": true,
+        "conditions": {
+          "freshBrowserContext": true,
+          "freshPage": true,
+          "firstSampleInMode": true,
+          "browserReused": false,
+          "backendAndOsCachesReset": false
+        },
+        "viewport": [
+          1280,
+          800
+        ],
+        "cpuRate": 1,
+        "phases": [
+          {
+            "name": "initial",
+            "ms": 4901.8726,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map",
+                "status": 200,
+                "requestBytes": 489,
+                "responseBytes": 72597622,
+                "serverHandlerMs": 2853.037,
+                "proxy": {
+                  "requestReadMs": 0.6492999999991298,
+                  "upstreamHeadersMs": 2871.2599,
+                  "upstreamBodyMs": 139.33450000000084,
+                  "htmlDecodeMs": 148.78700000000026,
+                  "htmlRewriteMs": 39.855100000000675,
+                  "htmlEncodeMs": 116.1315999999988,
+                  "responseStartMs": 3316.4046,
+                  "responseSendMs": 9.66740000000027,
+                  "responseEndMs": 3326.087099999999
+                },
+                "proxyMs": 3315.7553000000007
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890257,
+                "responseBytes": 189,
+                "serverHandlerMs": null,
+                "proxy": {
+                  "requestReadMs": 0.9982999999992899,
+                  "upstreamHeadersMs": 526.5902999999998,
+                  "upstreamBodyMs": 0.08979999999974098,
+                  "htmlDecodeMs": 0,
+                  "htmlRewriteMs": 0,
+                  "htmlEncodeMs": 0,
+                  "responseStartMs": 529.2422999999999,
+                  "responseSendMs": 0.18189999999958673,
+                  "responseEndMs": 529.425299999999
+                },
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0,
+                "proxyMs": 528.2440000000006
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 6,
+              "maxMs": 359,
+              "totalMs": 1350
+            }
+          },
+          {
+            "name": "close1",
+            "ms": 3.6101999999991676,
+            "requests": [],
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          }
+        ],
+        "cycles": [
+          {
+            "cycle": 1,
+            "closedHeap": 2461236,
+            "retainedRuntimes": 0,
+            "iframeCount": 0
+          }
+        ],
+        "heapBeforeOpen": 1632980,
+        "attemptedPhase": "close1",
+        "loadingIndicator": {
+          "observedDuringRequest": true,
+          "present": true,
+          "visible": true,
+          "inline": true,
+          "fullScreenOverlay": false,
+          "messageUnchanged": true,
+          "animationName": "spin-31d1d8c1",
+          "animationDurationMs": [
+            1000
+          ]
+        },
+        "initialDiagnostics": {
+          "navigation": {
+            "startTime": 0,
+            "fetchStart": 1.7999999970197678,
+            "requestStart": 5.199999995529652,
+            "responseStart": 3331.1999999955297,
+            "responseEnd": 3652,
+            "domInteractive": 4048.6999999955297,
+            "domContentLoadedEventStart": 4150.89999999851,
+            "domContentLoadedEventEnd": 4151.0999999940395,
+            "loadEventStart": 4216,
+            "loadEventEnd": 4216,
+            "transferSize": 72597922,
+            "encodedBodySize": 72597622,
+            "decodedBodySize": 72597622,
+            "redirectCount": 0
+          },
+          "navigationSpansMs": {
+            "ttfb": 3326,
+            "responseBody": 320.80000000447035,
+            "requestToResponseEnd": 3646.8000000044703
+          },
+          "navigationOffsetsMs": {
+            "requestStart": 38.999755859375,
+            "responseStart": 3364.999755859375,
+            "responseEnd": 3685.7998046875,
+            "domInteractive": 4082.499755859375,
+            "domContentLoadedEventEnd": 4184.89990234375,
+            "loadEventEnd": 4249.7998046875
+          },
+          "serverHandlerMs": 2853.037,
+          "markOffsetsMs": {
+            "parent.open.start": 0,
+            "parent.submit.start": 1.89990234375,
+            "parent.view.request": 1.89990234375,
+            "parent.view.complete": 11.89990234375,
+            "parent.nativeSubmit": 11.89990234375,
+            "parent.mapReady.receive": 4188.7998046875,
+            "parent.loading.cleared": 4188.89990234375,
+            "parent.options.start": 4192.89990234375,
+            "parent.loading.paintOpportunity": 4251.199951171875,
+            "parent.options.complete": 4763.2998046875,
+            "map.bootstrap.beforeScript": 3421.499755859375,
+            "map.bootstrap.afterScript": 4082.2998046875,
+            "map.entry.start": 4094.999755859375,
+            "map.bootstrapRead.end": 4095.099853515625,
+            "map.runtime.start": 4095.099853515625,
+            "map.shapeRegister.start": 4132.19970703125,
+            "map.shapeRegister.end": 4147.89990234375,
+            "map.initialRefresh.start": 4159.2998046875,
+            "map.initialRefresh.end": 4170.099853515625,
+            "map.runtime.end": 4170.099853515625,
+            "map.controllers.end": 4171.69970703125,
+            "map.finish.start": 4171.69970703125,
+            "map.finish.end": 4183.499755859375,
+            "map.firstIdle": 4184.69970703125,
+            "map.firstIdle.paintOpportunity": 4226.69970703125
+          },
+          "spansMs": {
+            "mapViewRequest": 10,
+            "bootstrapSeparateScripts": 660.800048828125,
+            "runtimeSynchronous": 75,
+            "shapeRegistration": 15.7001953125,
+            "initialRefreshSynchronous": 10.800048828125,
+            "finishPreviewSynchronous": 11.800048828125,
+            "readyMessageDelay": 5.300048828125,
+            "optionsAfterReady": 574.5,
+            "optionsRequestAndApply": 570.39990234375,
+            "shapeIdleAfterRuntime": 14.599853515625
+          },
+          "optionsRequests": [
+            {
+              "startTime": 4259.60000000149,
+              "requestStart": 4289,
+              "responseStart": 4818.60000000149,
+              "responseEnd": 4819,
+              "duration": 559.3999999985099,
+              "transferSize": 489,
+              "encodedBodySize": 189,
+              "decodedBodySize": 189
+            }
+          ],
+          "cdpDeltas": {
+            "LayoutCount": 66,
+            "RecalcStyleCount": 224,
+            "LayoutDuration": 0.06407399999999999,
+            "RecalcStyleDuration": 0.023295,
+            "DevToolsCommandDuration": 0.020725,
+            "ScriptDuration": 0.21046099999999998,
+            "V8CompileDuration": 0.302694,
+            "TaskDuration": 1.055535,
+            "TaskOtherDuration": 0.434286,
+            "ThreadTime": 1.033515,
+            "ProcessTime": 1.292239,
+            "JSHeapUsedSize": 98139036,
+            "JSHeapTotalSize": 112324608
+          },
+          "cdpDurationUnits": "seconds; heap units bytes; LayoutCount/RecalcStyleCount are counts"
+        },
+        "heapOpenAfterOperations": 76798624,
+        "blockedExternalRequests": 33,
+        "pageErrors": 0,
+        "completed": true
+      },
+      {
+        "mode": "pc",
+        "sample": 2,
+        "initialOnly": true,
+        "conditions": {
+          "freshBrowserContext": true,
+          "freshPage": true,
+          "firstSampleInMode": false,
+          "browserReused": true,
+          "backendAndOsCachesReset": false
+        },
+        "viewport": [
+          1280,
+          800
+        ],
+        "cpuRate": 1,
+        "phases": [
+          {
+            "name": "initial",
+            "ms": 4756.6718,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map",
+                "status": 200,
+                "requestBytes": 489,
+                "responseBytes": 72597622,
+                "serverHandlerMs": 2691.324,
+                "proxy": {
+                  "requestReadMs": 0.0937000000012631,
+                  "upstreamHeadersMs": 2699.521199999999,
+                  "upstreamBodyMs": 138.77829999999994,
+                  "htmlDecodeMs": 148.01800000000003,
+                  "htmlRewriteMs": 41.327000000001135,
+                  "htmlEncodeMs": 135.32909999999902,
+                  "responseStartMs": 3163.210000000001,
+                  "responseSendMs": 7.25840000000062,
+                  "responseEndMs": 3170.4975000000013
+                },
+                "proxyMs": 3163.1162999999997
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890257,
+                "responseBytes": 189,
+                "serverHandlerMs": null,
+                "proxy": {
+                  "requestReadMs": 0.694099999998798,
+                  "upstreamHeadersMs": 517.9164000000001,
+                  "upstreamBodyMs": 0.07690000000002328,
+                  "htmlDecodeMs": 0,
+                  "htmlRewriteMs": 0,
+                  "htmlEncodeMs": 0,
+                  "responseStartMs": 520.1941999999999,
+                  "responseSendMs": 0.1772000000000844,
+                  "responseEndMs": 520.3715999999986
+                },
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0,
+                "proxyMs": 519.5001000000011
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 6,
+              "maxMs": 364,
+              "totalMs": 1353
+            }
+          },
+          {
+            "name": "close1",
+            "ms": 4.92200000000048,
+            "requests": [],
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          }
+        ],
+        "cycles": [
+          {
+            "cycle": 1,
+            "closedHeap": 2460780,
+            "retainedRuntimes": 0,
+            "iframeCount": 0
+          }
+        ],
+        "heapBeforeOpen": 1632980,
+        "attemptedPhase": "close1",
+        "loadingIndicator": {
+          "observedDuringRequest": true,
+          "present": true,
+          "visible": true,
+          "inline": true,
+          "fullScreenOverlay": false,
+          "messageUnchanged": true,
+          "animationName": "spin-31d1d8c1",
+          "animationDurationMs": [
+            1000
+          ]
+        },
+        "initialDiagnostics": {
+          "navigation": {
+            "startTime": 0,
+            "fetchStart": 0.7000000029802322,
+            "requestStart": 3.3000000044703484,
+            "responseStart": 3173.89999999851,
+            "responseEnd": 3507.10000000149,
+            "domInteractive": 3887.89999999851,
+            "domContentLoadedEventStart": 3987.39999999851,
+            "domContentLoadedEventEnd": 3987.5,
+            "loadEventStart": 4061.5,
+            "loadEventEnd": 4061.60000000149,
+            "transferSize": 72597922,
+            "encodedBodySize": 72597622,
+            "decodedBodySize": 72597622,
+            "redirectCount": 0
+          },
+          "navigationSpansMs": {
+            "ttfb": 3170.5999999940395,
+            "responseBody": 333.20000000298023,
+            "requestToResponseEnd": 3503.7999999970198
+          },
+          "navigationOffsetsMs": {
+            "requestStart": 34.800048828125,
+            "responseStart": 3205.39990234375,
+            "responseEnd": 3538.60009765625,
+            "domInteractive": 3919.39990234375,
+            "domContentLoadedEventEnd": 4019,
+            "loadEventEnd": 4093.10009765625
+          },
+          "serverHandlerMs": 2691.324,
+          "markOffsetsMs": {
+            "parent.open.start": 0,
+            "parent.submit.start": 1.89990234375,
+            "parent.view.request": 2,
+            "parent.view.complete": 11.39990234375,
+            "parent.nativeSubmit": 11.5,
+            "parent.mapReady.receive": 4025,
+            "parent.loading.cleared": 4025.2998046875,
+            "parent.options.start": 4030.199951171875,
+            "parent.loading.paintOpportunity": 4094.7998046875,
+            "parent.options.complete": 4599.5,
+            "map.bootstrap.beforeScript": 3242.39990234375,
+            "map.bootstrap.afterScript": 3919.10009765625,
+            "map.entry.start": 3933.5,
+            "map.bootstrapRead.end": 3933.60009765625,
+            "map.runtime.start": 3933.60009765625,
+            "map.shapeRegister.start": 3964.39990234375,
+            "map.shapeRegister.end": 3982.10009765625,
+            "map.initialRefresh.start": 3993.39990234375,
+            "map.initialRefresh.end": 4004.5,
+            "map.runtime.end": 4004.60009765625,
+            "map.controllers.end": 4006.10009765625,
+            "map.finish.start": 4006.10009765625,
+            "map.finish.end": 4017.699951171875,
+            "map.firstIdle": 4018.800048828125,
+            "map.firstIdle.paintOpportunity": 4070.699951171875
+          },
+          "spansMs": {
+            "mapViewRequest": 9.39990234375,
+            "bootstrapSeparateScripts": 676.7001953125,
+            "runtimeSynchronous": 71,
+            "shapeRegistration": 17.7001953125,
+            "initialRefreshSynchronous": 11.10009765625,
+            "finishPreviewSynchronous": 11.599853515625,
+            "readyMessageDelay": 7.300048828125,
+            "optionsAfterReady": 574.5,
+            "optionsRequestAndApply": 569.300048828125,
+            "shapeIdleAfterRuntime": 14.199951171875
+          },
+          "optionsRequests": [
+            {
+              "startTime": 4092.7000000029802,
+              "requestStart": 4125.60000000149,
+              "responseStart": 4646.10000000149,
+              "responseEnd": 4646.4000000059605,
+              "duration": 553.7000000029802,
+              "transferSize": 489,
+              "encodedBodySize": 189,
+              "decodedBodySize": 189
+            }
+          ],
+          "cdpDeltas": {
+            "LayoutCount": 64,
+            "RecalcStyleCount": 218,
+            "LayoutDuration": 0.046775,
+            "RecalcStyleDuration": 0.022801,
+            "DevToolsCommandDuration": 0.021134,
+            "ScriptDuration": 0.240699,
+            "V8CompileDuration": 0.30546999999999996,
+            "TaskDuration": 1.073587,
+            "TaskOtherDuration": 0.436708,
+            "ThreadTime": 1.071422,
+            "ProcessTime": 1.328951,
+            "JSHeapUsedSize": 98622548,
+            "JSHeapTotalSize": 112062464
+          },
+          "cdpDurationUnits": "seconds; heap units bytes; LayoutCount/RecalcStyleCount are counts"
+        },
+        "heapOpenAfterOperations": 76790896,
+        "blockedExternalRequests": 33,
+        "pageErrors": 0,
+        "completed": true
+      },
+      {
+        "mode": "pc",
+        "sample": 3,
+        "initialOnly": true,
+        "conditions": {
+          "freshBrowserContext": true,
+          "freshPage": true,
+          "firstSampleInMode": false,
+          "browserReused": true,
+          "backendAndOsCachesReset": false
+        },
+        "viewport": [
+          1280,
+          800
+        ],
+        "cpuRate": 1,
+        "phases": [
+          {
+            "name": "initial",
+            "ms": 4734.3279,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map",
+                "status": 200,
+                "requestBytes": 489,
+                "responseBytes": 72597622,
+                "serverHandlerMs": 2675.133,
+                "proxy": {
+                  "requestReadMs": 0.09369999999944412,
+                  "upstreamHeadersMs": 2683.882600000001,
+                  "upstreamBodyMs": 132.1843000000008,
+                  "htmlDecodeMs": 145.24429999999847,
+                  "htmlRewriteMs": 44.40820000000167,
+                  "htmlEncodeMs": 132.5142999999989,
+                  "responseStartMs": 3138.4711000000007,
+                  "responseSendMs": 6.943699999999808,
+                  "responseEndMs": 3145.4155999999984
+                },
+                "proxyMs": 3138.377400000001
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890257,
+                "responseBytes": 189,
+                "serverHandlerMs": null,
+                "proxy": {
+                  "requestReadMs": 0.9654000000009546,
+                  "upstreamHeadersMs": 527.5291999999972,
+                  "upstreamBodyMs": 0.06990000000223517,
+                  "htmlDecodeMs": 0,
+                  "htmlRewriteMs": 0,
+                  "htmlEncodeMs": 0,
+                  "responseStartMs": 530.1434999999983,
+                  "responseSendMs": 0.18950000000040745,
+                  "responseEndMs": 530.3333999999995
+                },
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0,
+                "proxyMs": 529.1780999999974
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": false,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 6,
+              "maxMs": 356,
+              "totalMs": 1341
+            }
+          },
+          {
+            "name": "close1",
+            "ms": 4.098699999998644,
+            "requests": [],
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          }
+        ],
+        "cycles": [
+          {
+            "cycle": 1,
+            "closedHeap": 2461236,
+            "retainedRuntimes": 0,
+            "iframeCount": 0
+          }
+        ],
+        "heapBeforeOpen": 1632980,
+        "attemptedPhase": "close1",
+        "loadingIndicator": {
+          "observedDuringRequest": true,
+          "present": true,
+          "visible": true,
+          "inline": true,
+          "fullScreenOverlay": false,
+          "messageUnchanged": true,
+          "animationName": "spin-31d1d8c1",
+          "animationDurationMs": [
+            1000
+          ]
+        },
+        "initialDiagnostics": {
+          "navigation": {
+            "startTime": 0,
+            "fetchStart": 1.2000000029802322,
+            "requestStart": 3.4000000059604645,
+            "responseStart": 3149.10000000149,
+            "responseEnd": 3479,
+            "domInteractive": 3849.60000000149,
+            "domContentLoadedEventStart": 3953.3000000044703,
+            "domContentLoadedEventEnd": 3953.5,
+            "loadEventStart": 4024.5,
+            "loadEventEnd": 4024.5,
+            "transferSize": 72597922,
+            "encodedBodySize": 72597622,
+            "decodedBodySize": 72597622,
+            "redirectCount": 0
+          },
+          "navigationSpansMs": {
+            "ttfb": 3145.6999999955297,
+            "responseBody": 329.8999999985099,
+            "requestToResponseEnd": 3475.5999999940395
+          },
+          "navigationOffsetsMs": {
+            "requestStart": 35.800048828125,
+            "responseStart": 3181.500244140625,
+            "responseEnd": 3511.400146484375,
+            "domInteractive": 3882.000244140625,
+            "domContentLoadedEventEnd": 3985.900146484375,
+            "loadEventEnd": 4056.900146484375
+          },
+          "serverHandlerMs": 2675.133,
+          "markOffsetsMs": {
+            "parent.open.start": 0,
+            "parent.submit.start": 1.800048828125,
+            "parent.view.request": 2,
+            "parent.view.complete": 11.599853515625,
+            "parent.nativeSubmit": 11.599853515625,
+            "parent.mapReady.receive": 3990,
+            "parent.loading.cleared": 3990.099853515625,
+            "parent.options.start": 3994.199951171875,
+            "parent.loading.paintOpportunity": 4058.099853515625,
+            "parent.options.complete": 4568.5,
+            "map.bootstrap.beforeScript": 3220.60009765625,
+            "map.bootstrap.afterScript": 3881.900146484375,
+            "map.entry.start": 3896.60009765625,
+            "map.bootstrapRead.end": 3896.7001953125,
+            "map.runtime.start": 3896.7001953125,
+            "map.shapeRegister.start": 3930.7001953125,
+            "map.shapeRegister.end": 3948.000244140625,
+            "map.initialRefresh.start": 3959.900146484375,
+            "map.initialRefresh.end": 3970.300048828125,
+            "map.runtime.end": 3970.300048828125,
+            "map.controllers.end": 3971.60009765625,
+            "map.finish.start": 3971.7001953125,
+            "map.finish.end": 3984.300048828125,
+            "map.firstIdle": 3985.7001953125,
+            "map.firstIdle.paintOpportunity": 4033.300048828125
+          },
+          "spansMs": {
+            "mapViewRequest": 9.599853515625,
+            "bootstrapSeparateScripts": 661.300048828125,
+            "runtimeSynchronous": 73.599853515625,
+            "shapeRegistration": 17.300048828125,
+            "initialRefreshSynchronous": 10.39990234375,
+            "finishPreviewSynchronous": 12.599853515625,
+            "readyMessageDelay": 5.699951171875,
+            "optionsAfterReady": 578.5,
+            "optionsRequestAndApply": 574.300048828125,
+            "shapeIdleAfterRuntime": 15.400146484375
+          },
+          "optionsRequests": [
+            {
+              "startTime": 4051.7000000029802,
+              "requestStart": 4082.7000000029802,
+              "responseStart": 4613.10000000149,
+              "responseEnd": 4613.39999999851,
+              "duration": 561.6999999955297,
+              "transferSize": 489,
+              "encodedBodySize": 189,
+              "decodedBodySize": 189
+            }
+          ],
+          "cdpDeltas": {
+            "LayoutCount": 64,
+            "RecalcStyleCount": 218,
+            "LayoutDuration": 0.048652999999999995,
+            "RecalcStyleDuration": 0.023323,
+            "DevToolsCommandDuration": 0.021231,
+            "ScriptDuration": 0.234275,
+            "V8CompileDuration": 0.299638,
+            "TaskDuration": 1.05535,
+            "TaskOtherDuration": 0.42823,
+            "ThreadTime": 1.101974,
+            "ProcessTime": 1.313982,
+            "JSHeapUsedSize": 96954820,
+            "JSHeapTotalSize": 112848896
+          },
+          "cdpDurationUnits": "seconds; heap units bytes; LayoutCount/RecalcStyleCount are counts"
+        },
+        "heapOpenAfterOperations": 76798476,
+        "blockedExternalRequests": 33,
+        "pageErrors": 0,
+        "completed": true
+      },
+      {
+        "mode": "mobile",
+        "sample": 1,
+        "initialOnly": true,
+        "conditions": {
+          "freshBrowserContext": true,
+          "freshPage": true,
+          "firstSampleInMode": true,
+          "browserReused": true,
+          "backendAndOsCachesReset": false
+        },
+        "viewport": [
+          390,
+          844
+        ],
+        "cpuRate": 4,
+        "phases": [
+          {
+            "name": "initial",
+            "ms": 8159.7009,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map",
+                "status": 200,
+                "requestBytes": 488,
+                "responseBytes": 72597625,
+                "serverHandlerMs": 2770.06,
+                "proxy": {
+                  "requestReadMs": 0.07120000000213622,
+                  "upstreamHeadersMs": 2778.119599999998,
+                  "upstreamBodyMs": 113.49920000000202,
+                  "htmlDecodeMs": 144.89530000000013,
+                  "htmlRewriteMs": 40.8096000000005,
+                  "htmlEncodeMs": 130.73559999999998,
+                  "responseStartMs": 3208.311600000001,
+                  "responseSendMs": 8.116500000000087,
+                  "responseEndMs": 3216.4292000000023
+                },
+                "proxyMs": 3208.2403999999988
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890257,
+                "responseBytes": 189,
+                "serverHandlerMs": null,
+                "proxy": {
+                  "requestReadMs": 0.6309000000001106,
+                  "upstreamHeadersMs": 527.8271000000022,
+                  "upstreamBodyMs": 0.0738999999994121,
+                  "htmlDecodeMs": 0,
+                  "htmlRewriteMs": 0,
+                  "htmlEncodeMs": 0,
+                  "responseStartMs": 530.0679999999993,
+                  "responseSendMs": 0.17040000000270084,
+                  "responseEndMs": 530.2387999999992
+                },
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0,
+                "proxyMs": 529.4370999999992
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 15,
+              "maxMs": 1906,
+              "totalMs": 5449
+            }
+          },
+          {
+            "name": "close1",
+            "ms": 8.941399999999703,
+            "requests": [],
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          }
+        ],
+        "cycles": [
+          {
+            "cycle": 1,
+            "closedHeap": 2527316,
+            "retainedRuntimes": 0,
+            "iframeCount": 0
+          }
+        ],
+        "heapBeforeOpen": 1663184,
+        "attemptedPhase": "close1",
+        "loadingIndicator": {
+          "observedDuringRequest": true,
+          "present": true,
+          "visible": true,
+          "inline": true,
+          "fullScreenOverlay": false,
+          "messageUnchanged": true,
+          "animationName": "spin-a37a9225",
+          "animationDurationMs": [
+            1000
+          ]
+        },
+        "initialDiagnostics": {
+          "navigation": {
+            "startTime": 0,
+            "fetchStart": 1,
+            "requestStart": 3.1999999955296516,
+            "responseStart": 3219.5,
+            "responseEnd": 4671.0999999940395,
+            "domInteractive": 6617.39999999851,
+            "domContentLoadedEventStart": 6991.29999999702,
+            "domContentLoadedEventEnd": 6991.5999999940395,
+            "loadEventStart": 7439.0999999940395,
+            "loadEventEnd": 7439.19999999553,
+            "transferSize": 72597925,
+            "encodedBodySize": 72597625,
+            "decodedBodySize": 72597625,
+            "redirectCount": 0
+          },
+          "navigationSpansMs": {
+            "ttfb": 3216.3000000044703,
+            "responseBody": 1451.5999999940395,
+            "requestToResponseEnd": 4667.89999999851
+          },
+          "navigationOffsetsMs": {
+            "requestStart": 150.699951171875,
+            "responseStart": 3367,
+            "responseEnd": 4818.60009765625,
+            "domInteractive": 6764.89990234375,
+            "domContentLoadedEventEnd": 7139.10009765625,
+            "loadEventEnd": 7586.699951171875
+          },
+          "serverHandlerMs": 2770.06,
+          "markOffsetsMs": {
+            "parent.open.start": 0,
+            "parent.submit.start": 9.300048828125,
+            "parent.view.request": 9.800048828125,
+            "parent.view.complete": 53,
+            "parent.nativeSubmit": 53.199951171875,
+            "parent.mapReady.receive": 7183.699951171875,
+            "parent.loading.cleared": 7185.39990234375,
+            "parent.options.start": 7202.800048828125,
+            "parent.loading.paintOpportunity": 7512.800048828125,
+            "parent.options.complete": 7896.10009765625,
+            "map.bootstrap.beforeScript": 3557.5,
+            "map.bootstrap.afterScript": 6764.10009765625,
+            "map.entry.start": 6783.89990234375,
+            "map.bootstrapRead.end": 6784.199951171875,
+            "map.runtime.start": 6784.199951171875,
+            "map.shapeRegister.start": 6921,
+            "map.shapeRegister.end": 6969.39990234375,
+            "map.initialRefresh.start": 7024.199951171875,
+            "map.initialRefresh.end": 7071.89990234375,
+            "map.runtime.end": 7072,
+            "map.controllers.end": 7079,
+            "map.finish.start": 7079.199951171875,
+            "map.finish.end": 7132.300048828125,
+            "map.firstIdle": 7138.699951171875,
+            "map.firstIdle.paintOpportunity": 7377.199951171875
+          },
+          "spansMs": {
+            "mapViewRequest": 43.199951171875,
+            "bootstrapSeparateScripts": 3206.60009765625,
+            "runtimeSynchronous": 287.800048828125,
+            "shapeRegistration": 48.39990234375,
+            "initialRefreshSynchronous": 47.699951171875,
+            "finishPreviewSynchronous": 53.10009765625,
+            "readyMessageDelay": 51.39990234375,
+            "optionsAfterReady": 712.400146484375,
+            "optionsRequestAndApply": 693.300048828125,
+            "shapeIdleAfterRuntime": 66.699951171875
+          },
+          "optionsRequests": [
+            {
+              "startTime": 7362.69999999553,
+              "requestStart": 7441.5999999940395,
+              "responseStart": 7972,
+              "responseEnd": 7972.29999999702,
+              "duration": 609.6000000014901,
+              "transferSize": 489,
+              "encodedBodySize": 189,
+              "decodedBodySize": 189
+            }
+          ],
+          "cdpDeltas": {
+            "LayoutCount": 206,
+            "RecalcStyleCount": 492,
+            "LayoutDuration": 0.26749,
+            "RecalcStyleDuration": 0.140422,
+            "DevToolsCommandDuration": 0.092085,
+            "ScriptDuration": 1.0568119999999999,
+            "V8CompileDuration": 1.6538570000000001,
+            "TaskDuration": 5.013471999999999,
+            "TaskOtherDuration": 1.802806,
+            "ThreadTime": 1.245689,
+            "ProcessTime": 9.594664,
+            "JSHeapUsedSize": 101099220,
+            "JSHeapTotalSize": 126439424
+          },
+          "cdpDurationUnits": "seconds; heap units bytes; LayoutCount/RecalcStyleCount are counts"
+        },
+        "heapOpenAfterOperations": 76419740,
+        "blockedExternalRequests": 19,
+        "pageErrors": 0,
+        "completed": true
+      },
+      {
+        "mode": "mobile",
+        "sample": 2,
+        "initialOnly": true,
+        "conditions": {
+          "freshBrowserContext": true,
+          "freshPage": true,
+          "firstSampleInMode": false,
+          "browserReused": true,
+          "backendAndOsCachesReset": false
+        },
+        "viewport": [
+          390,
+          844
+        ],
+        "cpuRate": 4,
+        "phases": [
+          {
+            "name": "initial",
+            "ms": 8164.101899999998,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map",
+                "status": 200,
+                "requestBytes": 489,
+                "responseBytes": 72597626,
+                "serverHandlerMs": 2667.536,
+                "proxy": {
+                  "requestReadMs": 0.1396999999997206,
+                  "upstreamHeadersMs": 2727.1474000000053,
+                  "upstreamBodyMs": 131.0335999999952,
+                  "htmlDecodeMs": 146.07130000000325,
+                  "htmlRewriteMs": 39.575700000001234,
+                  "htmlEncodeMs": 143.9412999999986,
+                  "responseStartMs": 3188.176199999998,
+                  "responseSendMs": 7.615900000004331,
+                  "responseEndMs": 3195.792700000002
+                },
+                "proxyMs": 3188.0364999999983
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890257,
+                "responseBytes": 189,
+                "serverHandlerMs": null,
+                "proxy": {
+                  "requestReadMs": 0.8433999999979278,
+                  "upstreamHeadersMs": 542.912900000003,
+                  "upstreamBodyMs": 0.07819999999628635,
+                  "htmlDecodeMs": 0,
+                  "htmlRewriteMs": 0,
+                  "htmlEncodeMs": 0,
+                  "responseStartMs": 545.5195999999996,
+                  "responseSendMs": 0.17760000000271248,
+                  "responseEndMs": 545.6973999999973
+                },
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0,
+                "proxyMs": 544.6762000000017
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 15,
+              "maxMs": 1784,
+              "totalMs": 5437
+            }
+          },
+          {
+            "name": "close1",
+            "ms": 15.227599999998347,
+            "requests": [],
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          }
+        ],
+        "cycles": [
+          {
+            "cycle": 1,
+            "closedHeap": 2527260,
+            "retainedRuntimes": 0,
+            "iframeCount": 0
+          }
+        ],
+        "heapBeforeOpen": 1663184,
+        "attemptedPhase": "close1",
+        "loadingIndicator": {
+          "observedDuringRequest": true,
+          "present": true,
+          "visible": true,
+          "inline": true,
+          "fullScreenOverlay": false,
+          "messageUnchanged": true,
+          "animationName": "spin-a37a9225",
+          "animationDurationMs": [
+            1000
+          ]
+        },
+        "initialDiagnostics": {
+          "navigation": {
+            "startTime": 0,
+            "fetchStart": 0.8999999985098839,
+            "requestStart": 3.7000000029802322,
+            "responseStart": 3199.60000000149,
+            "responseEnd": 4649.29999999702,
+            "domInteractive": 6469.60000000149,
+            "domContentLoadedEventStart": 6932.89999999851,
+            "domContentLoadedEventEnd": 6933.5,
+            "loadEventStart": 7358.20000000298,
+            "loadEventEnd": 7358.20000000298,
+            "transferSize": 72597926,
+            "encodedBodySize": 72597626,
+            "decodedBodySize": 72597626,
+            "redirectCount": 0
+          },
+          "navigationSpansMs": {
+            "ttfb": 3195.89999999851,
+            "responseBody": 1449.6999999955297,
+            "requestToResponseEnd": 4645.5999999940395
+          },
+          "navigationOffsetsMs": {
+            "requestStart": 146.39990234375,
+            "responseStart": 3342.300048828125,
+            "responseEnd": 4792,
+            "domInteractive": 6612.300048828125,
+            "domContentLoadedEventEnd": 7076.199951171875,
+            "loadEventEnd": 7500.89990234375
+          },
+          "serverHandlerMs": 2667.536,
+          "markOffsetsMs": {
+            "parent.open.start": 0,
+            "parent.submit.start": 8.599853515625,
+            "parent.view.request": 8.89990234375,
+            "parent.view.complete": 51.599853515625,
+            "parent.nativeSubmit": 51.800048828125,
+            "parent.mapReady.receive": 7123.599853515625,
+            "parent.loading.cleared": 7124.800048828125,
+            "parent.options.start": 7141.699951171875,
+            "parent.loading.paintOpportunity": 7425.300048828125,
+            "parent.options.complete": 7836.39990234375,
+            "map.bootstrap.beforeScript": 3484.89990234375,
+            "map.bootstrap.afterScript": 6611.5,
+            "map.entry.start": 6630.89990234375,
+            "map.bootstrapRead.end": 6631.300048828125,
+            "map.runtime.start": 6631.300048828125,
+            "map.shapeRegister.start": 6813.39990234375,
+            "map.shapeRegister.end": 6868.89990234375,
+            "map.initialRefresh.start": 6965.5,
+            "map.initialRefresh.end": 7009.800048828125,
+            "map.runtime.end": 7010,
+            "map.controllers.end": 7016.599853515625,
+            "map.finish.start": 7016.599853515625,
+            "map.finish.end": 7070.099853515625,
+            "map.firstIdle": 7075.599853515625,
+            "map.firstIdle.paintOpportunity": 7311.099853515625
+          },
+          "spansMs": {
+            "mapViewRequest": 42.699951171875,
+            "bootstrapSeparateScripts": 3126.60009765625,
+            "runtimeSynchronous": 378.699951171875,
+            "shapeRegistration": 55.5,
+            "initialRefreshSynchronous": 44.300048828125,
+            "finishPreviewSynchronous": 53.5,
+            "readyMessageDelay": 53.5,
+            "optionsAfterReady": 712.800048828125,
+            "optionsRequestAndApply": 694.699951171875,
+            "shapeIdleAfterRuntime": 65.599853515625
+          },
+          "optionsRequests": [
+            {
+              "startTime": 7305.5,
+              "requestStart": 7385.89999999851,
+              "responseStart": 7931.70000000298,
+              "responseEnd": 7932,
+              "duration": 626.5,
+              "transferSize": 489,
+              "encodedBodySize": 189,
+              "decodedBodySize": 189
+            }
+          ],
+          "cdpDeltas": {
+            "LayoutCount": 252,
+            "RecalcStyleCount": 575,
+            "LayoutDuration": 0.32322799999999996,
+            "RecalcStyleDuration": 0.15929500000000002,
+            "DevToolsCommandDuration": 0.088999,
+            "ScriptDuration": 1.098722,
+            "V8CompileDuration": 1.5325,
+            "TaskDuration": 5.050267,
+            "TaskOtherDuration": 1.847523,
+            "ThreadTime": 1.261274,
+            "ProcessTime": 9.591762000000001,
+            "JSHeapUsedSize": 101119636,
+            "JSHeapTotalSize": 126439424
+          },
+          "cdpDurationUnits": "seconds; heap units bytes; LayoutCount/RecalcStyleCount are counts"
+        },
+        "heapOpenAfterOperations": 76432272,
+        "blockedExternalRequests": 19,
+        "pageErrors": 0,
+        "completed": true
+      },
+      {
+        "mode": "mobile",
+        "sample": 3,
+        "initialOnly": true,
+        "conditions": {
+          "freshBrowserContext": true,
+          "freshPage": true,
+          "firstSampleInMode": false,
+          "browserReused": true,
+          "backendAndOsCachesReset": false
+        },
+        "viewport": [
+          390,
+          844
+        ],
+        "cpuRate": 4,
+        "phases": [
+          {
+            "name": "initial",
+            "ms": 7860.763599999998,
+            "requests": [
+              {
+                "endpoint": "/form-answers/map",
+                "status": 200,
+                "requestBytes": 489,
+                "responseBytes": 72597626,
+                "serverHandlerMs": 2662.043,
+                "proxy": {
+                  "requestReadMs": 0.08649999999761349,
+                  "upstreamHeadersMs": 2669.742400000003,
+                  "upstreamBodyMs": 108.89890000000014,
+                  "htmlDecodeMs": 149.20679999999993,
+                  "htmlRewriteMs": 36.72200000000157,
+                  "htmlEncodeMs": 130.45999999999913,
+                  "responseStartMs": 3095.2963999999993,
+                  "responseSendMs": 7.229899999998452,
+                  "responseEndMs": 3102.526899999997
+                },
+                "proxyMs": 3095.2099000000017
+              },
+              {
+                "endpoint": "/form-answers/map-filter",
+                "status": 200,
+                "requestBytes": 890257,
+                "responseBytes": 189,
+                "serverHandlerMs": null,
+                "proxy": {
+                  "requestReadMs": 0.5985000000000582,
+                  "upstreamHeadersMs": 547.7914999999994,
+                  "upstreamBodyMs": 0.082300000001851,
+                  "htmlDecodeMs": 0,
+                  "htmlRewriteMs": 0,
+                  "htmlEncodeMs": 0,
+                  "responseStartMs": 550.0086999999985,
+                  "responseSendMs": 0.20240000000194414,
+                  "responseEndMs": 550.2114000000001
+                },
+                "optionsOnly": true,
+                "conditionOps": [],
+                "resultTargets": 0,
+                "resultAnswers": 0,
+                "proxyMs": 549.4101999999984
+              }
+            ],
+            "map": {
+              "recordCount": 19776,
+              "renderableCount": 19776,
+              "eligibleCount": 19776,
+              "renderedCount": 83,
+              "cachedCount": 83,
+              "cachedVertices": 12911,
+              "inactiveCachedCount": 0,
+              "inactiveCachedVertices": 0,
+              "pendingCount": 0,
+              "createdCount": 83,
+              "disposedCount": 0,
+              "logicalVisibleShapes": 19776,
+              "logicalVisibleMarkers": 0,
+              "svgPaths": 83,
+              "markerElements": 0,
+              "popupElements": 0,
+              "coloringRules": 0,
+              "coloredTargets": 0,
+              "coloringClassCounts": [],
+              "mobileControls": true,
+              "zoom": 10
+            },
+            "modal": {
+              "loading": false,
+              "busy": false,
+              "error": false,
+              "filterError": false,
+              "scopeReady": true,
+              "initialCount": 19776,
+              "matchedCount": 19776,
+              "visibleCount": 19776,
+              "renderableCount": 19776,
+              "answerCount": 22537,
+              "coloringActive": false,
+              "preparingPrint": false,
+              "printSnapshot": false,
+              "printTargets": 0,
+              "forms": 1,
+              "fields": 0
+            },
+            "longTasks": {
+              "count": 14,
+              "maxMs": 1694,
+              "totalMs": 5048
+            }
+          },
+          {
+            "name": "close1",
+            "ms": 9.604700000003504,
+            "requests": [],
+            "longTasks": {
+              "count": 0,
+              "maxMs": 0,
+              "totalMs": 0
+            }
+          }
+        ],
+        "cycles": [
+          {
+            "cycle": 1,
+            "closedHeap": 2517296,
+            "retainedRuntimes": 0,
+            "iframeCount": 0
+          }
+        ],
+        "heapBeforeOpen": 1663184,
+        "attemptedPhase": "close1",
+        "loadingIndicator": {
+          "observedDuringRequest": true,
+          "present": true,
+          "visible": true,
+          "inline": true,
+          "fullScreenOverlay": false,
+          "messageUnchanged": true,
+          "animationName": "spin-a37a9225",
+          "animationDurationMs": [
+            1000
+          ]
+        },
+        "initialDiagnostics": {
+          "navigation": {
+            "startTime": 0,
+            "fetchStart": 1.1000000014901161,
+            "requestStart": 2.9000000059604645,
+            "responseStart": 3105.4000000059605,
+            "responseEnd": 4537.80000000447,
+            "domInteractive": 6276.9000000059605,
+            "domContentLoadedEventStart": 6702.5,
+            "domContentLoadedEventEnd": 6703,
+            "loadEventStart": 7152.10000000149,
+            "loadEventEnd": 7152.10000000149,
+            "transferSize": 72597926,
+            "encodedBodySize": 72597626,
+            "decodedBodySize": 72597626,
+            "redirectCount": 0
+          },
+          "navigationSpansMs": {
+            "ttfb": 3102.5,
+            "responseBody": 1432.3999999985099,
+            "requestToResponseEnd": 4534.89999999851
+          },
+          "navigationOffsetsMs": {
+            "requestStart": 159.199951171875,
+            "responseStart": 3261.699951171875,
+            "responseEnd": 4694.10009765625,
+            "domInteractive": 6433.199951171875,
+            "domContentLoadedEventEnd": 6859.300048828125,
+            "loadEventEnd": 7308.400146484375
+          },
+          "serverHandlerMs": 2662.043,
+          "markOffsetsMs": {
+            "parent.open.start": 0,
+            "parent.submit.start": 9.099853515625,
+            "parent.view.request": 9.5,
+            "parent.view.complete": 56.7998046875,
+            "parent.nativeSubmit": 57,
+            "parent.mapReady.receive": 6914.5,
+            "parent.loading.cleared": 6915.699951171875,
+            "parent.options.start": 6934.599853515625,
+            "parent.loading.paintOpportunity": 7243.5,
+            "parent.options.complete": 7666.39990234375,
+            "map.bootstrap.beforeScript": 3409.400146484375,
+            "map.bootstrap.afterScript": 6432.5,
+            "map.entry.start": 6451.199951171875,
+            "map.bootstrapRead.end": 6451.400146484375,
+            "map.runtime.start": 6451.5,
+            "map.shapeRegister.start": 6621.400146484375,
+            "map.shapeRegister.end": 6680.10009765625,
+            "map.initialRefresh.start": 6747.5,
+            "map.initialRefresh.end": 6791.300048828125,
+            "map.runtime.end": 6791.5,
+            "map.controllers.end": 6799,
+            "map.finish.start": 6799.199951171875,
+            "map.finish.end": 6853.10009765625,
+            "map.firstIdle": 6858.60009765625,
+            "map.firstIdle.paintOpportunity": 7115.699951171875
+          },
+          "spansMs": {
+            "mapViewRequest": 47.2998046875,
+            "bootstrapSeparateScripts": 3023.099853515625,
+            "runtimeSynchronous": 340,
+            "shapeRegistration": 58.699951171875,
+            "initialRefreshSynchronous": 43.800048828125,
+            "finishPreviewSynchronous": 53.900146484375,
+            "readyMessageDelay": 61.39990234375,
+            "optionsAfterReady": 751.89990234375,
+            "optionsRequestAndApply": 731.800048828125,
+            "shapeIdleAfterRuntime": 67.10009765625
+          },
+          "optionsRequests": [
+            {
+              "startTime": 7092.30000000447,
+              "requestStart": 7175.70000000298,
+              "responseStart": 7726.10000000149,
+              "responseEnd": 7726.39999999851,
+              "duration": 634.0999999940395,
+              "transferSize": 489,
+              "encodedBodySize": 189,
+              "decodedBodySize": 189
+            }
+          ],
+          "cdpDeltas": {
+            "LayoutCount": 258,
+            "RecalcStyleCount": 584,
+            "LayoutDuration": 0.305975,
+            "RecalcStyleDuration": 0.140932,
+            "DevToolsCommandDuration": 0.092971,
+            "ScriptDuration": 1.019901,
+            "V8CompileDuration": 1.4702410000000001,
+            "TaskDuration": 4.850664,
+            "TaskOtherDuration": 1.820644,
+            "ThreadTime": 1.2089969999999999,
+            "ProcessTime": 9.255744,
+            "JSHeapUsedSize": 101156524,
+            "JSHeapTotalSize": 126701568
+          },
+          "cdpDurationUnits": "seconds; heap units bytes; LayoutCount/RecalcStyleCount are counts"
+        },
+        "heapOpenAfterOperations": 76440964,
+        "blockedExternalRequests": 19,
+        "pageErrors": 0,
+        "completed": true
+      }
+    ],
+    "notes": [
+      "Production-built real PC/mobile AnswerMapModal, map/filter/color/print modules; benchmark-only expose/runtime captures are injected at build time.",
+      "Uses real read-only Rust map, map-filter and map-print HTTP endpoints through a localhost proxy. Original 1MiB request cap is retained.",
+      "External requests are blocked; tiles/icons/media are local placeholders. Network tile latency and real authentication are excluded.",
+      "Raw HTML/geometry/answer contents remain local; reports contain only aggregate counts, timings and byte sizes.",
+      "PC 1280x800; mobile 390x844 with CPU4x emulation, not a physical mobile device. The real fixture contains shapes, not a large marker population.",
+      "The ordinary parent editing map and Pinia raw-record store are not mounted concurrently. This does not guarantee whole-application or physical-device memory usage.",
+      "Logical visible targets are independent from generated Leaflet objects and SVG DOM counts; all are reported separately.",
+      "Operation timings include endpoint work, HTTP/JSON, Vue, iframe rendering and settling plus automation coordination. Do not add them to backend-only measurements.",
+      "Heap values are Chrome JS heap after forced GC, not full browser/process memory. Long tasks may be observed by both same-process frame contexts.",
+      "Full print may be normally rejected by the retained 32MiB byte cap; successful bounded print uses an actual legend mask of at most1000 targets.",
+      "With --initial-only=true, each sample still performs real native map and automatic initial options requests, waits for the combined UI/shape readiness criterion, then verifies collection after closing; full interaction phases are skipped only in that diagnostic mode.",
+      "Each sample uses a fresh context/page. There is no unrecorded warmup. First and subsequent samples share the same Chrome browser and already-started backend/OS caches; cold storage/DB caches are not simulated. Contexts isolate browser HTTP caches, and proxy API/assets are no-store.",
+      "Native initial response is fully buffered by the diagnostic proxy, decoded, rewritten and encoded before forwarding. Proxy upstream-header/body/decode/rewrite/encode/send times are recorded separately; they are diagnostic overhead, not application backend time. Response-send completion is a Node socket callback, not browser responseEnd.",
+      "Bootstrap is a JavaScript object literal in an inline script, not JSON.parse. Marks are in separate scripts before/after it so the span includes parser/compile/evaluation and may overlap remaining HTML transfer/parser waiting. It is not pure JavaScript CPU time.",
+      "parent.mapReady.receive / parent.loading.cleared are the application's ready signal and do not wait for renderer idle; actual receive/idle ordering is shown by the milestones. Automatic options complete later. Paint-opportunity marks are double-rAF scheduling boundaries, not proof that every object pixel was painted.",
+      "initial ms preserves the existing combined benchmark criterion: parent scope/options/color-fieldset readiness plus renderer idle and frame settling. Nested spans overlap and must not be added together. CDP duration deltas are renderer/target aggregates and include automation overhead; they are not exact exclusive attribution of iframe JavaScript parsing.",
+      "Spinner probes inspect only the fixed loading message, inline/visible booleans and CSS animation properties. Reduced motion is explicitly no-preference for this UI check; normal application reduced-motion behavior is unchanged."
+    ]
+  },
+  "sourceSha256": {
+    "src/handler/answer_map.rs": "cfcf2a80feeb4d746b63612681506f228bbe52f034ef0a1ff410e564fddcb0c0",
+    "src/handler/marker_forms/answer_edit.rs": "c064df3b6b03445a62214f4cf68ab9b3cce555b78570d8feb9dab6a708ec885a",
+    "src/lib.rs": "00aa994092ca4efd8608d10c246023306c8702b24421257f3590ab83a301abf9",
+    "GeoCode-Web-Single/src/handler/answer_map.rs": "324718a5d8ef1a751edb94c460885dc76d6d3ea184d64c1a35c2b1c8676f0cc9",
+    "GeoCode-Web-Single/src/handler/marker_forms/answer_edit.rs": "29cf41817b5ac7cf16742d58475fef57444e206fe347cabc96a16ea89cf0b487",
+    "GeoCode-Web-Single/examples/profile_answer_map.rs": "b139a7f984e370b2cf6fbff76c0e8dd8352e8e5fed5a1c64b01efbe2f7b7764b",
+    "src/templates/form-answer-map.html": "9a0e2440beeab246cd118a2c5b2c3f335f86c3815491c3ce452acf091fbaa944",
+    "src_frontend/frontend/scripts/measure-answer-map.mjs": "fce988a2f0e2335152df33548667ba6dc110925989f42d2b6d067b874f46f455",
+    "src_frontend/frontend/scripts/answer-map-benchmark-entry.ts": "66f8652a8d078036a4253efccc5e2da19ab925614e9bf800eddc2eb97401ff46"
+  },
+  "interpretation": [
+    "Native handler median is approximately2.75s. SQLx observed median approximately1.94s includes fetch/possible row decoding, not database-only. Tera approximately0.20s includes the approximately0.17s original HTML-safe JSON encoding. Approximately0.60s is unattributed preparation/Context/cleanup and other unobserved or scheduling work, not a pure CPU measure.",
+    "The map-ready/loading-cleared milestone differs from combined readiness: the latter waits for automatic initial options, renderer idle and settling. Use the explicit milestone for loading UX.",
+    "Bootstrap before/after separate scripts include receiving/parsing/compiling/evaluating a large inline JS object literal; the interval may overlap response body receipt and is not an exclusive CPU interval. It is not JSON.parse.",
+    "Only83 initial SVG shapes are generated from19,776 logical shapes under existing viewport/zoom rules. Initialization and first shape-idle spans do not support prioritizing Canvas for this request.",
+    "HTML-safe serialized shapes are44,040,907bytes and popupBodies27,645,776bytes. Unused popup submitted_values/form_snapshot total91,065,110serialized database-column bytes, not HTTP payload or decoded memory.",
+    "The diagnostic proxy buffers and rewrites the full HTML, with summed upstream-body/decode/rewrite/encode stages of425.3–463.5ms before browser responseStart. This is harness overhead; body transfer/parsing overlaps bootstrap work. No production network speed claim is made.",
+    "Only the successful shared-host browser/server runs are recorded. An earlier browser attempt could not connect to an isolated localhost server and was stopped; it produced no valid timing samples."
+  ],
+  "plan": [
+    {
+      "priority": 1,
+      "change": "Use a popup-specific row projection of id,target_id,rendered_markdown, retaining the editing Answer type; preserve all target answers, same read transaction, ordering and legacy body-part matching. Reduce redundant owned body clones where justified.",
+      "acceptance": "Exact popup free_text/managed_markdown/sync_required equality, current body/shape semantics, no extra per-object GET and no API/DB schema change; compare real handler timings again."
+    },
+    {
+      "priority": 2,
+      "change": "Prototype an HTML-safe application/json bootstrap block parsed once by JSON.parse and released after initialization, versus the current large inline JavaScript literal. Keep the native authenticated POST and single snapshot response. Adopt only after PC/mobile production-module comparisons show benefit.",
+      "acceptance": "Identical bootstrap values including geometry, names, full text, target IDs, query/as_of and popup snapshots; script-injection escaping, Unicode, retry/close/reopen and print completeness regressions; measure parse duration and peak/retained memory."
+    },
+    {
+      "priority": 3,
+      "change": "Investigate removing repeated body text from the wire format while retaining the complete snapshot, with versioned references or validated part ranges and explicit fallback for ambiguous legacy bodies. First measure an isolated prototype; do not replace full popup history with a later live request.",
+      "acceptance": "Restore original body and free/managed text exactly, including part order, repeated text, emoji/Unicode offsets, empty values and sync_required. Keep snapshot time and expanded-print32MiB validation. Reject partial print data."
+    },
+    {
+      "priority": 4,
+      "change": "After acquisition/bootstrap improvements, remeasure Context/body-processing residual and automatic initial options before considering further initialization batching or shared-query work.",
+      "acceptance": "Retain initial map-view inheritance, full scope, latest/as_of, owner isolation, no additional full data fetch, late-response rejection, existing CSV/field/print/body-size limits and original geometry."
+    }
+  ],
+  "ui": {
+    "existingProgressSpinnerReusedInline": true,
+    "messageRetained": true,
+    "pcAndMobileBothRepositories": true,
+    "defaultStartupOverlayUnchanged": true,
+    "reducedMotionBehaviorRetained": true,
+    "browserVerifiedSamples": 6
+  },
+  "checks": {
+    "pcMobileTypeChecksAndProductionBuildsBothRepositories": true,
+    "existingSelectedUiTestsPerRepository": 4,
+    "newBackendPerformanceImplementation": false,
+    "newMigrations": false,
+    "sqliteReleaseBinaryRebuiltWithSpinnerAssets": true
+  },
+  "privacy": {
+    "originalDatabaseAndConfigUnmodified": true,
+    "consistentReadOnlyBackupUnderIgnoredTarget": true,
+    "rawIdsNamesCoordinatesAnswersCredentialsExcluded": true,
+    "privateFilesAndDatabaseCopyRemovedAfterRun": true
+  },
+  "limitations": [
+    "Real SQLite data only. PostgreSQL implementation was inspected but real PostgreSQL database latency was not measured.",
+    "PC1280x800; mobile390x844 CPU4x emulation, not a physical mobile device. Tiles/icons/media are local placeholders and authentication is replaced only in the benchmark.",
+    "The ordinary parent editing map/Pinia store is absent, so initial_view inheritance is not exercised in this timing run. No full-app memory or GPU-paint guarantee.",
+    "Native preliminary load and one handler warmup precede3sequential measured handlers. Browser trials use3fresh contexts/pages per mode with no discarded warmup; backend/OS/browser process caches are reused.",
+    "Each reported median is computed independently. Nested/overlapping spans and medians must not be added to infer total duration. No real-time CI threshold is introduced."
+  ],
+  "reproduction": {
+    "native": "cargo run --release --locked --offline --jobs 1 --example profile_answer_map -- --database target/PRIVATE_COPY.sqlite --output-directory target/answer-map-initial-profile --initial-samples 3 --serve --port 0",
+    "browserFromParentRoot": "node src_frontend/frontend/scripts/measure-answer-map.mjs --backend=http://127.0.0.1:PORT --manifest=GeoCode-Web-Single/target/answer-map-initial-profile/manifest.json --output=target/answer-map-initial-browser --playwright-path=C:/path/to/playwright/index.mjs --initial-only=true --samples=3",
+    "executionEnvironment": "Run Chrome and the localhost server in the same host/network execution environment; retain read-only database and loopback/Origin protections."
+  },
+  "postMeasurementNotesCorrection": {
+    "file": "src_frontend/frontend/scripts/measure-answer-map.mjs",
+    "measuredSha256": "fce988a2f0e2335152df33548667ba6dc110925989f42d2b6d067b874f46f455",
+    "currentSha256": "fcbc8f10fae21235c5b1c94a664406641c808f109132897d3c8472f549aff115",
+    "measurementInstrumentationChanged": false,
+    "changes": "Clarified ready-message/renderer-idle ordering; corrected approximate proxy stage sum. Numeric samples are unchanged."
+  }
+}

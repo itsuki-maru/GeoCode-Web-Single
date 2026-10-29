@@ -1,4 +1,5 @@
 import type { MapBootstrap } from "./types";
+import { restoreNormalBodyReferences } from "./normal-body-references";
 
 const MAP_PAGES = new Set<MapBootstrap["page"]>([
   "map",
@@ -16,7 +17,26 @@ declare global {
 }
 
 export function readMapBootstrap(): MapBootstrap {
-  const value = window.__GEOCODE_MAP_BOOTSTRAP__;
+  let value = window.__GEOCODE_MAP_BOOTSTRAP__;
+  let jsonNode: HTMLScriptElement | undefined;
+  if (value === undefined) {
+    const node = document.getElementById("geocode-map-bootstrap");
+    if (!(node instanceof HTMLScriptElement) || node.type !== "application/json") {
+      throw new Error("Map bootstrap data is invalid");
+    }
+    try {
+      value = JSON.parse(node.textContent ?? "");
+    } catch {
+      throw new Error("Map bootstrap data is invalid");
+    }
+    if (!isRecord(value) || value.page !== "form-answer-map") {
+      throw new Error("Answer-map bootstrap data is invalid");
+    }
+    restoreNormalBodyReferences(value);
+    jsonNode = node;
+  } else if (isRecord(value) && Object.hasOwn(value, "normalBodyReferences")) {
+    throw new Error("Answer-map body references are invalid");
+  }
   if (
     !isRecord(value) ||
     typeof value.page !== "string" ||
@@ -63,6 +83,11 @@ export function readMapBootstrap(): MapBootstrap {
       !Array.isArray(value.answerPreview.targets))
   ) {
     throw new Error("Answer-map bootstrap data is invalid");
+  }
+  if (jsonNode) {
+    // Later readers, including print preparation, reuse the validated snapshot.
+    window.__GEOCODE_MAP_BOOTSTRAP__ = value;
+    jsonNode.remove();
   }
   return value as unknown as MapBootstrap;
 }

@@ -1,0 +1,155 @@
+{
+  "measuredDate": "2026-10-28",
+  "baseline": "Both sides already include history-query rank removal and concurrent initial requests; this comparison isolates the deleted-form options-query fix.",
+  "dataset": {
+    "kind": "Existing local application data, accessed read-only",
+    "answers": 22537,
+    "targets": 19776,
+    "ownedForms": 29,
+    "deletedOwnedForms": 26,
+    "returnedForms": 3,
+    "pageRows": 50
+  },
+  "sourceSha256": {
+    "before": "4605fa02b050813c780fa91bf7cc467023624da284c1bc3e872efa3029c0de1d",
+    "after": "9b764658b1e6f5943038d4bf3513f6fa9a94d4c0e108cffcc7b5d9dc4b12d81b"
+  },
+  "benchmarkSourceSha256": "1cdcd1aab7b7537ba3003a85331cca04a5488080b9279557d42acaf47917562a",
+  "medianMs": {
+    "before": {
+      "optionsMs": 7342.62,
+      "searchMs": 1270.27,
+      "readyMs": 7342.62,
+      "serializationMs": 0.42
+    },
+    "after": {
+      "optionsMs": 213.32,
+      "searchMs": 500.51,
+      "readyMs": 500.52,
+      "serializationMs": 0.26
+    }
+  },
+  "notes": [
+    "Actual optimized Rust/SQLx handlers and production timestamp collations. Two read-only pool connections, one warm-up, then three samples with options and search running together.",
+    "readyMs is completion of both handlers, not browser display completion. JSON serialization is measured separately. HTTP, browser JSON parsing, Vue, WebView painting and background map work are excluded.",
+    "Only aggregate counts, byte sizes and timing data are retained; no account IDs, names, answers, paths, or credentials are saved. No migrations or application-data/configuration writes are performed.",
+    "Search timings include its concurrent execution with options; differences include the changed contention and must not be presented as a separately changed search query.",
+    "Python read-only SQL validation separately confirmed identical returned form records and order: three records; 26 deleted forms triggered repeated owner/answer scans before the fix."
+  ],
+  "handlers": {
+    "before": {
+      "build": "release",
+      "measuredAt": "2026-10-28T10:55:26.772547700+00:00",
+      "notes": [
+        "Read-only existing SQLite DB; no migrations or application configuration changes.",
+        "The account with the most answers is selected internally. No IDs, names, answers, or credentials are printed or saved.",
+        "Real Rust/SQLx handlers and timestamp collations; two read-only pool connections; one warm-up before parallel-request trials.",
+        "Includes JSON serialization separately, excludes HTTP transport, browser parsing, Vue, and painting."
+      ],
+      "trials": [
+        {
+          "answers": 22537,
+          "fields": 0,
+          "forms": 3,
+          "layers": 22,
+          "optionsBytes": 2303,
+          "optionsMs": 7620.9214,
+          "readyMs": 7620.9223,
+          "rows": 50,
+          "searchBytes": 215062,
+          "searchMs": 1298.6478,
+          "serializationMs": 0.4213,
+          "targets": 19776,
+          "trial": 1
+        },
+        {
+          "answers": 22537,
+          "fields": 0,
+          "forms": 3,
+          "layers": 22,
+          "optionsBytes": 2303,
+          "optionsMs": 7342.6197999999995,
+          "readyMs": 7342.6205,
+          "rows": 50,
+          "searchBytes": 215062,
+          "searchMs": 1270.2658,
+          "serializationMs": 0.28919999999999996,
+          "targets": 19776,
+          "trial": 2
+        },
+        {
+          "answers": 22537,
+          "fields": 0,
+          "forms": 3,
+          "layers": 22,
+          "optionsBytes": 2303,
+          "optionsMs": 7116.4264,
+          "readyMs": 7116.4274000000005,
+          "rows": 50,
+          "searchBytes": 215062,
+          "searchMs": 1198.1414,
+          "serializationMs": 0.5972,
+          "targets": 19776,
+          "trial": 3
+        }
+      ]
+    },
+    "after": {
+      "build": "release",
+      "measuredAt": "2026-10-28T11:02:49.617096300+00:00",
+      "notes": [
+        "Read-only existing SQLite DB; no migrations or application configuration changes.",
+        "The account with the most answers is selected internally. No IDs, names, answers, or credentials are printed or saved.",
+        "Real Rust/SQLx handlers and timestamp collations; two read-only pool connections; one warm-up before parallel-request trials.",
+        "Includes JSON serialization separately, excludes HTTP transport, browser parsing, Vue, and painting."
+      ],
+      "trials": [
+        {
+          "answers": 22537,
+          "fields": 0,
+          "forms": 3,
+          "layers": 22,
+          "optionsBytes": 2303,
+          "optionsMs": 217.4761,
+          "readyMs": 502.63159999999993,
+          "rows": 50,
+          "searchBytes": 215062,
+          "searchMs": 502.61999999999995,
+          "serializationMs": 0.27799999999999997,
+          "targets": 19776,
+          "trial": 1
+        },
+        {
+          "answers": 22537,
+          "fields": 0,
+          "forms": 3,
+          "layers": 22,
+          "optionsBytes": 2303,
+          "optionsMs": 213.318,
+          "readyMs": 500.5189,
+          "rows": 50,
+          "searchBytes": 215062,
+          "searchMs": 500.5085,
+          "serializationMs": 0.2581,
+          "targets": 19776,
+          "trial": 2
+        },
+        {
+          "answers": 22537,
+          "fields": 0,
+          "forms": 3,
+          "layers": 22,
+          "optionsBytes": 2303,
+          "optionsMs": 208.57049999999998,
+          "readyMs": 491.5746,
+          "rows": 50,
+          "searchBytes": 215062,
+          "searchMs": 491.5637,
+          "serializationMs": 0.2001,
+          "targets": 19776,
+          "trial": 3
+        }
+      ]
+    }
+  }
+}

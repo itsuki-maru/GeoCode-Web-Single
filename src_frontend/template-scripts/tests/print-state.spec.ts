@@ -12,6 +12,13 @@ const state: PrintMapState = {
 };
 
 describe("print clustering state validation", () => {
+  it.each(["markerIds", "shapeIds"])("validates optional %s filters", (key) => {
+    for (const value of [undefined, null, [], ["a", "b"]])
+      expect(isPrintMapState({ ...state, [key]: value })).toBe(true);
+    for (const value of ["a", 0, {}, [1], [null]])
+      expect(isPrintMapState({ ...state, [key]: value })).toBe(false);
+  });
+
   it("continues accepting print requests without the new settings", () => {
     expect(isPrintMapState(state)).toBe(true);
   });

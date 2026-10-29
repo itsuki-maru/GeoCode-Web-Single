@@ -22,8 +22,6 @@ use tera::{Context, Tera};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-const MAP_TARGET_LIMIT: i64 = 10_000;
-
 #[derive(Deserialize)]
 pub struct AnswerMapPrintRequest {
     pub parent_origin: String,
@@ -119,11 +117,6 @@ pub async fn load_answer_map(
         .build_query_as()
         .fetch_one(&mut *tx)
         .await?;
-    if target_count > MAP_TARGET_LIMIT {
-        return Err(AppError::Validation(
-            "地図で確認できる対象は10,000件までです。条件を絞り込んでください。".into(),
-        ));
-    }
     if target_count == 0 {
         return Err(AppError::Validation(
             "地図に表示する対象がありません。回答一覧を更新してください。".into(),
@@ -297,7 +290,11 @@ pub async fn answer_map_handler(
         Ok::<_,AppError>(())
     }.await;
     let (template, status) = match result {
-        Ok(()) => ("form-answer-map.html", StatusCode::OK),
+        Ok(()) => {
+            context = super::answer_map_transport::encode_context(context)
+                .map_err(|_| AppError::InternalServerError)?;
+            ("form-answer-map.html", StatusCode::OK)
+        },
         Err(error) => {
             let (message, status) = match error {
                 AppError::Validation(message) => (message, StatusCode::BAD_REQUEST),

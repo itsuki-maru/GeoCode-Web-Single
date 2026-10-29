@@ -42,6 +42,62 @@ async fn marker(pool: &SqlitePool, user: Uuid, layer: Uuid, name: &str) -> Uuid 
 }
 
 #[tokio::test]
+async fn form_options_keep_only_owned_active_or_referenced_deleted_forms() {
+    let pool = common::test_pool().await;
+    let user = test_user(&pool, "options-owner").await;
+    let other = test_user(&pool, "options-other").await;
+    let layer = test_layer(&pool, &user).await;
+    let other_layer = test_layer(&pool, &other).await;
+    let owned_marker = marker(&pool, user, layer, "owned marker").await;
+    let foreign_marker = marker(&pool, other, other_layer, "foreign marker").await;
+    let owned_shape = Uuid::new_v4();
+    sqlx::query("INSERT INTO shape_model(id,user_id,layer_id,shape_type,name,geojson,created_at,updated_at) VALUES($1,$2,$3,'polyline','owned shape',$4,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
+        .bind(owned_shape.to_string()).bind(user.to_string()).bind(layer.to_string())
+        .bind(json!({"type":"Feature","properties":{},"geometry":{"type":"LineString","coordinates":[[139,35],[140,36]]}}))
+        .execute(&pool).await.unwrap();
+    let forms: Vec<Uuid> = (0..6).map(|_| Uuid::new_v4()).collect();
+    let at = (Utc::now() - Duration::days(1)).naive_utc();
+    for (index, id) in forms.iter().enumerate() {
+        sqlx::query("INSERT INTO common_form_model(id,user_id,form_title,form_description,form_schema,deleted,create_at,update_at) VALUES($1,$2,'option form','',$3,$4,$5,$6)")
+            .bind(id.to_string()).bind(if index == 5 { other } else { user }.to_string())
+            .bind(schema(false)["form_schema"].clone()).bind(index != 0)
+            .bind(at).bind(at + Duration::seconds(index as i64))
+            .execute(&pool).await.unwrap();
+    }
+    for (kind, target, form) in [
+        ("marker", owned_marker, forms[1]),
+        ("marker", owned_marker, forms[1]),
+        ("shape", owned_shape, forms[2]),
+        ("marker", foreign_marker, forms[3]),
+        ("marker", owned_marker, forms[5]),
+    ] {
+        sqlx::query(&format!("INSERT INTO {kind}_form_submission_model(id,{kind}_id,submitted_values,rendered_markdown,source_form,create_at) VALUES($1,$2,$3,'',$4,$5)"))
+            .bind(Uuid::new_v4().to_string()).bind(target.to_string()).bind(json!({}))
+            .bind(json!({"id":form,"version":1})).bind(at)
+            .execute(&pool).await.unwrap();
+    }
+    let options = answer_options_handler(
+        Extension(user.to_string()),
+        Extension(pool),
+        Json(query(json!({}))),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(
+        options["forms"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|form| form["id"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>(),
+        [forms[2], forms[1], forms[0]].map(|id| id.to_string()),
+    );
+    assert_eq!(options["fields"], json!([]));
+    assert_eq!(options["versions"], json!([]));
+}
+
+#[tokio::test]
 async fn owned_history_latest_typed_filters_and_csv_agree() {
     let pool = common::test_pool().await;
     let user = test_user(&pool, "answers-owner").await;
@@ -134,6 +190,16 @@ async fn owned_history_latest_typed_filters_and_csv_agree() {
     }
     let history = search(&pool, user, json!({})).await;
     assert_eq!((history.total, history.target_count), (6, 3));
+    let explicit_history = search(
+        &pool,
+        user,
+        json!({"mode":"history", "as_of":history.as_of}),
+    )
+    .await;
+    assert_eq!(
+        serde_json::to_value(&explicit_history).unwrap(),
+        serde_json::to_value(&history).unwrap(),
+    );
     assert_eq!(search(&pool, other, json!({})).await.total, 1);
     assert_eq!(search(&pool, user, json!({"mode":"latest"})).await.total, 5);
     let condition = |id: &str, typ: &str, op: &str, value: Value| json!({"field_id":id,"field_type":typ,"op":op,"value":value});

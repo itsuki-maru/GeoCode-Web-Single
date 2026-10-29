@@ -17,6 +17,7 @@ export function isAnswerPrintSnapshot(v: any): v is AnswerPrintSnapshot {
   if (!record(v) || !isPrintMapState(v.state) || !record(v.bootstrap)) return false;
   const b = v.bootstrap;
   if (
+    Object.hasOwn(b, "normalBodyReferences") ||
     b.page !== "form-answer-map" ||
     typeof b.isCluster !== "boolean" ||
     !record(b.layers) ||
@@ -31,7 +32,7 @@ export function isAnswerPrintSnapshot(v: any): v is AnswerPrintSnapshot {
     return false;
   const markers = Object.values(b.markers),
     shapes = b.shapes;
-  if (markers.length + shapes.length === 0 || markers.length + shapes.length > 10000) return false;
+  if (markers.length + shapes.length === 0) return false;
   if (
     !markers.every(
       (m) =>
@@ -58,26 +59,25 @@ export function isAnswerPrintSnapshot(v: any): v is AnswerPrintSnapshot {
   )
     return false;
   const keys = [...markers.map((m) => `marker:${m.id}`), ...shapes.map((s) => `shape:${s.id}`)];
-  if (v.coloring !== undefined && !isAnswerColoring(v.coloring, new Set(keys))) return false;
+  const keySet = new Set(keys);
+  if (v.coloring !== undefined && !isAnswerColoring(v.coloring, keySet)) return false;
   if (
     b.popupBodies !== undefined &&
     (!record(b.popupBodies) ||
-      Object.entries(b.popupBodies).some(
-        ([key, value]) => !keys.includes(key) || !isPopupBody(value),
-      ))
+      Object.entries(b.popupBodies).some(([key, value]) => !keySet.has(key) || !isPopupBody(value)))
   )
     return false;
   if (
     b.popupAnalysis !== undefined &&
     (!record(b.popupAnalysis) ||
       Object.entries(b.popupAnalysis).some(
-        ([key, value]) => !keys.includes(key) || typeof value !== "string",
+        ([key, value]) => !keySet.has(key) || typeof value !== "string",
       ))
   )
     return false;
   const targets = new Set(b.answerPreview.targets);
   if (
-    new Set(keys).size !== keys.length ||
+    keySet.size !== keys.length ||
     targets.size !== keys.length ||
     b.answerPreview.targets.length !== keys.length ||
     !keys.every((k) => targets.has(k))
@@ -95,6 +95,8 @@ export function createAnswerPrintSnapshot(
   runtime: any,
   keys: string[],
 ): AnswerPrintSnapshot {
+  if (Object.hasOwn(bootstrap, "normalBodyReferences"))
+    throw new Error("印刷対象が不正です。地図を開き直してください。");
   const targets = new Set(keys);
   const markers = Object.fromEntries(
     Object.entries(bootstrap.markers).filter(([, m]) => targets.has(`marker:${m.id}`)),

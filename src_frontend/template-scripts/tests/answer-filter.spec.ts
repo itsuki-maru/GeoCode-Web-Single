@@ -3,7 +3,7 @@ import { installAnswerFilter } from "../src/map/answer-filter";
 
 afterEach(() => vi.useRealTimers());
 
-function setup() {
+function setup(targets = ["marker:id", "shape:id", "marker:invalid"]) {
   const marker = { getLatLng: () => [35, 139] };
   const shape = { getLatLng: () => [36, 140] };
   const group = { hasLayer: vi.fn(() => true) };
@@ -27,7 +27,7 @@ function setup() {
   const preview = {
     requestId: "r",
     parentOrigin: location.origin,
-    targets: ["marker:id", "shape:id", "marker:invalid"],
+    targets,
   } as any;
   const result = installAnswerFilter(runtime, preview, { latLngBounds: () => bounds });
   const send = (data: object, origin = location.origin, source = window.parent) =>
@@ -42,6 +42,30 @@ function setup() {
 }
 
 describe("dedicated answer map filter", () => {
+  it("2万対象を省略せず絞り込みとCSV候補へ渡し、所属と重複を検証する", () => {
+    const targets = Array.from({ length: 20_000 }, (_, n) => `shape:target-${n}`);
+    const s = setup(targets);
+    Object.assign(s.runtime, {
+      shapeRenderer: { isRenderable: () => true },
+      isShapeLogicallyVisible: () => true,
+    });
+    s.send({ targets });
+    expect(s.runtime.setAnswerTargets).toHaveBeenLastCalledWith(targets);
+    expect(s.result.counts()).toEqual({ visible: targets.length, renderable: targets.length });
+    s.send({ type: "answer-map-print-enable", enabled: true });
+    s.send({ type: "answer-map-csv-request", csvRequestId: "csv", updateId: "u" });
+    expect(s.post).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: "answer-map-csv-targets", targets }),
+      location.origin,
+    );
+    const calls = s.runtime.setAnswerTargets.mock.calls.length;
+    s.send({ targets: [...targets, targets[0]] });
+    s.send({ targets: [...targets, "shape:outside"] });
+    expect(s.runtime.setAnswerTargets).toHaveBeenCalledTimes(calls);
+    expect(s.result.counts()).toEqual({ visible: targets.length, renderable: targets.length });
+    s.handlers.unload();
+  });
+
   it("未生成の図形も件数・CSV・全体表示に含め、Leaflet生成を要求しない", () => {
     const s = setup();
     delete (s.runtime.shapeLayers as Record<string, unknown>)["shape-id"];

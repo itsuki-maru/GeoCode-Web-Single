@@ -1,7 +1,14 @@
 //! PostgreSQLのnumeric・timestamp比較をSQLiteの読み取り接続で再現する。
 use chrono::{DateTime, NaiveDateTime};
 use sqlx::{Sqlite, SqlitePool, Transaction};
-use std::cmp::Ordering;
+use std::{
+    cmp::Ordering,
+    collections::HashMap,
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering as AtomicOrdering},
+    },
+};
 
 pub(super) async fn begin_read(
     pool: &SqlitePool,
@@ -10,7 +17,8 @@ pub(super) async fn begin_read(
     {
         let mut handle = tx.lock_handle().await?;
         handle.create_collation("answer_numeric", compare_numbers)?;
-        handle.create_collation("answer_time", compare_times)?;
+        let times = CachedTimestampCollation::default();
+        handle.create_collation("answer_time", move |a, b| times.compare(a, b))?;
         handle.create_collation("answer_name", |a, b| {
             a.to_lowercase().cmp(&b.to_lowercase())
         })?;
@@ -65,6 +73,87 @@ fn compare_times(a: &str, b: &str) -> Ordering {
     match (timestamp(a), timestamp(b)) {
         (Some(a), Some(b)) => a.cmp(&b),
         _ => a.cmp(b),
+    }
+}
+
+const TIMESTAMP_CACHE_MAX_ENTRIES: usize = 512;
+const TIMESTAMP_CACHE_MAX_BYTES: usize = 32 * 1024;
+const TIMESTAMP_CACHE_MAX_KEY_BYTES: usize = 256;
+const TIMESTAMP_CACHE_SAMPLE_COMPARISONS: usize = 256;
+
+#[derive(Default)]
+struct TimestampCache {
+    values: HashMap<String, Option<NaiveDateTime>>,
+    key_bytes: usize,
+    comparisons: usize,
+    reused_comparisons: usize,
+}
+
+impl TimestampCache {
+    fn parse(&mut self, raw: &str) -> (Option<NaiveDateTime>, bool) {
+        // Do not hash or retain unusually long values; parsing/fallback stays unchanged.
+        if raw.len() > TIMESTAMP_CACHE_MAX_KEY_BYTES {
+            return (timestamp(raw), false);
+        }
+        if let Some(parsed) = self.values.get(raw) {
+            return (*parsed, true);
+        }
+        let parsed = timestamp(raw);
+        // Keep the initial working set instead of allocating on every cache miss.
+        // This also retains frequently reused query boundaries when dates are unique.
+        if self.values.len() < TIMESTAMP_CACHE_MAX_ENTRIES
+            && raw.len() <= TIMESTAMP_CACHE_MAX_BYTES.saturating_sub(self.key_bytes)
+        {
+            self.values.insert(raw.to_owned(), parsed);
+            self.key_bytes += raw.len();
+        }
+        (parsed, false)
+    }
+
+    fn unhelpful(&mut self, reused: bool) -> bool {
+        self.comparisons += 1;
+        self.reused_comparisons += usize::from(reused);
+        if self.comparisons < TIMESTAMP_CACHE_SAMPLE_COMPARISONS {
+            return false;
+        }
+        // A repeated as_of boundary keeps this useful even when every stored date
+        // differs. Stop when fewer than a quarter of comparisons reuse either date.
+        let unhelpful = self.reused_comparisons * 4 < self.comparisons;
+        self.comparisons = 0;
+        self.reused_comparisons = 0;
+        unhelpful
+    }
+}
+
+/// Replaced at each read transaction's start. SQLite keeps the callback on its
+/// pooled connection after commit, so both entry count and retained key bytes are bounded.
+#[derive(Default)]
+struct CachedTimestampCollation {
+    cache: Mutex<TimestampCache>,
+    disabled: AtomicBool,
+}
+
+impl CachedTimestampCollation {
+    fn compare(&self, a: &str, b: &str) -> Ordering {
+        if a == b {
+            return Ordering::Equal;
+        }
+        if self.disabled.load(AtomicOrdering::Relaxed) {
+            return compare_times(a, b);
+        }
+        let Ok(mut cache) = self.cache.lock() else {
+            self.disabled.store(true, AtomicOrdering::Relaxed);
+            return compare_times(a, b);
+        };
+        let (parsed_a, reused_a) = cache.parse(a);
+        let (parsed_b, reused_b) = cache.parse(b);
+        if cache.unhelpful(reused_a || reused_b) {
+            self.disabled.store(true, AtomicOrdering::Relaxed);
+        }
+        match (parsed_a, parsed_b) {
+            (Some(a), Some(b)) => a.cmp(&b),
+            _ => a.cmp(b),
+        }
     }
 }
 
@@ -195,5 +284,229 @@ mod tests {
             compare_times("2026-10-20T01:00:00.000002Z", "2026-10-20 01:00:00.000001"),
             Ordering::Greater
         );
+    }
+
+    #[test]
+    fn cached_times_preserve_mixed_formats_precision_and_invalid_fallback() {
+        let cached = CachedTimestampCollation::default();
+        let long_invalid = "日時".repeat(TIMESTAMP_CACHE_MAX_KEY_BYTES);
+        let samples = [
+            "2026-10-20 01:00:00.000001",
+            "2026-10-20T01:00:00.000001",
+            "2026-10-20T10:00:00.000001+09:00",
+            "2026-10-20T01:00:00.000002Z",
+            "2026-10-19T20:00:00.000001-05:00",
+            "2026-10-20T01:00:00.000001001Z",
+            "2016-12-31T23:59:60Z",
+            "",
+            "2026-02-30 01:00:00",
+            "invalid\0timestamp",
+            &long_invalid,
+        ];
+        for _ in 0..2 {
+            for a in samples {
+                for b in samples {
+                    assert_eq!(cached.compare(a, b), compare_times(a, b), "{a:?} / {b:?}");
+                }
+            }
+        }
+        let cache = cached.cache.lock().unwrap();
+        assert_eq!(cache.values.len(), samples.len() - 1);
+        assert_eq!(cache.values.get(""), Some(&None));
+        assert!(!cache.values.contains_key(&long_invalid));
+    }
+
+    #[test]
+    fn unique_times_remain_correct_after_cache_entry_limit() {
+        let cached = CachedTimestampCollation::default();
+        let start = timestamp("2026-01-01 00:00:00").unwrap();
+        let boundary = "2027-01-01T00:00:00Z";
+        for i in 0..TIMESTAMP_CACHE_MAX_ENTRIES * 2 {
+            let raw = (start + chrono::Duration::microseconds(i as i64)).to_string();
+            assert_eq!(
+                cached.compare(&raw, boundary),
+                compare_times(&raw, boundary)
+            );
+        }
+        let cache = cached.cache.lock().unwrap();
+        assert_eq!(cache.values.len(), TIMESTAMP_CACHE_MAX_ENTRIES);
+        assert!(cache.key_bytes <= TIMESTAMP_CACHE_MAX_BYTES);
+        assert!(cache.values.contains_key(boundary));
+        assert!(!cached.disabled.load(AtomicOrdering::Relaxed));
+    }
+
+    #[test]
+    fn cache_key_bytes_are_bounded_for_invalid_values() {
+        let cached = CachedTimestampCollation::default();
+        let suffix = "x".repeat(TIMESTAMP_CACHE_MAX_KEY_BYTES - 8);
+        for i in 0..TIMESTAMP_CACHE_MAX_ENTRIES {
+            let raw = format!("{i:08}{suffix}");
+            assert_eq!(cached.compare(&raw, "invalid"), raw.as_str().cmp("invalid"));
+        }
+        let cache = cached.cache.lock().unwrap();
+        assert!(cache.values.len() < TIMESTAMP_CACHE_MAX_ENTRIES);
+        assert!(cache.key_bytes <= TIMESTAMP_CACHE_MAX_BYTES);
+        assert!(cache.key_bytes + TIMESTAMP_CACHE_MAX_KEY_BYTES > TIMESTAMP_CACHE_MAX_BYTES);
+    }
+
+    #[test]
+    fn poisoned_timestamp_cache_falls_back_to_original_comparison() {
+        let cached = CachedTimestampCollation::default();
+        let _ = std::panic::catch_unwind(|| {
+            let _guard = cached.cache.lock().unwrap();
+            panic!("poison the cache for fallback verification");
+        });
+        assert!(cached.cache.is_poisoned());
+        for (a, b) in [
+            ("2026-10-20T10:00:00+09:00", "2026-10-20 01:00:00"),
+            ("invalid", "2026-10-20 01:00:00"),
+            ("invalid", "invalid"),
+        ] {
+            assert_eq!(cached.compare(a, b), compare_times(a, b));
+        }
+    }
+
+    #[test]
+    fn unhelpful_timestamp_cache_stops_and_new_collation_starts_enabled() {
+        let cached = CachedTimestampCollation::default();
+        let start = timestamp("2026-01-01 00:00:00").unwrap();
+        for i in 0..TIMESTAMP_CACHE_SAMPLE_COMPARISONS {
+            let a = (start + chrono::Duration::microseconds(i as i64 * 2)).to_string();
+            let b = (start + chrono::Duration::microseconds(i as i64 * 2 + 1)).to_string();
+            assert_eq!(cached.compare(&a, &b), compare_times(&a, &b));
+        }
+        assert!(cached.disabled.load(AtomicOrdering::Relaxed));
+        let retained = cached.cache.lock().unwrap().values.len();
+        let a = "2026-10-20T10:00:00.000001+09:00";
+        let b = "2026-10-20 01:00:00.000001";
+        assert_eq!(cached.compare(a, b), compare_times(a, b));
+        assert_eq!(cached.cache.lock().unwrap().values.len(), retained);
+
+        // begin_read registers a new default callback for every transaction.
+        let next_read = CachedTimestampCollation::default();
+        assert_eq!(next_read.compare(a, b), compare_times(a, b));
+        assert!(!next_read.disabled.load(AtomicOrdering::Relaxed));
+        assert_eq!(next_read.cache.lock().unwrap().values.len(), 2);
+    }
+
+    /// Comparator-only measurement: excludes SQLite, SQLx, I/O and UI work.
+    /// Run in release mode with --ignored --nocapture; there is no timing threshold.
+    #[test]
+    #[ignore = "manual timestamp collation performance measurement"]
+    fn timestamp_collation_performance() {
+        use std::time::Instant;
+
+        const ROWS: usize = 20_000;
+        const SAMPLES: usize = 5;
+
+        struct Measurement {
+            times_ms: [f64; 2],
+            matches: Vec<bool>,
+            order: Vec<usize>,
+            sort_comparisons: usize,
+        }
+
+        fn measure(
+            rows: &[String],
+            as_of: &str,
+            mut compare: impl FnMut(&str, &str) -> Ordering,
+        ) -> Measurement {
+            let started = Instant::now();
+            let matches = rows
+                .iter()
+                .map(|raw| compare(raw, as_of) != Ordering::Greater)
+                .collect();
+            let boundary_ms = started.elapsed().as_secs_f64() * 1000.0;
+            let mut order: Vec<_> = (0..rows.len()).collect();
+            let mut sort_comparisons = 0;
+            let started = Instant::now();
+            order.sort_unstable_by(|a, b| {
+                sort_comparisons += 1;
+                compare(&rows[*b], &rows[*a]).then_with(|| b.cmp(a))
+            });
+            Measurement {
+                times_ms: [boundary_ms, started.elapsed().as_secs_f64() * 1000.0],
+                matches,
+                order,
+                sort_comparisons,
+            }
+        }
+
+        fn summary(times: &[[f64; 2]], phase: usize) -> String {
+            let mut values: Vec<_> = times
+                .iter()
+                .map(|sample| match phase {
+                    0 | 1 => sample[phase],
+                    _ => sample[0] + sample[1],
+                })
+                .collect();
+            values.sort_by(f64::total_cmp);
+            format!(
+                "median={:.3},min={:.3},max={:.3}",
+                values[values.len() / 2],
+                values[0],
+                values[values.len() - 1]
+            )
+        }
+
+        let start = timestamp("2026-01-01 00:00:00").unwrap();
+        let as_of = (start + chrono::Duration::seconds(ROWS as i64)).to_string();
+        for repeated in [true, false] {
+            let mut rows: Vec<_> = (0..ROWS)
+                .map(|i| {
+                    let seconds = if repeated { i % 4 * (ROWS - 1) / 3 } else { i };
+                    (start + chrono::Duration::seconds(seconds as i64))
+                        .format("%Y-%m-%d %H:%M:%S%.6f")
+                        .to_string()
+                })
+                .collect();
+            // Deterministic unsorted input; no random-number dependency is needed.
+            let mut state = 0x9e3779b97f4a7c15_u64;
+            for i in (1..ROWS).rev() {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                rows.swap(i, state as usize % (i + 1));
+            }
+            let mut original_times = Vec::with_capacity(SAMPLES);
+            let mut cached_times = Vec::with_capacity(SAMPLES);
+            let mut sort_comparisons = 0;
+            for trial in 0..=SAMPLES {
+                let measure_cached = || {
+                    let cached = CachedTimestampCollation::default();
+                    measure(&rows, &as_of, |a, b| cached.compare(a, b))
+                };
+                let (original, cached) = if trial % 2 == 0 {
+                    (measure(&rows, &as_of, compare_times), measure_cached())
+                } else {
+                    let cached = measure_cached();
+                    (measure(&rows, &as_of, compare_times), cached)
+                };
+                assert_eq!(original.matches, cached.matches);
+                assert_eq!(original.order, cached.order);
+                assert_eq!(original.sort_comparisons, cached.sort_comparisons);
+                sort_comparisons = original.sort_comparisons;
+                if trial > 0 {
+                    original_times.push(original.times_ms);
+                    cached_times.push(cached.times_ms);
+                }
+            }
+            let scenario = if repeated {
+                "four_timestamps"
+            } else {
+                "unique_timestamps"
+            };
+            println!(
+                "timestamp_collation scenario={scenario} rows={ROWS} samples={SAMPLES} warmup=1 sort_comparisons={sort_comparisons}"
+            );
+            for (label, times) in [("original", &original_times), ("cached", &cached_times)] {
+                println!(
+                    "{label} as_of_ms[{}] sort_ms[{}] total_ms[{}]",
+                    summary(times, 0),
+                    summary(times, 1),
+                    summary(times, 2)
+                );
+            }
+        }
     }
 }

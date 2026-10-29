@@ -145,32 +145,33 @@ describe("回答一覧", () => {
     wrapper.unmount();
   });
   it.each([
-    { total: 10_000, target_count: 10_000, disabled: false },
-    { total: 10_001, target_count: 10_001, disabled: true },
-    { total: 20_000, target_count: 2, disabled: false },
-    { total: 10_001, target_count: undefined, disabled: true },
-  ])("地図の上限を重複のない対象数で判定する: %j", async ({ total, target_count, disabled }) => {
+    { total: 10_000, target_count: 10_000 },
+    { total: 20_000, target_count: 20_000 },
+    { total: 20_000, target_count: 2 },
+    { total: 20_000, target_count: undefined },
+  ])("対象数による上限なく地図を開ける: %j", async ({ total, target_count }) => {
     api.post.mockImplementation(async (url: string) => ({
       data: url.endsWith("options") ? options : { ...result, total, target_count },
     }));
     const wrapper = await open();
-    expect((button(wrapper, "地図で確認").element as HTMLButtonElement).disabled).toBe(disabled);
-    expect(wrapper.text().includes("地図で確認できる対象は10,000件までです")).toBe(disabled);
+    expect((button(wrapper, "地図で確認").element as HTMLButtonElement).disabled).toBe(false);
+    await button(wrapper, "地図で確認").trigger("click");
+    await flushPromises();
+    expect(wrapper.find('iframe[title="回答条件に一致する対象の地図"]').exists()).toBe(true);
     wrapper.unmount();
   });
-  it("地図の上限判定は表示中の条件を使い、絞り込みを反映すると有効に戻る", async () => {
+  it("多数の対象でも入力中の条件変更だけで地図を無効にしない", async () => {
     api.post.mockImplementation(async (url: string) => ({
       data: url.endsWith("options") ? options : { ...result, total: 10_001, target_count: 10_001 },
     }));
     const wrapper = await open();
     await select(wrapper, "共通フォームを選択").setValue("common");
     await flushPromises();
-    expect(button(wrapper, "地図で確認").attributes("disabled")).toBeDefined();
+    expect(button(wrapper, "地図で確認").attributes("disabled")).toBeUndefined();
     api.post.mockResolvedValueOnce({ data: result });
     await wrapper.get("form.search-form").trigger("submit");
     await flushPromises();
     expect(button(wrapper, "地図で確認").attributes("disabled")).toBeUndefined();
-    expect(wrapper.text()).not.toContain("地図で確認できる対象は10,000件までです");
     wrapper.unmount();
   });
   it("APIのフォーム入力順を表示項目とテーブル列に維持する", async () => {
@@ -491,11 +492,226 @@ const mediaScreen = (initial: boolean) => {
 };
 const deferredAnswer = <T>() => {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 };
+const searchProgress = () => document.body.querySelector<HTMLElement>(".answer-search-progress");
+
+describe("回答検索中の全画面スピナー", () => {
+  it.each([
+    { action: "更新", success: true },
+    { action: "更新", success: false },
+    { action: "絞り込む", success: true },
+    { action: "絞り込む", success: false },
+  ])("%sの待機中だけ前面に表示し、完了後に解除する", async ({ action, success }) => {
+    const wrapper = await open();
+    try {
+      expect(searchProgress()).toBeNull();
+      if (action === "絞り込む") {
+        await button(wrapper, "絞り込み").trigger("click");
+        await select(wrapper, "表示モード").setValue("latest");
+      }
+      const pending = deferredAnswer<{ data: typeof result }>();
+      api.post.mockReturnValueOnce(pending.promise);
+      const before = api.post.mock.calls.length;
+      if (action === "更新") await button(wrapper, "更新").trigger("click");
+      else await wrapper.get("form.search-form").trigger("submit");
+      const overlay = searchProgress()!;
+      expect(overlay).not.toBeNull();
+      expect(overlay.parentElement).toBe(document.body);
+      expect(overlay.classList.contains("progress-overlay")).toBe(true);
+      expect(overlay.classList.contains("progress-inline")).toBe(false);
+      expect(overlay.style.display).not.toBe("none");
+      expect(overlay.style.zIndex).toBe("120");
+      expect(overlay.getAttribute("role")).toBe("status");
+      expect(overlay.getAttribute("aria-label")).toBe("回答を読み込んでいます…");
+      expect(overlay.querySelector("svg.spinner")).not.toBeNull();
+      expect(wrapper.text()).toContain("回答を読み込んでいます…");
+      expect(api.post.mock.calls.slice(before)).toEqual([
+        [
+          "/form-answers/search",
+          expect.objectContaining({
+            mode: action === "更新" ? "history" : "latest",
+            limit: 50,
+            cursor: null,
+          }),
+        ],
+      ]);
+      if (success) pending.resolve({ data: { ...result, total: 40 } });
+      else pending.reject(new Error("search failed"));
+      await flushPromises();
+      expect(searchProgress()).toBeNull();
+      expect(wrapper.text()).toContain(success ? "40件" : "回答を読み込めませんでした。");
+      expect(api.post).toHaveBeenCalledTimes(before + 1);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it.each(["resolve", "reject"] as const)(
+    "閉鎖後の古い応答が%sしても、再表示中のスピナーを解除しない",
+    async (outcome) => {
+      const old = deferredAnswer<{ data: typeof result }>();
+      const current = deferredAnswer<{ data: typeof result }>();
+      let searches = 0;
+      api.post.mockImplementation((url: string) =>
+        url.endsWith("options")
+          ? Promise.resolve({ data: options })
+          : ++searches === 1
+            ? old.promise
+            : current.promise,
+      );
+      const wrapper = await open();
+      try {
+        expect(searchProgress()).not.toBeNull();
+        const close = searchProgress()!.querySelector<HTMLButtonElement>(".progress-close-button")!;
+        expect(close.disabled).toBe(false);
+        close.click();
+        await nextTick();
+        expect(wrapper.emitted("close")).toHaveLength(1);
+        await wrapper.setProps({ isOpen: false });
+        expect(searchProgress()).toBeNull();
+        await wrapper.setProps({ isOpen: true });
+        await flushPromises();
+        const overlay = searchProgress();
+        expect(overlay).not.toBeNull();
+        if (outcome === "resolve")
+          old.resolve({ data: { ...result, rows: [{ ...row, target_name: "古い応答" }] } });
+        else old.reject(new Error("old search failed"));
+        await flushPromises();
+        expect(searchProgress()).toBe(overlay);
+        expect(wrapper.text()).not.toContain("古い応答");
+        expect(wrapper.text()).not.toContain("回答を読み込めませんでした。");
+        current.resolve({ data: { ...result, rows: [{ ...row, target_name: "新しい回答" }] } });
+        await flushPromises();
+        expect(searchProgress()).toBeNull();
+        expect(wrapper.get("tbody").text()).toContain("新しい回答");
+        expect(searches).toBe(2);
+      } finally {
+        wrapper.unmount();
+      }
+    },
+  );
+
+  it("検索中に破棄してもbodyへスピナーを残さない", async () => {
+    const pending = deferredAnswer<{ data: typeof result }>();
+    api.post.mockImplementation((url: string) =>
+      url.endsWith("options") ? Promise.resolve({ data: options }) : pending.promise,
+    );
+    const wrapper = await open();
+    expect(searchProgress()).not.toBeNull();
+    wrapper.unmount();
+    expect(searchProgress()).toBeNull();
+    pending.resolve({ data: result });
+    await flushPromises();
+    expect(searchProgress()).toBeNull();
+  });
+
+  it("呼び出し元のclass・属性は一覧overlayへ渡し、前面スピナーへ混ぜない", async () => {
+    const pending = deferredAnswer<{ data: typeof result }>();
+    api.post.mockImplementation((url: string) =>
+      url.endsWith("options") ? Promise.resolve({ data: options }) : pending.promise,
+    );
+    const wrapper = mount(FormAnswersModal, {
+      attachTo: document.body,
+      props: { isOpen: true },
+      attrs: {
+        class: "caller-answers",
+        "data-caller": "retained",
+        style: "--answers-caller: kept",
+      },
+    });
+    try {
+      await flushPromises();
+      const overlay = wrapper.get(".base-modal-overlay.caller-answers").element as HTMLElement;
+      expect(overlay.dataset.caller).toBe("retained");
+      expect(overlay.style.getPropertyValue("--answers-caller")).toBe("kept");
+      const spinner = searchProgress()!;
+      expect(spinner).not.toBeNull();
+      expect(spinner.classList.contains("caller-answers")).toBe(false);
+      expect(spinner.getAttribute("data-caller")).toBeNull();
+      expect(spinner.style.getPropertyValue("--answers-caller")).toBe("");
+      pending.resolve({ data: result });
+      await flushPromises();
+      expect(searchProgress()).toBeNull();
+    } finally {
+      wrapper.unmount();
+    }
+  });
+});
+
+describe("回答一覧の初期取得", () => {
+  it.each(["options", "search"])(
+    "%sが先に完了しても、並行取得した回答と項目が揃ってから表示する",
+    async (first) => {
+      const definitions = deferredAnswer<{ data: typeof options }>();
+      const answers = deferredAnswer<{ data: typeof result }>();
+      api.post.mockImplementation((url: string) =>
+        url.endsWith("options") ? definitions.promise : answers.promise,
+      );
+      const wrapper = await open({
+        initialFormId: "common",
+        targetId: "target",
+        targetType: "marker",
+      });
+      expect(api.post.mock.calls.map(([url]) => url)).toEqual([
+        "/form-answers/options",
+        "/form-answers/search",
+      ]);
+      for (const [, request] of api.post.mock.calls)
+        expect(request).toMatchObject({
+          common_form_id: "common",
+          target_id: "target",
+          target_type: "marker",
+        });
+      expect(api.post.mock.calls[1]![1]).toMatchObject({
+        mode: "history",
+        limit: 50,
+        cursor: null,
+      });
+      if (first === "options") definitions.resolve({ data: options });
+      else answers.resolve({ data: result });
+      await flushPromises();
+      expect(wrapper.findAll("tbody tr")).toHaveLength(0);
+      expect(button(wrapper, "更新").attributes("disabled")).toBeDefined();
+      definitions.resolve({ data: options });
+      answers.resolve({ data: result });
+      await flushPromises();
+      expect(wrapper.findAll("tbody tr")).toHaveLength(1);
+      expect(wrapper.get("thead").text()).toContain(field.label);
+      expect(wrapper.get("tbody .answer-value").text()).toBe("0");
+      expect(api.post).toHaveBeenCalledTimes(2);
+      wrapper.unmount();
+    },
+  );
+  it.each(["options", "search"])(
+    "%sの取得失敗後にもう一方が完了しても、一覧を部分表示せずエラーを保持する",
+    async (failed) => {
+      const definitions = deferredAnswer<{ data: typeof options }>();
+      const answers = deferredAnswer<{ data: typeof result }>();
+      api.post.mockImplementation((url: string) =>
+        url.endsWith("options") ? definitions.promise : answers.promise,
+      );
+      const wrapper = await open();
+      if (failed === "options") definitions.reject(new Error("options failed"));
+      else answers.reject(new Error("search failed"));
+      await flushPromises();
+      definitions.resolve({ data: options });
+      answers.resolve({ data: result });
+      await flushPromises();
+      expect(wrapper.findAll("tbody tr")).toHaveLength(0);
+      expect(wrapper.text()).toContain(
+        failed === "options" ? "検索項目を読み込めませんでした。" : "回答を読み込めませんでした。",
+      );
+      expect(button(wrapper, "更新").attributes("disabled")).toBeUndefined();
+      wrapper.unmount();
+    },
+  );
+});
 describe("回答一覧の軽量表示と解放", () => {
   afterEach(() => vi.unstubAllGlobals());
   const manyFields = Array.from({ length: 20 }, (_, index) => ({
@@ -595,7 +811,7 @@ describe("回答一覧の軽量表示と解放", () => {
     expect((wrapper.vm.$.setupState as any).applied).toBeNull();
     wrapper.unmount();
   });
-  it("ignores options from a closed session and does not issue a stale initial search", async () => {
+  it("ignores options from a closed session without applying partial results or starting another search", async () => {
     const old = deferredAnswer<{ data: typeof options }>(),
       current = deferredAnswer<{ data: typeof options }>();
     let requests = 0;
@@ -611,10 +827,11 @@ describe("回答一覧の軽量表示と解放", () => {
     await wrapper.setProps({ isOpen: true });
     old.resolve({ data: { ...options, fields: [{ ...field, label: "古い項目" }] } });
     await flushPromises();
-    expect(api.post.mock.calls.filter(([url]) => url.endsWith("search"))).toHaveLength(0);
+    expect(api.post.mock.calls.filter(([url]) => url.endsWith("search"))).toHaveLength(2);
+    expect(wrapper.findAll("tbody tr")).toHaveLength(0);
     current.resolve({ data: { ...options, fields: [{ ...field, label: "最新項目" }] } });
     await flushPromises();
-    expect(api.post.mock.calls.filter(([url]) => url.endsWith("search"))).toHaveLength(1);
+    expect(api.post.mock.calls.filter(([url]) => url.endsWith("search"))).toHaveLength(2);
     expect(wrapper.get("thead").text()).toContain("最新項目");
     expect(wrapper.text()).not.toContain("古い項目");
     wrapper.unmount();

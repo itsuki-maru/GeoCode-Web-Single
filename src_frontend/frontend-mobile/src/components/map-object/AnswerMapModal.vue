@@ -4,6 +4,7 @@ import apiClient from "@/axiosClient";
 import { submitAuthenticatedForm } from "@/utils/authenticated-form";
 import { requestCurrentMapView } from "@/utils/map-view";
 import PrintMapModal from "../map/PrintMapModal.vue";
+import ProgressSpinner from "../common/ProgressSpinner.vue";
 import AnswerColoringPanel from "./AnswerColoringPanel.vue";
 import SaveMapPresetModal from "./SaveMapPresetModal.vue";
 import SavedMapPresetsModal from "./SavedMapPresetsModal.vue";
@@ -22,6 +23,7 @@ import {
   type AnswerColoring,
 } from "@/utils/answer-coloring";
 
+defineOptions({ inheritAttrs: false });
 const props = defineProps<{
   isOpen: boolean;
   query: Record<string, unknown> | null;
@@ -80,6 +82,8 @@ const loading = ref(false),
   filterError = ref(""),
   busy = ref(false),
   scopeReady = ref(false);
+const optionsOnlyPhase = ref(true);
+const updatingMap = computed(() => props.isOpen && busy.value && !optionsOnlyPhase.value);
 const initialCount = ref(0),
   matchedCount = ref(0),
   visibleCount = ref(0),
@@ -248,6 +252,7 @@ const stop = () => {
   clearTimeout(timeout);
   clearTimeout(ackTimeout);
   pending = undefined;
+  busy.value = false;
   sequence++;
 };
 const submit = async () => {
@@ -462,10 +467,13 @@ const fetchResult = async (
     return;
   }
   controller?.abort();
+  clearTimeout(ackTimeout);
+  pending = undefined;
   controller = new AbortController();
   const current = epoch,
     seq = ++sequence,
     id = requestId.value;
+  optionsOnlyPhase.value = optionsOnly;
   busy.value = true;
   const requestedFilter: AppliedMapFilter = colorChange
     ? JSON.parse(JSON.stringify(appliedFilter))
@@ -515,7 +523,6 @@ const fetchResult = async (
     if (
       !Number.isSafeInteger(data.target_count) ||
       data.target_count !== data.targets.length ||
-      data.targets.length > 10000 ||
       data.targets.some((k) => !initial.has(k)) ||
       new Set(data.targets).size !== data.targets.length ||
       !Number.isSafeInteger(data.answer_count) ||
@@ -580,6 +587,7 @@ const fetchResult = async (
       new URL(props.action, window.location.href).origin,
     );
     ackTimeout = setTimeout(() => {
+      if (!props.isOpen || current !== epoch || seq !== sequence || id !== requestId.value) return;
       busy.value = false;
       pending = undefined;
       filterError.value = "地図の更新結果を確認できませんでした。再度絞り込みを実行してください。";
@@ -627,7 +635,6 @@ const onMessage = (event: MessageEvent) => {
       data.updateId !== appliedId ||
       !Array.isArray(data.targets) ||
       !data.targets.length ||
-      data.targets.length > 10000 ||
       new Set(data.targets).size !== data.targets.length ||
       data.targets.some((id: unknown) => typeof id !== "string" || !initial.has(id))
     ) {
@@ -694,7 +701,8 @@ const onMessage = (event: MessageEvent) => {
       data.query &&
       typeof data.query.as_of === "string" &&
       Array.isArray(data.targets) &&
-      data.targets.length <= 10000 &&
+      data.targets.length === data.targetCount &&
+      new Set(data.targets).size === data.targets.length &&
       data.targets.every((v: unknown) => typeof v === "string")
     ) {
       baseQuery.value = data.query;
@@ -927,6 +935,7 @@ onBeforeUnmount(() => {
     role="dialog"
     aria-modal="true"
     aria-label="地図で分析・検索・出力"
+    v-bind="$attrs"
   >
     <button
       type="button"
@@ -1145,7 +1154,10 @@ onBeforeUnmount(() => {
             title="回答条件に一致する対象の地図"
             :class="{ 'is-loading': loading || error }"
           />
-          <p v-if="loading" class="map-state" role="status">地図を読み込んでいます…</p>
+          <div v-if="loading" class="map-state" role="status">
+            <ProgressSpinner :is-open="loading" inline />
+            <span>地図を読み込んでいます…</span>
+          </div>
           <div v-if="error" class="map-state" role="alert">
             <p>{{ error }}</p>
             <button type="button" @click="submit">再試行</button>
@@ -1210,6 +1222,19 @@ onBeforeUnmount(() => {
       @restore="restorePreset"
     />
   </div>
+  <Teleport to="body">
+    <ProgressSpinner
+      v-if="updatingMap"
+      :is-open="true"
+      :style="{ zIndex: 120 }"
+      role="status"
+      aria-label="地図の表示を更新しています"
+    >
+      <template #controls>
+        <button type="button" class="progress-close-button" @click="emit('close')">閉じる</button>
+      </template>
+    </ProgressSpinner>
+  </Teleport>
 </template>
 
 <style scoped>

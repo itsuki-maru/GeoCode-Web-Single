@@ -46,15 +46,12 @@ export function isAnswerColoring(
     ids.add(rule.id);
   }
   const targets = Object.entries(value.targets);
-  return (
-    targets.length <= 10000 &&
-    targets.every(
-      ([key, rule]) =>
-        /^(marker|shape):[^:]{1,128}$/.test(key) &&
-        (!allowedTargets || allowedTargets.has(key)) &&
-        typeof rule === "string" &&
-        ids.has(rule),
-    )
+  return targets.every(
+    ([key, rule]) =>
+      /^(marker|shape):[^:]{1,128}$/.test(key) &&
+      (!allowedTargets || allowedTargets.has(key)) &&
+      typeof rule === "string" &&
+      ids.has(rule),
   );
 }
 

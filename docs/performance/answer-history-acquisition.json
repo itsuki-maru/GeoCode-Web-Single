@@ -1,0 +1,366 @@
+{
+  "sqliteVersion": "3.42.0",
+  "baseline": "47b82c0a303cbe88e57f2b7a89beb63a0aad05fb",
+  "sourceSha256": {
+    "before": "013d682cbedb3280efa5ef64d0e8fddfce9ba478f3021569942e2a4866d04536",
+    "after": "4605fa02b050813c780fa91bf7cc467023624da284c1bc3e872efa3029c0de1d"
+  },
+  "samples": 3,
+  "notes": [
+    "Default unscoped history SQL reconstructed from the production Rust templates; not a full handler or application benchmark.",
+    "Synthetic memory DB with the referenced columns and owner/target/form indexes, not an application database. No application data or sources are modified.",
+    "Fixed-format UTC timestamps use lexical comparison, excluding production Rust timestamp parsing and mixed formats.",
+    "One warm-up per query; before/after samples alternate on the same fixture. Time includes SQLite execution and Python fetchall, excluding fixture setup, HTTP, JSON serialization/transfer, SQLx, and Vue.",
+    "Each case verifies identical counts, target counts, and 51 complete ordered rows (50 plus next-cursor sentinel). Latest-mode correctness is covered by the backend integration tests."
+  ],
+  "cases": [
+    {
+      "rows": 2000,
+      "valueLength": 80,
+      "operations": {
+        "count": {
+          "before": {
+            "medianMs": 5.79,
+            "samplesMs": [
+              5.79,
+              5.79,
+              5.7
+            ],
+            "plan": [
+              "CO-ROUTINE ranked",
+              "CO-ROUTINE (subquery-7)",
+              "CO-ROUTINE owned",
+              "COMPOUND QUERY",
+              "LEFT-MOST SUBQUERY",
+              "SEARCH m USING INDEX idx_marker_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_marker_target_time (marker_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "UNION ALL",
+              "SEARCH m USING INDEX idx_shape_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_shape_target_time (shape_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "SCAN owned",
+              "USE TEMP B-TREE FOR ORDER BY",
+              "SCAN (subquery-7)",
+              "USE TEMP B-TREE FOR count(DISTINCT)",
+              "SCAN ranked"
+            ]
+          },
+          "after": {
+            "medianMs": 1.59,
+            "samplesMs": [
+              1.95,
+              1.59,
+              1.59
+            ],
+            "plan": [
+              "CO-ROUTINE owned",
+              "COMPOUND QUERY",
+              "LEFT-MOST SUBQUERY",
+              "SEARCH m USING INDEX idx_marker_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_marker_target_time (marker_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "UNION ALL",
+              "SEARCH m USING INDEX idx_shape_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_shape_target_time (shape_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "USE TEMP B-TREE FOR count(DISTINCT)",
+              "SCAN owned"
+            ]
+          }
+        },
+        "page": {
+          "before": {
+            "medianMs": 10.3,
+            "samplesMs": [
+              10.3,
+              9.82,
+              10.9
+            ],
+            "plan": [
+              "CO-ROUTINE ranked",
+              "CO-ROUTINE (subquery-7)",
+              "CO-ROUTINE owned",
+              "COMPOUND QUERY",
+              "LEFT-MOST SUBQUERY",
+              "SEARCH m USING INDEX idx_marker_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_marker_target_time (marker_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "UNION ALL",
+              "SEARCH m USING INDEX idx_shape_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_shape_target_time (shape_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "SCAN owned",
+              "USE TEMP B-TREE FOR ORDER BY",
+              "SCAN (subquery-7)",
+              "SCAN ranked",
+              "USE TEMP B-TREE FOR ORDER BY"
+            ]
+          },
+          "after": {
+            "medianMs": 3.92,
+            "samplesMs": [
+              3.97,
+              3.92,
+              3.9
+            ],
+            "plan": [
+              "CO-ROUTINE owned",
+              "COMPOUND QUERY",
+              "LEFT-MOST SUBQUERY",
+              "SEARCH m USING INDEX idx_marker_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_marker_target_time (marker_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "UNION ALL",
+              "SEARCH m USING INDEX idx_shape_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_shape_target_time (shape_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "SCAN owned",
+              "USE TEMP B-TREE FOR ORDER BY"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "rows": 20000,
+      "valueLength": 80,
+      "operations": {
+        "count": {
+          "before": {
+            "medianMs": 66.97,
+            "samplesMs": [
+              67.76,
+              66.97,
+              66.57
+            ],
+            "plan": [
+              "CO-ROUTINE ranked",
+              "CO-ROUTINE (subquery-7)",
+              "CO-ROUTINE owned",
+              "COMPOUND QUERY",
+              "LEFT-MOST SUBQUERY",
+              "SEARCH m USING INDEX idx_marker_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_marker_target_time (marker_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "UNION ALL",
+              "SEARCH m USING INDEX idx_shape_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_shape_target_time (shape_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "SCAN owned",
+              "USE TEMP B-TREE FOR ORDER BY",
+              "SCAN (subquery-7)",
+              "USE TEMP B-TREE FOR count(DISTINCT)",
+              "SCAN ranked"
+            ]
+          },
+          "after": {
+            "medianMs": 16.34,
+            "samplesMs": [
+              16.23,
+              16.34,
+              16.44
+            ],
+            "plan": [
+              "CO-ROUTINE owned",
+              "COMPOUND QUERY",
+              "LEFT-MOST SUBQUERY",
+              "SEARCH m USING INDEX idx_marker_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_marker_target_time (marker_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "UNION ALL",
+              "SEARCH m USING INDEX idx_shape_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_shape_target_time (shape_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "USE TEMP B-TREE FOR count(DISTINCT)",
+              "SCAN owned"
+            ]
+          }
+        },
+        "page": {
+          "before": {
+            "medianMs": 101.58,
+            "samplesMs": [
+              101.58,
+              103.74,
+              101.28
+            ],
+            "plan": [
+              "CO-ROUTINE ranked",
+              "CO-ROUTINE (subquery-7)",
+              "CO-ROUTINE owned",
+              "COMPOUND QUERY",
+              "LEFT-MOST SUBQUERY",
+              "SEARCH m USING INDEX idx_marker_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_marker_target_time (marker_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "UNION ALL",
+              "SEARCH m USING INDEX idx_shape_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_shape_target_time (shape_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "SCAN owned",
+              "USE TEMP B-TREE FOR ORDER BY",
+              "SCAN (subquery-7)",
+              "SCAN ranked",
+              "USE TEMP B-TREE FOR ORDER BY"
+            ]
+          },
+          "after": {
+            "medianMs": 36.94,
+            "samplesMs": [
+              36.94,
+              37.06,
+              36.88
+            ],
+            "plan": [
+              "CO-ROUTINE owned",
+              "COMPOUND QUERY",
+              "LEFT-MOST SUBQUERY",
+              "SEARCH m USING INDEX idx_marker_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_marker_target_time (marker_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "UNION ALL",
+              "SEARCH m USING INDEX idx_shape_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_shape_target_time (shape_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "SCAN owned",
+              "USE TEMP B-TREE FOR ORDER BY"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "rows": 20000,
+      "valueLength": 5000,
+      "operations": {
+        "count": {
+          "before": {
+            "medianMs": 393.99,
+            "samplesMs": [
+              394.33,
+              386.26,
+              393.99
+            ],
+            "plan": [
+              "CO-ROUTINE ranked",
+              "CO-ROUTINE (subquery-7)",
+              "CO-ROUTINE owned",
+              "COMPOUND QUERY",
+              "LEFT-MOST SUBQUERY",
+              "SEARCH m USING INDEX idx_marker_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_marker_target_time (marker_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "UNION ALL",
+              "SEARCH m USING INDEX idx_shape_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_shape_target_time (shape_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "SCAN owned",
+              "USE TEMP B-TREE FOR ORDER BY",
+              "SCAN (subquery-7)",
+              "USE TEMP B-TREE FOR count(DISTINCT)",
+              "SCAN ranked"
+            ]
+          },
+          "after": {
+            "medianMs": 25.71,
+            "samplesMs": [
+              25.48,
+              25.71,
+              26.78
+            ],
+            "plan": [
+              "CO-ROUTINE owned",
+              "COMPOUND QUERY",
+              "LEFT-MOST SUBQUERY",
+              "SEARCH m USING INDEX idx_marker_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_marker_target_time (marker_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "UNION ALL",
+              "SEARCH m USING INDEX idx_shape_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_shape_target_time (shape_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "USE TEMP B-TREE FOR count(DISTINCT)",
+              "SCAN owned"
+            ]
+          }
+        },
+        "page": {
+          "before": {
+            "medianMs": 475.03,
+            "samplesMs": [
+              479.03,
+              475.03,
+              469.3
+            ],
+            "plan": [
+              "CO-ROUTINE ranked",
+              "CO-ROUTINE (subquery-7)",
+              "CO-ROUTINE owned",
+              "COMPOUND QUERY",
+              "LEFT-MOST SUBQUERY",
+              "SEARCH m USING INDEX idx_marker_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_marker_target_time (marker_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "UNION ALL",
+              "SEARCH m USING INDEX idx_shape_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_shape_target_time (shape_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "SCAN owned",
+              "USE TEMP B-TREE FOR ORDER BY",
+              "SCAN (subquery-7)",
+              "SCAN ranked",
+              "USE TEMP B-TREE FOR ORDER BY"
+            ]
+          },
+          "after": {
+            "medianMs": 69.15,
+            "samplesMs": [
+              66.95,
+              69.15,
+              69.3
+            ],
+            "plan": [
+              "CO-ROUTINE owned",
+              "COMPOUND QUERY",
+              "LEFT-MOST SUBQUERY",
+              "SEARCH m USING INDEX idx_marker_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_marker_target_time (marker_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "UNION ALL",
+              "SEARCH m USING INDEX idx_shape_owner (user_id=?)",
+              "SEARCH s USING INDEX idx_shape_target_time (shape_id=?)",
+              "SEARCH l USING INDEX sqlite_autoindex_layer_model_1 (id=?) LEFT-JOIN",
+              "SEARCH cf USING INDEX sqlite_autoindex_common_form_model_1 (id=?) LEFT-JOIN",
+              "SCAN owned",
+              "USE TEMP B-TREE FOR ORDER BY"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

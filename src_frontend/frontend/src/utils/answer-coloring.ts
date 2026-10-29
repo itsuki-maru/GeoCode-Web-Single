@@ -128,7 +128,6 @@ export function validateColorTargets(
 ): asserts value is string[] {
   if (
     !Array.isArray(value) ||
-    value.length > 10000 ||
     value.some((key) => typeof key !== "string" || !allowed.has(key)) ||
     new Set(value).size !== value.length
   )

@@ -1,0 +1,1067 @@
+{
+  "measuredAt": "2026-10-28T13:27:26.633811+00:00",
+  "baseline": {
+    "postgresql": "5246cff",
+    "sqlite": "ecf2d71"
+  },
+  "sourceSha256": {
+    "postgresql": {
+      "before": {
+        "src/handler/form_answers.rs": "de0c9d04981d31413d550f089bcb91420c0cfab52ee59cbab90f01224c25c822"
+      },
+      "after": {
+        "src/handler/form_answers.rs": "edf02200d8686a054aabd8596f5f9658bbbbe34eb9bec1fd716e3dd713c228f1"
+      }
+    },
+    "sqlite": {
+      "before": {
+        "src/handler/form_answers.rs": "9b764658b1e6f5943038d4bf3513f6fa9a94d4c0e108cffcc7b5d9dc4b12d81b",
+        "src/handler/answer_sqlite.rs": "6c60289f258aa0fee46c9fb021227aca741d1d1d80e65e8869942b9bb74c864d"
+      },
+      "after": {
+        "src/handler/form_answers.rs": "e8ae0bb7b19af90de9ea1ccedfda405c17c4aca239b680db73ba0c34bf79577c",
+        "src/handler/answer_sqlite.rs": "4a0642b3c217a60e2d3ec685c6c616e95c59e6bee494a4b86e8045a0bbf1cd81"
+      }
+    }
+  },
+  "sqliteHandlers": {
+    "dataset": {
+      "answers": 22537,
+      "distinctFieldArrays": 40,
+      "distinctTimestampStrings": 3,
+      "fieldOccurrences": 446760,
+      "largestFormAnswers": 22537
+    },
+    "before": {
+      "median": {
+        "all_history": {
+          "optionsMs": 149.62,
+          "searchMs": 606.62,
+          "phasesMs": {
+            "form_candidates": 149.3,
+            "layers": 0.1,
+            "count": 370.48,
+            "page": 234.77
+          }
+        },
+        "largest_form_history": {
+          "optionsMs": 3991.15,
+          "searchMs": 536.04,
+          "phasesMs": {
+            "form_candidates": 157.03,
+            "layers": 0.1,
+            "form_revisions": 0.07,
+            "field_definitions": 3830.91,
+            "count": 263.19,
+            "page": 270.33
+          }
+        },
+        "largest_form_latest": {
+          "optionsMs": 3937.62,
+          "searchMs": 1174.84,
+          "phasesMs": {
+            "form_candidates": 159.16,
+            "layers": 0.1,
+            "form_revisions": 0.06,
+            "field_definitions": 3778.06,
+            "count": 611.64,
+            "page": 560.56
+          }
+        }
+      },
+      "trials": [
+        {
+          "case": "all_history",
+          "fields": 0,
+          "optionsMs": 147.7911,
+          "optionsPhases": [
+            {
+              "ms": 147.55679999999998,
+              "phase": "form_candidates",
+              "rows": 3
+            },
+            {
+              "ms": 0.0997,
+              "phase": "layers",
+              "rows": 22
+            }
+          ],
+          "rows": 50,
+          "searchMs": 606.6247999999999,
+          "searchPhases": [
+            {
+              "ms": 370.6548,
+              "phase": "count",
+              "rows": 1
+            },
+            {
+              "ms": 234.7667,
+              "phase": "page",
+              "rows": 51
+            }
+          ],
+          "targets": 19776,
+          "total": 22537,
+          "trial": 1
+        },
+        {
+          "case": "all_history",
+          "fields": 0,
+          "optionsMs": 149.865,
+          "optionsPhases": [
+            {
+              "ms": 149.5924,
+              "phase": "form_candidates",
+              "rows": 3
+            },
+            {
+              "ms": 0.08310000000000001,
+              "phase": "layers",
+              "rows": 22
+            }
+          ],
+          "rows": 50,
+          "searchMs": 603.6252,
+          "searchPhases": [
+            {
+              "ms": 370.4842,
+              "phase": "count",
+              "rows": 1
+            },
+            {
+              "ms": 232.0173,
+              "phase": "page",
+              "rows": 51
+            }
+          ],
+          "targets": 19776,
+          "total": 22537,
+          "trial": 2
+        },
+        {
+          "case": "all_history",
+          "fields": 0,
+          "optionsMs": 149.6217,
+          "optionsPhases": [
+            {
+              "ms": 149.3022,
+              "phase": "form_candidates",
+              "rows": 3
+            },
+            {
+              "ms": 0.1015,
+              "phase": "layers",
+              "rows": 22
+            }
+          ],
+          "rows": 50,
+          "searchMs": 619.2725999999999,
+          "searchPhases": [
+            {
+              "ms": 370.2031,
+              "phase": "count",
+              "rows": 1
+            },
+            {
+              "ms": 248.15400000000002,
+              "phase": "page",
+              "rows": 51
+            }
+          ],
+          "targets": 19776,
+          "total": 22537,
+          "trial": 3
+        },
+        {
+          "case": "largest_form_history",
+          "fields": 20,
+          "optionsMs": 3991.1504,
+          "optionsPhases": [
+            {
+              "ms": 159.1901,
+              "phase": "form_candidates",
+              "rows": 3
+            },
+            {
+              "ms": 0.1061,
+              "phase": "layers",
+              "rows": 22
+            },
+            {
+              "ms": 0.0829,
+              "phase": "form_revisions",
+              "rows": 2
+            },
+            {
+              "ms": 3830.9118,
+              "phase": "field_definitions",
+              "rows": 39
+            }
+          ],
+          "rows": 50,
+          "searchMs": 532.0437999999999,
+          "searchPhases": [
+            {
+              "ms": 262.062,
+              "phase": "count",
+              "rows": 1
+            },
+            {
+              "ms": 268.8413,
+              "phase": "page",
+              "rows": 51
+            }
+          ],
+          "targets": 19776,
+          "total": 22537,
+          "trial": 1
+        },
+        {
+          "case": "largest_form_history",
+          "fields": 20,
+          "optionsMs": 3947.5328,
+          "optionsPhases": [
+            {
+              "ms": 157.02540000000002,
+              "phase": "form_candidates",
+              "rows": 3
+            },
+            {
+              "ms": 0.1,
+              "phase": "layers",
+              "rows": 22
+            },
+            {
+              "ms": 0.0703,
+              "phase": "form_revisions",
+              "rows": 2
+            },
+            {
+              "ms": 3789.9260999999997,
+              "phase": "field_definitions",
+              "rows": 39
+            }
+          ],
+          "rows": 50,
+          "searchMs": 536.2397,
+          "searchPhases": [
+            {
+              "ms": 264.82529999999997,
+              "phase": "count",
+              "rows": 1
+            },
+            {
+              "ms": 270.3329,
+              "phase": "page",
+              "rows": 51
+            }
+          ],
+          "targets": 19776,
+          "total": 22537,
+          "trial": 2
+        },
+        {
+          "case": "largest_form_history",
+          "fields": 20,
+          "optionsMs": 3991.8253999999997,
+          "optionsPhases": [
+            {
+              "ms": 156.3641,
+              "phase": "form_candidates",
+              "rows": 3
+            },
+            {
+              "ms": 0.078,
+              "phase": "layers",
+              "rows": 22
+            },
+            {
+              "ms": 0.0435,
+              "phase": "form_revisions",
+              "rows": 2
+            },
+            {
+              "ms": 3835.0107,
+              "phase": "field_definitions",
+              "rows": 39
+            }
+          ],
+          "rows": 50,
+          "searchMs": 536.0382000000001,
+          "searchPhases": [
+            {
+              "ms": 263.1905,
+              "phase": "count",
+              "rows": 1
+            },
+            {
+              "ms": 271.4917,
+              "phase": "page",
+              "rows": 51
+            }
+          ],
+          "targets": 19776,
+          "total": 22537,
+          "trial": 3
+        },
+        {
+          "case": "largest_form_latest",
+          "fields": 20,
+          "optionsMs": 3937.6156,
+          "optionsPhases": [
+            {
+              "ms": 159.0273,
+              "phase": "form_candidates",
+              "rows": 3
+            },
+            {
+              "ms": 0.1013,
+              "phase": "layers",
+              "rows": 22
+            },
+            {
+              "ms": 0.0558,
+              "phase": "form_revisions",
+              "rows": 2
+            },
+            {
+              "ms": 3778.0603,
+              "phase": "field_definitions",
+              "rows": 39
+            }
+          ],
+          "rows": 50,
+          "searchMs": 1169.8251,
+          "searchPhases": [
+            {
+              "ms": 611.6403,
+              "phase": "count",
+              "rows": 1
+            },
+            {
+              "ms": 557.9644000000001,
+              "phase": "page",
+              "rows": 51
+            }
+          ],
+          "targets": 19776,
+          "total": 19776,
+          "trial": 1
+        },
+        {
+          "case": "largest_form_latest",
+          "fields": 20,
+          "optionsMs": 3948.1419,
+          "optionsPhases": [
+            {
+              "ms": 159.16469999999998,
+              "phase": "form_candidates",
+              "rows": 3
+            },
+            {
+              "ms": 0.09670000000000001,
+              "phase": "layers",
+              "rows": 22
+            },
+            {
+              "ms": 0.0766,
+              "phase": "form_revisions",
+              "rows": 2
+            },
+            {
+              "ms": 3788.2484,
+              "phase": "field_definitions",
+              "rows": 39
+            }
+          ],
+          "rows": 50,
+          "searchMs": 1174.8403999999998,
+          "searchPhases": [
+            {
+              "ms": 614.0678,
+              "phase": "count",
+              "rows": 1
+            },
+            {
+              "ms": 560.564,
+              "phase": "page",
+              "rows": 51
+            }
+          ],
+          "targets": 19776,
+          "total": 19776,
+          "trial": 2
+        },
+        {
+          "case": "largest_form_latest",
+          "fields": 20,
+          "optionsMs": 3921.9109,
+          "optionsPhases": [
+            {
+              "ms": 159.38250000000002,
+              "phase": "form_candidates",
+              "rows": 3
+            },
+            {
+              "ms": 0.11,
+              "phase": "layers",
+              "rows": 22
+            },
+            {
+              "ms": 0.0564,
+              "phase": "form_revisions",
+              "rows": 2
+            },
+            {
+              "ms": 3761.8705999999997,
+              "phase": "field_definitions",
+              "rows": 39
+            }
+          ],
+          "rows": 50,
+          "searchMs": 1178.361,
+          "searchPhases": [
+            {
+              "ms": 607.6939,
+              "phase": "count",
+              "rows": 1
+            },
+            {
+              "ms": 570.3923,
+              "phase": "page",
+              "rows": 51
+            }
+          ],
+          "targets": 19776,
+          "total": 19776,
+          "trial": 3
+        }
+      ]
+    },
+    "after": {
+      "median": {
+        "all_history": {
+          "optionsMs": 150.49,
+          "searchMs": 274.22,
+          "phasesMs": {
+            "form_candidates": 150.31,
+            "layers": 0.08,
+            "count": 168.17,
+            "page": 99.29,
+            "page_details": 1.15
+          }
+        },
+        "largest_form_history": {
+          "optionsMs": 1130.3,
+          "searchMs": 444.81,
+          "phasesMs": {
+            "form_candidates": 158.72,
+            "layers": 0.08,
+            "form_revisions": 0.08,
+            "field_definitions": 971.63,
+            "count": 225.76,
+            "page": 216.77,
+            "page_details": 1.01
+          }
+        },
+        "largest_form_latest": {
+          "optionsMs": 1145.78,
+          "searchMs": 508.19,
+          "phasesMs": {
+            "form_candidates": 159.09,
+            "layers": 0.09,
+            "form_revisions": 0.05,
+            "field_definitions": 986.18,
+            "count": 257.33,
+            "page": 249.56,
+            "page_details": 1.12
+          }
+        }
+      },
+      "trials": [
+        {
+          "case": "all_history",
+          "fields": 0,
+          "optionsMs": 145.3603,
+          "optionsPhases": [
+            {
+              "ms": 145.1764,
+              "phase": "form_candidates",
+              "rows": 3
+            },
+            {
+              "ms": 0.0811,
+              "phase": "layers",
+              "rows": 22
+            }
+          ],
+          "rows": 50,
+          "searchMs": 274.2212,
+          "searchPhases": [
+            {
+              "ms": 168.1702,
+              "phase": "count",
+              "rows": 1
+            },
+            {
+              "ms": 103.5968,
+              "phase": "page",
+              "rows": 51
+            },
+            {
+              "ms": 1.1528,
+              "phase": "page_details",
+              "rows": 51
+            }
+          ],
+          "targets": 19776,
+          "total": 22537,
+          "trial": 1
+        },
+        {
+          "case": "all_history",
+          "fields": 0,
+          "optionsMs": 150.4908,
+          "optionsPhases": [
+            {
+              "ms": 150.3061,
+              "phase": "form_candidates",
+              "rows": 3
+            },
+            {
+              "ms": 0.0826,
+              "phase": "layers",
+              "rows": 22
+            }
+          ],
+          "rows": 50,
+          "searchMs": 262.2501,
+          "searchPhases": [
+            {
+              "ms": 162.89100000000002,
+              "phase": "count",
+              "rows": 1
+            },
+            {
+              "ms": 97.07499999999999,
+              "phase": "page",
+              "rows": 51
+            },
+            {
+              "ms": 1.1744999999999999,
+              "phase": "page_details",
+              "rows": 51
+            }
+          ],
+          "targets": 19776,
+          "total": 22537,
+          "trial": 2
+        },
+        {
+          "case": "all_history",
+          "fields": 0,
+          "optionsMs": 154.7834,
+          "optionsPhases": [
+            {
+              "ms": 154.52179999999998,
+              "phase": "form_candidates",
+              "rows": 3
+            },
+            {
+              "ms": 0.0871,
+              "phase": "layers",
+              "rows": 22
+            }
+          ],
+          "rows": 50,
+          "searchMs": 277.8674,
+          "searchPhases": [
+            {
+              "ms": 175.872,
+              "phase": "count",
+              "rows": 1
+            },
+            {
+              "ms": 99.2879,
+              "phase": "page",
+              "rows": 51
+            },
+            {
+              "ms": 1.0993000000000002,
+              "phase": "page_details",
+              "rows": 51
+            }
+          ],
+          "targets": 19776,
+          "total": 22537,
+          "trial": 3
+        },
+        {
+          "case": "largest_form_history",
+          "fields": 20,
+          "optionsMs": 1164.4859000000001,
+          "optionsPhases": [
+            {
+              "ms": 158.91549999999998,
+              "phase": "form_candidates",
+              "rows": 3
+            },
+            {
+              "ms": 0.07930000000000001,
+              "phase": "layers",
+              "rows": 22
+            },
+            {
+              "ms": 0.0846,
+              "phase": "form_revisions",
+              "rows": 2
+            },
+            {
+              "ms": 1005.1107999999999,
+              "phase": "field_definitions",
+              "rows": 39
+            }
+          ],
+          "rows": 50,
+          "searchMs": 444.8126,
+          "searchPhases": [
+            {
+              "ms": 225.76,
+              "phase": "count",
+              "rows": 1
+            },
+            {
+              "ms": 216.7657,
+              "phase": "page",
+              "rows": 51
+            },
+            {
+              "ms": 1.045,
+              "phase": "page_details",
+              "rows": 51
+            }
+          ],
+          "targets": 19776,
+          "total": 22537,
+          "trial": 1
+        },
+        {
+          "case": "largest_form_history",
+          "fields": 20,
+          "optionsMs": 1130.3030999999999,
+          "optionsPhases": [
+            {
+              "ms": 158.0327,
+              "phase": "form_candidates",
+              "rows": 3
+            },
+            {
+              "ms": 0.081,
+              "phase": "layers",
+              "rows": 22
+            },
+            {
+              "ms": 0.07540000000000001,
+              "phase": "form_revisions",
+              "rows": 2
+            },
+            {
+              "ms": 971.6324,
+              "phase": "field_definitions",
+              "rows": 39
+            }
+          ],
+          "rows": 50,
+          "searchMs": 443.4425,
+          "searchPhases": [
+            {
+              "ms": 225.73930000000001,
+              "phase": "count",
+              "rows": 1
+            },
+            {
+              "ms": 215.55360000000002,
+              "phase": "page",
+              "rows": 51
+            },
+            {
+              "ms": 1.0128,
+              "phase": "page_details",
+              "rows": 51
+            }
+          ],
+          "targets": 19776,
+          "total": 22537,
+          "trial": 2
+        },
+        {
+          "case": "largest_form_history",
+          "fields": 20,
+          "optionsMs": 1114.4231,
+          "optionsPhases": [
+            {
+              "ms": 158.7215,
+              "phase": "form_candidates",
+              "rows": 3
+            },
+            {
+              "ms": 0.0832,
+              "phase": "layers",
+              "rows": 22
+            },
+            {
+              "ms": 0.048900000000000006,
+              "phase": "form_revisions",
+              "rows": 2
+            },
+            {
+              "ms": 955.0569,
+              "phase": "field_definitions",
+              "rows": 39
+            }
+          ],
+          "rows": 50,
+          "searchMs": 454.5268,
+          "searchPhases": [
+            {
+              "ms": 233.1798,
+              "phase": "count",
+              "rows": 1
+            },
+            {
+              "ms": 219.2542,
+              "phase": "page",
+              "rows": 51
+            },
+            {
+              "ms": 0.993,
+              "phase": "page_details",
+              "rows": 51
+            }
+          ],
+          "targets": 19776,
+          "total": 22537,
+          "trial": 3
+        },
+        {
+          "case": "largest_form_latest",
+          "fields": 20,
+          "optionsMs": 1143.3842,
+          "optionsPhases": [
+            {
+              "ms": 160.6739,
+              "phase": "form_candidates",
+              "rows": 3
+            },
+            {
+              "ms": 0.0864,
+              "phase": "layers",
+              "rows": 22
+            },
+            {
+              "ms": 0.05,
+              "phase": "form_revisions",
+              "rows": 2
+            },
+            {
+              "ms": 982.2108000000001,
+              "phase": "field_definitions",
+              "rows": 39
+            }
+          ],
+          "rows": 50,
+          "searchMs": 508.19020000000006,
+          "searchPhases": [
+            {
+              "ms": 257.3306,
+              "phase": "count",
+              "rows": 1
+            },
+            {
+              "ms": 248.6219,
+              "phase": "page",
+              "rows": 51
+            },
+            {
+              "ms": 1.1175,
+              "phase": "page_details",
+              "rows": 51
+            }
+          ],
+          "targets": 19776,
+          "total": 19776,
+          "trial": 1
+        },
+        {
+          "case": "largest_form_latest",
+          "fields": 20,
+          "optionsMs": 1145.7796,
+          "optionsPhases": [
+            {
+              "ms": 159.0857,
+              "phase": "form_candidates",
+              "rows": 3
+            },
+            {
+              "ms": 0.1061,
+              "phase": "layers",
+              "rows": 22
+            },
+            {
+              "ms": 0.053,
+              "phase": "form_revisions",
+              "rows": 2
+            },
+            {
+              "ms": 986.1766,
+              "phase": "field_definitions",
+              "rows": 39
+            }
+          ],
+          "rows": 50,
+          "searchMs": 507.2955,
+          "searchPhases": [
+            {
+              "ms": 254.49929999999998,
+              "phase": "count",
+              "rows": 1
+            },
+            {
+              "ms": 250.3124,
+              "phase": "page",
+              "rows": 51
+            },
+            {
+              "ms": 1.4858,
+              "phase": "page_details",
+              "rows": 51
+            }
+          ],
+          "targets": 19776,
+          "total": 19776,
+          "trial": 2
+        },
+        {
+          "case": "largest_form_latest",
+          "fields": 20,
+          "optionsMs": 1233.6018,
+          "optionsPhases": [
+            {
+              "ms": 158.3558,
+              "phase": "form_candidates",
+              "rows": 3
+            },
+            {
+              "ms": 0.0821,
+              "phase": "layers",
+              "rows": 22
+            },
+            {
+              "ms": 0.0461,
+              "phase": "form_revisions",
+              "rows": 2
+            },
+            {
+              "ms": 1074.7411,
+              "phase": "field_definitions",
+              "rows": 39
+            }
+          ],
+          "rows": 50,
+          "searchMs": 509.0165,
+          "searchPhases": [
+            {
+              "ms": 257.3557,
+              "phase": "count",
+              "rows": 1
+            },
+            {
+              "ms": 249.55759999999998,
+              "phase": "page",
+              "rows": 51
+            },
+            {
+              "ms": 1.0299,
+              "phase": "page_details",
+              "rows": 51
+            }
+          ],
+          "targets": 19776,
+          "total": 19776,
+          "trial": 3
+        }
+      ]
+    },
+    "aggregateCountsMatch": true,
+    "notes": [
+      "Same consistent snapshot of the existing SQLite DB; source opened read-only for backup, handlers use read-only connections; no startup/migrations. Snapshot deleted after measurement.",
+      "Release Rust/SQLx public handlers; read-only pool capped at two connections; sequential options then search; one warmup and three samples per case. Largest answer account and its largest referenced owned form are selected internally.",
+      "Includes SQL execution and SQLx decode. Excludes HTTP, JSON serialization, browser parsing, Vue and painting. These are not whole-application opening times.",
+      "Baseline phase profiler and final profiler run equivalent cases. Final search adds a bounded details SQL step, separately labeled page_details.",
+      "Real-data aggregate totals/targets/rows/field counts match. Full values, definition ordering, cursor and filter semantics are compared against old queries in synthetic regression tests; real response contents are not saved.",
+      "No IDs, names, response contents, database paths or credentials are included."
+    ]
+  },
+  "timestampComparator": {
+    "cases": [
+      {
+        "case": "four_timestamps",
+        "rows": 20000,
+        "samples": 5,
+        "warmup": 1,
+        "sortComparisons": 307360,
+        "measurements": {
+          "original": {
+            "as_of": {
+              "medianMs": 6.874,
+              "minMs": 6.813,
+              "maxMs": 8.653
+            },
+            "sort": {
+              "medianMs": 107.55,
+              "minMs": 106.494,
+              "maxMs": 111.952
+            },
+            "total": {
+              "medianMs": 114.382,
+              "minMs": 113.368,
+              "maxMs": 118.78
+            }
+          },
+          "cached": {
+            "as_of": {
+              "medianMs": 0.853,
+              "minMs": 0.8,
+              "maxMs": 0.88
+            },
+            "sort": {
+              "medianMs": 3.245,
+              "minMs": 3.108,
+              "maxMs": 3.274
+            },
+            "total": {
+              "medianMs": 4.072,
+              "minMs": 3.98,
+              "maxMs": 4.103
+            }
+          }
+        }
+      },
+      {
+        "case": "unique_timestamps",
+        "rows": 20000,
+        "samples": 5,
+        "warmup": 1,
+        "sortComparisons": 298129,
+        "measurements": {
+          "original": {
+            "as_of": {
+              "medianMs": 7.057,
+              "minMs": 6.926,
+              "maxMs": 7.259
+            },
+            "sort": {
+              "medianMs": 104.253,
+              "minMs": 103.154,
+              "maxMs": 105.053
+            },
+            "total": {
+              "medianMs": 111.31,
+              "minMs": 110.283,
+              "maxMs": 112.045
+            }
+          },
+          "cached": {
+            "as_of": {
+              "medianMs": 4.619,
+              "minMs": 4.472,
+              "maxMs": 5.326
+            },
+            "sort": {
+              "medianMs": 107.401,
+              "minMs": 105.766,
+              "maxMs": 109.684
+            },
+            "total": {
+              "medianMs": 112.056,
+              "minMs": 110.385,
+              "maxMs": 115.01
+            }
+          }
+        }
+      }
+    ],
+    "notes": [
+      "Release ignored test timestamp_collation_performance. Synthetic 20000 timestamps, one warmup then five alternating samples.",
+      "as_of predicate, complete descending timestamp/ID sort; original comparator vs actual adaptive cached comparator. Predicate results, complete sorted order and comparison counts match.",
+      "Comparator-only benchmark excludes SQLite, SQLx, I/O and UI; its speedup must not be applied to the whole application.",
+      "Cache is capped and replaced per read; switches to the original comparator when reuse is low. All-unique results are approximately equal within sample ranges."
+    ]
+  },
+  "fieldSql": {
+    "rows": 2000,
+    "fieldsPerAnswer": 5,
+    "samples": 3,
+    "warmup": 1,
+    "sqliteRelease": [
+      {
+        "distinctArrays": false,
+        "beforeMs": 40.4,
+        "afterMs": 25.23
+      },
+      {
+        "distinctArrays": true,
+        "beforeMs": 57.09,
+        "afterMs": 66.29
+      }
+    ],
+    "postgresqlDebug": [
+      {
+        "distinctArrays": false,
+        "beforeMs": 104.6,
+        "afterMs": 97.14
+      },
+      {
+        "distinctArrays": true,
+        "beforeMs": 141.87,
+        "afterMs": 150.7
+      }
+    ],
+    "notes": [
+      "Ignored test measure_field_array_representatives, old and new SQL on the same synthetic JSON-record source; alternating order after warmup; full definition values and order match.",
+      "SQLite fixture source uses AS MATERIALIZED so column extraction is performed once; includes begin_read, fixture JSON projection, SQL execution and SQLx decode. Excludes input Value clone and assertion comparison.",
+      "PostgreSQL uses an isolated temporary local cluster, debug Rust build; includes synthetic source JSON conversion, query and decode. Do not compare its absolute time to the SQLite release result.",
+      "When every array differs, representative grouping adds work (SQLite about 9ms, PostgreSQL about 9ms in this fixture); the optimization targets repeated form definitions. No universal speedup is claimed."
+    ]
+  },
+  "verification": {
+    "postgresql": {
+      "passed": 95,
+      "ignored": 1,
+      "suites": [
+        "lib",
+        "form_answers",
+        "answer_map",
+        "answer_map_filter",
+        "answer_map_presets",
+        "answer_map_analysis"
+      ]
+    },
+    "sqlite": {
+      "passed": 112,
+      "ignored": 2,
+      "suites": [
+        "lib",
+        "form_answers",
+        "answer_map",
+        "answer_map_filter",
+        "answer_map_presets"
+      ]
+    },
+    "notes": [
+      "No strict runtime thresholds in functional tests.",
+      "PostgreSQL tests use a temporary owned cluster, not an application database. SQLite tests use isolated memory/file fixtures.",
+      "No frontend/API/schema changes or migrations. SQLite release application and profiling examples rebuilt."
+    ]
+  }
+}
