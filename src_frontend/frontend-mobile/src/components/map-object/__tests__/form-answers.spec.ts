@@ -499,6 +499,151 @@ const deferredAnswer = <T>() => {
   });
   return { promise, resolve, reject };
 };
+const searchProgress = () => document.body.querySelector<HTMLElement>(".answer-search-progress");
+
+describe("回答検索中の全画面スピナー", () => {
+  it.each([
+    { action: "更新", success: true },
+    { action: "更新", success: false },
+    { action: "絞り込む", success: true },
+    { action: "絞り込む", success: false },
+  ])("%sの待機中だけ前面に表示し、完了後に解除する", async ({ action, success }) => {
+    const wrapper = await open();
+    try {
+      expect(searchProgress()).toBeNull();
+      if (action === "絞り込む") {
+        await button(wrapper, "絞り込み").trigger("click");
+        await select(wrapper, "表示モード").setValue("latest");
+      }
+      const pending = deferredAnswer<{ data: typeof result }>();
+      api.post.mockReturnValueOnce(pending.promise);
+      const before = api.post.mock.calls.length;
+      if (action === "更新") await button(wrapper, "更新").trigger("click");
+      else await wrapper.get("form.search-form").trigger("submit");
+      const overlay = searchProgress()!;
+      expect(overlay).not.toBeNull();
+      expect(overlay.parentElement).toBe(document.body);
+      expect(overlay.classList.contains("overlay-progress-bar")).toBe(true);
+      expect(overlay.classList.contains("progress-inline")).toBe(false);
+      expect(overlay.style.display).not.toBe("none");
+      expect(overlay.style.zIndex).toBe("120");
+      expect(overlay.getAttribute("role")).toBe("status");
+      expect(overlay.getAttribute("aria-label")).toBe("回答を読み込んでいます…");
+      expect(overlay.querySelector("svg.spinner")).not.toBeNull();
+      expect(wrapper.text()).toContain("回答を読み込んでいます…");
+      expect(api.post.mock.calls.slice(before)).toEqual([
+        [
+          "/form-answers/search",
+          expect.objectContaining({
+            mode: action === "更新" ? "history" : "latest",
+            limit: 50,
+            cursor: null,
+          }),
+        ],
+      ]);
+      if (success) pending.resolve({ data: { ...result, total: 40 } });
+      else pending.reject(new Error("search failed"));
+      await flushPromises();
+      expect(searchProgress()).toBeNull();
+      expect(wrapper.text()).toContain(success ? "40件" : "回答を読み込めませんでした。");
+      expect(api.post).toHaveBeenCalledTimes(before + 1);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it.each(["resolve", "reject"] as const)(
+    "閉鎖後の古い応答が%sしても、再表示中のスピナーを解除しない",
+    async (outcome) => {
+      const old = deferredAnswer<{ data: typeof result }>();
+      const current = deferredAnswer<{ data: typeof result }>();
+      let searches = 0;
+      api.post.mockImplementation((url: string) =>
+        url.endsWith("options")
+          ? Promise.resolve({ data: options })
+          : ++searches === 1
+            ? old.promise
+            : current.promise,
+      );
+      const wrapper = await open();
+      try {
+        expect(searchProgress()).not.toBeNull();
+        const close = searchProgress()!.querySelector<HTMLButtonElement>(".progress-close-button")!;
+        expect(close.disabled).toBe(false);
+        close.click();
+        await nextTick();
+        expect(wrapper.emitted("close")).toHaveLength(1);
+        await wrapper.setProps({ isOpen: false });
+        expect(searchProgress()).toBeNull();
+        await wrapper.setProps({ isOpen: true });
+        await flushPromises();
+        const overlay = searchProgress();
+        expect(overlay).not.toBeNull();
+        if (outcome === "resolve")
+          old.resolve({ data: { ...result, rows: [{ ...row, target_name: "古い応答" }] } });
+        else old.reject(new Error("old search failed"));
+        await flushPromises();
+        expect(searchProgress()).toBe(overlay);
+        expect(wrapper.text()).not.toContain("古い応答");
+        expect(wrapper.text()).not.toContain("回答を読み込めませんでした。");
+        current.resolve({ data: { ...result, rows: [{ ...row, target_name: "新しい回答" }] } });
+        await flushPromises();
+        expect(searchProgress()).toBeNull();
+        expect(wrapper.get("tbody").text()).toContain("新しい回答");
+        expect(searches).toBe(2);
+      } finally {
+        wrapper.unmount();
+      }
+    },
+  );
+
+  it("検索中に破棄してもbodyへスピナーを残さない", async () => {
+    const pending = deferredAnswer<{ data: typeof result }>();
+    api.post.mockImplementation((url: string) =>
+      url.endsWith("options") ? Promise.resolve({ data: options }) : pending.promise,
+    );
+    const wrapper = await open();
+    expect(searchProgress()).not.toBeNull();
+    wrapper.unmount();
+    expect(searchProgress()).toBeNull();
+    pending.resolve({ data: result });
+    await flushPromises();
+    expect(searchProgress()).toBeNull();
+  });
+
+  it("呼び出し元のclass・属性は一覧overlayへ渡し、前面スピナーへ混ぜない", async () => {
+    const pending = deferredAnswer<{ data: typeof result }>();
+    api.post.mockImplementation((url: string) =>
+      url.endsWith("options") ? Promise.resolve({ data: options }) : pending.promise,
+    );
+    const wrapper = mount(FormAnswersModal, {
+      attachTo: document.body,
+      props: { isOpen: true },
+      attrs: {
+        class: "caller-answers",
+        "data-caller": "retained",
+        style: "--answers-caller: kept",
+      },
+    });
+    try {
+      await flushPromises();
+      const overlay = wrapper.get(".base-modal-overlay.caller-answers").element as HTMLElement;
+      expect(overlay.dataset.caller).toBe("retained");
+      expect(overlay.style.getPropertyValue("--answers-caller")).toBe("kept");
+      const spinner = searchProgress()!;
+      expect(spinner).not.toBeNull();
+      expect(spinner.classList.contains("caller-answers")).toBe(false);
+      expect(spinner.getAttribute("data-caller")).toBeNull();
+      expect(spinner.style.getPropertyValue("--answers-caller")).toBe("");
+      pending.resolve({ data: result });
+      await flushPromises();
+      expect(searchProgress()).toBeNull();
+    } finally {
+      wrapper.unmount();
+    }
+  });
+});
+
 describe("回答一覧の初期取得", () => {
   it.each(["options", "search"])(
     "%sが先に完了しても、並行取得した回答と項目が揃ってから表示する",

@@ -87,7 +87,256 @@ const click = async (w: ReturnType<typeof mount>, text: string) => {
     .trigger("click");
   await flushPromises();
 };
+const deferredResult = () => {
+  let resolve!: (value: { data: ReturnType<typeof result> }) => void;
+  let reject!: (cause: Error) => void;
+  const promise = new Promise<{ data: ReturnType<typeof result> }>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+};
+const progressOverlay = () =>
+  document.body.querySelector<HTMLElement>(
+    '[role="status"][aria-label="地図の表示を更新しています"]',
+  );
 describe("回答地図の非同期絞り込み", () => {
+  it("初期の候補取得は除外し、絞り込み・解除はAPI後も地図ACKまで回転表示を維持する", async () => {
+    const w = await open();
+    expect(w.find(".progress-inline").exists()).toBe(true);
+    expect(w.text()).toContain("地図を読み込んでいます");
+    expect(progressOverlay()).toBeNull();
+    const options = deferredResult();
+    post.mockReturnValueOnce(options.promise);
+    await ready(w);
+    expect(post.mock.calls.at(-1)![1]).toMatchObject({ options_only: true });
+    expect(progressOverlay()).toBeNull();
+    options.resolve({ data: result() });
+    await flushPromises();
+    const message = vi
+      .spyOn((w.get("iframe").element as HTMLIFrameElement).contentWindow!, "postMessage")
+      .mockImplementation(() => {});
+    const request = deferredResult();
+    post.mockReturnValueOnce(request.promise);
+    await click(w, "絞り込み実行");
+    expect(progressOverlay()).not.toBeNull();
+    expect(progressOverlay()!.getAttribute("role")).toBe("status");
+    expect(progressOverlay()!.style.zIndex).toBe("120");
+    expect(progressOverlay()!.parentElement).toBe(document.body);
+    expect(progressOverlay()!.querySelector("svg.spinner")).not.toBeNull();
+    request.resolve({ data: result([keys[0]]) });
+    await flushPromises();
+    const command = message.mock.calls.at(-1)![0];
+    expect(progressOverlay()).not.toBeNull();
+    send(w, { type: "answer-map-filter-applied", updateId: "older", visible: 1, renderable: 1 });
+    await flushPromises();
+    expect(progressOverlay()).not.toBeNull();
+    send(w, {
+      type: "answer-map-filter-applied",
+      updateId: command.updateId,
+      visible: 1,
+      renderable: 1,
+    });
+    await flushPromises();
+    expect(progressOverlay()).toBeNull();
+    await click(w, "地図条件を解除");
+    expect(progressOverlay()).not.toBeNull();
+    send(w, {
+      type: "answer-map-filter-applied",
+      updateId: message.mock.calls.at(-1)![0].updateId,
+      visible: 2,
+      renderable: 2,
+    });
+    await flushPromises();
+    expect(progressOverlay()).toBeNull();
+    w.unmount();
+  });
+  it.each(["API失敗", "地図エラー", "ACK期限切れ"])("回転表示は%sで解除する", async (failure) => {
+    const w = await open();
+    await ready(w);
+    vi.useFakeTimers();
+    const message = vi
+      .spyOn((w.get("iframe").element as HTMLIFrameElement).contentWindow!, "postMessage")
+      .mockImplementation(() => {});
+    const request = deferredResult();
+    post.mockReturnValueOnce(request.promise);
+    await click(w, "絞り込み実行");
+    expect(progressOverlay()).not.toBeNull();
+    if (failure === "API失敗") {
+      request.reject(Error("network"));
+    } else {
+      request.resolve({ data: result() });
+      await flushPromises();
+      expect(progressOverlay()).not.toBeNull();
+      if (failure === "地図エラー") {
+        send(w, {
+          type: "answer-map-filter-error",
+          updateId: message.mock.calls.at(-1)![0].updateId,
+          message: "表示更新に失敗しました。",
+        });
+      } else {
+        await vi.advanceTimersByTimeAsync(9_999);
+        expect(progressOverlay()).not.toBeNull();
+        await vi.advanceTimersByTimeAsync(1);
+      }
+    }
+    await flushPromises();
+    expect(progressOverlay()).toBeNull();
+    expect(w.find('[role="alert"]').exists()).toBe(true);
+    w.unmount();
+  });
+  it("色分けの逐次分類要求・地図ACK・色分け解除の間も回転表示を保つ", async () => {
+    const w = await open();
+    await ready(w);
+    const message = vi
+      .spyOn((w.get("iframe").element as HTMLIFrameElement).contentWindow!, "postMessage")
+      .mockImplementation(() => {});
+    const first = deferredResult(),
+      second = deferredResult();
+    const count = post.mock.calls.length;
+    post.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    w.getComponent(AnswerColoringPanel).vm.$emit("apply", {
+      common_form_id: query.common_form_id,
+      rules: ["first", "second"].map((id) => ({
+        id,
+        label: id,
+        color: "#2166ac",
+        conditions: [
+          { field_id: "n", field_type: "number", op: "filled", value: null, upper: null },
+        ],
+      })),
+    });
+    await flushPromises();
+    expect(post).toHaveBeenCalledTimes(count + 1);
+    expect(progressOverlay()).not.toBeNull();
+    first.resolve({ data: result([keys[0]]) });
+    await flushPromises();
+    expect(post).toHaveBeenCalledTimes(count + 2);
+    expect(progressOverlay()).not.toBeNull();
+    expect(message).not.toHaveBeenCalled();
+    second.resolve({ data: result([keys[1]]) });
+    await flushPromises();
+    expect(progressOverlay()).not.toBeNull();
+    send(w, {
+      type: "answer-map-filter-applied",
+      updateId: message.mock.calls.at(-1)![0].updateId,
+      visible: 2,
+      renderable: 2,
+    });
+    await flushPromises();
+    expect(progressOverlay()).toBeNull();
+    w.getComponent(AnswerColoringPanel).vm.$emit("apply", null);
+    await flushPromises();
+    expect(post).toHaveBeenCalledTimes(count + 2);
+    expect(progressOverlay()).not.toBeNull();
+    send(w, {
+      type: "answer-map-filter-applied",
+      updateId: message.mock.calls.at(-1)![0].updateId,
+      visible: 2,
+      renderable: 2,
+    });
+    await flushPromises();
+    expect(progressOverlay()).toBeNull();
+    w.unmount();
+  });
+  it("閉鎖・破棄で回転表示を外し、再表示後の要求を古いAPI結果で終了しない", async () => {
+    const w = await open();
+    await ready(w);
+    const older = deferredResult();
+    post.mockReturnValueOnce(older.promise);
+    await click(w, "絞り込み実行");
+    expect(progressOverlay()).not.toBeNull();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(w.emitted("close")).toHaveLength(1);
+    const close = progressOverlay()!.querySelector<HTMLButtonElement>(".progress-close-button")!;
+    expect(close.textContent).toBe("閉じる");
+    close.click();
+    await flushPromises();
+    expect(w.emitted("close")).toHaveLength(2);
+    await w.setProps({ isOpen: false });
+    expect(progressOverlay()).toBeNull();
+    await w.setProps({ isOpen: true });
+    await flushPromises();
+    await ready(w);
+    const message = vi
+      .spyOn((w.get("iframe").element as HTMLIFrameElement).contentWindow!, "postMessage")
+      .mockImplementation(() => {});
+    const newer = deferredResult();
+    post.mockReturnValueOnce(newer.promise);
+    await click(w, "絞り込み実行");
+    older.resolve({ data: result([keys[0]]) });
+    await flushPromises();
+    expect(message).not.toHaveBeenCalled();
+    expect(progressOverlay()).not.toBeNull();
+    newer.resolve({ data: result() });
+    await flushPromises();
+    expect(progressOverlay()).not.toBeNull();
+    w.unmount();
+    expect(progressOverlay()).toBeNull();
+  });
+  it("条件入力の検証エラーでは要求も回転表示も開始しない", async () => {
+    const w = await open();
+    await ready(w);
+    await w.get('[aria-label="共通フォーム"]').setValue(query.common_form_id);
+    await flushPromises();
+    await click(w, "条件を追加");
+    const count = post.mock.calls.length;
+    await click(w, "絞り込み実行");
+    expect(post).toHaveBeenCalledTimes(count);
+    expect(progressOverlay()).toBeNull();
+    expect(w.text()).toContain("条件の値を入力してください");
+    w.unmount();
+  });
+  it("新しい要求の回転表示を先行要求のACKや期限で終了しない", async () => {
+    const w = await open();
+    await ready(w);
+    vi.useFakeTimers();
+    const message = vi
+      .spyOn((w.get("iframe").element as HTMLIFrameElement).contentWindow!, "postMessage")
+      .mockImplementation(() => {});
+    await click(w, "絞り込み実行");
+    const older = message.mock.calls.at(-1)![0];
+    await vi.advanceTimersByTimeAsync(9_000);
+    const request = deferredResult();
+    post.mockReturnValueOnce(request.promise);
+    // Exercise latest-request protection even if an already queued action is
+    // delivered after the fieldset became disabled.
+    await click(w, "絞り込み実行");
+    send(w, {
+      type: "answer-map-filter-applied",
+      updateId: older.updateId,
+      visible: 2,
+      renderable: 2,
+    });
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(progressOverlay()).not.toBeNull();
+    request.resolve({ data: result() });
+    await flushPromises();
+    send(w, { type: "answer-map-filter-error", updateId: older.updateId, message: "古い要求" });
+    await flushPromises();
+    expect(progressOverlay()).not.toBeNull();
+    send(w, {
+      type: "answer-map-filter-applied",
+      updateId: message.mock.calls.at(-1)![0].updateId,
+      visible: 2,
+      renderable: 2,
+    });
+    await flushPromises();
+    expect(progressOverlay()).toBeNull();
+    w.unmount();
+  });
+  it("fragment化後も呼出元のモバイル用classと属性を既存地図overlayへ継承する", async () => {
+    const w = mount(AnswerMapModal, {
+      attachTo: document.body,
+      props: { isOpen: true, action, query },
+      attrs: { class: "answer-map-mobile-layout", "data-modal-context": "answers" },
+    });
+    await flushPromises();
+    expect(w.get(".answer-map-overlay").classes()).toContain("answer-map-mobile-layout");
+    expect(w.get(".answer-map-overlay").attributes("data-modal-context")).toBe("answers");
+    w.unmount();
+  });
   it("2万対象の初期化・絞り込み・色分けを維持し、CSVは回答数上限で検証する", async () => {
     const targets = Array.from({ length: 20_000 }, (_, n) => `shape:target-${n}`);
     post.mockResolvedValue({ data: result(targets) });

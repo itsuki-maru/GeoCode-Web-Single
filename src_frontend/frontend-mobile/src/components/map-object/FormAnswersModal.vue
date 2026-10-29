@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, shallowRef, toRef, watch } from "vue";
 import BaseModal from "@/components/common/BaseModal.vue";
+import ProgressSpinner from "@/components/common/ProgressSpinner.vue";
 import MapObjectFormInputModal from "./MapObjectFormInputModal.vue";
 import type { MapObjectData, ShapeData } from "@/interface";
 import AnswerMapModal from "./AnswerMapModal.vue";
@@ -17,6 +18,8 @@ import {
   type FormAnswer as Answer,
 } from "@/utils/answer-presentation";
 import { useAnswerPresentation } from "@/composables/useAnswerPresentation";
+
+defineOptions({ inheritAttrs: false });
 
 interface Options {
   forms: { id: string; name: string; deleted: boolean }[];
@@ -399,7 +402,22 @@ const exportCsv = async () => {
 </script>
 
 <template>
+  <Teleport to="body">
+    <ProgressSpinner
+      v-if="isOpen && loading"
+      :is-open="true"
+      class="answer-search-progress"
+      :style="{ zIndex: 120 }"
+      role="status"
+      aria-label="回答を読み込んでいます…"
+    >
+      <template #controls>
+        <button type="button" class="progress-close-button" @click="emit('close')">閉じる</button>
+      </template>
+    </ProgressSpinner>
+  </Teleport>
   <BaseModal
+    v-bind="$attrs"
     class="answers-overlay"
     :isOpen="isOpen"
     :zIndex="24"
