@@ -356,3 +356,63 @@ describe("canonical map data cache", () => {
     expect(matchesMapSearch(["東京", "pipe"], ["東京", "missing"])).toBe(false);
   });
 });
+
+describe("attribute and text search composition", () => {
+  const criteria = {
+    common_form_id: "form",
+    definition_version: 1,
+    layer_ids: null,
+    conditions: [],
+  };
+  const result = (marker_ids: string[], shape_ids: string[]) => ({
+    common_form_id: "form",
+    definition_version: 1,
+    as_of: "2026-10-30T00:00:00Z",
+    marker_ids,
+    shape_ids,
+    target_count: marker_ids.length + shape_ids.length,
+  });
+  it("keeps canonical data, combines text and attribute IDs, and restores after clear", async () => {
+    const markers = useMapObjectStore(),
+      shapes = useShapeStore();
+    api.get.mockResolvedValueOnce({
+      data: { a: marker("a", "a", "needle"), b: marker("b", "a", "needle") },
+    });
+    await markers.queryMapObject("a", false);
+    api.get.mockResolvedValueOnce({ data: [shape("s1"), shape("s2")] });
+    await shapes.queryShapes("a", false);
+    markers.setAttributeSearch(criteria, result(["a"], ["s1"]));
+    expect([...markers.mapObjectList.keys()]).toEqual(["a"]);
+    expect(markers.filteredShapeIds).toEqual(["s1"]);
+    expect(markers.recordCache.records.size).toBe(2);
+    api.get.mockResolvedValueOnce({
+      data: {
+        markers: { a: marker("a", "a", "needle"), b: marker("b", "a", "needle") },
+        shape_ids: ["s1", "s2"],
+      },
+    });
+    await markers.queryWordMapObject("needle", "", "a");
+    expect([...markers.mapObjectList.keys()]).toEqual(["a"]);
+    expect(markers.filteredShapeIds).toEqual(["s1"]);
+    markers.setAttributeSearch(null, null);
+    expect(markers.mapObjectList.size).toBe(2);
+    expect(markers.search?.query1).toBe("needle");
+  });
+  it("does not confuse zero results with disabled filters, even during writes", async () => {
+    const markers = useMapObjectStore(),
+      shapes = useShapeStore();
+    api.get.mockResolvedValueOnce({ data: { a: marker("a") } });
+    await markers.queryMapObject("a", false);
+    api.get.mockResolvedValueOnce({ data: [shape("s1")] });
+    await shapes.queryShapes("a", false);
+    markers.setAttributeSearch(criteria, result([], []));
+    markers.upsertRecord(marker("new"));
+    shapes.upsertRecord(shape("new-shape"));
+    markers.refreshSearchResults();
+    expect(markers.mapObjectList.size).toBe(0);
+    expect(markers.filteredShapeIds).toEqual([]);
+    markers.setAttributeSearch(null, null);
+    expect(markers.mapObjectList.size).toBe(2);
+    expect(markers.filteredShapeIds).toBeNull();
+  });
+});

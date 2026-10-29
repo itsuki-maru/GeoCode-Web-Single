@@ -56,7 +56,9 @@ export function useMapObjectTableRows(active: Ref<boolean>) {
             ],
             [query.query1, query.query2],
           );
-        if (record && included) index.upsert(kind, record);
+        const attributeAllowed =
+          kind !== "shape" || !markers.attributeShapeIds || markers.attributeShapeIds.has(id);
+        if (record && included && attributeAllowed) index.upsert(kind, record);
         else index.remove(kind, id);
       }
     }

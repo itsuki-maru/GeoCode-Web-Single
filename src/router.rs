@@ -265,6 +265,10 @@ pub fn build_router(
         )
         .route("/marker/read/query", get(query_marker_handler))
         .route("/map-objects/read/query", get(query_map_objects_handler))
+        .route(
+            "/map-objects/search/attributes",
+            post(crate::handler::map_attribute_search::search_handler),
+        )
         .route("/shapes", get(shapes_get_handler))
         .route("/shape", post(create_shape_handler))
         .route("/shape/{shape_id}", put(update_shape_handler))

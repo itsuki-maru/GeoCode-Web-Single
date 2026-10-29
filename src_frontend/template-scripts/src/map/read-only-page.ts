@@ -1,4 +1,5 @@
 // @ts-nocheck -- この統合境界では Leaflet プラグイン間の型定義に互換性がないため、型チェックを省略する。
+import { createAdvancedMapSearchModal, attributeTransport } from "./common/advanced-map-search";
 import { createTileOverlayManager } from "./common/tile-overlays";
 import { createTileVisibilityStorage } from "./common/tile-visibility-storage";
 import { createPopupContentRuntime } from "./common/popup-content";
@@ -556,11 +557,13 @@ export function initializeReadOnlyMapPage(
     shapeSearchMatches.set(record, { query: shapeSearchQuery, result });
     return result;
   };
+  let attributeTargetMask = null;
   const isShapeRecordVisible = (record) =>
     map.hasLayer(shapeVisibilityLayer) &&
     layeredMarkerDisplay.isLayerVisible(record.layer_id) &&
     (!printShapeIds || printShapeIds.has(String(record.id))) &&
     answerVisibility.allows(`shape:${record.id}`) &&
+    (!attributeTargetMask || attributeTargetMask.has(`shape:${record.id}`)) &&
     matchesCurrentShapeSearch(record);
   const isShapeLogicallyVisible = (id) => {
     const record = shapeRenderer?.getRecord(id);
@@ -581,7 +584,8 @@ export function initializeReadOnlyMapPage(
         ...options,
         isRecordAllowed: (record) =>
           (!printMarkerIds || printMarkerIds.has(String(record.id))) &&
-          answerVisibility.allows(`marker:${record.id}`),
+          answerVisibility.allows(`marker:${record.id}`) &&
+          (!attributeTargetMask || attributeTargetMask.has(`marker:${record.id}`)),
       }),
     escapeHtml,
     layerNames,
@@ -809,6 +813,49 @@ export function initializeReadOnlyMapPage(
       onCodeSearchControlAdded: isMobile ? registerHideableMapControl : undefined,
       onSearch: searchCoordinator.setMapObjectSearchQuery,
     });
+  if (isAnother && !isAnswerPreview && !isPrint) {
+    let appliedAttributeSearch = null;
+    const control = L.control({ position: "topleft" });
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "custom-control-button";
+    button.textContent = "詳しい検索";
+    button.setAttribute("aria-pressed", "false");
+    const modal = createAdvancedMapSearchModal({
+      transport: attributeTransport,
+      getApplied: () => appliedAttributeSearch,
+      getLayerIds: () => null,
+      getContext: () => String(bootstrap.tileVisibilityAccountId || ""),
+      onApply: (request, result) => {
+        appliedAttributeSearch = request;
+        attributeTargetMask = result
+          ? new Set([
+              ...result.marker_ids.map((id) => `marker:${id}`),
+              ...result.shape_ids.map((id) => `shape:${id}`),
+            ])
+          : null;
+        button.textContent = result
+          ? `詳しい検索（適用中・全レイヤー${result.target_count}件）`
+          : "詳しい検索";
+        button.setAttribute("aria-pressed", String(!!result));
+        layeredMarkerDisplay.rebuildVisibleMarkers();
+        layeredShapeDisplay.rebuildVisibleShapes();
+        groups.syncAllShapeGroupsVisibility();
+        shapeNameLabelManager?.scheduleRefresh();
+        shapeMeasurementManager?.scheduleRefresh();
+      },
+    });
+    button.addEventListener("click", () => void modal.open(button));
+    control.onAdd = () => {
+      const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
+      container.append(button);
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.disableScrollPropagation(container);
+      return container;
+    };
+    control.addTo(map);
+    map.on("unload", () => modal.dispose());
+  }
   if (isMobile && !isMobileAnswerMap) {
     const uiToggle = new MapUiVisibilityToggleControl!();
     map.addControl(uiToggle);

@@ -129,6 +129,73 @@ afterEach(() => {
   wrapper = undefined;
 });
 
+it.each([false, true])(
+  "re-evaluates restored attribute results after reload failure (prior recheck completed=%s)",
+  async (completed) => {
+    localStorage.setItem(LAST_ACTIVE_LAYER_STORAGE_KEY, "a");
+    mountView();
+    await flushPromises();
+    const markers = useMapObjectStore(),
+      shapes = useShapeStore();
+    const criteria = {
+      common_form_id: "form",
+      definition_version: 1,
+      layer_ids: ["a"],
+      conditions: [],
+    };
+    const empty = {
+      common_form_id: "form",
+      definition_version: 1,
+      as_of: "2026-10-30T00:00:00Z",
+      marker_ids: [] as string[],
+      shape_ids: [] as string[],
+      target_count: 0,
+    };
+    const matched = { ...empty, shape_ids: ["a"], target_count: 1 };
+    markers.setAttributeSearch(criteria, empty);
+    await flushPromises();
+    const recheck = deferred<{ data: typeof empty }>();
+    api.post.mockReturnValueOnce(recheck.promise).mockResolvedValue({ data: matched });
+    shapes.upsertRecord({
+      ...shape("a"),
+      user_id: "user",
+      shape_type: "circle",
+      updated_at: "2026-10-30T00:00:00Z",
+      geojson: {
+        type: "Feature",
+        properties: { radius: 10 },
+        geometry: { type: "Point", coordinates: [139, 35] },
+      },
+    });
+    await flushPromises();
+    expect(api.post).toHaveBeenCalledTimes(1);
+    const pendingMarkers = deferred<{ data: Record<string, ReturnType<typeof marker>> }>();
+    const pendingShapes = deferred<{ data: ReturnType<typeof shape>[] }>();
+    getMarkers = () => pendingMarkers.promise;
+    getShapes = () => pendingShapes.promise;
+    frameComponent().vm.$emit("mapReloadRequested");
+    await flushPromises();
+    if (completed) {
+      recheck.resolve({ data: matched });
+      await flushPromises();
+      expect(markers.attributeShapeIds?.has("a")).toBe(true);
+    }
+    pendingMarkers.resolve({ data: { a: marker("a") } });
+    pendingShapes.reject(Error("offline"));
+    await flushPromises();
+    expect(markers.attributeSearch?.common_form_id).toBe("form");
+    expect(markers.attributeShapeIds?.has("a")).toBe(true);
+    expect(markers.filteredShapeIds).toEqual(["a"]);
+    expect(api.post).toHaveBeenCalledTimes(2);
+    expect(api.post.mock.calls[1]![1].targets).toBeUndefined();
+    if (!completed) {
+      recheck.resolve({ data: empty });
+      await flushPromises();
+      expect(markers.attributeShapeIds?.has("a")).toBe(true);
+    }
+  },
+);
+
 describe("selected layer startup", () => {
   it("waits for layer metadata before fetching any marker/shape data, then requests only the saved layer", async () => {
     const pending = deferred<{ data: typeof layers }>();

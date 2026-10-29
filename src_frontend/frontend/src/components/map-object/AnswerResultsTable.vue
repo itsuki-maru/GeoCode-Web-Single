@@ -82,6 +82,8 @@ button:disabled {
 .table-scroll {
   overflow: auto;
   margin-top: 12px;
+  margin-right: 12px;
+  margin-left: 12px;
 }
 table {
   border-collapse: collapse;

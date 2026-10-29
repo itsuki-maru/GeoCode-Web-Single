@@ -21,7 +21,12 @@ const { count, rows } = useMapObjectTableRows(active);
 const { viewport, range, onScroll, resetScroll } = useVirtualTable(count, active);
 const visibleRows = computed(() => rows(range.value.start, range.value.end));
 watch(
-  () => [props.activeLayer, mapobjStore.search?.query1, mapobjStore.search?.query2],
+  () => [
+    props.activeLayer,
+    mapobjStore.search?.query1,
+    mapobjStore.search?.query2,
+    mapobjStore.attributeRevision,
+  ],
   resetScroll,
 );
 const getLayerForId = (id: string) => layersStore.getById(id)?.name ?? "Layer Name Get Error";

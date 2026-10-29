@@ -8,6 +8,7 @@ import { useWindowSize } from "@/composables/useWindowSize";
 const commonFormsOpen = ref(false);
 
 const props = defineProps<{
+  attributeSearchActive?: boolean;
   activeLayer: string;
   masterLayerId: string;
   layerList: Map<string, LayersData>;
@@ -17,6 +18,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
+  advancedSearch: [];
   newLayer: [];
   imageUpload: [];
   imageList: [];
@@ -208,6 +210,16 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
         v-model="mapObjectQueryFormData.query2"
       />
       <button
+        type="button"
+        class="btn-head-image-search advanced-search-button"
+        :title="attributeSearchActive ? '詳しい検索（適用中）' : '詳しい検索'"
+        aria-label="詳しい検索"
+        :aria-pressed="!!attributeSearchActive"
+        @click="emit('advancedSearch')"
+      >
+        <img :src="`${assetsUrl}search_fill24.png`" class="btn-img" alt="" />
+      </button>
+      <button
         v-if="isMasterLayer"
         @click="emit('reloadMap', `${baseUrl}/map?layer=${activeLayer}&is_master=true`, true)"
         class="btn-head-image-search"
@@ -246,6 +258,11 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
 </template>
 
 <style scoped>
+.btn-head-image-search[aria-pressed="true"] {
+  border-color: #2165bb;
+  background: #eaf2ff;
+}
+
 .header-btn-zone {
   display: flex;
   justify-content: space-between;

@@ -218,7 +218,11 @@ async fn filter_endpoint_is_authenticated_and_results_are_not_cached() {
         geocode_web_single::build_tera_extension().unwrap(),
         None,
     );
-    for route in ["/form-answers/map-filter", "/form-answers/map-csv-check"] {
+    for route in [
+        "/form-answers/map-filter",
+        "/form-answers/map-csv-check",
+        "/map-objects/search/attributes",
+    ] {
         let response = app
             .clone()
             .oneshot(
@@ -234,6 +238,15 @@ async fn filter_endpoint_is_authenticated_and_results_are_not_cached() {
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
     let f = fixture(&pool).await;
+    let attributes = geocode_web_single::handler::map_attribute_search::search_handler(
+        Extension(f.owner.to_string()),
+        Extension(pool.clone()),
+        Json(attribute_request(&f, json!([]))),
+    )
+    .await
+    .unwrap();
+    assert_eq!(attributes.status(), StatusCode::OK);
+    assert_eq!(attributes.headers()["cache-control"], "no-store");
     let r = request(&f, "history", json!([]));
     let response = geocode_web_single::handler::answer_map_filter::filter_handler(
         Extension(f.owner.to_string()),
@@ -467,4 +480,132 @@ async fn test_user(pool: &SqlitePool, name: &str) -> uuid::Uuid {
 }
 async fn test_master(pool: &SqlitePool, user: &uuid::Uuid) -> uuid::Uuid {
     uuid::Uuid::parse_str(&common::master_layer_id(pool, &user.to_string()).await).unwrap()
+}
+
+fn attribute_request(
+    f: &Data,
+    conditions: Value,
+) -> geocode_web_single::handler::map_attribute_search::AttributeSearchRequest {
+    serde_json::from_value(json!({"common_form_id":f.form,"definition_version":1,"layer_ids":null,"conditions":conditions})).unwrap()
+}
+
+#[tokio::test]
+async fn attribute_search_latest_scope_current_definition_and_updates() {
+    let pool = common::test_pool().await;
+    use geocode_web_single::handler::map_attribute_search::search_attributes;
+    let f = fixture(&pool).await;
+    let mut r = attribute_request(
+        &f,
+        json!([{"field_id":"n","field_type":"number","op":"gte","value":"20"}]),
+    );
+    let result = search_attributes(&pool, &f.owner.to_string(), &r)
+        .await
+        .unwrap();
+    // 過去の30に一致しても最新が10の対象は戻さない。
+    assert_eq!(result.marker_ids.len(), 2);
+    assert!(!result.marker_ids.contains(&f.ids[0].to_string()));
+    assert!(result.shape_ids.is_empty());
+    r.conditions = serde_json::from_value(json!([
+        {"field_id":"n","field_type":"number","op":"gte","value":"20"},
+        {"field_id":"flag","field_type":"checkbox","op":"eq","value":false}
+    ]))
+    .unwrap();
+    assert_eq!(
+        search_attributes(&pool, &f.owner.to_string(), &r)
+            .await
+            .unwrap()
+            .marker_ids,
+        vec![f.ids[3].to_string()]
+    );
+    r.layer_ids = Some(vec![]);
+    assert_eq!(
+        search_attributes(&pool, &f.owner.to_string(), &r)
+            .await
+            .unwrap()
+            .target_count,
+        0
+    );
+    r.layer_ids = None;
+    r.targets = serde_json::from_value(json!([{"target_type":"marker","id":f.ids[2]}])).unwrap();
+    assert_eq!(
+        search_attributes(&pool, &f.owner.to_string(), &r)
+            .await
+            .unwrap()
+            .target_count,
+        0
+    );
+    r.targets = None;
+    r.conditions = serde_json::from_value(
+        json!([{"field_id":"private_field","field_type":"text","op":"filled"}]),
+    )
+    .unwrap();
+    assert!(
+        search_attributes(&pool, &f.owner.to_string(), &r)
+            .await
+            .is_err()
+    );
+    r.conditions.clear();
+    r.definition_version = 99;
+    assert!(matches!(
+        search_attributes(&pool, &f.owner.to_string(), &r).await,
+        Err(geocode_web_single::error::AppError::Conflict)
+    ));
+    r.definition_version = 1;
+    let stranger = common::create_test_user(&pool, "attribute-stranger").await;
+    assert!(
+        search_attributes(&pool, &stranger.to_string(), &r)
+            .await
+            .is_err()
+    );
+    r.layer_ids = Some(vec![common::master_layer_id(&pool, &stranger).await]);
+    assert!(
+        search_attributes(&pool, &f.owner.to_string(), &r)
+            .await
+            .is_err()
+    );
+    r.layer_ids = None;
+    // 同じIDの図形も独立した対象。別フォームの回答は最新選択を妨げない。
+    sqlx::query("UPDATE shape_form_submission_model SET source_form=$1,form_snapshot=$2,submitted_values=$3")
+        .bind(json!({"id":f.form,"version":1})).bind(json!({"form_schema":{"fields":[{"id":"n","label":"年数","type":"number"}]}}))
+        .bind(json!({"n":0})).execute(&pool).await.unwrap();
+    r.conditions = serde_json::from_value(
+        json!([{"field_id":"n","field_type":"number","op":"eq","value":"0"}]),
+    )
+    .unwrap();
+    let result = search_attributes(&pool, &f.owner.to_string(), &r)
+        .await
+        .unwrap();
+    assert_eq!(result.shape_ids, vec![f.ids[0].to_string()]);
+    assert!(result.marker_ids.is_empty());
+    r.conditions =
+        serde_json::from_value(json!([{"field_id":"flag","field_type":"checkbox","op":"missing"}]))
+            .unwrap();
+    assert_eq!(
+        search_attributes(&pool, &f.owner.to_string(), &r)
+            .await
+            .unwrap()
+            .shape_ids,
+        vec![f.ids[0].to_string()]
+    );
+}
+
+#[tokio::test]
+async fn attribute_search_returns_all_twenty_thousand_targets() {
+    let pool = common::test_pool().await;
+    use geocode_web_single::handler::map_attribute_search::search_attributes;
+    let f = fixture(&pool).await;
+    let layer = common::master_layer_id(&pool, &f.owner.to_string()).await;
+    sqlx::query("WITH RECURSIVE series(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM series WHERE n<20000) INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) SELECT 'attribute-bulk-'||n,$1,$2,'',35,139,'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP FROM series")
+        .bind(f.owner.to_string()).bind(layer.to_string()).execute(&pool).await.unwrap();
+    sqlx::query("WITH RECURSIVE series(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM series WHERE n<20000) INSERT INTO marker_form_submission_model(id,marker_id,submitted_values,rendered_markdown,create_at,source_form) SELECT 'attribute-answer-'||n,'attribute-bulk-'||n,'{}','',CURRENT_TIMESTAMP,$1 FROM series")
+        .bind(json!({"id":f.form,"version":1})).execute(&pool).await.unwrap();
+    let result = search_attributes(
+        &pool,
+        &f.owner.to_string(),
+        &attribute_request(&f, json!([])),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.target_count, 20004);
+    assert_eq!(result.marker_ids.len(), 20004);
 }

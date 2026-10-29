@@ -7,6 +7,7 @@ import vue from '@vitejs/plugin-vue'
 export default defineConfig({
   plugins: [vue()],
   base: "./",
+  server: { fs: { allow: [fileURLToPath(new URL("../", import.meta.url))] } },
   // プロジェクトルートの.envを取得
   envDir: "../../",
   resolve: {

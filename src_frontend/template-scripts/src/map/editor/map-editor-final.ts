@@ -440,6 +440,12 @@ window.addEventListener("message", function (event) {
         messageData["lat"],
         messageData["lng"],
       );
+    } else if (messageData["type"] === "attributeSearchState") {
+      const button = document.getElementById("advanced-map-search-button");
+      if (button && typeof messageData.active === "boolean") {
+        button.textContent = messageData.active ? "詳しい検索（適用中）" : "詳しい検索";
+        button.setAttribute("aria-pressed", String(messageData.active));
+      }
     } else if (messageData["type"] === "mapObjectFilter") {
       applyMapObjectFilter(messageData["markerIds"], messageData["shapeIds"]);
     } else if (messageData["type"] === "markerFilter") {

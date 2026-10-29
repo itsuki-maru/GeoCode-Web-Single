@@ -11,6 +11,7 @@ import type {
   ShapeData,
   MapObjectUpdatePayload,
 } from "@/interface";
+import { useAdvancedMapSearch } from "@/composables/useAdvancedMapSearch";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useShapeStore } from "@/stores/shapes";
 import { useAuthStore } from "@/stores/auth";
@@ -243,6 +244,9 @@ const reloadMap = async (
       displayedQuery.query1 || displayedQuery.query2
         ? { ...displayedQuery, layerId: displayedLayerId }
         : null,
+    attributeSearch: mapobjStore.attributeSearch,
+    attributeMarkerIds: mapobjStore.attributeMarkerIds,
+    attributeShapeIds: mapobjStore.attributeShapeIds,
     query: { ...displayedQuery },
     markerLayer: displayedLayerId || mapobjStore.activeLayerId,
     markerMaster: displayedLayerId
@@ -263,6 +267,10 @@ const reloadMap = async (
   );
   const restoreDisplay = () => {
     if (previousDisplay.accountId !== authStore.accountId) return;
+    mapobjStore.attributeSearch = previousDisplay.attributeSearch;
+    mapobjStore.attributeMarkerIds = previousDisplay.attributeMarkerIds;
+    mapobjStore.attributeShapeIds = previousDisplay.attributeShapeIds;
+    ++mapobjStore.attributeRevision;
     shapeStore.activateScope(previousDisplay.shapeLayer, previousDisplay.shapeMaster);
     mapobjStore.activateScope(
       previousDisplay.markerLayer,
@@ -271,6 +279,7 @@ const reloadMap = async (
     );
     mapObjectQueryFormData.value = previousDisplay.query;
     filterMapObjects();
+    refreshAttributeSearch();
   };
   if (absolute) showProgressModal.value = true;
   try {
@@ -554,7 +563,7 @@ const focusObject = (type: "marker" | "shape", id: string, lat: number, lng: num
 };
 
 const filterMapObjects = (): void => {
-  if (!mapobjStore.search?.query1 && !mapobjStore.search?.query2) {
+  if (!mapobjStore.search?.query1 && !mapobjStore.search?.query2 && !mapobjStore.attributeSearch) {
     mapIframeRef.value?.filterMapObjects(null, null);
     return;
   }
@@ -588,6 +597,15 @@ const handleMapObjectSearch = async (query: QueryForm, reset: boolean = false): 
     showMessage("検索結果を取得できませんでした。再試行してください。");
   }
 };
+const { openAdvancedSearch, closeAdvancedSearch, refreshAttributeSearch } = useAdvancedMapSearch(
+  activeLayer,
+  masterLayerId,
+  filterMapObjects,
+  (text) => showMessage(text),
+);
+watch(activeLayer, () => closeAdvancedSearch());
+watch(() => mapobjStore.attributeRevision, filterMapObjects);
+
 // --- ログイン画面への遷移 ---
 async function loginRedirect(): Promise<void> {
   authStore.logout();
@@ -939,7 +957,7 @@ const mapObjectQueryFormData = ref<QueryForm>({ query1: "", query2: "" });
 
 // --- キーボードショートカット ---
 const handleKeyDown = (event: KeyboardEvent) => {
-  if (event.defaultPrevented || document.querySelector(".answer-map-overlay")) return;
+  if (event.defaultPrevented || document.querySelector(".answer-map-overlay, dialog[open]")) return;
   if (isOpenPrintMapModal.value) return;
   if (
     (event.ctrlKey || event.metaKey) &&
@@ -1172,6 +1190,8 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
     @importJson="showJsonUploadModal = true"
     @reloadMap="(url, absolute) => reloadMap(url, absolute, false, true)"
     @layerList="openLayerList()"
+    @advancedSearch="openAdvancedSearch"
+    :attributeSearchActive="!!mapobjStore.attributeSearch"
     @mapObjectSearch="handleMapObjectSearch"
     @update:mapObjectQueryFormData="mapObjectQueryFormData = $event"
     @update:activeLayer="activeLayer = $event"
