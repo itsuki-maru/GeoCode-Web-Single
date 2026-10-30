@@ -188,6 +188,7 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
         gap: 5px;
         min-width: 0;
         margin: 0;
+        font-weight: 400;
       }
       .advanced-map-search select, .advanced-map-search input, .advanced-map-search button {
         font: inherit;
@@ -196,6 +197,7 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
         max-width: 100%;
       }
       .advanced-map-search select, .advanced-map-search input {
+        font-weight: 400;
         min-width: 0;
         border: 1px solid #767676;
         border-radius: 6px;
@@ -394,7 +396,7 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
         return;
       }
       options.onApply(request, result);
-      status.textContent = `検索結果：${result.target_count}件`;
+      status.textContent = `属性条件のみの一致件数：${result.target_count}件`;
     } catch (e) {
       if (!disposed && seq === sequence && dialog.open)
         error(e instanceof Error ? e.message : "検索に失敗しました。");

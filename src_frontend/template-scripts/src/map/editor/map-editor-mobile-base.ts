@@ -570,9 +570,9 @@ advancedSearchControl.onAdd = () => {
   const button = document.createElement("button");
   button.type = "button";
   button.id = "advanced-map-search-button";
+  button.className = "custom-control-button";
   button.textContent = "詳しい検索";
   button.setAttribute("aria-pressed", "false");
-  button.style.cssText = "padding:8px;background:white;border:0;font:inherit;cursor:pointer";
   button.addEventListener("click", () =>
     window.parent.postMessage(
       { type: "advancedMapSearchOpen" },

@@ -603,6 +603,46 @@ describe("map lifecycle while data changes", () => {
 });
 
 describe("search responses during layer navigation", () => {
+  it("restores server text matches after a failed reload without changing database case folding", async () => {
+    localStorage.setItem(LAST_ACTIVE_LAYER_STORAGE_KEY, "a");
+    const record = { ...marker("a"), marker_name: "Ａ地点" };
+    getMarkers = async () => ({ data: { a: record } });
+    mountView();
+    await flushPromises();
+    api.get.mockResolvedValueOnce({ data: { markers: {}, shape_ids: [] } });
+    wrapper!
+      .getComponent({ name: "MapObjectTable" })
+      .vm.$emit("mapObjectSearch", { query1: "ａ", query2: "" }, false);
+    await flushPromises();
+    const markers = useMapObjectStore();
+    expect(markers.mapObjectList.size).toBe(0);
+    getShapes = async () => {
+      throw Error("offline");
+    };
+    frameComponent().vm.$emit("mapReloadRequested");
+    await flushPromises();
+    expect(markers.search?.query1).toBe("ａ");
+    expect(markers.mapObjectList.size).toBe(0);
+    markers.setAttributeSearch(
+      {
+        common_form_id: "form",
+        definition_version: 1,
+        layer_ids: ["a"],
+        conditions: [],
+      },
+      {
+        common_form_id: "form",
+        definition_version: 1,
+        as_of: "2026-10-30T00:00:00Z",
+        marker_ids: ["a"],
+        shape_ids: [],
+        target_count: 1,
+      },
+    );
+    expect(markers.mapObjectList.size).toBe(0);
+    markers.setAttributeSearch(null, null);
+    expect(markers.mapObjectList.size).toBe(0);
+  });
   it("does not restore another layer with the previous layer's delayed query", async () => {
     localStorage.setItem(LAST_ACTIVE_LAYER_STORAGE_KEY, "a");
     mountView();

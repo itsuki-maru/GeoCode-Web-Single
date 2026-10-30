@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MapObjectTable from "@/components/map-object/MapObjectTable.vue";
+import tableSource from "../MapObjectTable.vue?raw";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useShapeStore } from "@/stores/shapes";
 import { MapObjectTableIndex } from "@/composables/map-object-table-index";
@@ -63,6 +64,28 @@ function rowKeys() {
 }
 
 describe("virtual map object table", () => {
+  it("keeps both mobile search inputs the same outer height as the adjacent button", async () => {
+    await table();
+    const style = document.createElement("style");
+    style.textContent = tableSource.match(/<style scoped>([\s\S]*?)<\/style>/)![1];
+    document.head.append(style);
+    document.body.append(wrapper!.element);
+    try {
+      const row = wrapper!.get("#map-object-search-row");
+      expect(getComputedStyle(row.element).flexWrap).toBe("nowrap");
+      const button = getComputedStyle(row.get("button").element);
+      expect(button.height).toBe("40px");
+      for (const input of row.findAll("input")) {
+        const box = getComputedStyle(input.element);
+        expect(box.boxSizing).toBe("border-box");
+        expect(box.height).toBe(button.height);
+        expect(parseFloat(box.minWidth)).toBe(0);
+      }
+    } finally {
+      style.remove();
+      wrapper!.element.remove();
+    }
+  });
   it("places the advanced-search icon after both search inputs and exposes the active state", async () => {
     await table();
     const search = wrapper!.get("#map-object-search-row").get('[aria-label="詳しい検索"]');
