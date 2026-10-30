@@ -299,7 +299,7 @@ onScopeDispose(clearSwipe);
   flex: 1 1 0;
   min-width: 0;
   width: 0;
-  height: 30px;
+  height: 40px;
   text-align: center;
   font-size: 16px;
   border-color: #acacac;

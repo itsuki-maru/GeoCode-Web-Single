@@ -278,8 +278,34 @@ export class MapRecordCache<T extends LayerRecord> {
   }
 }
 
-// Match the list API: literal substrings, two optional AND terms, no trimming.
+// Local text edits use literal substrings, two optional AND terms, and no trimming.
+// Preserve server results for unchanged text: database case folding can differ from JavaScript.
 export function matchesMapSearch(fields: Array<string | null | undefined>, terms: string[]) {
   const values = fields.map((value) => (value ?? "").toLowerCase());
   return terms.every((term) => !term || values.some((value) => value.includes(term.toLowerCase())));
+}
+
+export class MapSearchMatches {
+  readonly records = new Map<string, { layerId: string; fields: string[] }>();
+  readonly ids: Set<string>;
+
+  constructor(records: Iterable<readonly [string, string, string[]]>, ids: Iterable<string>) {
+    this.ids = new Set(ids);
+    for (const [id, layerId, fields] of records) this.records.set(id, { layerId, fields });
+  }
+
+  matches(id: string, layerId: string, fields: string[], terms: string[]) {
+    const previous = this.records.get(id);
+    if (
+      previous?.layerId === layerId &&
+      previous.fields.every((value, index) => value === fields[index])
+    )
+      return this.ids.has(id);
+    // A server-matched shape can be loaded into the canonical cache after the query.
+    const matched = (!previous && this.ids.has(id)) || matchesMapSearch(fields, terms);
+    this.records.set(id, { layerId, fields });
+    if (matched) this.ids.add(id);
+    else this.ids.delete(id);
+    return matched;
+  }
 }

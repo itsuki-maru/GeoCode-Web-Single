@@ -127,6 +127,28 @@ function pendingResult() {
   return { promise, resolve };
 }
 
+it("labels the attribute-only count when the existing text search reduces the visible results", async () => {
+  const { markers, shapes, search } = mountSearch();
+  shapes.upsertRecord({ ...shape("s1"), name: "alpha" });
+  shapes.upsertRecord({ ...shape("s2"), name: "beta" });
+  api.get.mockResolvedValueOnce({ data: { markers: {}, shape_ids: ["s1"] } });
+  await markers.queryWordMapObject("alpha", "", "a");
+  api.get.mockResolvedValueOnce({
+    data: [{ id: "form", version: 1, form_title: "設備", form_schema: { fields: [] } }],
+  });
+  api.post.mockResolvedValue({ data: result(["s1", "s2"]) });
+  search.openAdvancedSearch();
+  await flushPromises();
+  const dialog = document.querySelector("dialog")!;
+  const select = dialog.querySelector("select")!;
+  select.value = "form";
+  select.dispatchEvent(new Event("change"));
+  dialog.querySelector<HTMLButtonElement>(".attribute-submit")!.click();
+  await flushPromises();
+  expect(markers.filteredShapeIds).toEqual(["s1"]);
+  expect(dialog.querySelector('[role="status"]')?.textContent).toBe("属性条件のみの一致件数：2件");
+});
+
 it("keeps the modal open on apply and clear, allows another search, and closes on an external reset", async () => {
   const { markers, search, apply } = mountSearch();
   api.get.mockResolvedValue({

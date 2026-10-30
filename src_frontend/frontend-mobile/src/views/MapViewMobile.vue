@@ -228,10 +228,7 @@ const reloadMap = async (
     activeLayer.value === selectedLayerId;
   const previousDisplay = {
     accountId: authStore.accountId,
-    search:
-      displayedQuery.query1 || displayedQuery.query2
-        ? { ...displayedQuery, layerId: displayedLayerId }
-        : null,
+    search: displayedQuery.query1 || displayedQuery.query2 ? mapobjStore.search : null,
     attributeSearch: mapobjStore.attributeSearch,
     attributeMarkerIds: mapobjStore.attributeMarkerIds,
     attributeShapeIds: mapobjStore.attributeShapeIds,

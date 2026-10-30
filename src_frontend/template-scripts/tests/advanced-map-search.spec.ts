@@ -88,7 +88,9 @@ describe("advanced map search", () => {
       target_count: 0,
     });
     expect(document.querySelector("dialog")?.open).toBe(true);
-    expect(document.querySelector('[role="status"]')?.textContent).toBe("検索結果：0件");
+    expect(document.querySelector('[role="status"]')?.textContent).toBe(
+      "属性条件のみの一致件数：0件",
+    );
     expect(document.querySelector<HTMLInputElement>("dialog input")?.value).toBe(
       "9007199254740993.0001",
     );
@@ -196,6 +198,7 @@ describe("advanced map search", () => {
           style.borderRadius,
           style.boxShadow,
           style.padding,
+          style.fontWeight === "normal" ? "400" : style.fontWeight,
         ];
       });
     const fullScreenStyles = styles();
@@ -213,6 +216,13 @@ describe("advanced map search", () => {
         return [style.borderBottomWidth, style.borderBottomStyle];
       };
       const topHeadingBorder = headingBorder();
+      const typography = () =>
+        [...document.querySelectorAll("dialog label, dialog select, dialog input")].map((node) => {
+          const weight = getComputedStyle(node).fontWeight;
+          return weight === "normal" ? "400" : weight;
+        });
+      const topTypography = typography();
+      expect(topTypography.every((weight) => weight === "normal" || weight === "400")).toBe(true);
       const buttons = [...document.querySelectorAll("dialog button")];
       expect(new Set(buttons.map((b) => getComputedStyle(b).borderRadius))).toEqual(
         new Set(["8px"]),
@@ -235,6 +245,12 @@ describe("advanced map search", () => {
         ),
         ...[...template.querySelectorAll("head style")].map((style) => style.textContent),
       ].join("\n");
+      expect(typography()).toEqual(topTypography);
+      expect(styles()).toEqual(fullScreenStyles);
+      const mapLabel = document.createElement("label");
+      mapLabel.textContent = "既存の地図コントロール";
+      map.append(mapLabel);
+      expect(getComputedStyle(mapLabel).fontWeight).toBe("bold");
       expect(headingBorder()).toEqual(topHeadingBorder);
       const markdownHeading = document.createElement("h2");
       markdownHeading.textContent = "Markdownの見出し";

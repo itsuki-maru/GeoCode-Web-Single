@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { markRaw } from "vue";
-import type { MapObjectData, MapObjectQueryResponse } from "@/interface";
+import type { MapObjectData, MapObjectQueryResponse, ShapeData } from "@/interface";
 import {
   getMapObjectsUrl,
   updateMapObjectUrl,
@@ -9,7 +9,7 @@ import {
 } from "@/router/urls";
 import apiClient from "@/axiosClient";
 import { useShapeStore } from "./shapes";
-import { MapRecordCache, matchesMapSearch } from "./map-record-cache";
+import { MapRecordCache, MapSearchMatches, matchesMapSearch } from "./map-record-cache";
 import { MapTableChanges } from "./map-table-changes";
 
 import type {
@@ -19,6 +19,18 @@ import type {
 
 const ordered = (records: MapObjectData[]) =>
   new Map(records.sort((a, b) => b.id.localeCompare(a.id)).map((record) => [record.id, record]));
+const markerText = (record: MapObjectData) => [record.marker_name ?? "", record.detail ?? ""];
+const shapeText = (record: ShapeData) => [
+  record.name ?? "",
+  String(record.geojson?.properties?.memo ?? ""),
+];
+interface MapSearch {
+  query1: string;
+  query2: string;
+  layerId: string;
+  markerMatches?: MapSearchMatches;
+  shapeMatches?: MapSearchMatches;
+}
 export const useMapObjectStore = defineStore("mapobjects", {
   state: () => ({
     loadRevision: 0,
@@ -31,7 +43,7 @@ export const useMapObjectStore = defineStore("mapobjects", {
     attributeRevision: 0,
     activeLayerId: "",
     activeIsMaster: true,
-    search: null as { query1: string; query2: string; layerId: string } | null,
+    search: null as MapSearch | null,
     recordCache: markRaw(new MapRecordCache<MapObjectData>()),
     mutationRevision: 0,
     mutationVersions: new Map<string, number>(),
@@ -80,11 +92,7 @@ export const useMapObjectStore = defineStore("mapobjects", {
         isMaster ?? this.activeIsMaster,
       );
     },
-    activateScope(
-      layerId: string,
-      isMaster: boolean,
-      search?: { query1: string; query2: string; layerId: string } | null,
-    ) {
+    activateScope(layerId: string, isMaster: boolean, search?: MapSearch | null) {
       this.activeLayerId = layerId;
       this.activeIsMaster = isMaster;
       this.recordCache.setActive(layerId, isMaster);
@@ -106,10 +114,17 @@ export const useMapObjectStore = defineStore("mapobjects", {
       const terms = [this.search?.query1 ?? "", this.search?.query2 ?? ""];
       const matchesMarker = (record: MapObjectData) =>
         (!this.attributeMarkerIds || this.attributeMarkerIds.has(record.id)) &&
-        matchesMapSearch([record.marker_name, record.detail], terms);
-      const matchesShape = (record: import("@/interface").ShapeData) =>
+        (this.search?.markerMatches?.matches(
+          record.id,
+          record.layer_id,
+          markerText(record),
+          terms,
+        ) ??
+          matchesMapSearch(markerText(record), terms));
+      const matchesShape = (record: ShapeData) =>
         (!this.attributeShapeIds || this.attributeShapeIds.has(record.id)) &&
-        matchesMapSearch([record.name, String(record.geojson?.properties?.memo ?? "")], terms);
+        (this.search?.shapeMatches?.matches(record.id, record.layer_id, shapeText(record), terms) ??
+          matchesMapSearch(shapeText(record), terms));
       if (rebuild) this.mapObjectList = ordered(this.getScopeRecords().filter(matchesMarker));
       else
         for (const id of this.dirtyIds) {
@@ -212,7 +227,6 @@ export const useMapObjectStore = defineStore("mapobjects", {
           `${mapQueryObjectsUrl}?${params}`,
         );
         if (revision !== this.loadRevision) return false;
-        this.search = { query1, query2, layerId: activeLayer };
         // Search returns a view, not a replacement for the canonical full-scope records.
         const records = new Map<string, MapObjectData>();
         for (const record of Object.values(response.data.markers)) {
@@ -239,16 +253,54 @@ export const useMapObjectStore = defineStore("mapobjects", {
               records.set(id, record);
             else records.delete(id);
           }
+        const shapeIds = new Set(response.data.shape_ids);
+        for (const [id, version] of shapeStore.mutationVersions)
+          if (version > shapeMutationRevision) {
+            const record = shapeStore.recordCache.records.get(id);
+            if (
+              record &&
+              (this.activeIsMaster || record.layer_id === this.activeLayerId) &&
+              matchesMapSearch(shapeText(record), terms)
+            )
+              shapeIds.add(id);
+            else shapeIds.delete(id);
+            shapeStore.dirtyIds.add(id);
+          }
+        // Keep the unmasked server text result, including nonmatches. Attribute changes
+        // must only intersect IDs, without applying JavaScript's different case folding.
+        this.search = {
+          query1,
+          query2,
+          layerId: activeLayer,
+          markerMatches: markRaw(
+            new MapSearchMatches(
+              [...this.recordCache.records.values()].map((record) => [
+                record.id,
+                record.layer_id,
+                markerText(record),
+              ]),
+              records.keys(),
+            ),
+          ),
+          shapeMatches: markRaw(
+            new MapSearchMatches(
+              [...shapeStore.recordCache.records.values()].map((record) => [
+                record.id,
+                record.layer_id,
+                shapeText(record),
+              ]),
+              shapeIds,
+            ),
+          ),
+        };
         this.mapObjectList = ordered(
           [...records.values()].filter(
             (record) => !this.attributeMarkerIds || this.attributeMarkerIds.has(record.id),
           ),
         );
-        this.filteredShapeIds = response.data.shape_ids.filter(
+        this.filteredShapeIds = [...shapeIds].filter(
           (id) => !this.attributeShapeIds || this.attributeShapeIds.has(id),
         );
-        for (const [id, version] of shapeStore.mutationVersions)
-          if (version > shapeMutationRevision) shapeStore.dirtyIds.add(id);
         this.refreshSearchResults();
         this.tableChanges.emit({ type: "reset" });
         return true;
