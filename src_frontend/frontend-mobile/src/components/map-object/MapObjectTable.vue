@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, toRef, onScopeDispose } from "vue";
 import type { QueryForm } from "@/interface";
+import { assetsUrl } from "@/settingMobile";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useLayersStore } from "@/stores/layers";
 import { useMapObjectTableRows } from "@/composables/useMapObjectTableRows";
@@ -9,6 +10,7 @@ import type { TableRow } from "@/composables/map-object-table-index";
 
 const props = withDefaults(
   defineProps<{
+    attributeSearchActive?: boolean;
     activeLayer: string;
     mapObjectQueryFormData: QueryForm;
     active?: boolean;
@@ -16,6 +18,7 @@ const props = withDefaults(
   { active: true },
 );
 const emit = defineEmits<{
+  advancedSearch: [];
   editObject: [type: "marker" | "shape", id: string];
   focusObject: [type: "marker" | "shape", id: string, lat: number, lng: number];
   deleteMarker: [id: string];
@@ -30,7 +33,12 @@ const { count, rows } = useMapObjectTableRows(active);
 const { viewport, range, onScroll, resetScroll } = useVirtualTable(count, active);
 const visibleRows = computed(() => rows(range.value.start, range.value.end));
 watch(
-  () => [props.activeLayer, mapobjStore.search?.query1, mapobjStore.search?.query2],
+  () => [
+    props.activeLayer,
+    mapobjStore.search?.query1,
+    mapobjStore.search?.query2,
+    mapobjStore.attributeRevision,
+  ],
   resetScroll,
 );
 const mapObjectQueryFormData = ref<QueryForm>({ ...props.mapObjectQueryFormData });
@@ -161,6 +169,16 @@ onScopeDispose(clearSwipe);
       required
       v-model="mapObjectQueryFormData.query2"
     />
+    <button
+      class="btn-head-image-search advanced-search-button"
+      type="button"
+      :title="attributeSearchActive ? '詳しい検索（適用中）' : '詳しい検索'"
+      aria-label="詳しい検索"
+      @click="emit('advancedSearch')"
+      :aria-pressed="!!attributeSearchActive"
+    >
+      <img :src="`${assetsUrl}search_fill24.png`" class="btn-img" alt="" />
+    </button>
   </div>
 
   <div
@@ -237,17 +255,50 @@ onScopeDispose(clearSwipe);
 </template>
 
 <style scoped>
+.btn-head-image-search {
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: 0 0 40px;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 8px 5px;
+  border: 1px solid transparent;
+  border-radius: 15px;
+  background: white;
+  color: #000;
+  transition: background-color 0.3s;
+  cursor: pointer;
+}
+.btn-head-image-search:hover {
+  background: rgb(192, 192, 192);
+}
+.btn-head-image-search[aria-pressed="true"] {
+  border-color: #2165bb;
+  background: #eaf2ff;
+}
+.btn-img {
+  display: block;
+  width: 24px;
+  border: none;
+  box-shadow: none;
+}
+
 #map-object-search-row {
   display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+  min-width: 0;
   margin: 30px auto;
 }
 
-#search-textbox1 {
-  margin-right: 1%;
-}
-
 .search-map-object-box {
-  width: 90%;
+  box-sizing: border-box;
+  flex: 1 1 0;
+  min-width: 0;
+  width: 0;
   height: 30px;
   text-align: center;
   font-size: 16px;

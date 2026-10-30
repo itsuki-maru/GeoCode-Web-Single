@@ -4,6 +4,7 @@ import type { Ref } from "vue";
 import { AxiosError } from "axios";
 import { useRouter } from "vue-router";
 import type { MapObjectUpdatePayload, QueryForm, UploadProgressState } from "@/interface";
+import { useAdvancedMapSearch } from "@/composables/useAdvancedMapSearch";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useShapeStore } from "@/stores/shapes";
 import { useAuthStore } from "@/stores/auth";
@@ -231,6 +232,9 @@ const reloadMap = async (
       displayedQuery.query1 || displayedQuery.query2
         ? { ...displayedQuery, layerId: displayedLayerId }
         : null,
+    attributeSearch: mapobjStore.attributeSearch,
+    attributeMarkerIds: mapobjStore.attributeMarkerIds,
+    attributeShapeIds: mapobjStore.attributeShapeIds,
     query: { ...displayedQuery },
     markerLayer: displayedLayerId || mapobjStore.activeLayerId,
     markerMaster: displayedLayerId
@@ -251,6 +255,10 @@ const reloadMap = async (
   );
   const restoreDisplay = () => {
     if (previousDisplay.accountId !== authStore.accountId) return;
+    mapobjStore.attributeSearch = previousDisplay.attributeSearch;
+    mapobjStore.attributeMarkerIds = previousDisplay.attributeMarkerIds;
+    mapobjStore.attributeShapeIds = previousDisplay.attributeShapeIds;
+    ++mapobjStore.attributeRevision;
     shapeStore.activateScope(previousDisplay.shapeLayer, previousDisplay.shapeMaster);
     mapobjStore.activateScope(
       previousDisplay.markerLayer,
@@ -259,6 +267,7 @@ const reloadMap = async (
     );
     mapObjectQueryFormData.value = previousDisplay.query;
     filterMapObjects();
+    refreshAttributeSearch();
   };
   if (absolute) showProgressModal.value = true;
   try {
@@ -427,7 +436,7 @@ const focusObject = (type: "marker" | "shape", id: string, lat: number, lng: num
 };
 
 const filterMapObjects = (): void => {
-  if (!mapobjStore.search?.query1 && !mapobjStore.search?.query2) {
+  if (!mapobjStore.search?.query1 && !mapobjStore.search?.query2 && !mapobjStore.attributeSearch) {
     mapIframeRef.value?.filterMapObjects(null, null);
     return;
   }
@@ -461,6 +470,15 @@ const handleMapObjectSearch = async (query: QueryForm, reset: boolean = false): 
     showMessage("検索結果を取得できませんでした。再試行してください。");
   }
 };
+const { openAdvancedSearch, closeAdvancedSearch, refreshAttributeSearch } = useAdvancedMapSearch(
+  activeLayer,
+  masterLayerId,
+  filterMapObjects,
+  (text) => showMessage(text),
+);
+watch(activeLayer, () => closeAdvancedSearch());
+watch(() => mapobjStore.attributeRevision, filterMapObjects);
+
 // 保存処理を親で継続し、保存中に地図が切り替わっても原本へ結果を反映する。
 const writeMapObject = useMapObjectWriter();
 const onMapObjectWriteRequested: typeof writeMapObject = async (request, reply) => {
@@ -1174,6 +1192,8 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
             @focusObject="focusObject"
             @deleteMarker="handleDeleteMarker"
             @message="showMessage"
+            @advancedSearch="openAdvancedSearch"
+            :attributeSearchActive="!!mapobjStore.attributeSearch"
             @mapObjectSearch="handleMapObjectSearch"
             @update:mapObjectQueryFormData="mapObjectQueryFormData = $event"
           />
@@ -1186,9 +1206,11 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
   <!-- 地図 -->
   <MapIframe
     ref="mapIframeRef"
+    :attributeSearchActive="!!mapobjStore.attributeSearch"
     :srcUrl="srcUrl"
     :inputPolicies="layerInputPolicies"
     :allowedOrigins="allowedOriginsRef"
+    @advancedSearch="openAdvancedSearch"
     @mapReloadRequested="onMapReloadRequested"
     @mapObjectChanged="onMapObjectChanged"
     @mapDataRequested="onMapDataRequested"

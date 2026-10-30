@@ -63,6 +63,19 @@ function rowKeys() {
 }
 
 describe("virtual map object table", () => {
+  it("places the advanced-search icon after both search inputs and exposes the active state", async () => {
+    await table();
+    const search = wrapper!.get("#map-object-search-row").get('[aria-label="詳しい検索"]');
+    expect(search.element.previousElementSibling?.id).toBe("search-textbox2");
+    expect(search.get("img").attributes("src")).toContain("search_fill24.png");
+    expect(search.text()).toBe("");
+    expect(search.attributes("aria-pressed")).toBe("false");
+    await search.trigger("click");
+    expect(wrapper!.emitted("advancedSearch")).toEqual([[]]);
+    await wrapper!.setProps({ attributeSearchActive: true });
+    expect(search.attributes("aria-pressed")).toBe("true");
+    expect(search.attributes("title")).toContain("適用中");
+  });
   it("mounts a bounded set of rows, uses lazy centers, and edits/focuses the scrolled typed ID", async () => {
     seed(20000);
     const spy = vi.spyOn(centers, "getShapeCenter");

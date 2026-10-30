@@ -123,9 +123,104 @@ const status = (id: string) =>
   document.querySelector(`[data-layer-load-id="${id}"] .layer-object-load-state`)!.textContent;
 
 describe("lazy groups in the actual read-only map runtime", () => {
+  it("standalone attribute search masks later loaded layers and combines with text until explicitly cleared", async () => {
+    Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+      configurable: true,
+      value() {
+        this.setAttribute("open", "");
+      },
+    });
+    Object.defineProperty(HTMLDialogElement.prototype, "close", {
+      configurable: true,
+      value() {
+        this.removeAttribute("open");
+      },
+    });
+    const originalFetch = fetchData.getMockImplementation()!;
+    fetchData.mockImplementation(async (url, init) => {
+      if (String(url) === "/common-forms")
+        return new Response(
+          JSON.stringify([
+            { id: "form", version: 1, form_title: "記録", form_schema: { fields: [] } },
+          ]),
+        );
+      if (String(url) === "/map-objects/search/attributes") {
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          layer_ids: null,
+          common_form_id: "form",
+        });
+        return new Response(
+          JSON.stringify({
+            common_form_id: "form",
+            definition_version: 1,
+            as_of: "2026-10-30T00:00:00Z",
+            marker_ids: ["m-b"],
+            shape_ids: ["s-b"],
+            target_count: 2,
+          }),
+        );
+      }
+      return originalFetch(url, init);
+    });
+    runtime = initializeReadOnlyMapPage("map-anather");
+    const open = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+      (b) => b.textContent === "詳しい検索",
+    )!;
+    const controlStyle = document.createElement("style");
+    controlStyle.textContent = readFileSync(resolve("../frontend/public/map-controls.css"), "utf8");
+    document.head.append(controlStyle);
+    try {
+      const names = [...document.querySelectorAll("button")].find(
+        (button) => button.textContent === "マーカー名表示",
+      )!;
+      const appearance = (button: HTMLElement) => {
+        const css = getComputedStyle(button);
+        return [css.fontSize, css.fontWeight, css.padding, css.borderRadius, css.backgroundColor];
+      };
+      expect(appearance(open)).toEqual(appearance(names));
+    } finally {
+      controlStyle.remove();
+    }
+    open.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("dialog select option[value='form']")).not.toBeNull(),
+    );
+    const form = document.querySelector<HTMLSelectElement>("dialog select")!;
+    form.value = "form";
+    form.dispatchEvent(new Event("change"));
+    [...document.querySelectorAll<HTMLButtonElement>("dialog button")]
+      .find((b) => b.textContent === "検索")!
+      .click();
+    await vi.waitFor(() => expect(open.getAttribute("aria-pressed")).toBe("true"));
+    checkbox("a").click();
+    checkbox("b").click();
+    await vi.waitFor(() => expect(runtime!.getShapeRecord("s-b")).not.toBeNull());
+    await runtime.shapeRenderer.whenIdle();
+    expect(runtime.getVisibleShapeIds()).toEqual(["s-b"]);
+    expect(runtime.map.hasLayer(runtime.markers["marker-m-a"])).toBe(false);
+    expect(runtime.map.hasLayer(runtime.markers["marker-m-b"])).toBe(true);
+    const input = document.getElementById("marker-search-input") as HTMLInputElement;
+    input.value = "no match";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(runtime.getVisibleShapeIds()).toEqual([]);
+    input.value = "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(runtime.getVisibleShapeIds()).toEqual(["s-b"]);
+    checkbox("b").click();
+    checkbox("b").click();
+    expect(runtime.getVisibleShapeIds()).toEqual(["s-b"]);
+    open.click();
+    await flush();
+    [...document.querySelectorAll<HTMLButtonElement>("dialog button")]
+      .find((b) => b.textContent === "属性条件を解除")!
+      .click();
+    expect(new Set(runtime.getVisibleShapeIds())).toEqual(new Set(["s-a", "s-b"]));
+  });
   it.each([
-    { mobile: false, references: false }, { mobile: true, references: false },
-    { mobile: false, references: true }, { mobile: true, references: true },
+    { mobile: false, references: false },
+    { mobile: true, references: false },
+    { mobile: false, references: true },
+    { mobile: true, references: true },
   ])(
     "回答JSON blockは現在位置・全対象・Unicode本文の切替を維持する（%j）",
     async ({ mobile, references }) => {
@@ -142,15 +237,33 @@ describe("lazy groups in the actual read-only map runtime", () => {
           ...(window.__GEOCODE_MAP_BOOTSTRAP__ as Record<string, unknown>),
           page: "form-answer-map",
           markers: { "m-a": { ...marker("a"), detail: body } },
-          shapes: [{ ...record, geojson: { ...record.geojson, properties: { ...record.geojson.properties, memo: body } } }],
-          popupBodies: Object.fromEntries(["marker:m-a", "shape:s-a"].map((id) => [id,
-            { free_text: references ? `${free}\n\n` : free, managed_markdown: answers, sync_required: false },
-          ])),
+          shapes: [
+            {
+              ...record,
+              geojson: {
+                ...record.geojson,
+                properties: { ...record.geojson.properties, memo: body },
+              },
+            },
+          ],
+          popupBodies: Object.fromEntries(
+            ["marker:m-a", "shape:s-a"].map((id) => [
+              id,
+              {
+                free_text: references ? `${free}\n\n` : free,
+                managed_markdown: answers,
+                sync_required: false,
+              },
+            ]),
+          ),
           answerPreview: {
-            answerCount: 3, targetCount: 2,
+            answerCount: 3,
+            targetCount: 2,
             query: { mode: "history", as_of: "2026-10-01T00:00:00Z" },
             targets: ["marker:m-a", "shape:s-a"],
-            initialView: view, parentOrigin: location.origin, requestId: "json-body-runtime",
+            initialView: view,
+            parentOrigin: location.origin,
+            requestId: "json-body-runtime",
           },
         };
         if (references) {
@@ -183,14 +296,27 @@ describe("lazy groups in the actual read-only map runtime", () => {
         const actualView = runtime.getPrintState().view;
         expect(actualView.zoom).toBe(view.zoom);
         // Leaflet rounds the initial center to map pixels during invalidateSize.
-        expect(runtime.map.project([actualView.latitude, actualView.longitude], view.zoom)
-          .distanceTo(runtime.map.project([view.latitude, view.longitude], view.zoom))).toBeLessThanOrEqual(1);
+        expect(
+          runtime.map
+            .project([actualView.latitude, actualView.longitude], view.zoom)
+            .distanceTo(runtime.map.project([view.latitude, view.longitude], view.zoom)),
+        ).toBeLessThanOrEqual(1);
         expect(document.body.classList.contains("map-mobile-controls")).toBe(mobile);
-        expect(post).toHaveBeenCalledWith(expect.objectContaining({
-          type: "answer-map-ready", targetCount: 2, answerCount: 3, displayed: 2,
-          query: data.answerPreview.query, targets: data.answerPreview.targets,
-        }), location.origin);
-        runtime.markers["marker-m-a"].getPopup().setLatLng([view.latitude, view.longitude]).openOn(runtime.map);
+        expect(post).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: "answer-map-ready",
+            targetCount: 2,
+            answerCount: 3,
+            displayed: 2,
+            query: data.answerPreview.query,
+            targets: data.answerPreview.targets,
+          }),
+          location.origin,
+        );
+        runtime.markers["marker-m-a"]
+          .getPopup()
+          .setLatLng([view.latitude, view.longitude])
+          .openOn(runtime.map);
         const select = document.querySelector<HTMLSelectElement>(".popup-content-toolbar select")!;
         await vi.waitFor(() => expect(select.options[0].disabled).toBe(false));
         for (const mode of ["free", "answers", "normal"]) {
@@ -198,14 +324,22 @@ describe("lazy groups in the actual read-only map runtime", () => {
           select.dispatchEvent(new Event("change", { bubbles: true }));
           const rendered = document.querySelector<HTMLElement>(".popup-content-body")!;
           if (mode === "free") expect(rendered.textContent?.trim()).toBe(free);
-          if (mode === "answers") expect(rendered.querySelector("strong")?.textContent).toBe("回答🙂");
+          if (mode === "answers")
+            expect(rendered.querySelector("strong")?.textContent).toBe("回答🙂");
           if (mode === "normal") {
             expect(rendered.textContent).toContain(free);
             expect(rendered.querySelector("strong")?.textContent).toBe("回答🙂");
           }
         }
-        runtime.shapeLayers["shape-s-a"].fire("click", { latlng: leaflet.latLng(view.latitude, view.longitude) });
-        await vi.waitFor(() => expect(document.querySelector<HTMLSelectElement>(".popup-content-toolbar select")!.options[0].disabled).toBe(false));
+        runtime.shapeLayers["shape-s-a"].fire("click", {
+          latlng: leaflet.latLng(view.latitude, view.longitude),
+        });
+        await vi.waitFor(() =>
+          expect(
+            document.querySelector<HTMLSelectElement>(".popup-content-toolbar select")!.options[0]
+              .disabled,
+          ).toBe(false),
+        );
         expect(document.querySelector(".popup-content-title")?.textContent).toBe(record.name);
         expect(document.querySelector(".popup-content-body")?.textContent).toContain(free);
         const snapshot = createAnswerPrintSnapshot(bootstrap, runtime, ["marker:m-a", "shape:s-a"]);
@@ -427,7 +561,8 @@ describe("lazy groups in the actual read-only map runtime", () => {
         };
       }
       fetchData.mockImplementation(
-        async (url) => new Response(JSON.stringify(String(url).startsWith("/shapes") ? records : {})),
+        async (url) =>
+          new Response(JSON.stringify(String(url).startsWith("/shapes") ? records : {})),
       );
       runtime = initializeReadOnlyMapPage(page);
       if (page === "map-anather" && !checkbox("a").checked) {
@@ -435,7 +570,10 @@ describe("lazy groups in the actual read-only map runtime", () => {
         await flush();
       }
       await runtime.shapeRenderer.whenIdle();
-      expect(runtime.shapeRenderer.getStats()).toMatchObject({ eligibleCount: 4, renderedCount: 1 });
+      expect(runtime.shapeRenderer.getStats()).toMatchObject({
+        eligibleCount: 4,
+        renderedCount: 1,
+      });
       expect(runtime.shapeLayers["shape-overview"]).toBeUndefined();
       expect(runtime.shapeLayers["shape-middle"]).toBeUndefined();
       const large = runtime.shapeLayers["shape-large"];

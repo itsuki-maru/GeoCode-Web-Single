@@ -33,3 +33,5 @@ mod answer_sqlite;
 pub mod layer_forms;
 
 pub mod layer_input_policy;
+
+pub mod map_attribute_search;

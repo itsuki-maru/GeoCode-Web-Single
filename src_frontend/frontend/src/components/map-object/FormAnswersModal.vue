@@ -826,7 +826,7 @@ button:disabled {
 }
 .condition-row {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   flex-wrap: wrap;
   gap: 8px;
   margin: 12px 0;
@@ -835,6 +835,18 @@ button:disabled {
 }
 .condition-row > label {
   flex: 1 1 150px;
+  margin: 0;
+}
+.condition-row select,
+.condition-row input:not([type="checkbox"]) {
+  height: calc(1.4em + 18px);
+  line-height: 1.4;
+  margin: 0;
+}
+.condition-row > button {
+  align-self: flex-end;
+  margin: 0;
+  box-shadow: none;
 }
 .column-options {
   display: flex;

@@ -12,6 +12,11 @@ import { useShapeStore } from "./shapes";
 import { MapRecordCache, matchesMapSearch } from "./map-record-cache";
 import { MapTableChanges } from "./map-table-changes";
 
+import type {
+  AttributeSearchRequest,
+  AttributeSearchResult,
+} from "../../../template-scripts/src/map/common/advanced-map-search";
+
 const ordered = (records: MapObjectData[]) =>
   new Map(records.sort((a, b) => b.id.localeCompare(a.id)).map((record) => [record.id, record]));
 export const useMapObjectStore = defineStore("mapobjects", {
@@ -20,6 +25,10 @@ export const useMapObjectStore = defineStore("mapobjects", {
     tableChanges: markRaw(new MapTableChanges()),
     mapObjectList: new Map<string, MapObjectData>(),
     filteredShapeIds: null as string[] | null,
+    attributeSearch: null as AttributeSearchRequest | null,
+    attributeMarkerIds: null as Set<string> | null,
+    attributeShapeIds: null as Set<string> | null,
+    attributeRevision: 0,
     activeLayerId: "",
     activeIsMaster: true,
     search: null as { query1: string; query2: string; layerId: string } | null,
@@ -48,6 +57,10 @@ export const useMapObjectStore = defineStore("mapobjects", {
     },
     clearSearch() {
       this.search = null;
+      this.attributeSearch = null;
+      this.attributeMarkerIds = null;
+      this.attributeShapeIds = null;
+      ++this.attributeRevision;
       this.filteredShapeIds = null;
       this.dirtyIds.clear();
       this.tableChanges.emit({ type: "reset" });
@@ -78,57 +91,56 @@ export const useMapObjectStore = defineStore("mapobjects", {
       if (search !== undefined) this.search = search;
       this.refreshSearchResults(true);
     },
+    setAttributeSearch(
+      request: AttributeSearchRequest | null,
+      result: AttributeSearchResult | null,
+    ) {
+      this.attributeSearch = request;
+      this.attributeMarkerIds = result ? markRaw(new Set(result.marker_ids)) : null;
+      this.attributeShapeIds = result ? markRaw(new Set(result.shape_ids)) : null;
+      ++this.attributeRevision;
+      this.refreshSearchResults(true);
+    },
     refreshSearchResults(rebuild = false) {
       const shapes = useShapeStore();
-      if (!this.search) {
-        if (rebuild) this.mapObjectList = ordered(this.getScopeRecords());
-        else
-          for (const id of this.dirtyIds) {
-            const record = this.recordCache.records.get(id);
-            if (record && (this.activeIsMaster || record.layer_id === this.activeLayerId))
-              this.mapObjectList.set(id, record);
-            else this.mapObjectList.delete(id);
-          }
-        this.filteredShapeIds = null;
-      } else if (rebuild) {
-        const terms = [this.search.query1, this.search.query2];
-        this.mapObjectList = ordered(
-          this.getScopeRecords().filter((record) =>
-            matchesMapSearch([record.marker_name, record.detail], terms),
-          ),
-        );
-        this.filteredShapeIds = shapes
-          .getScopeRecords(this.activeLayerId, this.activeIsMaster)
-          .filter((record) =>
-            matchesMapSearch([record.name, String(record.geojson?.properties?.memo ?? "")], terms),
-          )
-          .map((record) => record.id);
-      } else {
-        const terms = [this.search.query1, this.search.query2];
+      const terms = [this.search?.query1 ?? "", this.search?.query2 ?? ""];
+      const matchesMarker = (record: MapObjectData) =>
+        (!this.attributeMarkerIds || this.attributeMarkerIds.has(record.id)) &&
+        matchesMapSearch([record.marker_name, record.detail], terms);
+      const matchesShape = (record: import("@/interface").ShapeData) =>
+        (!this.attributeShapeIds || this.attributeShapeIds.has(record.id)) &&
+        matchesMapSearch([record.name, String(record.geojson?.properties?.memo ?? "")], terms);
+      if (rebuild) this.mapObjectList = ordered(this.getScopeRecords().filter(matchesMarker));
+      else
         for (const id of this.dirtyIds) {
           const record = this.recordCache.records.get(id);
           if (
             record &&
             (this.activeIsMaster || record.layer_id === this.activeLayerId) &&
-            matchesMapSearch([record.marker_name, record.detail], terms)
+            matchesMarker(record)
           )
             this.mapObjectList.set(id, record);
           else this.mapObjectList.delete(id);
         }
-        if (shapes.dirtyIds.size) {
-          const ids = new Set(this.filteredShapeIds ?? []);
-          for (const id of shapes.dirtyIds) {
-            const record = shapes.recordCache.records.get(id);
-            if (
-              record &&
-              (this.activeIsMaster || record.layer_id === this.activeLayerId) &&
-              matchesMapSearch([record.name, String(record.geojson?.properties?.memo ?? "")], terms)
-            )
-              ids.add(id);
-            else ids.delete(id);
-          }
-          this.filteredShapeIds = [...ids];
+      if (!this.search && !this.attributeSearch) this.filteredShapeIds = null;
+      else if (rebuild || this.filteredShapeIds === null) {
+        this.filteredShapeIds = shapes
+          .getScopeRecords(this.activeLayerId, this.activeIsMaster)
+          .filter(matchesShape)
+          .map((record) => record.id);
+      } else if (shapes.dirtyIds.size) {
+        const ids = new Set(this.filteredShapeIds);
+        for (const id of shapes.dirtyIds) {
+          const record = shapes.recordCache.records.get(id);
+          if (
+            record &&
+            (this.activeIsMaster || record.layer_id === this.activeLayerId) &&
+            matchesShape(record)
+          )
+            ids.add(id);
+          else ids.delete(id);
         }
+        this.filteredShapeIds = [...ids];
       }
       if (rebuild) this.tableChanges.emit({ type: "reset" });
       else {
@@ -227,8 +239,14 @@ export const useMapObjectStore = defineStore("mapobjects", {
               records.set(id, record);
             else records.delete(id);
           }
-        this.mapObjectList = ordered([...records.values()]);
-        this.filteredShapeIds = [...response.data.shape_ids];
+        this.mapObjectList = ordered(
+          [...records.values()].filter(
+            (record) => !this.attributeMarkerIds || this.attributeMarkerIds.has(record.id),
+          ),
+        );
+        this.filteredShapeIds = response.data.shape_ids.filter(
+          (id) => !this.attributeShapeIds || this.attributeShapeIds.has(id),
+        );
         for (const [id, version] of shapeStore.mutationVersions)
           if (version > shapeMutationRevision) shapeStore.dirtyIds.add(id);
         this.refreshSearchResults();
