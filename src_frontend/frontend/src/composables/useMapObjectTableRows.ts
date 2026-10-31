@@ -21,7 +21,7 @@ export function useMapObjectTableRows(active: Ref<boolean>) {
     if (change.type === "reset") reset = true;
     else if (!reset) {
       pending.set(`${change.kind}:${change.id}`, change);
-      // Imports/bulk edits build once, rather than repeatedly shifting the ID array.
+      // インポートや一括編集では、ID 配列の要素を繰り返しずらさず、一度で構築する。
       if (pending.size > 256) {
         reset = true;
         pending.clear();
@@ -43,7 +43,7 @@ export function useMapObjectTableRows(active: Ref<boolean>) {
     } else {
       for (const { kind, id } of pending.values()) {
         const record = kind === "marker" ? markerMap().get(id) : shapeMap().get(id);
-        // A single write uses the same predicate as the store's incremental search.
+        // 単一の書き込みには、ストアの差分検索と同じ判定条件を使う。
         const query = markers.search;
         const included =
           kind === "marker" ||

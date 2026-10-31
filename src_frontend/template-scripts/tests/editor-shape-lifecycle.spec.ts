@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
-import { createContext, runInContext } from "node:vm";
+import { createContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
+import { runSource } from "./support/vm-source";
 
 function setup() {
   let configuration: any;
@@ -23,6 +23,7 @@ function setup() {
     measurementSelectedShapes: new Set(),
     isEditorShapePopupOpen: () => false,
     shapeNameLabelManager: null,
+    shapeRenderManager: null,
     shapeMeasurementManager: null,
     layersFromAxum: {},
     drawnShapesGroup: {},
@@ -33,7 +34,7 @@ function setup() {
     }),
     fetchWithAuth: vi.fn(),
   });
-  runInContext(readFileSync("src/map/editor/map-editor-shape-metadata.ts", "utf8"), context);
+  runSource(context, "src/map/editor/map-editor-shape-metadata.ts");
   context.initializeEditorShapeRendering();
   return { context, manager, configuration };
 }

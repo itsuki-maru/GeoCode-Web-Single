@@ -85,7 +85,7 @@ pub async fn search_marker_icons_handler(
             filename,
             uuid_filename
         FROM marker_icon_model
-        WHERE user_id = $1 AND filename ILIKE $2 ESCAPE '\'
+        WHERE user_id = $1 AND filename LIKE $2 ESCAPE '\' COLLATE NOCASE
         ORDER BY create_at DESC
         "#,
     )

@@ -387,7 +387,7 @@ const restorePreset = async (preset: SavedMapPreset) => {
         ),
       );
     }
-    // This lookup never goes through loadOptions/loadFields: both clear the current draft first.
+    // loadOptions/loadFields は先に現在の下書きを消去するため、この検索では経由しない。
     const data = (
       await apiClient.post<Result>(
         endpoint.value,
@@ -480,7 +480,7 @@ const fetchResult = async (
     JSON.stringify(colorChange ? colorChange.specification : appliedColorSpecification),
   );
   try {
-    // Validate all requests before doing any work, including the shared 20-condition limit.
+    // 共通の 20 条件制限も含め、処理を始める前にすべてのリクエストを検証する。
     const colorRequests =
       !optionsOnly &&
       requestedColors?.rules.map((rule) =>
@@ -532,7 +532,7 @@ const fetchResult = async (
         targets: {},
       };
       const allowed = new Set(data.targets);
-      // Sequential requests avoid multiplying the database load for large target sets.
+      // 対象件数が多い場合にデータベース負荷を増幅させないよう、リクエストを順次実行する。
       for (let index = 0; index < colorRequests.length; index++) {
         const classified = (
           await apiClient.post<Result>(

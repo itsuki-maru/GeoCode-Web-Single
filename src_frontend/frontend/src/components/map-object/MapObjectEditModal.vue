@@ -143,7 +143,7 @@ onBeforeUnmount(() => {
 });
 const detailTextarea = ref<HTMLTextAreaElement | null>(null);
 const isShape = computed(() => props.targetType === "shape");
-// Both the saved layer and destination apply until the move has been saved.
+// 移動が保存されるまでは、保存済みのレイヤと移動先の両方の制約を適用する。
 const originalLayerId = computed(() =>
   isShape.value
     ? shapeStore.getById(props.targetId)?.layer_id

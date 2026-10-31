@@ -172,7 +172,7 @@ const save = () => {
     error.value = (cause as Error).message;
   }
 };
-// Resolve every row before replacing the draft, so an invalid preset preserves the edits.
+// 下書きを置き換える前に全行を解決し、プリセットが無効でも編集中の内容を保持する。
 const restoreDraft = (specification: AnswerColorSpecification, candidates: AnswerField[]) => {
   validatePresetDraft({ kind: "coloring", definition: specification });
   if (props.requiredForm && props.requiredForm !== specification.common_form_id)

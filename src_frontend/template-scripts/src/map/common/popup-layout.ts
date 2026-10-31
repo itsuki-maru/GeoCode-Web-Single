@@ -9,8 +9,8 @@ const measuredContent = new WeakMap<
   { parent: HTMLElement; width: number; height: number; scrollWidth: number }
 >();
 
-// Leaflet detaches and reattaches live popup content during update(). Preserve
-// both the inner Markdown scroller and Leaflet's optional outer scroller.
+// Leaflet は update() 中に実際のポップアップ内容を取り外して付け直すため、内側の Markdown 用スクロール領域と
+// 必要に応じて存在する Leaflet の外側のスクロール領域の両方を保持する。
 export function capturePopupScroll(root: HTMLElement): () => void {
   const ancestors: HTMLElement[] = [];
   for (let element: HTMLElement | null = root; element; element = element.parentElement) {
@@ -52,9 +52,9 @@ export function updatePopupLayout(popup: PopupLayout, fallbackRoot?: HTMLElement
   if (pinned) {
     const previous = measuredContent.get(pinned);
     const size = pinned.getBoundingClientRect();
-    // Appending below a full-height Markdown scroller does not change popup
-    // geometry. Avoid Leaflet's detach/reinsert and whole-content remeasurement
-    // in that common case, including image loads after an append.
+    // 高さを使い切った Markdown のスクロール領域の下へ追記しても、ポップアップの形状は変わらない。
+    // この一般的なケースでは、追記後の画像読み込みも含め、Leaflet による取り外し・再挿入と
+    // 内容全体の再計測を避ける。
     if (
       previous &&
       previous.parent === pinned.parentElement &&
@@ -70,7 +70,7 @@ export function updatePopupLayout(popup: PopupLayout, fallbackRoot?: HTMLElement
     popup.update?.();
     if (focused && root.contains(focused)) focused.focus({ preventScroll: true });
   } finally {
-    // Focus restoration can also move scroll positions on some browsers.
+    // ブラウザーによっては、フォーカスの復元でもスクロール位置が動く場合がある。
     restoreScroll();
   }
   if (pinned?.parentElement) {

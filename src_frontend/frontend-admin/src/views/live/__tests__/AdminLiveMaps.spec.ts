@@ -12,6 +12,7 @@ vi.mock("@/axiosClient", () => ({ default: api }));
 vi.mock("@/setting", () => ({ baseUrl: "/api" }));
 
 import AdminLiveMaps from "@/views/live/AdminLiveMaps.vue";
+import ConfirmModal from "@/components/common/ConfirmModal.vue";
 
 const account = {
   user_id: "user-1",
@@ -20,7 +21,12 @@ const account = {
   received_at: null,
 };
 
-function mockLoad(maps: unknown[], locationAccounts = [account]) {
+function mockLoad(
+  maps: unknown[],
+  locationAccounts: Array<Omit<typeof account, "received_at"> & { received_at: string | null }> = [
+    account,
+  ],
+) {
   api.get.mockImplementation((url: string) =>
     Promise.resolve({
       data: url.includes("live-locations") ? locationAccounts : maps,
@@ -29,6 +35,7 @@ function mockLoad(maps: unknown[], locationAccounts = [account]) {
 }
 
 beforeEach(() => {
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-01-01T00:00:00Z"));
   api.delete.mockResolvedValue({});
   api.post.mockResolvedValue({ data: { share_url: "/live/public-map-1" } });
   api.put.mockResolvedValue({});
@@ -50,6 +57,7 @@ describe("現在位置共有マップ管理画面", () => {
     expect(api.post).toHaveBeenCalledOnce();
     expect(api.post.mock.calls[0][1].name).toBe("現在位置共有マップ");
     expect(api.post.mock.calls[0][1].use_tile_overlays).toBe(true);
+    expect(api.post.mock.calls[0][1].expires_at).toBe("2026-01-02T00:00:00.000Z");
   });
 
   it("発行済みの場合は同じ1件の設定を編集する", async () => {
@@ -308,5 +316,105 @@ describe("ライブマップの公開レイヤ選択", () => {
     await click(wrapper, "設定を更新");
     expect(api.put.mock.lastCall![1]).not.toHaveProperty("layer_ids");
     wrapper.unmount();
+  });
+});
+
+describe("共有リンク管理の失敗と確認操作", () => {
+  it.each([
+    [20, "共有中", "is-live"],
+    [21, "更新遅延", "is-delayed"],
+    [120, "更新遅延", "is-delayed"],
+    [121, "オフライン", "is-offline"],
+  ])("固定UTC時刻から受信状態の境界を判定する: %s秒", async (seconds, label, className) => {
+    const fixedNow = Date.parse("2026-01-01T00:00:00Z");
+    mockLoad(
+      [],
+      [{ ...account, received_at: new Date(fixedNow - Number(seconds) * 1000).toISOString() }],
+    );
+    const w = mount(AdminLiveMaps);
+    await flushPromises();
+    const status = w.findAll(".status-badge").find((element) => element.text() === label)!;
+    expect(status).toBeDefined();
+    expect(status.classes()).toContain(className);
+    w.unmount();
+  });
+  const saved = {
+    id: "map-1",
+    name: "共有",
+    expires_at: "2099-01-01T00:00:00Z",
+    revoked_at: null,
+    share_url: "/live/old",
+    is_password_protected: false,
+    members: [{ user_id: account.user_id, display_name: "共有者", marker_color: "#123456" }],
+  };
+  const click = async (w: ReturnType<typeof mount>, text: string) => {
+    await w
+      .findAll("button")
+      .find((b) => b.text() === text)!
+      .trigger("click");
+    await flushPromises();
+  };
+  it.each(["revoke", "rotate"] as const)(
+    "リンク操作は確認後だけ実行し、失敗を通知する: %s",
+    async (action) => {
+      mockLoad([saved]);
+      const w = mount(AdminLiveMaps);
+      await flushPromises();
+      const label = action === "revoke" ? "共有リンクを失効" : "共有URLを再発行";
+      await click(w, label);
+      const confirmation = w.getComponent(ConfirmModal);
+      confirmation.vm.$emit("cancel");
+      await flushPromises();
+      expect(api.delete).not.toHaveBeenCalled();
+      expect(api.post).not.toHaveBeenCalled();
+      await click(w, label);
+      if (action === "revoke") api.delete.mockRejectedValueOnce(new Error("offline"));
+      else api.post.mockRejectedValueOnce(new Error("offline"));
+      confirmation.vm.$emit("confirm");
+      await flushPromises();
+      expect(w.text()).toContain(action === "revoke" ? "失効できません" : "再発行できません");
+      await click(w, label);
+      confirmation.vm.$emit("confirm");
+      await flushPromises();
+      expect(w.text()).toContain(action === "revoke" ? "失効しました" : "新しい共有リンク");
+      w.unmount();
+    },
+  );
+  it("入力不足と短い共有パスワードを送信せず、保存競合を通知する", async () => {
+    mockLoad([]);
+    const w = mount(AdminLiveMaps);
+    await flushPromises();
+    await w.get('.form input[maxlength="100"]').setValue("");
+    await click(w, "共有リンクを発行");
+    expect(api.post).not.toHaveBeenCalled();
+    expect(w.text()).toContain("地図名、有効期限");
+    await w.get('.form input[maxlength="100"]').setValue("共有");
+    await w.get(".password-toggle input").setValue(true);
+    await w.get('input[type="password"]').setValue("abc");
+    await click(w, "共有リンクを発行");
+    expect(api.post).not.toHaveBeenCalled();
+    expect(w.text()).toContain("4文字以上");
+    await w.get('input[type="password"]').setValue("valid");
+    api.post.mockRejectedValueOnce({ response: { status: 409 } });
+    await click(w, "共有リンクを発行");
+    expect(w.text()).toContain("すでに発行");
+    w.unmount();
+  });
+  it("一覧取得とURLコピーの失敗を通知する", async () => {
+    api.get.mockRejectedValueOnce(new Error("offline"));
+    const failed = mount(AdminLiveMaps);
+    await flushPromises();
+    expect(failed.text()).toContain("取得できません");
+    failed.unmount();
+    mockLoad([saved]);
+    const w = mount(AdminLiveMaps);
+    await flushPromises();
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+    });
+    await click(w, "コピー");
+    expect(w.text()).toContain("手動でコピー");
+    w.unmount();
   });
 });

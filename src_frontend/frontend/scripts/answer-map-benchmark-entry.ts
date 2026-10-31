@@ -1,4 +1,4 @@
-// Built only by measure-answer-map.mjs; all application components stay unchanged.
+// measure-answer-map.mjs でのみビルドし、アプリのコンポーネントはすべて変更せずに使う。
 // @ts-nocheck
 import { createApp, h, nextTick, ref } from "vue";
 import { createPinia } from "pinia";
@@ -45,11 +45,11 @@ async function initializeParent() {
       return null;
     };
     const coordinate = point((shape?.geojson?.type === "Feature" ? shape.geojson.geometry : shape?.geojson)?.coordinates);
-    // An empty ID moves the real editor to zoom16 without opening a popup or
-    // requesting a fresh body. Geometry/render-idle is verified by the runner.
+    // 空の ID を指定すると、実際の編集画面はポップアップを開いたり本文を再取得したりせずに
+    // ズーム 16 へ移動する。図形と描画の完了は実行側で検証する。
     if (coordinate) parentFrame.value.focusObject("shape", "", coordinate[1], coordinate[0]);
-    // Setup is excluded from the measured answer-map opening. Retain actual
-    // Pinia records and the editor iframe while the answer modal is measured.
+    // 準備処理は回答地図を開く時間の計測に含めない。回答モーダルの計測中は、
+    // 実際の Pinia レコードと編集用 iframe を保持する。
     for (let index = 0; index < 12; index++) await new Promise(requestAnimationFrame);
     parentState.ready = true;
   } catch {

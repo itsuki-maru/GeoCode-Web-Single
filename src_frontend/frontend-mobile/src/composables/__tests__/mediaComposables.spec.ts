@@ -103,3 +103,47 @@ describe("動画ポスター画像の生成", () => {
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:video");
   });
 });
+
+describe("動画ポスター生成の失敗と短い動画", () => {
+  it.each(["video", "size", "context", "blob", "zero-duration"])(
+    "生成の%s経路で動画とBlob URLを後始末する",
+    async (outcome) => {
+      const native = document.createElement.bind(document),
+        video = native("video"),
+        canvas = native("canvas");
+      Object.defineProperties(video, {
+        videoWidth: { value: outcome === "size" ? 0 : 100 },
+        videoHeight: { value: 100 },
+        duration: { value: 0 },
+      });
+      vi.spyOn(video, "pause").mockImplementation(() => {});
+      vi.spyOn(video, "load").mockImplementation(() => {});
+      vi.spyOn(canvas, "getContext").mockReturnValue(
+        outcome === "context" ? null : ({ drawImage: vi.fn() } as any),
+      );
+      const blob = new Blob(["jpeg"]);
+      vi.spyOn(canvas, "toBlob").mockImplementation((callback) =>
+        callback(outcome === "blob" ? null : blob),
+      );
+      vi.spyOn(document, "createElement").mockImplementation(((tag: string) =>
+        tag === "video" ? video : tag === "canvas" ? canvas : native(tag)) as any);
+      const revoke = vi.fn();
+      vi.stubGlobal("URL", {
+        ...URL,
+        createObjectURL: vi.fn(() => "blob:video"),
+        revokeObjectURL: revoke,
+      });
+      const result = useVideoPoster().generateVideoPoster(new File(["video"], "clip.mp4"));
+      const assertion =
+        outcome === "zero-duration"
+          ? expect(result).resolves.toEqual({ blob, fileName: "clip.jpg" })
+          : expect(result).rejects.toThrow();
+      if (outcome === "video") video.onerror?.(new Event("error"));
+      else video.onloadedmetadata?.(new Event("loadedmetadata"));
+      await assertion;
+      expect(revoke).toHaveBeenCalledExactlyOnceWith("blob:video");
+      expect(video.pause).toHaveBeenCalledTimes(1);
+      expect(video.hasAttribute("src")).toBe(false);
+    },
+  );
+});

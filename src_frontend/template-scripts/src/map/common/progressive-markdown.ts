@@ -109,8 +109,8 @@ function* textChunks(text: string, size: number): Generator<string> {
   let start = 0;
   while (start < text.length) {
     let end = Math.min(start + size, text.length);
-    // Do not separate UTF-16 surrogate pairs or an HTML entity that the normal
-    // Marked text renderer would preserve as one sequence.
+    // UTF-16 のサロゲートペアや、通常の Marked のテキスト描画処理が一続きとして扱う
+    // HTML エンティティーを分割しない。
     if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1]!)) end++;
     const ampersand = text.lastIndexOf("&", end - 1);
     if (ampersand >= start && !text.slice(ampersand, end).includes(";")) {
@@ -139,12 +139,12 @@ function escapeCode(text: string): string {
   });
 }
 
-// Marked exposes no cursor, but accepts an output array. Stop after a bounded
-// number of complete top-level tokens, and consume only their exact raw spans.
-// Nested inline parsing is deferred until that container is itself visited.
+// Marked はカーソルを公開していないが、出力配列を受け取れる。完全な最上位トークンを上限数だけ処理して止め、
+// それらに正確に対応する生のテキスト範囲だけを消費する。
+// 入れ子のインライン解析は、そのコンテナー自体を処理するまで遅延する。
 function* inlineTokens(source: string, renderer: ProgressiveMarkdownRenderer): Generator<Token> {
-  // These are the inline delimiters used by Marked and this application's
-  // video/YouTube extensions. Plain prose needs no whole-paragraph lexer pass.
+  // これらは、Marked とこのアプリの動画・YouTube 拡張が使うインラインの区切り文字である。
+  // 通常の文章には、段落全体の字句解析は不要である。
   if (!/[\\`*_[\]<>~@:\r\n]|www\./i.test(source)) {
     if (source) yield { type: "text", raw: source, text: source, escaped: false };
     return;
@@ -159,9 +159,9 @@ function* inlineTokens(source: string, renderer: ProgressiveMarkdownRenderer): G
     yield* renderer.lexInline(source) as Token[];
     return;
   }
-  // Marked 17 rebuilds its masked string once per match by concatenating the
-  // whole source. The equivalent linear pass above is cached for this cursor.
-  // Clone the adapter state so no shared Marked defaults are modified.
+  // Marked 17 は、一致するたびにソース全体を連結してマスク済み文字列を作り直す。
+  // 上記の同等な線形処理の結果を、このカーソル用にキャッシュする。
+  // 共有の Marked の既定値を変更しないよう、アダプターの状態を複製する。
   const tokenizer = Object.assign(
     Object.create(Object.getPrototypeOf(lexer.tokenizer)),
     lexer.tokenizer,
@@ -231,8 +231,8 @@ function* inlineTokens(source: string, renderer: ProgressiveMarkdownRenderer): G
     }
     const consumed = tokens.reduce((length, token) => length + (token.raw?.length ?? 0), 0);
     if (!consumed) {
-      // A custom adapter must make progress. Using its ordinary full lexer here
-      // preserves the original content rather than dropping or looping on it.
+      // カスタムアダプターは、必ず処理を先へ進める必要がある。ここで通常の全体用字句解析を使い、
+      // 元の内容が欠落したり、無限ループになったりすることを防ぐ。
       yield* renderer.lexInline(source) as Token[];
       return;
     }
@@ -253,8 +253,8 @@ function* children(
     return;
   }
   let text = token.text ?? "";
-  // Block-only lexing can pre-seed a task checkbox before skipping the inline
-  // queue. Preserve it, then parse the remaining label only when displayed.
+  // ブロックのみの字句解析でも、インラインの待機列をスキップする前にタスクのチェックボックスが
+  // 設定される場合がある。それを保持し、残りのラベルは表示するときにだけ解析する。
   for (const checkbox of tokens ?? []) {
     yield checkbox;
     if (checkbox.raw && text.startsWith(checkbox.raw)) text = text.slice(checkbox.raw.length);
@@ -299,8 +299,8 @@ function* inlineStream(
         yield wrapper[1];
       } else yield renderer.renderInline([token]);
     } else if (token.type === "html") {
-      // Do not close or rebalance this fragment. A raw opening tag may enclose
-      // subsequent Markdown blocks; the consumer keeps one HTML stream stack.
+      // この断片のタグを閉じたり、対応関係を調整したりしない。生の開始タグが後続の Markdown ブロックを囲む場合があるため、
+      // 利用側で一つの HTML ストリームのスタックを維持する。
       yield token.text ?? token.raw ?? "";
     } else
       yield renderer.renderInline([
@@ -352,7 +352,7 @@ function* listStream(
         : "";
     const wrapper = splitMarker(inner, text);
     if (!wrapper) {
-      // This fallback remains one item, never the entire unshown list.
+      // このフォールバックは一項目に限定し、未表示の一覧全体には適用しない。
       const rendered = renderer.renderBlock([{ ...token, items: [item] }]);
       yield rendered.startsWith(outer[0]) && rendered.endsWith(outer[1])
         ? rendered.slice(outer[0].length, rendered.length - outer[1].length)
@@ -385,9 +385,9 @@ function* tableStream(
   renderer: ProgressiveMarkdownRenderer,
   size: number,
 ): Generator<string> {
-  // Marked's standard table renderer differs only in cell content and alignment.
-  // Keeping those wrappers open lets a single huge row/cell obey the same DOM
-  // and character budgets as ordinary paragraphs without repeating its header.
+  // Marked の標準テーブル描画との差は、セルの内容と配置だけである。
+  // 囲みのタグを開いたままにすることで、巨大な一行や一セルにも通常の段落と同じ DOM 数・文字数の
+  // 上限を適用し、ヘッダーの繰り返しを避ける。
   yield "<table>\n<thead>\n<tr>\n";
   for (const cell of token.header ?? []) yield* cellStream(cell, renderer, size);
   yield "</tr>\n</thead>\n";
@@ -437,9 +437,9 @@ function* blockStream(
   }
 }
 
-// Pieces can contain open containers. The consumer must retain one HTML parser
-// across pieces, sanitize before creating DOM, and stop materializing at its
-// own node/character budget. No DOM or complete unshown HTML is built here.
+// 断片には閉じていないコンテナーが含まれる場合がある。利用側では断片をまたいで一つの HTML パーサーを維持し、
+// DOM を作る前にサニタイズし、自身のノード数・文字数の上限で実体化を止める。
+// ここでは DOM も、未表示部分全体の HTML も構築しない。
 export function createMarkdownStream(
   tokens: unknown[],
   renderer: ProgressiveMarkdownRenderer,

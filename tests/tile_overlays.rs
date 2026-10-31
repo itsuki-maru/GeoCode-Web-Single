@@ -622,3 +622,175 @@ async fn temporary_overlay_sharing_is_opt_in_and_query_only_controls_visibility(
         }
     }
 }
+
+#[tokio::test]
+async fn live_map_tile_usage_is_saved_and_cannot_be_overridden_by_url() {
+    let pool = common::test_pool().await;
+    use axum::{extract::Query, http::HeaderMap};
+    use geocode_web_single::handler::live_map::*;
+    use geocode_web_single::model::CreateLiveMapPayload;
+    use uuid::Uuid;
+    let owner = common::create_test_admin(&pool, "usage-owner").await;
+    let editor = common::create_test_admin(&pool, "usage-editor").await;
+    sqlx::query("UPDATE user_model SET can_share_live_location=true WHERE id=$1")
+        .bind(&owner)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let Json(tile) = admin_create(
+        Extension(owner.clone()),
+        Extension(pool.clone()),
+        Json(definition(true)),
+    )
+    .await
+    .unwrap();
+    let _ = user_select(
+        Extension(owner.clone()),
+        Extension(pool.clone()),
+        Path(tile.id.clone()),
+        selection(true),
+    )
+    .await
+    .unwrap();
+    let payload = |enabled| -> CreateLiveMapPayload {
+        serde_json::from_value(json!({
+            "name":"usage-test", "expires_at":chrono::Utc::now()+chrono::Duration::hours(1),
+            "use_tile_overlays": enabled,
+            "members":[{"user_id":owner,"display_name":"owner","marker_color":"#1a73e8"}]
+        }))
+        .unwrap()
+    };
+    let Json(created) = create_live_map_handler(
+        Extension(owner.clone()),
+        Extension(pool.clone()),
+        Extension(None),
+        Json(payload(false)),
+    )
+    .await
+    .unwrap();
+    let tera = geocode_web_single::build_tera_extension().unwrap();
+    tera.lock()
+        .await
+        .add_raw_template(
+            "live-map.html",
+            "{{ tileOverlays | length }}|{{ isCheckOverlay }}",
+        )
+        .unwrap();
+    let mut public_id: Uuid = created
+        .share_url
+        .rsplit('/')
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap();
+    for enabled in [false, true, false] {
+        update_live_map_handler(
+            Extension(editor.clone()),
+            Extension(pool.clone()),
+            Extension(None),
+            Path(created.id.clone()),
+            Json(payload(enabled)),
+        )
+        .await
+        .unwrap();
+        let Json(maps) = list_live_maps_handler(Extension(editor.clone()), Extension(pool.clone()))
+            .await
+            .unwrap();
+        assert_eq!(maps[0].use_tile_overlays, enabled);
+        let stored_owner: String =
+            sqlx::query_scalar("SELECT created_by FROM live_map WHERE id=$1")
+                .bind(&created.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stored_owner, owner);
+        for agent in ["Desktop", "Mobile"] {
+            for (query, checked) in [
+                (None, false),
+                (Some("true"), true),
+                (Some("false"), false),
+                (Some("invalid"), false),
+            ] {
+                let mut headers = HeaderMap::new();
+                headers.insert("user-agent", agent.parse().unwrap());
+                let body = html(
+                    live_map_page_handler(
+                        headers,
+                        Extension(tera.clone()),
+                        Extension(pool.clone()),
+                        Path(public_id.to_string()),
+                        Query(serde_json::from_value(json!({"is_check_overlay":query})).unwrap()),
+                    )
+                    .await
+                    .unwrap(),
+                )
+                .await;
+                assert_eq!(body, format!("{}|{}", usize::from(enabled), checked));
+            }
+        }
+        sqlx::query("UPDATE live_map SET password_hash=$1 WHERE id=$2")
+            .bind(bcrypt::hash("test-password", 4).unwrap())
+            .bind(&created.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let auth = authenticate_live_map_handler(
+            HeaderMap::new(),
+            Extension(pool.clone()),
+            Extension(tera.clone()),
+            Path(public_id.to_string()),
+            Query(serde_json::from_value(json!({"is_check_overlay":"true"})).unwrap()),
+            axum::Form(geocode_web_single::model::LiveMapPasswordForm {
+                password: "test-password".into(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(auth.status(), axum::http::StatusCode::SEE_OTHER);
+        let cookie = auth.headers()["set-cookie"]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("cookie", cookie.parse().unwrap());
+        let authenticated = html(
+            live_map_page_handler(
+                headers,
+                Extension(tera.clone()),
+                Extension(pool.clone()),
+                Path(public_id.to_string()),
+                Query(serde_json::from_value(json!({"is_check_overlay":"true"})).unwrap()),
+            )
+            .await
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(authenticated, format!("{}|true", usize::from(enabled)));
+        sqlx::query("UPDATE live_map SET password_hash=NULL WHERE id=$1")
+            .bind(&created.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let Json(rotated) = rotate_live_map_url_handler(
+            Extension(editor.clone()),
+            Extension(pool.clone()),
+            Extension(None),
+            Path(created.id.clone()),
+        )
+        .await
+        .unwrap();
+        public_id = rotated
+            .share_url
+            .rsplit('/')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let Json(maps) = list_live_maps_handler(Extension(owner.clone()), Extension(pool.clone()))
+            .await
+            .unwrap();
+        assert_eq!(maps[0].use_tile_overlays, enabled);
+    }
+}

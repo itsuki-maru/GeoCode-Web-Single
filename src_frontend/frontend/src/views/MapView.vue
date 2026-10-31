@@ -948,7 +948,7 @@ watch(
   },
 );
 
-// --- Map object search (MapToolbarからエクスポート) ---
+// --- 地図オブジェクトの検索（MapToolbar からエクスポート） ---
 const mapToolbarRef = ref<InstanceType<typeof MapToolbar> | null>(null);
 const mapObjectQueryFormData = ref<QueryForm>({ query1: "", query2: "" });
 

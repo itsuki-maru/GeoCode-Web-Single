@@ -1,3 +1,4 @@
+import { runSource } from "./support/vm-source";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createContext, runInContext } from "node:vm";
@@ -31,10 +32,7 @@ function setup(isMobile = false) {
     updateMeasurementControlState: vi.fn(),
     shapeMeasurementManager: { scheduleRefresh: vi.fn(), setEnabled: vi.fn() },
   });
-  runInContext(
-    readFileSync(resolve("src/map/editor/map-editor-shape-measurement.ts"), "utf8"),
-    context,
-  );
+  runSource(context, "src/map/editor/map-editor-shape-measurement.ts");
   Object.assign(
     context,
     createShapeMeasurementRuntime({
@@ -128,7 +126,7 @@ describe("editor measurement selection", () => {
 
   it("routes clicks in selection mode on shape bodies to selection and clears on mode changes", async () => {
     const { context: c, show } = setup();
-    runInContext(readFileSync(resolve("src/map/editor/map-editor-shape-geometry.ts"), "utf8"), c);
+    runSource(c, "src/map/editor/map-editor-shape-geometry.ts");
     const handlers = new Map<string, (...args: any[]) => any>();
     const shape = {
       ...line(),

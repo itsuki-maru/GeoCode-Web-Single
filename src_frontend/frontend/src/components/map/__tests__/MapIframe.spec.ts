@@ -241,3 +241,97 @@ describe("MapIframe", () => {
     wrapper.unmount();
   });
 });
+
+describe("地図フレーム通信の失敗と再送", () => {
+  const open = (suffix = "") => {
+    const wrapper = mount(MapIframe, {
+      attachTo: document.body,
+      props: { srcUrl: "/map" + suffix, allowedOrigins: window.location.origin, height: 80 },
+    });
+    const frame = wrapper.get("iframe").element as HTMLIFrameElement;
+    const post = vi.spyOn(frame.contentWindow!, "postMessage").mockImplementation(() => {});
+    const send = (data: unknown) =>
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin: window.location.origin,
+          source: frame.contentWindow,
+          data,
+        }),
+      );
+    return { wrapper, frame, post, send };
+  };
+  it.each(["error", "clone"])("メッセージ転送の%s失敗は待機を残さずfalseを返す", async (kind) => {
+    const { wrapper, post } = open();
+    post.mockImplementation(() => {
+      throw kind === "clone"
+        ? new DOMException("cannot clone", "DataCloneError")
+        : new Error("closed");
+    });
+    expect(await wrapper.vm.updateMapObject({ id: "m", objectType: "marker" } as any)).toBe(false);
+    expect(post).toHaveBeenCalledTimes(kind === "clone" ? 2 : 1);
+    wrapper.unmount();
+  });
+  it("応答期限切れとフレーム切替で保存待機を解除する", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    const { wrapper } = open();
+    try {
+      const first = wrapper.vm.updateMapObject({ id: "m", objectType: "marker" } as any);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(await first).toBe(false);
+      const second = wrapper.vm.deleteMapObject("m", "marker");
+      await wrapper.setProps({ srcUrl: "/map?layer=next" });
+      expect(await second).toBe(false);
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
+  it.each(["42", "0"])("読込後にフィルターと初期フォーカスを再送する: marker_id=%s", async (id) => {
+    const { wrapper, post } = open(`?marker_id=${id}&latitude=35&longitude=139`);
+    wrapper.vm.filterMapObjects(["m"], ["s"]);
+    await wrapper.get("iframe").trigger("load");
+    expect(post).toHaveBeenCalledWith(
+      { type: "mapObjectFilter", markerIds: ["m"], shapeIds: ["s"] },
+      window.location.origin,
+    );
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "focus",
+        objectType: id === "0" ? "shape" : "marker",
+        id: id === "0" ? "" : id,
+        lat: 35,
+        lng: 139,
+      }),
+      window.location.origin,
+    );
+    wrapper.unmount();
+  });
+  it("アップサートとタイル更新は応答で完了し、プレビュー・再読込・位置エラーを通知する", async () => {
+    const { wrapper, post, send } = open();
+    const updates = [
+      wrapper.vm.upsertMapObject("marker", { id: "m" } as any),
+      wrapper.vm.updateTileOverlays([{ id: "rain" }]),
+    ];
+    for (const [message] of post.mock.calls) {
+      send({
+        type:
+          message.type === "tileOverlaysUpdate"
+            ? "tileOverlaysUpdateResult"
+            : "mapObjectUpdateResult",
+        requestId: message.requestId,
+        success: true,
+      });
+    }
+    expect(await Promise.all(updates)).toEqual([true, true]);
+    send({ type: "callParentFunction", message: "photo.png" });
+    send({ type: "callParentReload", layerId: "next" });
+    send({ type: "callParentLoginRedirect" });
+    send({ type: "userLocationError", code: "2" });
+    expect(wrapper.emitted("previewImage")).toEqual([["photo.png"]]);
+    expect(wrapper.emitted("mapReloadRequested")).toEqual([["next"]]);
+    expect(wrapper.emitted("loginRedirect")).toEqual([[]]);
+    expect(wrapper.emitted("userLocationError")).toEqual([[2]]);
+    wrapper.unmount();
+  });
+});

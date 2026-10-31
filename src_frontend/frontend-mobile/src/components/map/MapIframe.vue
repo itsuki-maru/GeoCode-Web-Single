@@ -18,7 +18,6 @@ type MapObjectSnapshot = {
 };
 
 const props = defineProps<{
-  attributeSearchActive?: boolean;
   srcUrl: string;
   allowedOrigins: string;
   inputPolicies?: Record<string, boolean>;
@@ -32,7 +31,6 @@ const emit = defineEmits<{
     reply: (result: { status: number; data: unknown }) => void,
   ];
   mapObjectChanged: [change: MapObjectChange, acknowledge: (success: boolean) => void];
-  advancedSearch: [];
   loginRedirect: [];
   mapLoaded: [url: string];
   previewImage: [filename: string];
@@ -105,7 +103,7 @@ const postMessageToMap = (messageData: Record<string, unknown>): boolean => {
   }
 };
 
-// The parent owns layer state; legacy callers may omit policies.
+// レイヤの状態は親が管理し、旧来の呼び出し元ではポリシーが省略される場合がある。
 const syncInputPolicies = (): boolean => {
   if (!props.inputPolicies) return false;
   return postMessageToMap({ type: "layerInputPolicies", policies: { ...props.inputPolicies } });
@@ -168,7 +166,7 @@ const deleteMapObject = (
   return requestMapObjectMutation("mapObjectDelete", { id, objectType });
 };
 
-// Unwrap Vue proxies without repeated stringify/parse of the complete dataset.
+// データ全体の stringify/parse を繰り返さずに、Vue のプロキシを解除する。
 function plainMessageValue(value: unknown): unknown {
   if (value === null || typeof value !== "object") return value;
   const raw = toRaw(value);
@@ -230,13 +228,7 @@ const focusObject = (
   postMessageToMap({ objectType, id, lat, lng, type: "focus" });
 };
 
-const sendAttributeSearchState = () => {
-  if (props.attributeSearchActive !== undefined)
-    postMessageToMap({ type: "attributeSearchState", active: props.attributeSearchActive });
-};
-watch(() => props.attributeSearchActive, sendAttributeSearchState);
 const filterMapObjects = (markerIds: string[] | null, shapeIds: string[] | null): void => {
-  sendAttributeSearchState();
   const cloneableMarkerIds = Array.isArray(markerIds) ? [...markerIds] : null;
   const cloneableShapeIds = Array.isArray(shapeIds) ? [...shapeIds] : null;
   filteredObjectIds.value = {
@@ -316,10 +308,6 @@ const handleMessage = (event: MessageEvent): void => {
     return;
   }
   if (event.data.runtimeId && event.data.runtimeId !== runtimeId) return;
-  if (event.data.type === "advancedMapSearchOpen") {
-    emit("advancedSearch");
-    return;
-  }
   if (event.data.type === "mapObjectWriteRequested") {
     if (!runtimeId || event.data.runtimeId !== runtimeId) return;
     const request = event.data.request;

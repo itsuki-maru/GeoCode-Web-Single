@@ -267,7 +267,7 @@ async function applyEditorMapSnapshot(snapshot) {
     delete markers[key];
   }
   for (const id of Object.keys(markersFromAxum)) delete markersFromAxum[id];
-  // Register marker batches between frames; no repeated JSON encoding of all records.
+  // フレームの合間にマーカーをまとめて登録し、全レコードの JSON エンコードを繰り返さない。
   for (let offset = 0; offset < markerRecords.length; offset += 500) {
     if (generation !== editorSnapshotGeneration) return false;
     for (const record of markerRecords.slice(offset, offset + 500))
@@ -440,12 +440,6 @@ window.addEventListener("message", function (event) {
         messageData["lat"],
         messageData["lng"],
       );
-    } else if (messageData["type"] === "attributeSearchState") {
-      const button = document.getElementById("advanced-map-search-button");
-      if (button && typeof messageData.active === "boolean") {
-        button.textContent = messageData.active ? "詳しい検索（適用中）" : "詳しい検索";
-        button.setAttribute("aria-pressed", String(messageData.active));
-      }
     } else if (messageData["type"] === "mapObjectFilter") {
       applyMapObjectFilter(messageData["markerIds"], messageData["shapeIds"]);
     } else if (messageData["type"] === "markerFilter") {

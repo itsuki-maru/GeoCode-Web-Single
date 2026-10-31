@@ -8,6 +8,8 @@ vi.mock("@/axiosClient", () => ({ default: { get: authCheck } }));
 vi.mock("@/views/users/AdminUsersList.vue", () => ({ default: { render: () => null } }));
 vi.mock("@/views/auth/LoginViewAdmin.vue", () => ({ default: { render: () => null } }));
 vi.mock("@/views/NotFoundAdmin.vue", () => ({ default: { render: () => null } }));
+vi.mock("@/views/live/AdminLiveMaps.vue", () => ({ default: { render: () => null } }));
+vi.mock("@/views/TileOverlays.vue", () => ({ default: { render: () => null } }));
 
 import router from "@/router";
 
@@ -16,6 +18,18 @@ beforeEach(async () => {
 });
 
 describe("管理者ルートの認証ガード", () => {
+  it.each(["/live-maps", "/tile-overlays"])(
+    "%sでも認証を確認して、失敗時はログインへ戻す",
+    async (path) => {
+      authCheck.mockResolvedValue({});
+      await router.push(path);
+      expect(router.currentRoute.value.path).toBe(path);
+      await router.push("/account/login");
+      authCheck.mockRejectedValue(new Error("unauthorized"));
+      await router.push(path);
+      expect(router.currentRoute.value.name).toBe("login");
+    },
+  );
   it("管理画面の配信URLからユーザー一覧へ遷移する", async () => {
     authCheck.mockResolvedValue({ data: { username: "admin" } });
     await router.push("/admin");

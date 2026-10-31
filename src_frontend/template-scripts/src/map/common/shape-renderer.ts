@@ -1,4 +1,4 @@
-/** Geometry records remain available even when their Leaflet layer has never been created. */
+/** 対応する Leaflet レイヤを一度も作成していなくても、図形レコードは利用できる状態に保つ。 */
 export interface ShapeRenderRecord {
   id?: string | number;
   shape_type?: unknown;
@@ -68,7 +68,7 @@ export interface ShapeRenderAreaDiagnostics {
   sizeBuckets: ShapeSizeBuckets;
 }
 
-/** Target selection at the latest refresh, before asynchronous layer generation. */
+/** 非同期でレイヤを生成する前の、最新の更新時点における対象の選択結果。 */
 export interface ShapeRenderDiagnostics {
   zoom: number | null;
   minPixelSize: number;
@@ -92,7 +92,7 @@ interface ShapeRenderOptions<TRecord extends ShapeRenderRecord, TLayer> {
   onLayerCreated?(layer: TLayer, record: TRecord): void;
   onLayerEvicted?(layer: TLayer, record: TRecord): void;
   onRefresh?(): void;
-  /** An explicit value overrides the zoom policy, including zero for print. */
+  /** 明示的な値はズームポリシーより優先し、印刷用のゼロも有効とする。 */
   minPixelSize?: number;
   collectDiagnostics?: boolean;
   padding?: number;
@@ -112,7 +112,7 @@ const EARTH_RADIUS = 6371000;
 const DEG = Math.PI / 180;
 const MERCATOR_MAX_LATITUDE = 85.0511287798;
 
-/** Conservative geographic extent, including circle radius; no Leaflet object is needed. */
+/** 円の半径を含め、地理的な範囲を安全側に見積もる。Leaflet オブジェクトは不要である。 */
 export function getShapeGeometryInfo(value: ShapeRenderRecord): ShapeGeometryInfo | null {
   const geojson = value?.geojson;
   if (!record(geojson)) return null;
@@ -149,8 +149,8 @@ export function getShapeGeometryInfo(value: ShapeRenderRecord): ShapeGeometryInf
     if (south > -90 && north < 90 && angularRadius < Math.PI / 2) {
       let longitudeRadius =
         Math.asin(Math.min(1, Math.sin(angularRadius) / Math.cos(latitude * DEG))) / DEG;
-      // Leaflet projects a circle as an ellipse around the projected vertical
-      // midpoint. Include that extent as well as the spherical circle bounds.
+      // Leaflet は、投影後の垂直方向の中点を中心とする楕円として円を投影する。
+      // 球面上の円の境界に加え、その範囲も含める。
       const mercator = (lat: number) =>
         Math.log(
           Math.tan(
@@ -175,7 +175,7 @@ export function getShapeGeometryInfo(value: ShapeRenderRecord): ShapeGeometryInf
           Math.acos(Math.max(-1, Math.min(1, cosine))) / DEG,
         );
       longitudeRadius += epsilon;
-      // A circle crossing the date line is conservatively kept as a world-wide extent.
+      // 日付変更線をまたぐ円は、安全側に見積もって全世界の範囲として保持する。
       if (longitude - longitudeRadius >= -180 && longitude + longitudeRadius <= 180) {
         west = longitude - longitudeRadius;
         east = longitude + longitudeRadius;
@@ -244,7 +244,7 @@ function intersects(bounds: ShapeBounds, viewport: ShapeBounds): boolean {
   return bounds.east + offset >= viewport.west && bounds.west + offset <= viewport.east;
 }
 
-/** Small shapes become eligible progressively as the map is enlarged. */
+/** 小さな図形は、地図の拡大に応じて段階的に描画対象にする。 */
 export function getShapeMinPixelSizeForZoom(zoom: number): number {
   if (!Number.isFinite(zoom)) return 4;
   if (zoom < 11) return 8;
@@ -312,7 +312,7 @@ function copyAreaDiagnostics(area: ShapeRenderAreaDiagnostics): ShapeRenderAreaD
   };
 }
 
-/** EPSG:3857 is the CRS used by both the editor and read-only map. */
+/** 編集画面と読み取り専用地図の座標参照系には、どちらも EPSG:3857 を使う。 */
 function screenSize(bounds: ShapeBounds, zoom: number): number {
   if (!Number.isFinite(zoom)) return Infinity;
   const scale = 256 * 2 ** zoom;
@@ -329,9 +329,9 @@ function screenSize(bounds: ShapeBounds, zoom: number): number {
 }
 
 /**
- * Records are registered separately from refresh(), so bulk hydration never performs
- * a full visibility scan for every inserted record. Cache limits concern inactive,
- * unpinned layers; currently visible or explicitly selected objects are never evicted.
+ * レコードの登録は refresh() と分離し、一括読み込み時に挿入したレコードごとに
+ * 表示状態を全件走査しないようにする。キャッシュの上限は非表示かつ固定されていないレイヤに適用し、
+ * 現在表示中または明示的に選択されたオブジェクトは追い出さない。
  */
 export function createShapeRenderManager<TRecord extends ShapeRenderRecord, TLayer>({
   map,
@@ -557,7 +557,7 @@ export function createShapeRenderManager<TRecord extends ShapeRenderRecord, TLay
       if (!eligible(entry)) continue;
       eligibleCount++;
       const pinned = isPinned(entry.id, entry.layer);
-      // Preserve the inexpensive pinned path unless diagnostics were explicitly requested.
+      // 診断が明示的に要求されない限り、固定済みの対象に対する低コストの処理経路を維持する。
       const inPaddedViewport =
         (!pinned || diagnostics !== null) &&
         (!paddedViewport || intersects(entry.info!.bounds, paddedViewport));
@@ -597,8 +597,8 @@ export function createShapeRenderManager<TRecord extends ShapeRenderRecord, TLay
     const operations: Work["operations"] = [];
     for (const id of attached) if (!wanted.has(id)) operations.push({ id, attach: false });
     for (const id of wanted) entries.get(id)!.lastUsed = ++serial;
-    // Keep source order within each priority, without sorting all candidates.
-    // Buffer generation remains part of this work generation and whenIdle().
+    // 全候補を並べ替えず、優先度ごとに元の順序を維持する。
+    // バッファーの生成も、この処理世代と whenIdle() の対象に含める。
     for (const ids of [pinnedAttachments, viewportAttachments, bufferedAttachments])
       for (const id of ids) operations.push({ id, attach: true });
     if (operations.length) {
@@ -615,7 +615,7 @@ export function createShapeRenderManager<TRecord extends ShapeRenderRecord, TLay
     diagnostics = null;
     refreshRequested = true;
     logicalStatsDirty = true;
-    // A new view supersedes unfinished work rather than drawing stale candidates.
+    // 新しい表示状態になったら、古い候補を描画せず、未完了の処理を置き換える。
     if (work) cancelWork();
     if (frame !== null || zooming || moving) return;
     scheduleBatch(refresh);

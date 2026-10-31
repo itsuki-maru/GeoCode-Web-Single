@@ -17,7 +17,7 @@ function referenceIds(value: unknown): string[] {
   return value;
 }
 
-/** Restore only the private, freshly parsed JSON value before it is published. */
+/** 解析した直後の非公開の JSON 値だけを、公開する前に復元する。 */
 export function restoreNormalBodyReferences(value: RecordValue): void {
   if (!own(value, "normalBodyReferences")) return;
   const metadata = value.normalBodyReferences;
@@ -80,7 +80,7 @@ export function restoreNormalBodyReferences(value: RecordValue): void {
     prepare("shape", id, shape.geojson.properties, "memo");
   }
 
-  // Validate every reference first. No trimming, normalization or boundary inference.
+  // 最初にすべての参照を検証し、前後の空白除去、正規化、境界の推定は行わない。
   for (const { target, field, free, managed } of updates) target[field] = free + managed;
   delete value.normalBodyReferences;
 }

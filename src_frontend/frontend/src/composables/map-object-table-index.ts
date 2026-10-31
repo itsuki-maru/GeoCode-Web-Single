@@ -30,7 +30,7 @@ export function compareTableSummaries(a: TableSummary, b: TableSummary): number 
   return b.timestamp - a.timestamp || a.key.localeCompare(b.key);
 }
 
-// Plain metadata only. GeoJSON remains in the existing canonical store.
+// 通常のメタデータのみを扱い、GeoJSON は既存の正規ストアに保持する。
 export class MapObjectTableIndex {
   readonly rows = new Map<string, TableSummary>();
   readonly keys: string[] = [];

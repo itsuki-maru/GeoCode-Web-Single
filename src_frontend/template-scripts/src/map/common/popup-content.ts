@@ -33,8 +33,8 @@ export function isPopupBody(value: any): value is PopupBody {
   );
 }
 
-// Installed only by the five owner map pages. Content is rendered with the page's
-// existing Markdown sanitizer; the toolbar is built outside user Markdown.
+// 所有者用の五つの地図ページでのみ設定する。内容はページに既存の Markdown サニタイザーで描画し、
+// ツールバーはユーザーの Markdown の外側に構築する。
 export function createPopupContentRuntime(options: Options) {
   const contents = new Map<string, Content & { html: string }>();
   const analysis = new Map<string, string>(Object.entries(options.analysis || {}));
@@ -109,10 +109,10 @@ export function createPopupContentRuntime(options: Options) {
     analysisElement.innerHTML = analysisHtml;
     printLabel.textContent = "通常表示";
     note.textContent = "表示内容を確認しています…";
-    // Prevent map dragging/zooming while operating the select, without trapping keyboard focus.
+    // キーボードのフォーカスを閉じ込めず、選択欄の操作中に地図がドラッグやズームされることを防ぐ。
     for (const type of toolbarEvents) toolbar.addEventListener(type, stopToolbarEvent);
-    // Initial image batches can synchronously update the popup layout. Retain
-    // the live node before setup so Leaflet never restores the prepared string.
+    // 最初の画像の一括読み込みで、ポップアップのレイアウトが同期的に更新される場合がある。
+    // Leaflet が準備済みの文字列を復元しないよう、初期化前に実際のノードを保持する。
     if (popup.setContent) popup.setContent(root);
     else update();
     options.setupImages(root, options.renderMarkdown);
@@ -196,8 +196,8 @@ export function createPopupContentRuntime(options: Options) {
     if (root) {
       sessions.get(root)?.dispose();
       const content = contents.get(root.dataset.contentKey!);
-      // Keep only the prepared, collapsed HTML while the popup is closed.
-      // Expanded image DOM must not accumulate across visited markers.
+      // ポップアップが閉じている間は、準備済みの折りたたんだ HTML だけを保持する。
+      // 表示したマーカーを切り替えるたびに、展開済みの画像 DOM が蓄積しないようにする。
       if (content) event.popup.setContent?.(content.html);
     }
   });

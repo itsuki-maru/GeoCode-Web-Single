@@ -84,3 +84,55 @@ describe("取込操作の保存と再試行", () => {
     expect((await beginJsonImport("account", file("{}"))).key).not.toBe(first.key);
   });
 });
+
+describe("FileReaderによる取込操作の識別", () => {
+  it("代替の読み込み経路でも同じバイト列を同じ再試行キーへ対応付ける", async () => {
+    const bytes = new TextEncoder().encode('{"記録":"点検"}');
+    const original = await beginJsonImport("reader-account", file('{"記録":"点検"}'));
+    let reader: any;
+    class Reader {
+      result = bytes.buffer;
+      onload: any;
+      readAsArrayBuffer = vi.fn(() => queueMicrotask(() => this.onload()));
+      constructor() {
+        reader = this;
+      }
+    }
+    vi.stubGlobal("FileReader", Reader);
+    try {
+      const value = new File(["unused"], "renamed.json");
+      Object.defineProperty(value, "arrayBuffer", { value: undefined });
+      const retry = await beginJsonImport("reader-account", value);
+      expect(retry).toEqual(original);
+      expect(reader.readAsArrayBuffer).toHaveBeenCalledExactlyOnceWith(value);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it.each(["onerror", "onabort"])(
+    "読み込みの%sでは再試行情報を作成せず、既存の未解決操作も消さない",
+    async (event) => {
+      const original = await beginJsonImport("reader-account", file("unresolved"));
+      const before = Object.entries(sessionStorage);
+      class Reader {
+        onerror: any;
+        onabort: any;
+        readAsArrayBuffer() {
+          queueMicrotask(() => (this as any)[event]());
+        }
+      }
+      vi.stubGlobal("FileReader", Reader);
+      try {
+        const value = new File(["bad"], "bad.json");
+        Object.defineProperty(value, "arrayBuffer", { value: undefined });
+        await expect(beginJsonImport("reader-account", value)).rejects.toThrow(
+          event === "onerror" ? "読み込めません" : "中断されました",
+        );
+        expect(Object.entries(sessionStorage)).toEqual(before);
+        expect(sessionStorage.getItem(original.storageKey)).toBe(original.key);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+});

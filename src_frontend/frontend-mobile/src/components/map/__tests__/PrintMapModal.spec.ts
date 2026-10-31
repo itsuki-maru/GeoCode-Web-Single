@@ -1,0 +1,171 @@
+import { mount, flushPromises } from "@vue/test-utils";
+import apiClient from "@/axiosClient";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import PrintMapModal from "../PrintMapModal.vue";
+
+vi.mock("@/router/urls", () => ({ mapAnatherLayerUrl: "http://localhost:3000/map-another" }));
+vi.mock("@/axiosClient", () => ({ default: { get: vi.fn() } }));
+let wrapper: ReturnType<typeof mount> | undefined;
+beforeEach(() => {
+  vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(() => {});
+  vi.mocked(apiClient.get).mockResolvedValue({ data: {} });
+  vi.useFakeTimers();
+  HTMLDialogElement.prototype.showModal = vi.fn();
+  HTMLDialogElement.prototype.close = vi.fn();
+  document.body.innerHTML = '<iframe id="map-iframe" src="http://localhost:3000/map"></iframe>';
+});
+afterEach(() => {
+  wrapper?.unmount();
+  document.body.replaceChildren();
+  vi.useRealTimers();
+});
+describe("印刷モーダルの地図連携", () => {
+  it("回答地図は専用POSTを使用し、認証更新・要求ID・再試行を維持する", async () => {
+    const snapshot = { state: { view: { zoom: 12 } }, bootstrap: { markers: { a: { id: "a" } } } };
+    wrapper = mount(PrintMapModal, {
+      props: {
+        layerIds: null,
+        answerPrint: { action: "http://localhost:3000/form-answers/map-print", snapshot },
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    const frame = wrapper.get("iframe").element as HTMLIFrameElement;
+    expect(frame.getAttribute("src")).toBeNull();
+    const form = wrapper.get("form");
+    const session = () => (form.get('input[name="request_id"]').element as HTMLInputElement).value;
+    const oldSession = session();
+    const native = new URL(form.attributes("action")!);
+    const send = (data: any) =>
+      window.dispatchEvent(
+        new MessageEvent("message", { origin: native.origin, source: frame.contentWindow, data }),
+      );
+    send({
+      type: "native-form-auth-error",
+      requestId: native.searchParams.get("native_request_id"),
+      error: "token_expired",
+    });
+    await flushPromises();
+    expect(apiClient.get).toHaveBeenCalled();
+    expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(2);
+    const post = vi.spyOn(frame.contentWindow!, "postMessage");
+    send({ type: "printReady", requestId: "old" });
+    expect(post).not.toHaveBeenCalled();
+    send({ type: "printReady", requestId: oldSession });
+    expect(post).toHaveBeenCalledWith(
+      { type: "printInitialize", requestId: oldSession, snapshot },
+      native.origin,
+    );
+    send({ type: "printError", requestId: oldSession });
+    await wrapper.vm.$nextTick();
+    await wrapper.get(".print-loading button").trigger("click");
+    await flushPromises();
+    expect(session()).not.toBe(oldSession);
+    expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(3);
+    const fresh = wrapper.get("iframe").element as HTMLIFrameElement;
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        origin: native.origin,
+        source: fresh.contentWindow,
+        data: { type: "printInitialized", requestId: oldSession },
+      }),
+    );
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".print-loading").exists()).toBe(true);
+  });
+  it("ヘッダーからの印刷キーは準備完了後だけ転送し、長押しを抑止する", () => {
+    wrapper = mount(PrintMapModal, { props: { layerIds: null }, attachTo: document.body });
+    const frame = wrapper.get("iframe").element as HTMLIFrameElement;
+    const post = vi.spyOn(frame.contentWindow!, "postMessage");
+    const press = (extra: KeyboardEventInit = {}) => {
+      const event = new KeyboardEvent("keydown", {
+        key: "p",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+        ...extra,
+      });
+      wrapper!.get(".print-header button").element.dispatchEvent(event);
+      return event;
+    };
+    expect(press().defaultPrevented).toBe(true);
+    expect(post).not.toHaveBeenCalled();
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        origin: "http://localhost:3000",
+        source: frame.contentWindow,
+        data: { type: "printInitialized" },
+      }),
+    );
+    expect(press({ repeat: true }).defaultPrevented).toBe(true);
+    expect(post).not.toHaveBeenCalled();
+    press();
+    press({ ctrlKey: false, metaKey: true });
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(post).toHaveBeenLastCalledWith({ type: "printExecute" }, "http://localhost:3000");
+    expect(press({ shiftKey: true }).defaultPrevented).toBe(false);
+    wrapper.unmount();
+    wrapper = undefined;
+    const after = new KeyboardEvent("keydown", { key: "p", ctrlKey: true, cancelable: true });
+    window.dispatchEvent(after);
+    expect(after.defaultPrevented).toBe(false);
+  });
+  it("要求先の地図からの応答だけを採用し、プレビューの準備完了後に状態を送る", async () => {
+    const source = document.querySelector("iframe")!;
+    const sourcePost = vi.spyOn(source.contentWindow!, "postMessage");
+    wrapper = mount(PrintMapModal, { props: { layerIds: ["a"] }, attachTo: document.body });
+    const request = sourcePost.mock.calls[0]![0];
+    const frame = wrapper.get("iframe").element as HTMLIFrameElement;
+    const post = vi.spyOn(frame.contentWindow!, "postMessage");
+    const send = (
+      source: Window | null,
+      type: string,
+      extra = {},
+      origin = "http://localhost:3000",
+    ) => {
+      window.dispatchEvent(
+        new MessageEvent("message", { origin, source, data: { type, ...extra } }),
+      );
+    };
+    send(frame.contentWindow, "printReady");
+    send(window, "printStateResult", { requestId: request.requestId, state: {} });
+    send(
+      source.contentWindow,
+      "printStateResult",
+      { requestId: request.requestId, state: {} },
+      "https://invalid.test",
+    );
+    expect(post).not.toHaveBeenCalled();
+    send(source.contentWindow, "printStateResult", {
+      requestId: request.requestId,
+      state: { tileServerId: "2", markerIds: ["matching"], shapeIds: [] },
+    });
+    expect(post).toHaveBeenCalledWith(
+      {
+        type: "printInitialize",
+        state: {
+          tileServerId: "2",
+          layerIds: ["a"],
+          markerIds: ["matching"],
+          shapeIds: [],
+        },
+      },
+      "http://localhost:3000",
+    );
+    send(frame.contentWindow, "printInitialized");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".print-loading").exists()).toBe(false);
+    send(frame.contentWindow, "printClose");
+    expect(wrapper.emitted("close")).toHaveLength(1);
+  });
+  it("読み込みが停止した場合に再試行できる", async () => {
+    wrapper = mount(PrintMapModal, { props: { layerIds: null }, attachTo: document.body });
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(wrapper.text()).toContain("読み込めませんでした");
+    const source = document.querySelector<HTMLIFrameElement>("#map-iframe")!;
+    const post = vi.spyOn(source.contentWindow!, "postMessage");
+    await wrapper.get(".print-loading button").trigger("click");
+    expect(post).toHaveBeenCalled();
+    expect(wrapper.text()).toContain("準備しています");
+  });
+});

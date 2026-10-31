@@ -176,3 +176,78 @@ describe("色分けの分類編集", () => {
     w.unmount();
   });
 });
+
+describe("分類の入力検証と削除", () => {
+  it("空の分類定義を実行・保存せず、異なる共通フォームの保存条件を拒否する", async () => {
+    const w = create();
+    const panel = w.get("details");
+    (panel.element as HTMLDetailsElement).open = true;
+    await panel.trigger("toggle");
+    await flushPromises();
+    expect(
+      w
+        .findAll("button")
+        .find((b) => b.text() === "色分け実行")!
+        .attributes("disabled"),
+    ).toBeDefined();
+    expect(w.emitted("apply")).toBeUndefined();
+    await click(w, "検索条件を保存");
+    expect(w.emitted("save")).toBeUndefined();
+    expect(() =>
+      w.vm.restoreDraft(
+        {
+          common_form_id: "other",
+          rules: [
+            {
+              id: "r",
+              label: "分類",
+              color: "#123456",
+              conditions: [
+                { field_id: "n", field_type: "number", op: "gte", value: "1", upper: null },
+              ],
+            },
+          ],
+        },
+        fields,
+      ),
+    ).toThrow("共通フォームが異なる");
+    w.unmount();
+  });
+  it("分類色と条件値を編集し、並べ替え・条件削除・追加・分類削除を反映する", async () => {
+    const w = create();
+    const panel = w.get("details");
+    (panel.element as HTMLDetailsElement).open = true;
+    await panel.trigger("toggle");
+    await flushPromises();
+    await click(w, "分類を追加");
+    await click(w, "分類を追加");
+    await w.findAll('[aria-label="分類名"]')[0]!.setValue("先頭");
+    await w.findAll('[aria-label="分類名"]')[1]!.setValue("後続");
+    await w.findAll('[aria-label="分類を下へ"]')[0]!.trigger("click");
+    expect((w.findAll('[aria-label="分類名"]')[0]!.element as HTMLInputElement).value).toBe("後続");
+    await w.findAll('[aria-label="分類の色"]')[0]!.setValue("#654321");
+    await w
+      .findAll("button")
+      .find((b) => b.text() === "分類条件を削除")!
+      .trigger("click");
+    await click(w, "色分け実行");
+    expect(w.text()).toContain("各分類に条件");
+    await w
+      .findAll("button")
+      .find((b) => b.text() === "分類条件を追加")!
+      .trigger("click");
+    await w.findAll('[aria-label="色分けの条件値"]')[0]!.setValue("10");
+    await w
+      .findAll("button")
+      .filter((b) => b.text() === "分類を削除")[1]!
+      .trigger("click");
+    await click(w, "色分け実行");
+    expect(w.emitted("apply")!.at(-1)![0]).toMatchObject({
+      rules: [{ label: "後続", color: "#654321" }],
+    });
+    await w.setProps({ active: true });
+    await click(w, "色分け解除");
+    expect(w.emitted("apply")!.at(-1)).toEqual([null]);
+    w.unmount();
+  });
+});

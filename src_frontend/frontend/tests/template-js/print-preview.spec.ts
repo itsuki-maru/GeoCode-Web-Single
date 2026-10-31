@@ -1,4 +1,9 @@
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+const frontendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const readFrontendFile = (file: string, encoding: "utf8") =>
+  readFileSync(resolve(frontendRoot, file), encoding);
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPrintPreview } from "../../../template-scripts/src/map/print/print-preview";
 import {
@@ -21,11 +26,11 @@ let fetchData: ReturnType<typeof vi.fn<typeof fetch>>;
 beforeEach(() => {
   vi.useFakeTimers();
   document.body.innerHTML = '<div id="map"></div>';
-  // Load the real CSS explicitly: Vitest stubs ?inline imports by default, while
-  // the shipped Markdown styles would otherwise fix legend ul/li at 16px.
+  // 実際の CSS を明示的に読み込む。Vitest は既定で ?inline のインポートをスタブ化するが、
+  // 配布される Markdown スタイルでは凡例の ul/li が 16px に固定される。
   for (const file of ["public/github.css", "../template-scripts/src/map/print/print-preview.css"]) {
     const style = document.createElement("style");
-    style.textContent = readFileSync(file, "utf8");
+    style.textContent = readFrontendFile(file, "utf8");
     document.head.append(style);
   }
   localStorage.clear();
@@ -39,7 +44,7 @@ beforeEach(() => {
     "marked/lib/marked.umd.js",
     "xss/dist/xss.js",
   ]) {
-    window.eval(readFileSync(`node_modules/${file}`, "utf8"));
+    window.eval(readFrontendFile(`node_modules/${file}`, "utf8"));
   }
   L = (window as any).L;
   vi.stubGlobal("L", L);
@@ -286,7 +291,7 @@ describe("印刷プレビューと実際のLeaflet", () => {
       targetCount: 4,
     };
     const before = JSON.stringify(bootstrap);
-    // Top-page filters must never affect the separate common-form print route.
+    // トップページのフィルターを、独立した共通フォームの印刷ルートに反映させない。
     preview = createPrintPreview(
       { ...state, markerIds: [], shapeIds: [] },
       vi.fn(),

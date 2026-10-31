@@ -72,7 +72,7 @@ function validateConditions(value: unknown): asserts value is Record<string, unk
   }
 }
 
-/** Validate only reusable definitions; targets, query timestamps and results are never saved. */
+/** 再利用可能な定義のみを検証し、対象、クエリの日時、結果は保存しない。 */
 export function validatePresetDraft(draft: MapPresetDraft): void {
   if (!record(draft) || !record(draft.definition)) throw Error("保存する検索条件がありません。");
   const definition = draft.definition;
@@ -146,7 +146,7 @@ export function clonePresetDraft(draft: MapPresetDraft): MapPresetDraft {
   );
 }
 
-/** Build all rows before the caller assigns them, so failed restoration cannot erase a draft. */
+/** 呼び出し元が代入する前に全行を構築し、復元に失敗しても下書きが消えないようにする。 */
 export function deserializePresetConditions(
   conditions: Record<string, unknown>[],
   fields: AnswerField[],

@@ -311,3 +311,84 @@ describe("parent-owned map object writes", () => {
     expect(api.request).toHaveBeenCalledTimes(257);
   });
 });
+
+describe("保存要求の検証と確定済み保存の保護", () => {
+  it.each([
+    null,
+    { requestId: "" },
+    { requestId: "x".repeat(257) },
+    { method: null },
+    { url: null },
+  ])("不正な要求を送信前に拒否する: %j", async (invalid) => {
+    const reply = vi.fn();
+    await useMapObjectWriter()(invalid === null ? (null as any) : request(invalid as any), reply);
+    expect(reply).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ status: 400 }));
+    expect(api.request).not.toHaveBeenCalled();
+    expect(useShapeStore().recordCache.records.size).toBe(0);
+  });
+  it("ログアウト中は有効な要求でも送信しない", async () => {
+    useAuthStore().logout();
+    const reply = vi.fn();
+    await useMapObjectWriter()(request(), reply);
+    expect(reply).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ status: 401 }));
+    expect(api.request).not.toHaveBeenCalled();
+  });
+  it("循環参照を含む本文を拒否しても、同じ要求IDで修正して送信できる", async () => {
+    const body: any = {};
+    body.self = body;
+    const write = useMapObjectWriter(),
+      reply = vi.fn();
+    await write(request({ body }), reply);
+    expect(reply.mock.lastCall![0].status).toBe(400);
+    expect(api.request).not.toHaveBeenCalled();
+    api.request.mockResolvedValue({ status: 201, data: { object: shape() } });
+    await write(request(), reply);
+    expect(api.request).toHaveBeenCalledTimes(1);
+    expect(reply.mock.lastCall![0].status).toBe(201);
+    expect(useShapeStore().getById("shape-a")).toEqual(shape());
+  });
+  it.each([401, 409, 503])(
+    "HTTP失敗が応答として返ってもデータを更新せず、そのまま返す: %s",
+    async (status) => {
+      const store = useShapeStore();
+      store.upsertRecord(shape());
+      const data = { message: "rejected", object: { ...shape(), name: "保存されていない変更" } };
+      api.request.mockResolvedValue({ status, data });
+      const reply = vi.fn();
+      await useMapObjectWriter()(request({ method: "PUT", url: "/shape/shape-a" }), reply);
+      expect(reply).toHaveBeenCalledExactlyOnceWith({ status, data });
+      expect(store.getById("shape-a")).toEqual(shape());
+      expect(api.request).toHaveBeenCalledTimes(1);
+    },
+  );
+  it("削除済みマーカーを作成応答で復活させず、409として返す", async () => {
+    const store = useMapObjectStore();
+    store.upsertRecord(marker());
+    store.removeRecord("marker-a");
+    api.request.mockResolvedValue({ status: 201, data: { object: marker() } });
+    const reply = vi.fn();
+    await useMapObjectWriter()(request({ url: "/marker" }), reply);
+    expect(reply.mock.lastCall![0].status).toBe(409);
+    expect(store.getById("marker-a")).toBeUndefined();
+    expect(api.request).toHaveBeenCalledTimes(1);
+  });
+  it("保存後の一覧更新が例外でも、確定した保存結果を失敗に変えず再送しない", async () => {
+    const error = new Error("render failed");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(useMapObjectStore(), "refreshSearchResults").mockImplementation(() => {
+      throw error;
+    });
+    api.request.mockResolvedValue({ status: 201, data: { object: shape() } });
+    const reply = vi.fn(),
+      write = useMapObjectWriter();
+    await write(request(), reply);
+    await write(request(), reply);
+    expect(api.request).toHaveBeenCalledTimes(1);
+    expect(reply.mock.calls.map(([r]) => r.status)).toEqual([201, 201]);
+    expect(useShapeStore().getById("shape-a")).toEqual(shape());
+    expect(console.error).toHaveBeenCalledWith(
+      "Saved map object could not be synchronized:",
+      error,
+    );
+  });
+});

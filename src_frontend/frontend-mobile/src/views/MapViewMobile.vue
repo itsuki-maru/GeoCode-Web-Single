@@ -1203,11 +1203,9 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
   <!-- 地図 -->
   <MapIframe
     ref="mapIframeRef"
-    :attributeSearchActive="!!mapobjStore.attributeSearch"
     :srcUrl="srcUrl"
     :inputPolicies="layerInputPolicies"
     :allowedOrigins="allowedOriginsRef"
-    @advancedSearch="openAdvancedSearch"
     @mapReloadRequested="onMapReloadRequested"
     @mapObjectChanged="onMapObjectChanged"
     @mapDataRequested="onMapDataRequested"

@@ -42,9 +42,9 @@ export type CreateHtmlDetails = (
 
 const literalTags = new Set(["script", "style", "pre", "code", "textarea"]);
 
-// Raw HTML can span several Marked HTML tokens with real Markdown blocks in
-// between. Parse just their tag structure; the blocks remain their original
-// tokens, and no hidden body is rendered into HTML or browser DOM here.
+// 生の HTML は、実際の Markdown ブロックを挟んで複数の Marked HTML トークンにまたがる場合がある。
+// タグ構造だけを解析し、ブロックは元のトークンのまま保持する。
+// ここでは、非表示の本文を HTML やブラウザーの DOM に描画しない。
 export function deferHtmlDetails(tokens: unknown[], createDetails: CreateHtmlDetails): unknown[] {
   const finish = (output: unknown[]) =>
     "links" in tokens
@@ -148,8 +148,8 @@ export function deferHtmlDetails(tokens: unknown[], createDetails: CreateHtmlDet
       parser.write(html);
       position += html.length;
     } else {
-      // One inert character represents the token for offset bookkeeping. Its
-      // Markdown/code source is never fed to the HTML tag parser.
+      // 位置管理用に、動作に影響しない一文字でトークンを表す。
+      // その Markdown やコードのソースを、HTML タグのパーサーには渡さない。
       pieces.push({ token, start: position, end: position + 1 });
       parser.write("\uE000");
       position++;

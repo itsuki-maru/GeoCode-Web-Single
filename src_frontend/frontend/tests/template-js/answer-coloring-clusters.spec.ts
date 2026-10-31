@@ -1,4 +1,9 @@
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+const frontendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const readFrontendFile = (file: string, encoding: "utf8") =>
+  readFileSync(resolve(frontendRoot, file), encoding);
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initializeReadOnlyMapPage } from "../../../template-scripts/src/map/read-only-page";
 import {
@@ -19,7 +24,7 @@ beforeEach(() => {
     "marked/lib/marked.umd.js",
     "xss/dist/xss.js",
   ])
-    window.eval(readFileSync(`node_modules/${file}`, "utf8"));
+    window.eval(readFrontendFile(`node_modules/${file}`, "utf8"));
   L = (window as any).L;
   vi.stubGlobal("L", L);
   vi.stubGlobal(

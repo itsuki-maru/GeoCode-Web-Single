@@ -14,7 +14,7 @@ export const MAX_COLORING_RULES = 20;
 const record = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value);
 
-/** Accept only bounded, declarative styles; no HTML, arbitrary CSS, or outside objects. */
+/** 範囲を限定した宣言的なスタイルだけを受け付け、HTML、任意の CSS、外部のオブジェクトは受け付けない。 */
 export function isAnswerColoring(
   value: unknown,
   allowedTargets?: ReadonlySet<string>,
@@ -58,7 +58,7 @@ export function isAnswerColoring(
 const clone = (state: AnswerColoring | null): AnswerColoring | null =>
   state ? JSON.parse(JSON.stringify(state)) : null;
 
-/** Styles belong to the answer iframe. Persisted records and popups are never modified. */
+/** スタイルは回答用 iframe が管理し、永続化したレコードやポップアップは変更しない。 */
 export function installAnswerColoring(runtime: any, leaflet: any): AnswerColoringController {
   if (runtime.answerColoring) return runtime.answerColoring;
   let current: AnswerColoring | null = null;
@@ -82,7 +82,7 @@ export function installAnswerColoring(runtime: any, leaflet: any): AnswerColorin
     for (const [key, original] of originals) {
       if (key.startsWith("marker:")) original.layer.setIcon(original.icon);
       else {
-        // Leaflet merges styles, so reset fillColor even if the original style omitted it.
+        // Leaflet はスタイルをマージするため、元のスタイルに fillColor がなくてもリセットする。
         original.layer.setStyle?.(original.options);
         updateShape(original.layer, { ...original.style });
       }
@@ -140,8 +140,8 @@ export function installAnswerColoring(runtime: any, leaflet: any): AnswerColorin
       if (!layer) continue;
       applyToLayer(key, layer, rules.get(id)!, icons);
     }
-    // Classification colors belong to individual objects. Keep the existing
-    // cluster renderer so its size, count colors, and any custom styling survive.
+    // 分類色は個々のオブジェクトに適用する。既存のクラスター描画処理を維持し、
+    // サイズ、件数に応じた色、カスタムスタイルを保つ。
     cluster?.refreshClusters?.();
   };
   const stopCreated = runtime.onShapeLayerCreated?.((layer: any, record: { id: string }) => {
@@ -158,8 +158,8 @@ export function installAnswerColoring(runtime: any, leaflet: any): AnswerColorin
   const controller: AnswerColoringController = {
     apply(state: AnswerColoring | null) {
       if (disposed) throw new Error("色分け画面は終了しています。");
-      // Invalid geometries may still be present in the answer scope; message validation
-      // checks that scope, while this controller simply skips their absent layers.
+      // 回答の対象範囲には無効な図形が残る場合がある。メッセージの検証ではその範囲を確認し、
+      // この制御処理では、対応するレイヤがない図形を単にスキップする。
       if (state !== null && !isAnswerColoring(state)) throw new Error("色分けの設定が不正です。");
       const next = clone(state);
       try {

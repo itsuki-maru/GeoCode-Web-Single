@@ -229,7 +229,7 @@ const focusRow = (row: TableRow): void => {
   }
 }
 
-/* Fixed CSS-pixel height includes borders and both coordinate lines. */
+/* CSS ピクセル単位の固定高には、境界線と座標の二行を含める。 */
 .table_sticky .object-row {
   height: var(--map-table-row-height);
   background: white;

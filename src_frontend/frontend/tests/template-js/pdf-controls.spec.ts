@@ -10,6 +10,8 @@ let controls: ReturnType<typeof createPdfControls>;
 let ready = true;
 const busy = vi.fn();
 beforeEach(() => {
+  generate.mockReset();
+  busy.mockClear();
   document.body.innerHTML =
     '<aside id="settings"><div class="print-actions"></div><div id="print-status"></div></aside><article id="paper"></article>';
   ready = true;

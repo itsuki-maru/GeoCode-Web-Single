@@ -227,7 +227,7 @@ export const useMapObjectStore = defineStore("mapobjects", {
           `${mapQueryObjectsUrl}?${params}`,
         );
         if (revision !== this.loadRevision) return false;
-        // Search returns a view, not a replacement for the canonical full-scope records.
+        // 検索が返すのは表示用の結果であり、全範囲の正規レコードを置き換えるものではない。
         const records = new Map<string, MapObjectData>();
         for (const record of Object.values(response.data.markers)) {
           if ((this.mutationVersions.get(record.id) ?? 0) <= mutationRevision) {
@@ -266,8 +266,8 @@ export const useMapObjectStore = defineStore("mapobjects", {
             else shapeIds.delete(id);
             shapeStore.dirtyIds.add(id);
           }
-        // Keep the unmasked server text result, including nonmatches. Attribute changes
-        // must only intersect IDs, without applying JavaScript's different case folding.
+        // 不一致も含め、マスク適用前のサーバーのテキスト検索結果を保持する。属性の変更では、
+        // JavaScript 独自の大小文字変換を適用せず、ID の積集合だけを求める。
         this.search = {
           query1,
           query2,

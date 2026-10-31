@@ -61,7 +61,7 @@ const server = await createServer({
         find: "@",
         replacement: resolve(frontend, "src").replaceAll("\\", "/"),
         async customResolver(source, importer, options) {
-          // Mobile must use its own BaseModal/MessageModal and utilities as in production.
+          // モバイル版では、本番と同じ専用の BaseModal/MessageModal とユーティリティーを使う。
           if (importer?.replaceAll("\\", "/").includes("/frontend-mobile/"))
             source = source.replace("/frontend/src/", "/frontend-mobile/src/");
           return this.resolve(source, importer, { ...options, skipSelf: true });

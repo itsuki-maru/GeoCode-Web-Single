@@ -1,4 +1,4 @@
-// Called by check-print-preview.mjs --clusters=true. Uses real templates and vendor CSS.
+// check-print-preview.mjs --clusters=true から呼び出し、実際のテンプレートと外部ライブラリの CSS を使う。
 import assert from "node:assert/strict";
 import { readFile, mkdir } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
@@ -247,8 +247,8 @@ export async function checkAnswerClusters(args) {
     await page.evaluate(() => {
       clusterCheck.map.setZoom(18, { animate: false });
     });
-    // Leaflet's non-animated zoom still lets MarkerCluster animate its split.
-    // MarkerCluster 1.5.3 deliberately ignores spiderfy() during that animation.
+    // Leaflet のアニメーションなしのズームでも、MarkerCluster は分割のアニメーションを行う。
+    // MarkerCluster 1.5.3 は、そのアニメーション中の spiderfy() 呼び出しを意図的に無視する。
     await page.waitForFunction(() => {
       const { map, group } = clusterCheck;
       const parent = group.getVisibleParent(group.getLayers()[0]);
@@ -325,8 +325,8 @@ export async function checkAnswerClusters(args) {
           preferCSSPageSize: true,
           printBackground: true,
         });
-        // afterprint restarts the settling check. Wait for both buttons to be
-        // refreshed before clicking PDF; a stale enabled button can ignore clicks.
+        // afterprint で描画の安定確認を再開する。両ボタンの更新を待ってから PDF をクリックする。
+        // 更新前の有効状態のボタンでは、クリックが無視される場合がある。
         await page.waitForFunction(
           () =>
             !document.querySelector("#print-submit").disabled &&

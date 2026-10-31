@@ -213,8 +213,8 @@ describe("answer map coloring", () => {
 
   it("preserves cluster rendering through recoloring, clearing, rollback and disposal", () => {
     const s = setup();
-    // Styling may be supplied by Leaflet or another caller; coloring must never
-    // write its options, including when restoring a previous coloring state.
+    // スタイルは Leaflet や別の呼び出し元が渡す場合があるため、色分け処理では、
+    // 以前の色分け状態を復元する場合も含め、そのオプションを書き換えない。
     Object.freeze(s.runtime.visibleMarkerGroup.options);
     const controller = installAnswerColoring(s.runtime, s.leaflet);
     const expectRendererPreserved = () =>

@@ -80,8 +80,8 @@
       window.measure = async (test, policy, timeoutMs, parentData = false, initialOnly = false) => {
         localStorage.clear();
         const geometryZoom = test.kind === "zoom-policy" ? test.zoom : 14;
-        // Expected candidates are derived from fixture geometry and the selected policy,
-        // independently of the render manager and its diagnostics.
+        // 期待される候補は、描画マネージャーやその診断情報に依存せず、
+        // テストデータの形状と選択したポリシーから導出する。
         const minimumAtZoom = (zoom) => policy.minPixelSize ?? (zoom < 11 ? 8 : zoom < 14 ? 6 : 4);
         const center = L.latLng(35.681, 139.7615),
           base = L.CRS.EPSG3857.latLngToPoint(center, geometryZoom),
@@ -124,7 +124,7 @@
             y = ((Math.floor(i / 200) % 200) - 100) * 2;
           }
           if (test.kind === "short") length = [3, 5, 7, 10][i % 4];
-          // Stay away from exact thresholds after projection and zooming.
+          // 投影とズーム後の値が、ちょうどしきい値になる条件は避ける。
           if (test.kind === "zoom-policy") length = [3.25, 5.25, 7.25, 10.25, 16.25][i % 5];
           const anchor = far
             ? L.CRS.EPSG3857.latLngToPoint(L.latLng(34.69, 135.5), geometryZoom)

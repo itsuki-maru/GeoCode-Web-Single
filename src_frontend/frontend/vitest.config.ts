@@ -15,6 +15,14 @@ export default mergeConfig(
       clearMocks: true,
       mockReset: true,
       restoreMocks: true,
+      coverage: {
+        provider: "v8",
+        include: ["src/**/*.{ts,vue}"],
+        exclude: ["**/*.d.ts", "**/__tests__/**", "**/test/**"],
+        reporter: ["text", "html", "json", "json-summary", "lcov"],
+        reportsDirectory: "./coverage",
+        reportOnFailure: true,
+      },
     },
   }),
 );

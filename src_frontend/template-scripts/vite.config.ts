@@ -233,7 +233,7 @@ function editorEntryPlugin(): Plugin {
           const focusBridge = relativePath === "src/map/editor/map-editor-final.ts"
             ? editorFocusBridge
             : "";
-          return `${focusBridge}\n// source: ${relativePath}\n${readFileSync(sourcePath, "utf8")}`;
+          return `${focusBridge}\n// ソース: ${relativePath}\n${readFileSync(sourcePath, "utf8")}`;
         })
         .join("\n");
     },

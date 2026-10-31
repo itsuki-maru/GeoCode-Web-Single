@@ -29,7 +29,7 @@ interface UpdateUserData {
 interface ApplicationInit {
   appTitle: string;
   allowUserAccountCreate: boolean;
-  allowOrigins: string; // ex) http://localhost:3000,www.example.com
+  allowOrigins: string; // 例: http://localhost:3000,www.example.com
 }
 
 export type { LoginUser, UserData, UpdateUserData, LockedUserData, ApplicationInit };

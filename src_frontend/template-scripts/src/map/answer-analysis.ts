@@ -11,7 +11,7 @@ export interface AnswerAnalysis {
   targets: Record<string, { bucket: number; value: string | null; answered_at: string | null }>;
 }
 
-/** Analysis styles only live in this iframe. Reloading without analysis restores saved styles. */
+/** 分析用スタイルはこの iframe 内だけで有効とし、分析なしで再読み込みすると保存済みのスタイルに戻る。 */
 export function installAnswerAnalysis(
   runtime: any,
   data: AnswerAnalysis,
@@ -66,7 +66,7 @@ export function installAnswerAnalysis(
     } else {
       const style = { ...(layer.shapeStyle || {}), color: bucket.color, fillColor: bucket.color };
       if (layer.shapeType !== "polyline") Object.assign(style, { fill: true, fillOpacity: 0.3 });
-      layer.shapeStyle = style; // Hover restoration must restore the analysis style too.
+      layer.shapeStyle = style; // ホバー状態から戻すときは、分析用スタイルも復元する。
       layer.setStyle?.(style);
       runtime.shapeNameLabelManager?.invalidate(layer);
       const markdownEscape = (s: string) => s.replace(/[\\`*_{}[\]<>()#+\-.!|]/g, "\\$&");
@@ -81,7 +81,7 @@ export function installAnswerAnalysis(
       kind === "marker" ? runtime.markers[`marker-${id}`] : runtime.shapeLayers[`shape-${id}`],
     );
   }
-  // Legacy analysis is the base style; modern classification must run afterwards.
+  // 旧形式の分析結果を基本スタイルとし、新しい分類処理はその後に適用する。
   const stopCreated = runtime.onShapeLayerCreated?.(
     (layer: any, record: { id: string }) => applyTarget(`shape:${record.id}`, layer),
     true,

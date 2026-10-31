@@ -1,4 +1,4 @@
-/** Shared by the Vue map pages and the standalone full-screen map. */
+/** Vue の地図ページと、単独で開く全画面の地図で共有する。 */
 export interface AttributeCondition {
   field_id: string;
   field_type: string;
@@ -92,7 +92,7 @@ export function validateAttributeResult(
   return r;
 }
 
-/** Cookie authentication for template pages; Vue supplies its existing Axios adapter. */
+/** テンプレートページには Cookie 認証を使い、Vue 側からは既存の Axios アダプターを渡す。 */
 export const attributeTransport: AttributeTransport = async (path, body, signal) => {
   const init: RequestInit = {
     method: body === undefined ? "GET" : "POST",
@@ -145,8 +145,8 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
   if (!document.getElementById(styleId)) {
     const style = document.createElement("style");
     style.id = styleId;
-    // Define the controls here as well: template pages do not load Vue's global CSS.
-    // Center without auto margins: github.css overrides margins on the last body child.
+    // テンプレートページでは Vue の全体用 CSS を読み込まないため、ここでも操作部品を定義する。
+    // github.css が body の最後の子要素の余白を上書きするため、auto の余白を使わず中央に配置する。
     style.textContent = `
       .advanced-map-search {
         box-sizing: border-box;

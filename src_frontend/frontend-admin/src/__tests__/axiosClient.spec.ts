@@ -114,3 +114,32 @@ describe("レスポンスインターセプター", () => {
     expect(state.push).toHaveBeenCalledWith("/account/login");
   });
 });
+
+describe("認証以外の失敗も呼び出し元へ返す契約", () => {
+  it.each([400, 401, 403, 404, 409, 422, 500, 503])(
+    "HTTP %sをそのまま拒否し、認証更新や画面遷移は行わない",
+    async (status) => {
+      const error = {
+        response: { status, data: { error: "rejected" } },
+        config: { url: "/protected" },
+      };
+      await expect(state.responseHandler!(error)).rejects.toBe(error);
+      expect(state.post).not.toHaveBeenCalled();
+      expect(state.logout).not.toHaveBeenCalled();
+      expect(state.push).not.toHaveBeenCalled();
+    },
+  );
+  it.each([500, undefined])(
+    "HTTP %s・通信エラーを成功として扱わず呼び出し元へ返す",
+    async (status) => {
+      const error = Object.assign(
+        new Error("request failed"),
+        status ? { response: { status, data: { error: "failed" } } } : {},
+      );
+      await expect(state.responseHandler!(error)).rejects.toBe(error);
+      expect(state.post).not.toHaveBeenCalled();
+      expect(state.logout).not.toHaveBeenCalled();
+      expect(state.push).not.toHaveBeenCalled();
+    },
+  );
+});

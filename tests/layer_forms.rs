@@ -1939,3 +1939,147 @@ async fn concurrent_vertices_and_form_posts_preserve_each_others_data() {
     assert_eq!(info["body"], final_shape["geojson"]["properties"]["memo"]);
     common::close_file_test_pool(pool, temporary_path).await;
 }
+
+#[tokio::test]
+async fn risk_layer_icon_ownership_and_invalid_updates_preserve_saved_layer() {
+    let pool = common::test_pool().await;
+    let owner = test_user(&pool, "risk-layer-owner").await;
+    let other = test_user(&pool, "risk-layer-other").await;
+    let app = geocode_web_single::router::build_router(
+        pool.clone(),
+        geocode_web_single::build_tera_extension().unwrap(),
+        None,
+    );
+    let id = layer(&app, owner, "original").await;
+    let own_icon = Uuid::new_v4();
+    let foreign_icon = Uuid::new_v4();
+    for (icon, user) in [(own_icon, owner), (foreign_icon, other)] {
+        sqlx::query("INSERT INTO marker_icon_model (id,user_id,filename,uuid_filename,create_at) VALUES ($1,$2,'icon.png',$3,'2026-01-01 00:00:00')")
+            .bind(icon.to_string()).bind(user.to_string()).bind(format!("{icon}.png")).execute(&pool).await.unwrap();
+    }
+    ok(
+        &app,
+        owner,
+        "PUT",
+        &format!("/layer/update/{id}"),
+        Some(json!({"name":"original","marker_icon_id":own_icon,"update_marker_icon":true})),
+    )
+    .await;
+    let before: Value =
+        sqlx::query_scalar("SELECT json_object('id',id,'user_id',user_id,'layer_name',layer_name,'is_master',is_master,'create_at',create_at,'update_at',update_at,'marker_icon_id',marker_icon_id,'common_form_id',common_form_id,'common_form_version',common_form_version,'form_binding_revision',form_binding_revision,'restrict_free_text',restrict_free_text) FROM layer_model WHERE id=$1")
+            .bind(id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    for (actor, body, expected) in [
+        (
+            owner,
+            json!({"name":"  ","update_marker_icon":true,"marker_icon_id":null}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            owner,
+            json!({"name":"changed","update_marker_icon":true,"marker_icon_id":foreign_icon}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            owner,
+            json!({"name":"changed","update_marker_icon":true,"marker_icon_id":Uuid::new_v4()}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (other, json!({"name":"changed"}), StatusCode::BAD_REQUEST),
+    ] {
+        let (status, result) = call(
+            &app,
+            Some(actor),
+            "PUT",
+            &format!("/layer/update/{id}"),
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, expected, "{result}");
+        let after: Value =
+            sqlx::query_scalar("SELECT json_object('id',id,'user_id',user_id,'layer_name',layer_name,'is_master',is_master,'create_at',create_at,'update_at',update_at,'marker_icon_id',marker_icon_id,'common_form_id',common_form_id,'common_form_version',common_form_version,'form_binding_revision',form_binding_revision,'restrict_free_text',restrict_free_text) FROM layer_model WHERE id=$1")
+                .bind(id.to_string())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(after, before, "rejected layer update changed stored state");
+    }
+    ok(
+        &app,
+        owner,
+        "PUT",
+        &format!("/layer/update/{id}"),
+        Some(json!({"name":" renamed ","update_marker_icon":true,"marker_icon_id":null})),
+    )
+    .await;
+    let saved: (String, Option<String>) =
+        sqlx::query_as("SELECT layer_name,marker_icon_id FROM layer_model WHERE id=$1")
+            .bind(id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(saved, ("renamed".into(), None));
+}
+
+#[tokio::test]
+async fn risk_invalid_shape_destinations_preserve_geometry_body_answers_and_config() {
+    let pool = common::test_pool().await;
+    let owner = test_user(&pool, "risk-shape-owner").await;
+    let other = test_user(&pool, "risk-shape-other").await;
+    let app = geocode_web_single::router::build_router(
+        pool.clone(),
+        geocode_web_single::build_tera_extension().unwrap(),
+        None,
+    );
+    let source = layer(&app, owner, "source").await;
+    let foreign = layer(&app, other, "foreign").await;
+    let id = shape(&app, owner, source).await;
+    save_config(&app, owner, "shape", id, definition("preserved")).await;
+    owner_post(&app, owner, "shape", id, "1").await;
+    let before = stored_shape(&pool, id).await;
+    let config_before = config(&app, owner, "shape", id).await;
+    let answers_before = saved_answer_rows(&pool, id).await;
+    for destination in [foreign, Uuid::new_v4()] {
+        let (status, body) = call(
+            &app,
+            Some(owner),
+            "PUT",
+            &format!("/shape/{id}"),
+            Some(json!({"name":"changed","layer_id":destination})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+        assert_eq!(stored_shape(&pool, id).await, before);
+        assert_eq!(config(&app, owner, "shape", id).await, config_before);
+        let answers_after = saved_answer_rows(&pool, id).await;
+        assert_eq!(answers_after, answers_before);
+    }
+}
+
+async fn saved_answer_rows(pool: &SqlitePool, id: Uuid) -> Vec<Vec<String>> {
+    use sqlx::{Row, ValueRef};
+    sqlx::query("SELECT * FROM shape_form_submission_model WHERE shape_id=$1 ORDER BY id")
+        .bind(id.to_string())
+        .fetch_all(pool)
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| {
+            (0..row.len())
+                .map(|i| {
+                    if row.try_get_raw(i).unwrap().is_null() {
+                        "NULL".to_string()
+                    } else {
+                        format!(
+                            "{:?}",
+                            row.try_get::<String, _>(i)
+                                .unwrap_or_else(|_| row.get::<i64, _>(i).to_string())
+                        )
+                    }
+                })
+                .collect()
+        })
+        .collect()
+}

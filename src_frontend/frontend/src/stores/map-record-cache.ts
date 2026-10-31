@@ -10,7 +10,7 @@ interface Scope {
   promise?: Promise<boolean>;
   controller?: AbortController;
 }
-// One canonical record per ID; scopes contain IDs only, including successfully empty scopes.
+// ID ごとに一つの正規レコードを持ち、正常に空と判定された範囲も含め、範囲には ID だけを保持する。
 export class MapRecordCache<T extends LayerRecord> {
   readonly records = new Map<string, T>();
   private scopes = new Map<string, Scope>();
@@ -121,7 +121,7 @@ export class MapRecordCache<T extends LayerRecord> {
       if (this.matches(record, key)) scope.ids.add(record.id);
       else scope.ids.delete(record.id);
     }
-    // Retain a moved/new record without claiming its destination was fully fetched.
+    // 移動済み・新規のレコードは保持するが、移動先全体を取得済みとはみなさない。
     if (![...this.scopes.values()].some((scope) => scope.ids.has(record.id)))
       this.scope("layer:" + record.layer_id).ids.add(record.id);
     if (!this.pending) this.changes.clear();
@@ -155,7 +155,7 @@ export class MapRecordCache<T extends LayerRecord> {
     this.observed.clear();
   }
   private prune() {
-    // Keep the visible scope even if it is larger than the cache budget.
+    // 表示中の範囲は、キャッシュの上限を超えても保持する。
     const inactive = [...this.scopes]
       .filter(([key, scope]) => key !== this.active && !scope.promise && !this.leases.has(key))
       .sort((a, b) => a[1].touched - b[1].touched);
@@ -199,13 +199,13 @@ export class MapRecordCache<T extends LayerRecord> {
         if (controller.signal.aborted || epoch !== this.epoch || generation !== scope.generation)
           return false;
         const incoming = new Map(response.map((record) => [record.id, record]));
-        // Replay successful writes made while this GET was in flight, including deletions.
+        // この GET の通信中に成功した書き込みを、削除も含めて再適用する。
         for (const [id, change] of this.changes)
           if (change.revision > revision) {
             if (change.record && this.matches(change.record, key)) incoming.set(id, change.record);
             else incoming.delete(id);
           }
-        // A later scope read may already know newer records or deletions.
+        // 後続の範囲読み取りで、より新しいレコードや削除がすでに判明している場合がある。
         for (const [id, observed] of this.observed)
           if (observed.sequence > sequence) {
             const record = this.records.get(id);
@@ -278,8 +278,8 @@ export class MapRecordCache<T extends LayerRecord> {
   }
 }
 
-// Local text edits use literal substrings, two optional AND terms, and no trimming.
-// Preserve server results for unchanged text: database case folding can differ from JavaScript.
+// ローカルのテキスト編集では、省略可能な二つの AND 条件で文字列をそのまま部分一致検索し、前後の空白は除去しない。
+// データベースと JavaScript では大小文字の扱いが異なる場合があるため、未変更のテキストはサーバーの結果を保持する。
 export function matchesMapSearch(fields: Array<string | null | undefined>, terms: string[]) {
   const values = fields.map((value) => (value ?? "").toLowerCase());
   return terms.every((term) => !term || values.some((value) => value.includes(term.toLowerCase())));
@@ -301,7 +301,7 @@ export class MapSearchMatches {
       previous.fields.every((value, index) => value === fields[index])
     )
       return this.ids.has(id);
-    // A server-matched shape can be loaded into the canonical cache after the query.
+    // サーバーで一致した図形が、クエリ実行後に正規キャッシュへ読み込まれる場合がある。
     const matched = (!previous && this.ids.has(id)) || matchesMapSearch(fields, terms);
     this.records.set(id, { layerId, fields });
     if (matched) this.ids.add(id);

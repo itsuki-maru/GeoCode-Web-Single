@@ -1,5 +1,5 @@
-// SHA-256 over the original file bytes; never parse transfer JSON in JavaScript.
-// This implementation also works on HTTP origins where crypto.subtle is absent.
+// 元のファイルのバイト列から SHA-256 を求め、転送用 JSON は JavaScript で解析しない。
+// この実装は、crypto.subtle のない HTTP オリジンでも動作する。
 const ROUND_CONSTANTS = new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
   0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -102,7 +102,7 @@ export async function beginJsonImport(
     const previous = sessionStorage.getItem(storageKey);
     const key =
       previous && UUID.test(previous) && !completedKeys.has(previous) ? previous : randomUuid();
-    // Persist before POST so a reload after an uncertain response can resume safely.
+    // 応答が不確かな場合も再読み込み後に安全に再開できるよう、POST の前に永続化する。
     sessionStorage.setItem(storageKey, key);
     return { storageKey, key };
   } catch {
@@ -113,7 +113,7 @@ export async function beginJsonImport(
 }
 
 export function completeJsonImport(attempt: JsonImportAttempt): void {
-  // A cleanup failure must never turn a confirmed import into a failed import.
+  // 後処理の失敗を理由に、確定済みのインポートを失敗として扱わない。
   completedKeys.add(attempt.key);
   try {
     if (sessionStorage.getItem(attempt.storageKey) === attempt.key) {

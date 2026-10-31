@@ -1,5 +1,5 @@
-// Reproducible local Chrome/Leaflet/Marked/XSS popup measurements.
-// Example: node scripts/measure-popup-content.mjs --label=baseline --output=../../../docs/performance/popup-content-baseline.json --playwright-path=C:/.../playwright/index.mjs
+// ローカルで再現可能な Chrome・Leaflet・Marked・XSS 対策のポップアップ計測。
+// 実行例: node scripts/measure-popup-content.mjs --label=baseline --output=../../../docs/performance/popup-content-baseline.json --playwright-path=C:/.../playwright/index.mjs
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -140,7 +140,7 @@ window.measure={
  async budget(markdown,limit){
   if(map){map.remove();map=null}document.querySelector('#map').innerHTML='';reset();
   const lexStart=performance.now();const tokens=marked.lexer(markdown);const lexerMs=performance.now()-lexStart;
-  // This fixture has p + strong + a = three rendered elements per paragraph.
+  // このテストデータでは、各段落に p・strong・a の三つの描画要素がある。
   const selected=Object.assign(tokens.slice(0,Math.floor(limit/3)*2),{links:tokens.links});
   const generateStart=performance.now();const markup=filterXSS(marked.parser(selected),xssOptions);const generateMs=performance.now()-generateStart;
   const host=document.createElement('div');host.className='md-detail-contents';const start=performance.now();host.innerHTML=markup;document.querySelector('#map').append(host);host.getBoundingClientRect();const domLayoutMs=performance.now()-start;await frames();

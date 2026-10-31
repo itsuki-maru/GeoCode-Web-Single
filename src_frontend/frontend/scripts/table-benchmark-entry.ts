@@ -1,4 +1,4 @@
-// Browser-only harness: mounts the real Vue table and real Pinia stores.
+// ブラウザー専用の検証環境で、実際の Vue テーブルと Pinia ストアをマウントする。
 import { createApp, h, nextTick, ref } from "vue";
 import { createPinia, setActivePinia } from "pinia";
 import Table from "@bench-component";
@@ -170,7 +170,7 @@ window.runTableBenchmark = async ({
     });
     await operation("closeMs", () => {
       active.value = false;
-      // The original parent hid the still-mounted table with v-show.
+      // 元の親コンポーネントは、マウントしたままのテーブルを v-show で非表示にしていた。
       if (window.TABLE_STAGE === "before") document.getElementById("host")!.style.display = "none";
     });
     closedHeapBytes = await window.tableMemoryCheckpoint();

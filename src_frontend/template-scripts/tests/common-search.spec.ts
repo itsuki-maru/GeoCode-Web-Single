@@ -552,64 +552,70 @@ describe("map common search", () => {
     expect(dropdown.open).toBe(false);
   });
 
-  it.each(["null", "body", "input", "outside-focusin"])("allows a candidate click after %s and does not select during scroll", async (blurTarget) => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          results: [{ address: "東京都新宿区", latitude: 35.69, longitude: 139.7 }],
+  it.each(["null", "body", "input", "outside-focusin"])(
+    "allows a candidate click after %s and does not select during scroll",
+    async (blurTarget) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({
+            results: [{ address: "東京都新宿区", latitude: 35.69, longitude: 139.7 }],
+          }),
         }),
-      }),
-    );
-    const { search, list, setView, input } = searchFixture();
-    search("東京都新宿区");
-    await vi.waitFor(() => expect(list.hidden).toBe(false));
-    const dropdown = list.closest("details")!;
-    const summary = dropdown.querySelector("summary")!;
-    const candidate = list.querySelector("button")!;
-    summary.click();
-    summary.focus();
-    const touchDown = () => {
-      const event = new Event("pointerdown", { bubbles: true });
-      Object.defineProperty(event, "pointerType", { value: "touch" });
-      candidate.dispatchEvent(event);
-    };
-    touchDown();
-    summary.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: null }));
-    candidate.dispatchEvent(new Event("pointermove", { bubbles: true }));
-    candidate.dispatchEvent(new Event("pointercancel", { bubbles: true }));
-    expect(dropdown.open).toBe(true);
-    expect(setView).not.toHaveBeenCalled();
-    touchDown();
-    candidate.dispatchEvent(new Event("pointerup", { bubbles: true }));
-    candidate.dispatchEvent(new Event("touchend", { bubbles: true }));
-    summary.dispatchEvent(new FocusEvent("focusout", {
-      bubbles: true,
-      relatedTarget: blurTarget === "null" ? null : blurTarget === "body" ? document.body : input,
-    }));
-    if (blurTarget === "outside-focusin") {
-      input.dispatchEvent(new FocusEvent("focusin", { bubbles: true, relatedTarget: summary }));
-    }
-    // iOS では、touchend からクリックイベントを生成するまでの間に、フォーカスが外へ移る場合がある。
-    expect(dropdown.open).toBe(true);
-    expect(setView).not.toHaveBeenCalled();
-    candidate.click();
-    expect(setView).toHaveBeenCalledOnce();
-    expect(dropdown.open).toBe(false);
-    expect(summary.textContent).toBe("東京都新宿区");
-    expect(document.activeElement).toBe(summary);
-    summary.click();
-    touchDown();
-    document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
-    expect(dropdown.open).toBe(false);
-    summary.click();
-    touchDown();
-    summary.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
-    summary.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: null }));
-    input.focus();
-    expect(dropdown.open).toBe(false);
-  });
+      );
+      const { search, list, setView, input } = searchFixture();
+      search("東京都新宿区");
+      await vi.waitFor(() => expect(list.hidden).toBe(false));
+      const dropdown = list.closest("details")!;
+      const summary = dropdown.querySelector("summary")!;
+      const candidate = list.querySelector("button")!;
+      summary.click();
+      summary.focus();
+      const touchDown = () => {
+        const event = new Event("pointerdown", { bubbles: true });
+        Object.defineProperty(event, "pointerType", { value: "touch" });
+        candidate.dispatchEvent(event);
+      };
+      touchDown();
+      summary.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: null }));
+      candidate.dispatchEvent(new Event("pointermove", { bubbles: true }));
+      candidate.dispatchEvent(new Event("pointercancel", { bubbles: true }));
+      expect(dropdown.open).toBe(true);
+      expect(setView).not.toHaveBeenCalled();
+      touchDown();
+      candidate.dispatchEvent(new Event("pointerup", { bubbles: true }));
+      candidate.dispatchEvent(new Event("touchend", { bubbles: true }));
+      summary.dispatchEvent(
+        new FocusEvent("focusout", {
+          bubbles: true,
+          relatedTarget:
+            blurTarget === "null" ? null : blurTarget === "body" ? document.body : input,
+        }),
+      );
+      if (blurTarget === "outside-focusin") {
+        input.dispatchEvent(new FocusEvent("focusin", { bubbles: true, relatedTarget: summary }));
+      }
+      // iOS では、touchend からクリックイベントを生成するまでの間に、フォーカスが外へ移る場合がある。
+      expect(dropdown.open).toBe(true);
+      expect(setView).not.toHaveBeenCalled();
+      candidate.click();
+      expect(setView).toHaveBeenCalledOnce();
+      expect(dropdown.open).toBe(false);
+      expect(summary.textContent).toBe("東京都新宿区");
+      expect(document.activeElement).toBe(summary);
+      summary.click();
+      touchDown();
+      document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      expect(dropdown.open).toBe(false);
+      summary.click();
+      touchDown();
+      summary.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+      summary.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: null }));
+      input.focus();
+      expect(dropdown.open).toBe(false);
+    },
+  );
 
   it("shows no match in red, separately from a service error, and resets on mode change", async () => {
     const fetchMock = vi
@@ -666,6 +672,53 @@ describe("map common search", () => {
     );
     expect(document.getElementById("mode-description")?.style.color).toBe("red");
     expect(document.getElementById("mode-description")?.getAttribute("role")).toBe("status");
+  });
+
+  it("100文字を超える住所は送信せず、コードポイントで長さを判定する", () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    const { search, status } = searchFixture();
+    search("𠮷".repeat(101));
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(status.textContent).toBe("住所は100文字以内で入力してください。");
+  });
+  it.each([
+    {},
+    { results: [null, "invalid", { address: "壊れた応答", latitude: "35", longitude: 139 }] },
+  ])("不正な住所候補を地図へ表示しない: %j", async (data) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => data }));
+    const { search, setView, list, status } = searchFixture();
+    search("東京都");
+    await vi.waitFor(() => expect(status.style.color).toBe("red"));
+    expect(setView).not.toHaveBeenCalled();
+    expect(list.children).toHaveLength(0);
+  });
+  it("15秒経過した住所検索を中断し、検索ボタンから再試行できる", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    try {
+      const fetcher = vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) =>
+            init.signal!.addEventListener("abort", () => reject(new Error("aborted")), {
+              once: true,
+            }),
+          ),
+      );
+      vi.stubGlobal("fetch", fetcher);
+      const { search, status } = searchFixture();
+      search("東京都");
+      await vi.advanceTimersByTimeAsync(14999);
+      expect(fetcher.mock.calls[0]![1].signal!.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetcher.mock.calls[0]![1].signal!.aborted).toBe(true);
+      expect(status.textContent).toContain("住所検索に失敗");
+      search("広島県");
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(15000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not send invalid coordinates or empty input to the geocoder", () => {
@@ -740,3 +793,62 @@ function createLeafletMock() {
     }),
   };
 }
+
+describe("レイヤ別検索の直接操作と検索コントロール", () => {
+  it("グループごとに一致マーカーを絞り、空入力で全件を復元する", () => {
+    document.body.innerHTML = "";
+    const one = {},
+      two = {},
+      a = { addLayer: vi.fn(), clearLayers: vi.fn() },
+      b = { addLayer: vi.fn(), clearLayers: vi.fn() };
+    const records = {
+      one: { id: 1, layer_id: "a", marker_name: "Tokyo" },
+      two: { id: 2, layer_id: "b", marker_name: "Osaka" },
+      missing: { id: 3, layer_id: null, marker_name: "Tokyo" },
+      unknown: { id: 4, layer_id: "none", marker_name: "Tokyo" },
+    };
+    const closePopup = vi.fn();
+    const runtime = createMapSearchRuntime({
+      getLeaflet: createLeafletMock,
+      getMap: () => ({ closePopup, hasLayer: () => true, setView: vi.fn() }),
+      getMeasurementSegmentMerged: () => false,
+      getMeasurementVisible: () => false,
+      isValidCoordinate: () => true,
+      refreshAllShapeMeasurementMarkers: vi.fn(),
+      setMeasurementSegmentMerged: vi.fn(),
+    });
+    const data = {
+      markerRecords: records,
+      markers: { "marker-1": one, "marker-2": two },
+      clusterGroups: { a, b },
+    };
+    const control = runtime.createMarkerSearchControl(data) as { onAdd(): HTMLElement };
+    const element = control.onAdd();
+    document.body.append(element);
+    const input = element.querySelector("input")!;
+    input.value = "Tokyo";
+    input.dispatchEvent(new Event("input"));
+    expect(a.addLayer.mock.calls).toEqual([[one]]);
+    expect(b.addLayer).not.toHaveBeenCalled();
+    input.value = "Osaka";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
+    expect(b.addLayer).toHaveBeenLastCalledWith(two);
+    input.value = "";
+    input.dispatchEvent(new Event("input"));
+    expect(a.addLayer).toHaveBeenLastCalledWith(one);
+    expect(b.addLayer).toHaveBeenLastCalledWith(two);
+    input.value = " ";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    expect(input.value).toBe("");
+    expect(closePopup).toHaveBeenCalledTimes(4);
+    const count = a.clearLayers.mock.calls.length;
+    const empty = (runtime.createMarkerSearchControl() as { onAdd(): HTMLElement })
+      .onAdd()
+      .querySelector("input")!;
+    empty.value = "Tokyo";
+    empty.dispatchEvent(new Event("input"));
+    empty.value = "";
+    empty.dispatchEvent(new Event("input"));
+    expect(a.clearLayers).toHaveBeenCalledTimes(count);
+  });
+});

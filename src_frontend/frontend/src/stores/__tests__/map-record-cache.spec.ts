@@ -383,7 +383,7 @@ describe("attribute and text search composition", () => {
       await markers.queryMapObject("a", false);
       api.get.mockResolvedValueOnce({ data: [figure] });
       await shapes.queryShapes("a", false);
-      // SQLite LIKE excludes this full-width case variant; other collations may include it.
+      // SQLite の LIKE は、この全角の大小文字違いを除外する。他の照合順序では一致する場合がある。
       api.get.mockResolvedValueOnce({
         data: { markers: matched ? { one: record } : {}, shape_ids: matched ? ["s1"] : [] },
       });
@@ -395,19 +395,19 @@ describe("attribute and text search composition", () => {
       expectMatches();
       markers.setAttributeSearch(criteria, result(["one"], ["s1"]));
       expectMatches();
-      // Answer changes must not re-evaluate unchanged text with a different collation.
+      // 回答が変わっても、変更のないテキストを別の照合規則で再評価しない。
       markers.upsertRecord({ ...record, update_at: "2026-01-02T00:00:00" });
       shapes.upsertRecord({ ...figure, updated_at: "2026-01-02T00:00:00" });
       markers.refreshSearchResults(true);
       expectMatches();
       markers.setAttributeSearch(null, null);
       expectMatches();
-      // Restoring a failed reload must retain the same server matches as well.
+      // 再読み込みの失敗から復元する場合も、同じサーバー側の一致結果を保持する。
       const search = markers.search;
       markers.clearSearch();
       markers.activateScope("a", false, search);
       expectMatches();
-      // Actual text edits still update the view locally, as before.
+      // 実際にテキストを編集した場合は、従来どおりローカルで表示を更新する。
       markers.upsertRecord({ ...record, marker_name: "ａ地点", update_at: "2026-01-03T00:00:00" });
       shapes.upsertRecord({ ...figure, name: "ａ地点", updated_at: "2026-01-03T00:00:00" });
       markers.refreshSearchResults();

@@ -2,7 +2,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { defineComponent, ref } from "vue";
 import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), isAxiosError: () => false }));
+const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), isAxiosError: vi.fn(() => false) }));
 vi.mock("@/axiosClient", () => ({ default: api }));
 import { useAdvancedMapSearch } from "../useAdvancedMapSearch";
 import { useMapObjectStore } from "@/stores/mapobjects";
@@ -34,6 +34,7 @@ let wrapper: VueWrapper;
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.clearAllMocks();
+  api.isAxiosError.mockReturnValue(false);
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
     configurable: true,
     value() {
@@ -254,3 +255,59 @@ it.each([false, true])(
     expect(markers.attributeShapeIds).toEqual(replace ? new Set(["keep"]) : null);
   },
 );
+
+it.each([
+  [409, {}, "共通フォームが変更されました"],
+  [404, {}, "共通フォームまたはレイヤーが見つかりません"],
+  [400, { error: "validation error: 条件が不正です" }, "条件が不正です"],
+  [500, {}, "検索結果を取得できませんでした"],
+])("再判定のHTTPエラーを通知し、適用済みの条件を保持する: %s", async (status, data, expected) => {
+  const markers = useMapObjectStore(),
+    shapes = useShapeStore(),
+    notify = vi.fn();
+  markers.activateScope("a", false);
+  shapes.activateScope("a", false);
+  let search!: ReturnType<typeof useAdvancedMapSearch>;
+  wrapper = mount(
+    defineComponent({
+      setup() {
+        search = useAdvancedMapSearch(ref("a"), ref("master"), vi.fn(), notify);
+        return () => null;
+      },
+    }),
+  );
+  api.isAxiosError.mockReturnValue(true);
+  api.post.mockRejectedValueOnce({ response: { status, data } });
+  markers.setAttributeSearch(criteria, result([]));
+  shapes.upsertRecord(shape("failed"));
+  await flushPromises();
+  expect(notify).toHaveBeenCalledWith(expect.stringContaining(expected));
+  expect(markers.attributeSearch).toEqual(criteria);
+  expect(markers.attributeShapeIds).toEqual(new Set());
+  search.closeAdvancedSearch();
+});
+it("例外の型が不明でも通知し、後続の再判定は成功できる", async () => {
+  const markers = useMapObjectStore(),
+    shapes = useShapeStore(),
+    notify = vi.fn(),
+    apply = vi.fn();
+  markers.activateScope("a", false);
+  shapes.activateScope("a", false);
+  wrapper = mount(
+    defineComponent({
+      setup() {
+        useAdvancedMapSearch(ref("a"), ref("master"), apply, notify);
+        return () => null;
+      },
+    }),
+  );
+  markers.setAttributeSearch(criteria, result([]));
+  api.post.mockRejectedValueOnce("network").mockResolvedValue({ data: result(["recovered"]) });
+  shapes.upsertRecord(shape("failed"));
+  await flushPromises();
+  expect(notify).toHaveBeenCalledWith("属性条件の再判定に失敗しました。再検索してください。");
+  shapes.upsertRecord(shape("recovered"));
+  await flushPromises();
+  expect(markers.attributeShapeIds?.has("recovered")).toBe(true);
+  expect(apply).toHaveBeenCalled();
+});

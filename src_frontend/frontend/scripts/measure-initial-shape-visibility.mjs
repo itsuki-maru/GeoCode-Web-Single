@@ -1,4 +1,4 @@
-// Real editor source composition and Leaflet/SVG measurement for initial visibility.
+// 実際の編集画面のソース構成と Leaflet/SVG の計測を使い、初期表示を調べる。
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
@@ -50,8 +50,8 @@ for (const entry of ["map", "map-mobile"]) {
         text,
     )
     .join("\n");
-  // Only a function wrapper is added to the actual entry composition. Module
-  // loading finishes before timing the synchronous initialization statements.
+  // 実際のエントリー構成には、関数のラッパーだけを追加する。モジュールの読み込みを終えてから、
+  // 同期的な初期化処理の時間を計測する。
   editorSources[entry] =
     importLines +
     "\nexport function initializeBenchmarkEditor(){\n" +

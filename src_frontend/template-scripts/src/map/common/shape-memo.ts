@@ -141,8 +141,8 @@ export function createShapeMemoRuntime({
 
   const attachShapeMemoPopup = (layer: ShapeMemoLayer | null | undefined): void => {
     if (!layer || layer.shapeMemoClickBound === true) return;
-    // Prepare the lightweight, collapsed HTML when restoring the shape rather
-    // than adding Markdown work to the first tap.
+    // 最初のタップに Markdown の処理を追加せず、図形の復元時に
+    // 軽量な折りたたみ済み HTML を準備する。
     preparePopupContent(layer);
     layer.shapeMemoClickBound = true;
     layer.on("click", (event) => {

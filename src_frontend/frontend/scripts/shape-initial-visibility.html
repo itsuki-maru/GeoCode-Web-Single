@@ -164,8 +164,8 @@
           toggle("図形");
           toggle("図形名");
         }
-        // This existing layer mask is independent of shape visibility and stays OFF
-        // initially in the normal another-map page. Select it explicitly in both modes.
+        // この既存のレイヤマスクは図形の表示状態とは独立しており、通常の別画面地図では
+        // 初期状態が OFF になる。どちらのモードでも明示的に選択する。
         if (entry === "map-anather") toggle("pipes");
         if (mode === "manual" || entry === "map-anather") {
           await new Promise((resolve) => setTimeout(resolve, 0));

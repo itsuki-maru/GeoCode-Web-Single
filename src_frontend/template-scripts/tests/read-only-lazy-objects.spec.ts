@@ -295,7 +295,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
         expect(runtime.getVisibleShapeIds()).toEqual(["s-a"]);
         const actualView = runtime.getPrintState().view;
         expect(actualView.zoom).toBe(view.zoom);
-        // Leaflet rounds the initial center to map pixels during invalidateSize.
+        // Leaflet は invalidateSize 中に、初期中心位置を地図のピクセル単位に丸める。
         expect(
           runtime.map
             .project([actualView.latitude, actualView.longitude], view.zoom)
@@ -837,7 +837,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
           data: { requestId: "r", ...data },
         }),
       );
-    // initialize the protocol's current answer condition, then capture the visible subset.
+    // プロトコルの現在の回答条件を初期化してから、表示中の部分集合を取得する。
     send({
       type: "answer-map-filter",
       updateId: "u",

@@ -118,7 +118,7 @@ interface ApplicationInit {
   appTitle: string;
   allowUserAccountCreate: boolean;
   allowUserUpdatePassword: boolean;
-  allowOrigins: string; // ex) http://localhost:3000,www.example.com
+  allowOrigins: string; // 例: http://localhost:3000,www.example.com
 }
 
 interface UploadProgressState {

@@ -158,3 +158,60 @@ describe("所有者フォーム入力", () => {
     w.unmount();
   });
 });
+
+describe("入力フォームの取得・変換エラー", () => {
+  it.each([404, 400])("取得エラーを利用者へ説明し、送信可能にしない: %s", async (status) => {
+    vi.mocked(apiClient.get).mockRejectedValueOnce({
+      response: { status, data: { error: "validation error: 入力エラー" } },
+    });
+    const w = await mountModal();
+    expect(w.text()).toContain(status === 404 ? "見つかりません" : "入力エラー");
+    expect(apiClient.post).not.toHaveBeenCalled();
+    w.unmount();
+  });
+  it("不正なフォーム応答を拒否する", async () => {
+    vi.mocked(apiClient.get).mockResolvedValueOnce({
+      data: { values: {}, form_schema: { fields: null } },
+    });
+    const w = await mountModal();
+    expect(w.text()).toContain("フォームを取得できません");
+    expect(w.find("form").exists()).toBe(false);
+    w.unmount();
+  });
+  it.each([new Error("画像が壊れています"), "unknown"])(
+    "画像変換失敗の後に再選択できる: %s",
+    async (error) => {
+      const w = await mountModal();
+      vi.mocked(resizeImage).mockRejectedValueOnce(error);
+      const file = w.get('input[type="file"]');
+      Object.defineProperty(file.element, "files", {
+        configurable: true,
+        value: [new File(["bad"], "bad.png")],
+      });
+      await file.trigger("change");
+      await flushPromises();
+      expect(w.text()).toContain(error instanceof Error ? error.message : "画像を処理できません");
+      expect((file.element as HTMLInputElement).value).toBe("");
+      await file.trigger("change");
+      await flushPromises();
+      expect(w.text()).toContain("準備完了");
+      w.unmount();
+    },
+  );
+  it("選択項目・ラジオ・チェック・テキストを編集し、未選択へ戻す", async () => {
+    const w = await mountModal();
+    await w.get("#owner-form-choice").setValue("塩ビ");
+    await w.get('input[type="radio"][value="B"]').setValue(true);
+    await w.get("#owner-form-flag").setValue(true);
+    await w.get("#owner-form-note").setValue("変更");
+    const reset = w.findAll("button").find((b) => b.text().includes("選択を解除"))!;
+    await reset.trigger("click");
+    await w.get("form").trigger("submit");
+    await flushPromises();
+    const body = JSON.parse(
+      String((vi.mocked(apiClient.post).mock.lastCall![1] as FormData).get("submission")),
+    );
+    expect(body.values).toMatchObject({ choice: "塩ビ", radio: "", flag: true, note: "変更" });
+    w.unmount();
+  });
+});

@@ -105,7 +105,7 @@ const postMessageToMap = (messageData: Record<string, unknown>): boolean => {
   }
 };
 
-// The parent owns layer state; legacy callers may omit policies.
+// レイヤの状態は親が管理し、旧来の呼び出し元ではポリシーが省略される場合がある。
 const syncInputPolicies = (): boolean => {
   if (!props.inputPolicies) return false;
   return postMessageToMap({ type: "layerInputPolicies", policies: { ...props.inputPolicies } });
@@ -168,7 +168,7 @@ const deleteMapObject = (
   return requestMapObjectMutation("mapObjectDelete", { id, objectType });
 };
 
-// Unwrap Vue proxies without repeated stringify/parse of the complete dataset.
+// データ全体の stringify/parse を繰り返さずに、Vue のプロキシを解除する。
 function plainMessageValue(value: unknown): unknown {
   if (value === null || typeof value !== "object") return value;
   const raw = toRaw(value);

@@ -92,6 +92,7 @@ pub async fn close_file_test_pool(pool: SqlitePool, path: PathBuf) {
 }
 
 pub async fn create_test_user(pool: &SqlitePool, username: &str) -> String {
+    init_test_env();
     let hashed_password =
         hash("password123", DEFAULT_COST).expect("test password should hash successfully");
 

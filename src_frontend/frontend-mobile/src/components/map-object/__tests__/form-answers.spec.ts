@@ -2,6 +2,7 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { nextTick } from "vue";
 import Input from "../MapObjectFormInputModal.vue";
+import BaseModal from "@/components/common/BaseModal.vue";
 import FormAnswersModal from "@/components/map-object/FormAnswersModal.vue";
 const api = vi.hoisted(() => ({ post: vi.fn(), get: vi.fn(), isAxiosError: vi.fn(() => false) }));
 vi.mock("@/axiosClient", () => ({ default: api }));
@@ -468,7 +469,7 @@ it("編集API未対応のバックエンドでは編集操作を表示しない"
   wrapper.unmount();
 });
 
-// Responsive rendering and lifecycle checks use explicit media events / deferred requests.
+// レスポンシブ表示とライフサイクルの確認には、明示的なメディアイベントと完了を制御できるリクエストを使う。
 const mediaScreen = (initial: boolean) => {
   let narrow = initial;
   const listeners = new Set<(event: MediaQueryListEvent) => void>();
@@ -905,4 +906,93 @@ it("保存後の再取得が閉じたセッションへ完了しても、新し�
   expect(wrapper.text()).not.toContain("回答を更新しました。");
   expect(wrapper.find(".answer-detail").exists()).toBe(false);
   wrapper.unmount();
+});
+describe("回答条件の型変換と一覧復帰", () => {
+  it("項目変更で値をリセットし、型別の条件と範囲上限を送る", async () => {
+    const fields = [
+      field,
+      { id: "flag", label: "確認", field_type: "checkbox", choices: [] },
+      { id: "photo", label: "写真", field_type: "image", choices: [] },
+      { id: "note", label: "備考", field_type: "text", choices: [] },
+    ];
+    api.post.mockImplementation(async (url: string) => ({
+      data: url.endsWith("options") ? { ...options, fields } : result,
+    }));
+    const w = await open({ initialFormId: "common" });
+    await select(w, "対象種別").setValue("shape");
+    await flushPromises();
+    await select(w, "適用元の版").setValue("2");
+    await button(w, "条件を追加").trigger("click");
+    const condition = w.get(".condition-row");
+    await condition.findAll("select")[1]!.setValue("between");
+    await condition.findAll("input")[0]!.setValue("10");
+    await condition.findAll("input")[1]!.setValue("20");
+    await w.get(".search-form").trigger("submit");
+    await flushPromises();
+    expect(api.post).toHaveBeenLastCalledWith(
+      "/form-answers/search",
+      expect.objectContaining({
+        version: 2,
+        target_type: "shape",
+        conditions: [expect.objectContaining({ value: "10", upper: "20" })],
+      }),
+    );
+    const fieldSelect = condition.findAll("select")[0]!;
+    const key = (label: string) =>
+      fieldSelect
+        .findAll("option")
+        .find((option) => option.text().startsWith(label))!
+        .attributes("value")!;
+    await fieldSelect.setValue(key("確認"));
+    expect(condition.findAll("select")[2]!.element.value).toBe("true");
+    await condition.findAll("select")[2]!.setValue("false");
+    await w.get(".search-form").trigger("submit");
+    await flushPromises();
+    expect(api.post).toHaveBeenLastCalledWith(
+      "/form-answers/search",
+      expect.objectContaining({
+        conditions: [
+          expect.objectContaining({ field_id: "flag", op: "eq", value: false, upper: "" }),
+        ],
+      }),
+    );
+    await fieldSelect.setValue(key("写真"));
+    expect(
+      condition
+        .findAll("select")[1]!
+        .findAll("option")
+        .map((x) => x.attributes("value")),
+    ).toEqual(["filled", "empty", "missing"]);
+    expect(condition.find("input").exists()).toBe(false);
+    await fieldSelect.setValue(key("備考"));
+    expect(condition.findAll("select")[1]!.element.value).toBe("contains");
+    await condition.get("input").setValue("点検");
+    await button(w, "条件を削除").trigger("click");
+    expect(w.findAll(".condition-row")).toHaveLength(0);
+    await button(w, "次へ").trigger("click");
+    await flushPromises();
+    await button(w, "前へ").trigger("click");
+    await flushPromises();
+    expect(api.post).toHaveBeenLastCalledWith(
+      "/form-answers/search",
+      expect.objectContaining({ cursor: null, as_of: result.as_of }),
+    );
+    await button(w, "詳細を見る").trigger("click");
+    await w.get(".answer-detail .close-button").trigger("click");
+    expect(w.find(".answer-detail").exists()).toBe(false);
+    w.unmount();
+  });
+  it("APIの検証エラーを利用者向けに表示し、モーダルを閉じられる", async () => {
+    api.isAxiosError.mockReturnValue(true);
+    api.post.mockRejectedValueOnce({
+      response: { data: { error: "validation error: 条件を確認してください" } },
+    });
+    const w = await open();
+    expect(w.text()).toContain("条件を確認してください");
+    expect(w.text()).not.toContain("validation error:");
+    w.getComponent(BaseModal).vm.$emit("close");
+    expect(w.emitted("close")).toHaveLength(1);
+    api.isAxiosError.mockReturnValue(false);
+    w.unmount();
+  });
 });

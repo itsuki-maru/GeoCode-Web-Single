@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPopupContentRuntime } from "../src/map/common/popup-content";
 import { setupDetailsLazyImages } from "../src/map/common/content";
-// The runtime must use the page sanitizer for both Markdown and analysis HTML.
+// 実行時には、Markdown と分析用 HTML の両方にページのサニタイザーを使う必要がある。
 const filterXSS = (html: string) =>
   html.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/ onerror=[^ >]*/gi, "");
 

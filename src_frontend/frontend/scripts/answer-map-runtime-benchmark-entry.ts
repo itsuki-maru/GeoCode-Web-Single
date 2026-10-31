@@ -1,4 +1,4 @@
-// @ts-nocheck -- diagnostics are bundled separately from the shipped application.
+// @ts-nocheck -- 診断用コードは、配布するアプリとは別にバンドルする。
 import "../../template-scripts/src/entries/form-answer-map";
 import { createAnswerPrintSnapshot, isAnswerPrintSnapshot, MAX_ANSWER_PRINT_BYTES } from "../../template-scripts/src/map/print/answer-print-state";
 
@@ -88,7 +88,7 @@ window.__answerMapRuntimeBenchmark = {
     return { ms: performance.now() - started, targets: keys.length, accepted, bytes: measurement.bytes, structurallyValid: measurement.structurallyValid, capacityRejected, capacityBytes: MAX_ANSWER_PRINT_BYTES };
   },
   guardProbe() {
-    // Synthetic overflow verifies the retained byte guard independently of the real file size.
+    // 人工的に上限を超えさせ、実ファイルのサイズとは独立して、維持されているバイト数制限を検証する。
     const keys = bootstrap.answerPreview.targets.slice(0, 1);
     const snapshot = createAnswerPrintSnapshot(bootstrap, runtime, keys);
     const firstMarker: any = Object.values(snapshot.bootstrap.markers)[0];

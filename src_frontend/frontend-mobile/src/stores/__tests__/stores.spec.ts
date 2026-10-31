@@ -261,3 +261,47 @@ describe("レイヤー・マーカーアイコンストア", () => {
     expect(api.delete).toHaveBeenCalledWith(expect.stringContaining("icon-2"));
   });
 });
+
+describe("レイヤ更新と画像操作の失敗時の状態", () => {
+  it.each([undefined, null, "icon"])(
+    "レイヤのアイコン指定を送信して一覧を取り直す: %s",
+    async (icon) => {
+      const store = useLayersStore();
+      store.layersList.set("old", { id: "old", name: "以前", is_master: false });
+      api.put.mockResolvedValue({});
+      api.get.mockResolvedValue({ data: [{ id: "new", layer_name: "変更後", is_master: false }] });
+      await store.updateLayer("old", "変更後", icon);
+      expect(api.put).toHaveBeenCalledWith(expect.stringContaining("old"), {
+        name: "変更後",
+        marker_icon_id: icon ?? null,
+        update_marker_icon: icon !== undefined,
+      });
+      expect([...store.layersList.keys()]).toEqual(["new"]);
+      expect(store.getById("new").name).toBe("変更後");
+      store.clearLayers();
+      expect(store.layersList.size).toBe(0);
+    },
+  );
+  it("レイヤの保存失敗時は既存一覧を保持して再取得しない", async () => {
+    const store = useLayersStore();
+    store.layersList.set("old", { id: "old", name: "以前", is_master: false });
+    api.put.mockRejectedValueOnce(new Error("offline"));
+    await store.updateLayer("old", "変更後");
+    expect(store.getById("old").name).toBe("以前");
+    expect(api.get).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalled();
+  });
+  it("画像の追加と削除を一覧へ反映し、取得失敗は呼び出し元へ返す", async () => {
+    const store = useImageStore();
+    const image = { id: "image", filename: "調査.jpg", uuid_filename: "uuid.jpg" };
+    store.addImage(image);
+    expect(store.getById("image")).toEqual(image);
+    const error = new Error("offline");
+    api.get.mockRejectedValue(error);
+    await expect(store.initList()).rejects.toBe(error);
+    await expect(store.queryImage("調査")).rejects.toBe(error);
+    expect(store.getById("image")).toEqual(image);
+    store.deleteImage("image");
+    expect(store.imageList.size).toBe(0);
+  });
+});

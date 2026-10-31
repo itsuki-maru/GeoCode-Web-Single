@@ -10,7 +10,7 @@ export interface PrintMapState {
   shapesVisible: boolean;
   shapeNamesVisible: boolean;
   layerIds: string[] | null;
-  // Omitted/null means unrestricted; an empty array means no matches.
+  // 省略または null は制限なし、空配列は一致なしを意味する。
   markerIds?: string[] | null;
   shapeIds?: string[] | null;
 }

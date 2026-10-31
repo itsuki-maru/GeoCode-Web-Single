@@ -1,4 +1,4 @@
-// Production-built actual FormAnswersModal; no live backend or network latency.
+// 本番ビルドの実際の FormAnswersModal を使い、稼働中のバックエンドやネットワーク遅延には依存しない。
 import { execFileSync } from "node:child_process";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -74,7 +74,7 @@ await build({
     rollupOptions: { input: resolve(scripts, "answer-list-performance.html") },
   },
 });
-// Rollup emits an outside-root HTML input under a path varying with selected app.
+// Rollup は、ルート外の HTML 入力を、選択したアプリによって異なるパスに出力する。
 const { glob } = await import("node:fs/promises");
 let html;
 for await (const path of glob("**/answer-list-performance.html", { cwd: output })) html = path;

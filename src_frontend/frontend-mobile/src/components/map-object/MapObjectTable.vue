@@ -85,7 +85,7 @@ const focusRow = (row: TableRow): void => {
     emit("focusObject", row.type, row.id, row.latitude, row.longitude);
 };
 
-// One gesture belongs to a typed ID, never to the recycled row position.
+// 操作は型を含む ID にひも付け、再利用される行の位置にはひも付けない。
 const swipe = ref<{ key: string; offset: number; moving: boolean; confirm: boolean } | null>(null);
 let startX: number | null = null;
 let deleteTimer: ReturnType<typeof setTimeout> | undefined;
@@ -424,7 +424,7 @@ table tr td {
   background-color: black;
 }
 
-/* Fixed CSS-pixel height includes borders and both coordinate lines. */
+/* CSS ピクセル単位の固定高には、境界線と座標の二行を含める。 */
 .table_sticky table {
   border-collapse: separate;
   border-spacing: 0;

@@ -83,7 +83,7 @@ function fixture(
     }),
   };
   const manager = createShapeRenderManager<Record, Layer>({
-    // Keep count-based assertions independent of CI speed; time-budget tests override this clock.
+    // 件数の検証は CI の速度に依存させず、時間制限のテストではこの時計を置き換える。
     now: () => 0,
     ...options,
     map,
