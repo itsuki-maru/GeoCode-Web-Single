@@ -51,15 +51,43 @@ async fn apply_object(
     // IDは既存SQLiteと同じUUID文字列。既存公開URLと公開可否はON CONFLICTで保持する。
     sqlx::query(&format!(
         r#"
-        INSERT INTO {kind}_form_config_model ({kind}_id, public_id, enabled, form_title,
-        form_description, form_schema, password_hash, source_form, managed_layer_id, create_at,
-        update_at) SELECT $1, $2, false, form_title, form_description, form_schema,
-        password_hash, json_object('id', id, 'version', version), $3, $4, $4 FROM
-        common_form_model WHERE id=$5 AND user_id=$6 AND NOT deleted ON CONFLICT ({kind}_id) DO
-        UPDATE SET form_title=excluded.form_title, form_description=excluded.form_description,
-        form_schema=excluded.form_schema, password_hash=excluded.password_hash,
-        source_form=excluded.source_form, managed_layer_id=excluded.managed_layer_id,
-        update_at=excluded.update_at
+        INSERT INTO {kind}_form_config_model (
+            {kind}_id,
+            public_id,
+            enabled,
+            form_title,
+            form_description,
+            form_schema,
+            password_hash,
+            source_form,
+            managed_layer_id,
+            create_at,
+            update_at
+        )
+        SELECT
+            $1,
+            $2,
+            false,
+            form_title,
+            form_description,
+            form_schema,
+            password_hash,
+            json_object('id', id, 'version', version),
+            $3,
+            $4,
+            $4
+        FROM common_form_model
+        WHERE id = $5
+            AND user_id = $6
+            AND NOT deleted
+        ON CONFLICT ({kind}_id) DO UPDATE SET
+            form_title = excluded.form_title,
+            form_description = excluded.form_description,
+            form_schema = excluded.form_schema,
+            password_hash = excluded.password_hash,
+            source_form = excluded.source_form,
+            managed_layer_id = excluded.managed_layer_id,
+            update_at = excluded.update_at
         "#
     ))
     .bind(id)
@@ -81,8 +109,8 @@ async fn apply_layer(
     for (kind, table) in [("marker", "marker_info_model"), ("shape", "shape_model")] {
         let ids: Vec<String> = sqlx::query_scalar(&format!(
             r#"
-        SELECT id FROM {table} WHERE layer_id=$1 AND user_id=$2 ORDER BY id
-        "#
+            SELECT id FROM {table} WHERE layer_id=$1 AND user_id=$2 ORDER BY id
+            "#
         ))
         .bind(layer)
         .bind(user)
@@ -129,8 +157,8 @@ pub(crate) async fn change(
     let version = if let Some(form) = &p.common_form_id {
         let v: i32 = sqlx::query_scalar(
             r#"
-        SELECT version FROM common_form_model WHERE id=$1 AND user_id=$2 AND NOT deleted
-        "#,
+            SELECT version FROM common_form_model WHERE id=$1 AND user_id=$2 AND NOT deleted
+            "#,
         )
         .bind(form)
         .bind(user)
@@ -146,8 +174,8 @@ pub(crate) async fn change(
         for kind in ["marker", "shape"] {
             let ids: Vec<String> = sqlx::query_scalar(&format!(
                 r#"
-        SELECT {kind}_id FROM {kind}_form_config_model WHERE managed_layer_id=$1
-        "#
+                SELECT {kind}_id FROM {kind}_form_config_model WHERE managed_layer_id=$1
+                "#
             ))
             .bind(layer)
             .fetch_all(&mut **tx)
@@ -155,10 +183,19 @@ pub(crate) async fn change(
             for id in ids {
                 sqlx::query(&format!(
                     r#"
-        UPDATE {kind}_form_config_model SET enabled=false, public_id=$1, form_title='',
-        form_description='', form_schema='{{"fields":[]}}', password_hash=NULL,
-        source_form=NULL, managed_layer_id=NULL, update_at=$2 WHERE {kind}_id=$3
-        "#
+                    UPDATE {kind}_form_config_model
+                    SET
+                        enabled = false,
+                        public_id = $1,
+                        form_title = '',
+                        form_description = '',
+                        form_schema = '{{"fields":[]}}',
+                        password_hash = NULL,
+                        source_form = NULL,
+                        managed_layer_id = NULL,
+                        update_at = $2
+                    WHERE {kind}_id = $3
+                    "#
                 ))
                 .bind(Uuid::new_v4().to_string())
                 .bind(chrono::Utc::now().naive_utc())
@@ -171,8 +208,13 @@ pub(crate) async fn change(
     };
     sqlx::query(
         r#"
-        UPDATE layer_model SET common_form_id=$1, common_form_version=$2,
-        form_binding_revision=form_binding_revision+1 WHERE id=$3 AND user_id=$4
+        UPDATE layer_model
+        SET
+            common_form_id = $1,
+            common_form_version = $2,
+            form_binding_revision = form_binding_revision + 1
+        WHERE id = $3
+            AND user_id = $4
         "#,
     )
     .bind(&p.common_form_id)
@@ -205,9 +247,13 @@ pub(crate) async fn sync_object(
     } else {
         sqlx::query(&format!(
             r#"
-        UPDATE {kind}_form_config_model SET managed_layer_id=NULL, update_at=$1 WHERE
-        {kind}_id=$2 AND managed_layer_id IS NOT NULL
-        "#
+            UPDATE {kind}_form_config_model
+            SET
+                managed_layer_id = NULL,
+                update_at = $1
+            WHERE {kind}_id = $2
+                AND managed_layer_id IS NOT NULL
+            "#
         ))
         .bind(chrono::Utc::now().naive_utc())
         .bind(id)
@@ -235,9 +281,9 @@ pub(crate) async fn propagate(
         apply_layer(tx, user, &layer, form).await?;
         sqlx::query(
             r#"
-        UPDATE layer_model SET common_form_version=(SELECT version FROM common_form_model WHERE
-        id=$1), form_binding_revision=form_binding_revision+1 WHERE id=$2
-        "#,
+            UPDATE layer_model SET common_form_version=(SELECT version FROM common_form_model WHERE
+            id=$1), form_binding_revision=form_binding_revision+1 WHERE id=$2
+            "#,
         )
         .bind(form)
         .bind(layer)
@@ -248,10 +294,24 @@ pub(crate) async fn propagate(
         for (kind, table) in [("marker", "marker_info_model"), ("shape", "shape_model")] {
             sqlx::query(&format!(
                 r#"
-        UPDATE {kind}_form_config_model SET password_hash=(SELECT password_hash FROM
-        common_form_model WHERE id=$1 AND user_id=$2), update_at=$3 WHERE source_form->>'id'=$1
-        AND {kind}_id IN (SELECT id FROM {table} WHERE user_id=$2)
-        "#
+                UPDATE {kind}_form_config_model
+                SET
+                    password_hash = (
+                        SELECT
+                            password_hash
+                        FROM common_form_model
+                        WHERE id = $1
+                            AND user_id = $2
+                    ),
+                    update_at = $3
+                WHERE source_form ->> 'id' = $1
+                    AND {kind}_id IN (
+                    SELECT
+                        id
+                    FROM {table}
+                    WHERE user_id = $2
+                )
+                "#
             ))
             .bind(form)
             .bind(user)
@@ -280,10 +340,10 @@ pub(crate) async fn usage(
     for (kind, table) in [("marker", "marker_info_model"), ("shape", "shape_model")] {
         let (m, a): (i64, i64) = sqlx::query_as(&format!(
             r#"
-        SELECT count(*) FILTER(WHERE c.managed_layer_id IS NOT NULL), count(*) FROM
-        {kind}_form_config_model c JOIN {table} o ON o.id=c.{kind}_id WHERE o.user_id=$1 AND
-        c.source_form->>'id'=$2
-        "#
+            SELECT count(*) FILTER(WHERE c.managed_layer_id IS NOT NULL), count(*) FROM
+            {kind}_form_config_model c JOIN {table} o ON o.id=c.{kind}_id WHERE o.user_id=$1 AND
+            c.source_form->>'id'=$2
+            "#
         ))
         .bind(user)
         .bind(form)

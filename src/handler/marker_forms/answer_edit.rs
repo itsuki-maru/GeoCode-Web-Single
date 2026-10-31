@@ -175,8 +175,27 @@ async fn answer(
     id: &str,
 ) -> Result<Answer, AppError> {
     let object_table = table(kind)?;
-    sqlx::query_as(&format!("SELECT s.id,s.{kind}_id AS target_id,s.submitted_values,s.form_snapshot,s.rendered_markdown,s.revision,s.edited_at FROM {kind}_form_submission_model s JOIN {object_table} o ON o.id=s.{kind}_id WHERE s.id=$1 AND o.user_id=$2"))
-        .bind(id).bind(user).fetch_optional(&mut **tx).await?.ok_or(AppError::NotFound)
+    sqlx::query_as(&format!(
+        r#"
+        SELECT
+            s.id,
+            s.{kind}_id AS target_id,
+            s.submitted_values,
+            s.form_snapshot,
+            s.rendered_markdown,
+            s.revision,
+            s.edited_at
+        FROM {kind}_form_submission_model s
+        JOIN {object_table} o ON o.id = s.{kind}_id
+        WHERE s.id = $1
+            AND o.user_id = $2
+        "#,
+    ))
+    .bind(id)
+    .bind(user)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(AppError::NotFound)
 }
 pub(crate) async fn document(
     tx: &mut Transaction<'_, Sqlite>,
@@ -191,15 +210,38 @@ pub(crate) async fn document(
         "COALESCE(geojson->'properties'->>'memo','')"
     };
     let (body, stored): (String, Option<SqlJson<Vec<BodyPart>>>) = sqlx::query_as(&format!(
-        "SELECT {column},form_body_parts FROM {object_table} WHERE id=$1 AND user_id=$2"
+        r#"
+        SELECT
+            {column},
+            form_body_parts
+        FROM {object_table}
+        WHERE id = $1
+            AND user_id = $2
+        "#
     ))
     .bind(target)
     .bind(user)
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(AppError::NotFound)?;
-    let answers: Vec<Answer> = sqlx::query_as(&format!("SELECT id,{kind}_id AS target_id,submitted_values,form_snapshot,rendered_markdown,revision,edited_at FROM {kind}_form_submission_model WHERE {kind}_id=$1 ORDER BY create_at COLLATE answer_time,id"))
-        .bind(target).fetch_all(&mut **tx).await?;
+    let answers: Vec<Answer> = sqlx::query_as(&format!(
+        r#"
+        SELECT
+            id,
+            {kind}_id AS target_id,
+            submitted_values,
+            form_snapshot,
+            rendered_markdown,
+            revision,
+            edited_at
+        FROM {kind}_form_submission_model
+        WHERE {kind}_id = $1
+        ORDER BY create_at COLLATE answer_time, id
+        "#,
+    ))
+    .bind(target)
+    .fetch_all(&mut **tx)
+    .await?;
     let parts = match stored {
         Some(parts) if render(&parts.0, &answers).as_deref() == Some(&body) => Some(parts.0),
         Some(_) => None,
@@ -240,7 +282,18 @@ pub(crate) async fn popup_bodies(
             continue;
         }
         let stored: Vec<(String, Option<SqlJson<Vec<BodyPart>>>)> = sqlx::query_as(&format!(
-            "SELECT id,form_body_parts FROM {} WHERE user_id=$1 AND id IN (SELECT value FROM json_each($2))",
+            r#"
+            SELECT
+                id,
+                form_body_parts
+            FROM {}
+            WHERE user_id = $1
+                AND id IN (
+                SELECT
+                    value
+                FROM json_each($2)
+            )
+            "#,
             table(kind)?
         ))
         .bind(user)
@@ -249,8 +302,27 @@ pub(crate) async fn popup_bodies(
         .await?;
         let mut by_target: HashMap<String, Vec<PopupAnswer>> = HashMap::new();
         let answers: Vec<PopupAnswer> = sqlx::query_as(&format!(
-            "SELECT s.id,s.{kind}_id AS target_id,s.rendered_markdown FROM {kind}_form_submission_model s JOIN {} m ON m.id=s.{kind}_id WHERE m.user_id=$1 AND m.id IN (SELECT value FROM json_each($2)) ORDER BY s.create_at COLLATE answer_time,s.id", table(kind)?
-        )).bind(user).bind(SqlJson(&ids)).fetch_all(&mut **tx).await?;
+            r#"
+            SELECT
+                s.id,
+                s.{kind}_id AS target_id,
+                s.rendered_markdown
+            FROM {kind}_form_submission_model s
+            JOIN {} m ON m.id = s.{kind}_id
+            WHERE m.user_id = $1
+                AND m.id IN (
+                SELECT
+                    value
+                FROM json_each($2)
+            )
+            ORDER BY s.create_at COLLATE answer_time, s.id
+            "#,
+            table(kind)?
+        ))
+        .bind(user)
+        .bind(SqlJson(&ids))
+        .fetch_all(&mut **tx)
+        .await?;
         for answer in answers {
             by_target
                 .entry(answer.target_id.clone())
@@ -288,7 +360,13 @@ pub(crate) async fn store_parts(
 ) -> Result<(), AppError> {
     let object_table = table(kind)?;
     sqlx::query(&format!(
-        "UPDATE {object_table} SET form_body_parts=$1 WHERE id=$2 AND user_id=$3"
+        r#"
+        UPDATE {object_table}
+        SET
+            form_body_parts = $1
+        WHERE id = $2
+            AND user_id = $3
+        "#
     ))
     .bind(parts.map(SqlJson))
     .bind(target)
@@ -369,16 +447,47 @@ async fn write_body(
     parts: &[BodyPart],
 ) -> Result<JsonValue, AppError> {
     if kind == "marker" {
-        let object = sqlx::query_as::<_, crate::model::MarkerObject>("UPDATE marker_info_model SET detail=$1,form_body_parts=$2,update_at=$3 WHERE id=$4 AND user_id=$5 RETURNING id,layer_id,marker_name,latitude,longitude,detail,update_at")
-            .bind(body).bind(SqlJson(parts)).bind(Utc::now().naive_utc()).bind(target).bind(user).fetch_one(&mut **tx).await?;
+        let object = sqlx::query_as::<_, crate::model::MarkerObject>(
+            r#"
+            UPDATE marker_info_model
+            SET
+                detail = $1,
+                form_body_parts = $2,
+                update_at = $3
+            WHERE id = $4
+                AND user_id = $5
+            RETURNING id,
+            layer_id,
+            marker_name,
+            latitude,
+            longitude,
+            detail,
+            update_at
+            "#,
+        )
+        .bind(body)
+        .bind(SqlJson(parts))
+        .bind(Utc::now().naive_utc())
+        .bind(target)
+        .bind(user)
+        .fetch_one(&mut **tx)
+        .await?;
         return serde_json::to_value(object).map_err(|_| AppError::InternalServerError);
     }
-    let (shape_type, mut geojson): (String, JsonValue) =
-        sqlx::query_as("SELECT shape_type,geojson FROM shape_model WHERE id=$1 AND user_id=$2")
-            .bind(target)
-            .bind(user)
-            .fetch_one(&mut **tx)
-            .await?;
+    let (shape_type, mut geojson): (String, JsonValue) = sqlx::query_as(
+        r#"
+        SELECT
+            shape_type,
+            geojson
+        FROM shape_model
+        WHERE id = $1
+            AND user_id = $2
+        "#,
+    )
+    .bind(target)
+    .bind(user)
+    .fetch_one(&mut **tx)
+    .await?;
     if body.chars().count() > SHAPE_MEMO_MAX_LENGTH {
         return Err(AppError::PayloadTooLarge(
             "図形メモは10000文字以内にしてください。".into(),
@@ -391,8 +500,32 @@ async fn write_body(
     }
     properties["memo"] = json!(body);
     validate_shape_geojson(&shape_type, &geojson)?;
-    let object = sqlx::query_as::<_, crate::model::ShapeObject>("UPDATE shape_model SET geojson=$1,form_body_parts=$2,updated_at=$3 WHERE id=$4 AND user_id=$5 RETURNING id,user_id,layer_id,shape_type,name,geojson,created_at,updated_at")
-        .bind(SqlJson(geojson)).bind(SqlJson(parts)).bind(Utc::now().naive_utc()).bind(target).bind(user).fetch_one(&mut **tx).await?;
+    let object = sqlx::query_as::<_, crate::model::ShapeObject>(
+        r#"
+        UPDATE shape_model
+        SET
+            geojson = $1,
+            form_body_parts = $2,
+            updated_at = $3
+        WHERE id = $4
+            AND user_id = $5
+        RETURNING id,
+        user_id,
+        layer_id,
+        shape_type,
+        name,
+        geojson,
+        created_at,
+        updated_at
+        "#,
+    )
+    .bind(SqlJson(geojson))
+    .bind(SqlJson(parts))
+    .bind(Utc::now().naive_utc())
+    .bind(target)
+    .bind(user)
+    .fetch_one(&mut **tx)
+    .await?;
     serde_json::to_value(object).map_err(|_| AppError::InternalServerError)
 }
 async fn begin_read(pool: &SqlitePool) -> Result<Transaction<'_, Sqlite>, AppError> {
@@ -626,7 +759,12 @@ async fn save_images(
     images: &[PreparedImage],
 ) -> Result<(), AppError> {
     let used: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(stored_bytes),0) FROM marker_form_image_model WHERE owner_id=$1",
+        r#"
+        SELECT
+            COALESCE(SUM(stored_bytes), 0)
+        FROM marker_form_image_model
+        WHERE owner_id = $1
+        "#,
     )
     .bind(user)
     .fetch_one(&mut **tx)
@@ -642,10 +780,40 @@ async fn save_images(
     }
     write_prepared_images(images).await?;
     for i in images {
-        sqlx::query("INSERT INTO image_model (id,user_id,filename,uuid_filename,create_at) VALUES ($1,$2,$3,$4,$5)")
-            .bind(&i.id).bind(user).bind(&i.filename).bind(&i.unique_filename).bind(Utc::now().naive_utc()).execute(&mut **tx).await?;
-        sqlx::query("INSERT INTO marker_form_image_model (image_id,owner_id,stored_bytes,create_at) VALUES ($1,$2,$3,$4)")
-            .bind(&i.id).bind(user).bind((i.bytes.len()+i.thumb_bytes.len()) as i64).bind(Utc::now().naive_utc()).execute(&mut **tx).await?;
+        sqlx::query(
+            r#"
+            INSERT INTO image_model (
+                id,
+                user_id,
+                filename,
+                uuid_filename,
+                create_at
+            ) VALUES ($1, $2, $3, $4, $5)
+            "#,
+        )
+        .bind(&i.id)
+        .bind(user)
+        .bind(&i.filename)
+        .bind(&i.unique_filename)
+        .bind(Utc::now().naive_utc())
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO marker_form_image_model (
+                image_id,
+                owner_id,
+                stored_bytes,
+                create_at
+            ) VALUES ($1, $2, $3, $4)
+            "#,
+        )
+        .bind(&i.id)
+        .bind(user)
+        .bind((i.bytes.len() + i.thumb_bytes.len()) as i64)
+        .bind(Utc::now().naive_utc())
+        .execute(&mut **tx)
+        .await?;
     }
     Ok(())
 }
@@ -679,7 +847,17 @@ pub async fn update_handler(
         // Validate body before creating any image files.
         if kind=="shape" && body.chars().count()>SHAPE_MEMO_MAX_LENGTH {return Err(AppError::PayloadTooLarge("図形メモは10000文字以内にしてください。".into()));}
         save_images(&mut tx,&user,&prepared).await?;
-        sqlx::query(&format!("UPDATE {kind}_form_submission_model SET submitted_values=$1,rendered_markdown=$2,revision=revision+1,edited_at=$3 WHERE id=$4"))
+        sqlx::query(&format!(
+            r#"
+            UPDATE {kind}_form_submission_model
+            SET
+                submitted_values = $1,
+                rendered_markdown = $2,
+                revision = revision + 1,
+                edited_at = $3
+            WHERE id = $4
+            "#,
+        ))
             .bind(SqlJson(values)).bind(&markdown).bind(Utc::now().naive_utc()).bind(&id).execute(&mut *tx).await?;
         let object=write_body(&mut tx,&user,&kind,&old.target_id,&body,&parts).await?;
         tx.commit().await?;

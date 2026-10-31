@@ -255,11 +255,13 @@ pub async fn answer_map_handler(
         let data = load_answer_map(&pool,&user,&q).await?;
         let targets: Vec<String> = data.markers.iter().map(|m|format!("marker:{}",m.id))
             .chain(data.shapes.iter().map(|s|format!("shape:{}",s.id))).collect();
-        let tiles = sqlx::query_as::<_,TileServers>(r#"
-        SELECT
-            *
-        FROM tileserver_model
-        "#).fetch_all(&pool).await?;
+        let tiles = sqlx::query_as::<_,TileServers>(
+            r#"
+            SELECT
+                *
+            FROM tileserver_model
+            "#,
+        ).fetch_all(&pool).await?;
         let mut layers: HashMap<String,Value> = data.layers.into_iter().map(|l|(l.id.to_string(),json!(l))).collect();
         let markers: HashMap<String,Value> = data.markers.into_iter().filter(|m|m.latitude.is_finite() && m.longitude.is_finite() && m.latitude.abs()<=90.0 && m.longitude.abs()<=180.0).map(|mut m| {
             let layer = m.layer_id.unwrap_or_else(|| Uuid::nil().to_string());

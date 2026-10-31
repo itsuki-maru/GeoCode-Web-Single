@@ -209,29 +209,53 @@ async fn cleanup_cascades_signals_and_keeps_stopped_ids_until_retention_expires(
         .unwrap();
     camera::cleanup(&pool).await.unwrap();
     for table in ["live_camera_viewer", "live_camera_signal"] {
-        let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let count: i64 = sqlx::query_scalar(&format!(
+            r#"
+            SELECT
+                count(*)
+            FROM {table}
+            "#,
+        ))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(count, 0);
     }
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM live_camera_session")
-            .fetch_one(&pool)
-            .await
-            .unwrap(),
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT
+                count(*)
+            FROM live_camera_session
+            "#,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
         1
     );
-    sqlx::query("UPDATE live_camera_session SET expires_at=datetime('now','-2 days')")
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE live_camera_session
+        SET
+            expires_at = datetime('now', '-2 days')
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     camera::cleanup(&pool).await.unwrap();
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM live_camera_session")
-            .fetch_one(&pool)
-            .await
-            .unwrap(),
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT
+                count(*)
+            FROM live_camera_session
+            "#,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
         0
     );
 }
@@ -258,28 +282,79 @@ async fn disabled_camera_does_not_create_a_session() {
         Err(geocode_web_single::error::AppError::NotFound)
     ));
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM live_camera_session")
-            .fetch_one(&pool)
-            .await
-            .unwrap(),
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT
+                count(*)
+            FROM live_camera_session
+            "#,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
         1
     );
 }
 async fn fixture(pool: &SqlitePool) -> (String, Uuid, Uuid, Uuid, Uuid) {
     let user = common::create_test_user(pool, "camera-publisher").await;
-    sqlx::query("UPDATE user_model SET can_share_live_location=true WHERE id=$1")
-        .bind(&user)
-        .execute(pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE user_model
+        SET
+            can_share_live_location = true
+        WHERE id = $1
+        "#,
+    )
+    .bind(&user)
+    .execute(pool)
+    .await
+    .unwrap();
     let location = Uuid::new_v4();
     let map = Uuid::new_v4();
     let public = Uuid::new_v4();
     let member = Uuid::new_v4();
-    sqlx::query("INSERT INTO live_location_session(user_id,session_id,latitude,longitude,observed_at) VALUES($1,$2,35,139,CURRENT_TIMESTAMP)").bind(&user).bind(location.to_string()).execute(pool).await.unwrap();
-    sqlx::query("INSERT INTO live_map(id,public_id,name,created_by,expires_at) VALUES($1,$2,'camera map',$3,datetime('now','+1 hour'))").bind(map.to_string()).bind(public.to_string()).bind(&user).execute(pool).await.unwrap();
     sqlx::query(
-        "INSERT INTO live_map_member(id,map_id,user_id,display_name) VALUES($1,$2,$3,'publisher')",
+        r#"
+        INSERT INTO live_location_session (
+            user_id,
+            session_id,
+            latitude,
+            longitude,
+            observed_at
+        ) VALUES ($1, $2, 35, 139, CURRENT_TIMESTAMP)
+        "#,
+    )
+    .bind(&user)
+    .bind(location.to_string())
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO live_map (
+            id,
+            public_id,
+            name,
+            created_by,
+            expires_at
+        ) VALUES ($1, $2, 'camera map', $3, datetime('now', '+1 hour'))
+        "#,
+    )
+    .bind(map.to_string())
+    .bind(public.to_string())
+    .bind(&user)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO live_map_member (
+            id,
+            map_id,
+            user_id,
+            display_name
+        ) VALUES ($1, $2, $3, 'publisher')
+        "#,
     )
     .bind(member.to_string())
     .bind(map.to_string())
@@ -377,11 +452,18 @@ async fn revocation_removes_existing_peer_and_rejects_renewal() {
     let viewer = Uuid::new_v4();
     let key = Uuid::new_v4();
     join(&pool, public, member, viewer, key).await.unwrap();
-    sqlx::query("UPDATE live_map SET access_version=access_version+1 WHERE public_id=$1")
-        .bind(public.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE live_map
+        SET
+            access_version = access_version + 1
+        WHERE public_id = $1
+        "#,
+    )
+    .bind(public.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let result = camera::publisher_exchange(
         Extension(pool.clone()),
         Extension(config()),
@@ -466,10 +548,16 @@ async fn retries_are_deduplicated_and_viewer_secret_is_required() {
     .unwrap();
     assert_eq!(body(result).await["messages"], json!([]));
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM live_camera_signal")
-            .fetch_one(&pool)
-            .await
-            .unwrap(),
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT
+                count(*)
+            FROM live_camera_signal
+            "#,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
         1
     );
 }
@@ -497,19 +585,33 @@ async fn stopped_expired_and_replaced_sessions_cannot_resume() {
             Json(exchange(None)),
         )
     };
-    sqlx::query("UPDATE live_location_session SET session_id=$1 WHERE user_id=$2")
-        .bind(Uuid::new_v4().to_string())
-        .bind(&user)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE live_location_session
+        SET
+            session_id = $1
+        WHERE user_id = $2
+        "#,
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(&user)
+    .execute(&pool)
+    .await
+    .unwrap();
     assert!(poll().await.is_err());
-    sqlx::query("UPDATE live_location_session SET session_id=$1 WHERE user_id=$2")
-        .bind(location.to_string())
-        .bind(&user)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE live_location_session
+        SET
+            session_id = $1
+        WHERE user_id = $2
+        "#,
+    )
+    .bind(location.to_string())
+    .bind(&user)
+    .execute(&pool)
+    .await
+    .unwrap();
     camera::stop(Extension(pool.clone()), Extension(user.clone()), Path(id))
         .await
         .unwrap();
@@ -523,11 +625,18 @@ async fn stopped_expired_and_replaced_sessions_cannot_resume() {
 async fn password_map_and_foreign_owner_are_rejected() {
     let pool = common::test_pool().await;
     let (_, _, public, member, id) = fixture(&pool).await;
-    sqlx::query("UPDATE live_map SET password_hash='protected' WHERE public_id=$1")
-        .bind(public.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE live_map
+        SET
+            password_hash = 'protected'
+        WHERE public_id = $1
+        "#,
+    )
+    .bind(public.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     assert!(
         join(&pool, public, member, Uuid::new_v4(), Uuid::new_v4())
             .await
@@ -553,11 +662,18 @@ async fn lease_expiry_cannot_be_renewed_and_frees_the_viewer_slot() {
     let viewer = Uuid::new_v4();
     let key = Uuid::new_v4();
     join(&pool, public, member, viewer, key).await.unwrap();
-    sqlx::query("UPDATE live_camera_viewer SET expires_at=datetime('now','-1 second') WHERE id=$1")
-        .bind(viewer)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE live_camera_viewer
+        SET
+            expires_at = datetime('now', '-1 second')
+        WHERE id = $1
+        "#,
+    )
+    .bind(viewer)
+    .execute(&pool)
+    .await
+    .unwrap();
     assert!(
         camera::viewer_exchange(
             Extension(pool.clone()),
@@ -580,7 +696,12 @@ async fn lease_expiry_cannot_be_renewed_and_frees_the_viewer_slot() {
     .unwrap();
     assert_eq!(body(result).await["peers"], json!([]));
     sqlx::query(
-        "UPDATE live_camera_session SET expires_at=datetime('now','-1 second') WHERE id=$1",
+        r#"
+        UPDATE live_camera_session
+        SET
+            expires_at = datetime('now', '-1 second')
+        WHERE id = $1
+        "#,
     )
     .bind(id)
     .execute(&pool)
@@ -632,7 +753,12 @@ async fn cloudflare_session_lifetime_and_preflight_authorization() {
         Err(AppError::Forbidden(_))
     ));
     sqlx::query(
-        "UPDATE live_camera_session SET created_at=datetime('now','-24 hours') WHERE id=$1",
+        r#"
+        UPDATE live_camera_session
+        SET
+            created_at = datetime('now', '-24 hours')
+        WHERE id = $1
+        "#,
     )
     .bind(id)
     .execute(&pool)

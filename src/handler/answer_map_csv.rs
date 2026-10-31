@@ -38,7 +38,13 @@ async fn prepare(
     let scope = ExportScope::Map { request, scope };
     let count: i64 = scope
         .build(user, at)
-        .push(" SELECT count(*) FROM export_rows")
+        .push(
+            r#"
+            SELECT
+                count(*)
+            FROM export_rows
+            "#,
+        )
         .build_query_scalar()
         .fetch_one(&mut *tx)
         .await?;

@@ -119,8 +119,15 @@ async fn insert_marker(pool: &SqlitePool, user_id: &str, layer_id: &str) -> Stri
     sqlx::query(
         r#"
         INSERT INTO marker_info_model (
-            id, user_id, layer_id, marker_name, latitude, longitude,
-            detail, create_at, update_at
+            id,
+            user_id,
+            layer_id,
+            marker_name,
+            latitude,
+            longitude,
+            detail,
+            create_at,
+            update_at
         ) VALUES ($1, $2, $3, '投稿先', 35.0, 139.0, '既存本文', $4, $4)
         "#,
     )
@@ -139,8 +146,16 @@ async fn insert_shape(pool: &SqlitePool, user_id: &str, layer_id: &str) -> Strin
     let now = Utc::now().naive_utc();
     sqlx::query(
         r#"
-        INSERT INTO shape_model (id, user_id, layer_id, shape_type, name, geojson, created_at, updated_at)
-        VALUES ($1, $2, $3, 'polyline', '巡回経路', $4, $5, $5)
+        INSERT INTO shape_model (
+            id,
+            user_id,
+            layer_id,
+            shape_type,
+            name,
+            geojson,
+            created_at,
+            updated_at
+        ) VALUES ($1, $2, $3, 'polyline', '巡回経路', $4, $5, $5)
         "#,
     )
     .bind(&shape_id)
@@ -259,12 +274,18 @@ async fn shape_form_appends_markdown_without_changing_geometry() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let geojson: sqlx::types::Json<Value> =
-        sqlx::query_scalar("SELECT geojson FROM shape_model WHERE id = $1")
-            .bind(&shape_id)
-            .fetch_one(&pool)
-            .await
-            .expect("shape geojson should load");
+    let geojson: sqlx::types::Json<Value> = sqlx::query_scalar(
+        r#"
+        SELECT
+            geojson
+        FROM shape_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(&shape_id)
+    .fetch_one(&pool)
+    .await
+    .expect("shape geojson should load");
     assert_eq!(geojson["geometry"]["type"], "LineString");
     assert_eq!(geojson["properties"]["style"]["weight"], 4);
     let memo = geojson["properties"]["memo"].as_str().unwrap_or_default();
@@ -272,12 +293,18 @@ async fn shape_form_appends_markdown_without_changing_geometry() {
     assert!(memo.contains("## フォーム投稿: 経路報告"));
     assert!(memo.contains("### コメント"));
     assert!(memo.contains("異常なし"));
-    let submissions: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM shape_form_submission_model WHERE shape_id = $1")
-            .bind(&shape_id)
-            .fetch_one(&pool)
-            .await
-            .expect("submission count should load");
+    let submissions: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            COUNT(*)
+        FROM shape_form_submission_model
+        WHERE shape_id = $1
+        "#,
+    )
+    .bind(&shape_id)
+    .fetch_one(&pool)
+    .await
+    .expect("submission count should load");
     assert_eq!(submissions, 1);
 }
 
@@ -396,12 +423,18 @@ async fn owner_can_enable_form_and_public_user_can_only_append() {
     assert_eq!(numeric_date, StatusCode::BAD_REQUEST);
 
     let image_bytes = std::fs::read("icons/icon.png").expect("fixture image should be readable");
-    let image_count_before_invalid: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM image_model WHERE user_id = $1")
-            .bind(&owner_id)
-            .fetch_one(&pool)
-            .await
-            .expect("image count should be readable");
+    let image_count_before_invalid: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            COUNT(*)
+        FROM image_model
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(&owner_id)
+    .fetch_one(&pool)
+    .await
+    .expect("image count should be readable");
     let invalid_date = post_form(
         &app,
         &public_id,
@@ -416,12 +449,18 @@ async fn owner_can_enable_form_and_public_user_can_only_append() {
     )
     .await;
     assert_eq!(invalid_date, StatusCode::BAD_REQUEST);
-    let image_count_after_invalid: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM image_model WHERE user_id = $1")
-            .bind(&owner_id)
-            .fetch_one(&pool)
-            .await
-            .expect("image count should be readable");
+    let image_count_after_invalid: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            COUNT(*)
+        FROM image_model
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(&owner_id)
+    .fetch_one(&pool)
+    .await
+    .expect("image count should be readable");
     assert_eq!(image_count_after_invalid, image_count_before_invalid);
     let (success, success_body) = post_form_response(
         &app,
@@ -439,11 +478,18 @@ async fn owner_can_enable_form_and_public_user_can_only_append() {
     assert_eq!(success, StatusCode::OK);
     assert_eq!(success_body["message"], "送信が完了しました。");
 
-    let detail: String = sqlx::query_scalar("SELECT detail FROM marker_info_model WHERE id = $1")
-        .bind(&marker_id)
-        .fetch_one(&pool)
-        .await
-        .expect("marker detail should be readable");
+    let detail: String = sqlx::query_scalar(
+        r#"
+        SELECT
+            detail
+        FROM marker_info_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(&marker_id)
+    .fetch_one(&pool)
+    .await
+    .expect("marker detail should be readable");
     assert!(detail.starts_with("既存本文"));
     assert!(detail.contains("## フォーム投稿: 現地報告"));
     assert!(detail.contains("### コメント\n\n\\# 見出し"));
@@ -453,7 +499,12 @@ async fn owner_can_enable_form_and_public_user_can_only_append() {
     assert!(!detail.contains("[危険](javascript:"));
 
     let submission_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM marker_form_submission_model WHERE marker_id = $1",
+        r#"
+        SELECT
+            COUNT(*)
+        FROM marker_form_submission_model
+        WHERE marker_id = $1
+        "#,
     )
     .bind(&marker_id)
     .fetch_one(&pool)
@@ -462,7 +513,13 @@ async fn owner_can_enable_form_and_public_user_can_only_append() {
     assert_eq!(submission_count, 1);
 
     let uploaded_filename: String = sqlx::query_scalar(
-        "SELECT uuid_filename FROM image_model WHERE user_id = $1 AND filename = 'field-photo.png'",
+        r#"
+        SELECT
+            uuid_filename
+        FROM image_model
+        WHERE user_id = $1
+            AND filename = 'field-photo.png'
+        "#,
     )
     .bind(&owner_id)
     .fetch_one(&pool)
@@ -480,12 +537,18 @@ async fn owner_can_enable_form_and_public_user_can_only_append() {
     assert!(image_path.exists());
     assert!(thumb_path.exists());
 
-    let stored_bytes: i64 =
-        sqlx::query_scalar("SELECT stored_bytes FROM marker_form_image_model WHERE owner_id = $1")
-            .bind(&owner_id)
-            .fetch_one(&pool)
-            .await
-            .expect("stored form image bytes should be readable");
+    let stored_bytes: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            stored_bytes
+        FROM marker_form_image_model
+        WHERE owner_id = $1
+        "#,
+    )
+    .bind(&owner_id)
+    .fetch_one(&pool)
+    .await
+    .expect("stored form image bytes should be readable");
     let actual_bytes = i64::try_from(
         std::fs::metadata(&image_path)
             .expect("stored image metadata should be readable")
@@ -497,18 +560,31 @@ async fn owner_can_enable_form_and_public_user_can_only_append() {
     .expect("stored byte count should fit in i64");
     assert_eq!(stored_bytes, actual_bytes);
 
-    sqlx::query("UPDATE marker_form_image_model SET stored_bytes = $1 WHERE owner_id = $2")
-        .bind(CONFIG.marker_form_storage_quota_bytes)
-        .bind(&owner_id)
-        .execute(&pool)
-        .await
-        .expect("form image usage should be raised to the quota");
-    let image_count_before_quota: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM image_model WHERE user_id = $1")
-            .bind(&owner_id)
-            .fetch_one(&pool)
-            .await
-            .expect("image count should be readable");
+    sqlx::query(
+        r#"
+        UPDATE marker_form_image_model
+        SET
+            stored_bytes = $1
+        WHERE owner_id = $2
+        "#,
+    )
+    .bind(CONFIG.marker_form_storage_quota_bytes)
+    .bind(&owner_id)
+    .execute(&pool)
+    .await
+    .expect("form image usage should be raised to the quota");
+    let image_count_before_quota: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            COUNT(*)
+        FROM image_model
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(&owner_id)
+    .fetch_one(&pool)
+    .await
+    .expect("image count should be readable");
     let over_quota = post_form(
         &app,
         &public_id,
@@ -523,16 +599,28 @@ async fn owner_can_enable_form_and_public_user_can_only_append() {
     )
     .await;
     assert_eq!(over_quota, StatusCode::PAYLOAD_TOO_LARGE);
-    let image_count_after_quota: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM image_model WHERE user_id = $1")
-            .bind(&owner_id)
-            .fetch_one(&pool)
-            .await
-            .expect("image count should be readable");
+    let image_count_after_quota: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            COUNT(*)
+        FROM image_model
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(&owner_id)
+    .fetch_one(&pool)
+    .await
+    .expect("image count should be readable");
     assert_eq!(image_count_after_quota, image_count_before_quota);
 
     sqlx::query(
-        "UPDATE marker_form_rate_limit_model SET window_started_at = $1, attempt_count = 30 WHERE marker_id = $2",
+        r#"
+        UPDATE marker_form_rate_limit_model
+        SET
+            window_started_at = $1,
+            attempt_count = 30
+        WHERE marker_id = $2
+        "#,
     )
     .bind(Utc::now().timestamp())
     .bind(&marker_id)
@@ -554,11 +642,18 @@ async fn owner_can_enable_form_and_public_user_can_only_append() {
     .await;
     assert_eq!(rate_limited, StatusCode::TOO_MANY_REQUESTS);
 
-    sqlx::query("UPDATE marker_form_config_model SET enabled = false WHERE marker_id = $1")
-        .bind(&marker_id)
-        .execute(&pool)
-        .await
-        .expect("form should be disabled");
+    sqlx::query(
+        r#"
+        UPDATE marker_form_config_model
+        SET
+            enabled = false
+        WHERE marker_id = $1
+        "#,
+    )
+    .bind(&marker_id)
+    .execute(&pool)
+    .await
+    .expect("form should be disabled");
 
     for path in [
         &public_id,
@@ -817,7 +912,19 @@ async fn common_forms_are_owned_copied_and_preserve_submission_definitions() {
         .await,
         StatusCode::OK
     );
-    let snapshots: Vec<Value> = sqlx::query_scalar("SELECT form_snapshot FROM marker_form_submission_model WHERE marker_id = $1 ORDER BY create_at, id").bind(&marker).fetch_all(&pool).await.unwrap();
+    let snapshots: Vec<Value> = sqlx::query_scalar(
+        r#"
+        SELECT
+            form_snapshot
+        FROM marker_form_submission_model
+        WHERE marker_id = $1
+        ORDER BY create_at, id
+        "#,
+    )
+    .bind(&marker)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
     assert_eq!(snapshots[0]["form_schema"]["fields"][0]["label"], "値");
     assert_eq!(
         snapshots[1]["form_schema"]["fields"][0]["label"],
@@ -828,7 +935,14 @@ async fn common_forms_are_owned_copied_and_preserve_submission_definitions() {
         ("shape_form_submission_model", "shape_id", shape.clone()),
     ] {
         let rows: Vec<(Value, Value, Value)> = sqlx::query_as(&format!(
-            "SELECT source_form, form_snapshot, submitted_values FROM {table} WHERE {column} = $1"
+            r#"
+            SELECT
+                source_form,
+                form_snapshot,
+                submitted_values
+            FROM {table}
+            WHERE {column} = $1
+            "#
         ))
         .bind(&target_id)
         .fetch_all(&pool)
@@ -893,7 +1007,12 @@ async fn common_forms_are_owned_copied_and_preserve_submission_definitions() {
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM marker_form_submission_model WHERE marker_id = $1"
+            r#"
+            SELECT
+                COUNT(*)
+            FROM marker_form_submission_model
+            WHERE marker_id = $1
+            "#
         )
         .bind(&marker)
         .fetch_one(&pool)
@@ -1038,7 +1157,11 @@ async fn concurrent_definition_changes_reject_posts_and_versions_are_atomic() {
         resume_tx.send(()).unwrap();
         assert_eq!(task.await.unwrap().unwrap().status(), StatusCode::CONFLICT);
         let count: i64 = sqlx::query_scalar(&format!(
-            "SELECT count(*) FROM {kind}_form_submission_model"
+            r#"
+            SELECT
+                count(*)
+            FROM {kind}_form_submission_model
+            "#
         ))
         .fetch_one(&pool)
         .await
@@ -1180,7 +1303,12 @@ async fn owner_inputs_work_with_private_forms_preserve_objects_and_are_searchabl
         assert!(!input.to_string().contains("private-password"));
         assert!(input.get("password_hash").is_none());
         let public_id: String = sqlx::query_scalar(&format!(
-            "SELECT public_id FROM {kind}_form_config_model WHERE {kind}_id=$1"
+            r#"
+            SELECT
+                public_id
+            FROM {kind}_form_config_model
+            WHERE {kind}_id = $1
+            "#
         ))
         .bind(id.to_string())
         .fetch_one(&pool)
@@ -1267,7 +1395,19 @@ async fn owner_inputs_work_with_private_forms_preserve_objects_and_are_searchabl
                     .starts_with("既存メモ")
             );
         }
-        let (submitted,snapshot):(Value,Value)=sqlx::query_as(&format!("SELECT submitted_values,form_snapshot FROM {kind}_form_submission_model WHERE {kind}_id=$1")).bind(id.to_string()).fetch_one(&pool).await.unwrap();
+        let (submitted, snapshot): (Value, Value) = sqlx::query_as(&format!(
+            r#"
+            SELECT
+                submitted_values,
+                form_snapshot
+            FROM {kind}_form_submission_model
+            WHERE {kind}_id = $1
+            "#,
+        ))
+        .bind(id.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(submitted["n"], 0);
         assert_eq!(submitted["flag"], false);
         assert_eq!(snapshot["form_title"], "所有者入力");
@@ -1294,7 +1434,12 @@ async fn owner_inputs_work_with_private_forms_preserve_objects_and_are_searchabl
             StatusCode::OK
         );
         let count: i64 = sqlx::query_scalar(&format!(
-            "SELECT count(*) FROM {kind}_form_submission_model WHERE {kind}_id=$1"
+            r#"
+            SELECT
+                count(*)
+            FROM {kind}_form_submission_model
+            WHERE {kind}_id = $1
+            "#
         ))
         .bind(id.to_string())
         .fetch_one(&pool)
@@ -1312,7 +1457,12 @@ async fn owner_inputs_work_with_private_forms_preserve_objects_and_are_searchabl
         assert_eq!(results.0.total, 1);
         // 表示後の設定変更は保存させず、履歴・本文を変更しない。
         sqlx::query(&format!(
-            "UPDATE {kind}_form_config_model SET form_description='変更' WHERE {kind}_id=$1"
+            r#"
+            UPDATE {kind}_form_config_model
+            SET
+                form_description = '変更'
+            WHERE {kind}_id = $1
+            "#
         ))
         .bind(id.to_string())
         .execute(&pool)
@@ -1332,7 +1482,12 @@ async fn owner_inputs_work_with_private_forms_preserve_objects_and_are_searchabl
             StatusCode::CONFLICT
         );
         let count: i64 = sqlx::query_scalar(&format!(
-            "SELECT count(*) FROM {kind}_form_submission_model WHERE {kind}_id=$1"
+            r#"
+            SELECT
+                count(*)
+            FROM {kind}_form_submission_model
+            WHERE {kind}_id = $1
+            "#
         ))
         .bind(id.to_string())
         .fetch_one(&pool)
@@ -1366,12 +1521,19 @@ async fn owner_prefill_uses_only_latest_same_form_and_matching_definitions() {
     .await
     .unwrap();
     let form = Uuid::new_v4();
-    sqlx::query("UPDATE marker_form_config_model SET source_form=$1 WHERE marker_id=$2")
-        .bind(json!({"id":form,"version":2}))
-        .bind(marker.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE marker_form_config_model
+        SET
+            source_form = $1
+        WHERE marker_id = $2
+        "#,
+    )
+    .bind(json!({"id":form,"version":2}))
+    .bind(marker.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let snapshot = json!({"form_schema":{"fields":[{"id":"n","type":"number","label":"旧数値"},{"id":"flag","type":"text","label":"旧確認"}]}});
     for (seconds, source, values, definition) in [
         (
@@ -1398,8 +1560,28 @@ async fn owner_prefill_uses_only_latest_same_form_and_matching_definitions() {
             .unwrap()
             .naive_utc()
             - chrono::Duration::seconds(seconds);
-        sqlx::query("INSERT INTO marker_form_submission_model(id,marker_id,create_at,submitted_values,rendered_markdown,source_form,form_snapshot) VALUES($1,$2,$3,$4,'',$5,$6)")
-        .bind(Uuid::new_v4().to_string()).bind(marker.to_string()).bind(created_at).bind(values).bind(source).bind(definition).execute(&pool).await.unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO marker_form_submission_model (
+                id,
+                marker_id,
+                create_at,
+                submitted_values,
+                rendered_markdown,
+                source_form,
+                form_snapshot
+            ) VALUES ($1, $2, $3, $4, '', $5, $6)
+            "#,
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(marker.to_string())
+        .bind(created_at)
+        .bind(values)
+        .bind(source)
+        .bind(definition)
+        .execute(&pool)
+        .await
+        .unwrap();
     }
     let app = geocode_web_single::router::build_router(
         pool.clone(),
@@ -1416,13 +1598,36 @@ async fn owner_prefill_uses_only_latest_same_form_and_matching_definitions() {
     let created_at = chrono::DateTime::parse_from_rfc3339("2020-01-01T00:00:00Z")
         .unwrap()
         .naive_utc();
-    sqlx::query("INSERT INTO marker_form_submission_model(id,marker_id,create_at,submitted_values,rendered_markdown,source_form) VALUES($1,$2,$3,'{\"n\":9}','','{}')")
-      .bind(Uuid::new_v4().to_string()).bind(marker.to_string()).bind(created_at).execute(&pool).await.unwrap();
-    sqlx::query("UPDATE marker_form_config_model SET source_form=NULL WHERE marker_id=$1")
-        .bind(marker.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO marker_form_submission_model (
+            id,
+            marker_id,
+            create_at,
+            submitted_values,
+            rendered_markdown,
+            source_form
+        ) VALUES ($1, $2, $3, '{"n":9}', '', '{}')
+        "#,
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(marker.to_string())
+    .bind(created_at)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE marker_form_config_model
+        SET
+            source_form = NULL
+        WHERE marker_id = $1
+        "#,
+    )
+    .bind(marker.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let (_, input) = owner_request(&app, Some(user), "marker", marker, None, None).await;
     assert_eq!(input["values"], json!({})); // 定義がない既存回答を推測しない。
     pool.close().await;

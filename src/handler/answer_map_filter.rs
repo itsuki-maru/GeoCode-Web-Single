@@ -83,14 +83,22 @@ fn base(
 ) -> QueryBuilder<'static, Sqlite> {
     let mut b = build_query(user, q, at);
     b.push(
-        r#", map_scope AS (
-        SELECT * FROM filtered WHERE
-        (target_type='marker' AND target_id IN (SELECT value FROM json_each("#,
+        r#"
+        , map_scope AS (
+            SELECT *
+            FROM filtered
+            WHERE (target_type = 'marker' AND target_id IN (
+                SELECT value
+                FROM json_each(
+        "#,
     )
     .push_bind(serde_json::to_string(&scope.markers).unwrap())
     .push(
-        r#"))) OR
-        (target_type='shape' AND target_id IN (SELECT value FROM json_each("#,
+        r#"
+        ))) OR (target_type = 'shape' AND target_id IN (
+            SELECT value
+            FROM json_each(
+        "#,
     )
     .push_bind(serde_json::to_string(&scope.shapes).unwrap())
     .push("))))");
@@ -103,7 +111,14 @@ pub(super) fn matched(
     scope: &Scope,
 ) -> QueryBuilder<'static, Sqlite> {
     let mut b = base(user, &r.query, at, scope);
-    b.push(", map_matched AS (SELECT * FROM map_scope WHERE TRUE");
+    b.push(
+        r#"
+        , map_matched AS (
+            SELECT *
+            FROM map_scope
+            WHERE TRUE
+        "#,
+    );
     if let Some(form) = &r.common_form_id {
         b.push(" AND source_form->>'id'=")
             .push_bind(form.to_string());
@@ -124,10 +139,21 @@ async fn fields(
     };
     let mut fields = BTreeMap::new();
     let mut order = vec![];
-    let schemas:Vec<Value>=sqlx::query_scalar(r#"
-        SELECT r.form_schema FROM common_form_revision_model r JOIN common_form_model f ON f.id=r.form_id
-        WHERE f.id=$1 AND f.user_id=$2 ORDER BY r.version DESC
-    "#).bind(form).bind(user).fetch_all(&mut **tx).await?;
+    let schemas: Vec<Value> = sqlx::query_scalar(
+        r#"
+        SELECT
+            r.form_schema
+        FROM common_form_revision_model r
+        JOIN common_form_model f ON f.id = r.form_id
+        WHERE f.id = $1
+            AND f.user_id = $2
+        ORDER BY r.version DESC
+        "#,
+    )
+    .bind(form)
+    .bind(user)
+    .fetch_all(&mut **tx)
+    .await?;
     for schema in schemas {
         if let Ok(schema) = serde_json::from_value::<MarkerFormSchema>(schema) {
             for f in schema.fields {
@@ -168,35 +194,69 @@ async fn fields(
 fn append_map_field_definitions(b: &mut QueryBuilder<'static, Sqlite>, form: &str) {
     // Group only arrays by their BINARY JSON text. Strings can extract to the
     // same text; null/missing/object/scalar values must keep their old expansion.
-    b.push(r#", map_field_source AS (
-        SELECT form_snapshot,create_at,id,target_type FROM map_scope
-        WHERE source_form->>'id'=
-    "#).push_bind(form.to_owned()).push(r#"
+    b.push(
+        r#"
+        , map_field_source AS (
+            SELECT
+                form_snapshot,
+                create_at,
+                id,
+                target_type
+            FROM map_scope
+            WHERE source_form->>'id' =
+        "#,
     )
-    SELECT field FROM (
-        SELECT f.value AS field,a.create_at,CAST(f.key AS INTEGER) AS position,
-            row_number() OVER (
-                PARTITION BY f.value
-                ORDER BY a.create_at COLLATE answer_time DESC,a.id DESC,
-                    a.target_type ASC,CAST(f.key AS INTEGER)
-            ) AS definition_rank
+    .push_bind(form.to_owned())
+    .push(
+        r#"
+        )
+        SELECT field
         FROM (
-            SELECT form_snapshot,create_at,id,target_type FROM (
-                SELECT form_snapshot,create_at,id,target_type,
-                    row_number() OVER (
-                        PARTITION BY json_extract(form_snapshot,'$.form_schema.fields') COLLATE BINARY
-                        ORDER BY create_at COLLATE answer_time DESC,id DESC,target_type ASC
-                    ) AS snapshot_rank
+            SELECT
+                f.value AS field,
+                a.create_at,
+                CAST(f.key AS INTEGER) AS position,
+                row_number() OVER (
+                    PARTITION BY f.value
+                    ORDER BY a.create_at COLLATE answer_time DESC, a.id DESC, a.target_type ASC,
+                        CAST(f.key AS INTEGER)
+                ) AS definition_rank
+            FROM (
+                SELECT
+                    form_snapshot,
+                    create_at,
+                    id,
+                    target_type
+                FROM (
+                    SELECT
+                        form_snapshot,
+                        create_at,
+                        id,
+                        target_type,
+                        row_number() OVER (
+                            PARTITION BY
+                                json_extract(form_snapshot, '$.form_schema.fields') COLLATE BINARY
+                            ORDER BY create_at COLLATE answer_time DESC, id DESC, target_type ASC
+                        ) AS snapshot_rank
+                    FROM map_field_source
+                    WHERE json_type(form_snapshot, '$.form_schema.fields') = 'array'
+                ) arrays
+                WHERE snapshot_rank = 1
+                UNION ALL
+                SELECT
+                    form_snapshot,
+                    create_at,
+                    id,
+                    target_type
                 FROM map_field_source
-                WHERE json_type(form_snapshot,'$.form_schema.fields')='array'
-            ) arrays WHERE snapshot_rank=1
-            UNION ALL
-            SELECT form_snapshot,create_at,id,target_type FROM map_field_source
-            WHERE json_type(form_snapshot,'$.form_schema.fields') IS NOT 'array'
-        ) a,json_each(a.form_snapshot,'$.form_schema.fields') f
-    ) definitions WHERE definition_rank=1
-    ORDER BY create_at COLLATE answer_time DESC,position,field LIMIT 10001
-    "#);
+                WHERE json_type(form_snapshot, '$.form_schema.fields') IS NOT 'array'
+            ) a, json_each(a.form_snapshot, '$.form_schema.fields') f
+        ) definitions
+        WHERE definition_rank = 1
+        ORDER BY create_at COLLATE answer_time DESC, position, field
+        LIMIT 10001
+        "#,
+    );
 }
 
 pub(super) fn validate_request(r: &MapFilterRequest) -> Result<DateTime<Utc>, AppError> {
@@ -237,13 +297,24 @@ pub(super) async fn validate_conditions(
                 "text" | "textarea" | "number" | "date" | "select" | "radio" | "checkbox"
             )
         {
-            known = build_query(user, &r.query, at).push(r#"
-                SELECT EXISTS (SELECT 1 FROM filtered,json_each(form_snapshot,'$.form_schema.fields') field
-                WHERE source_form->>'id'=
-            "#).push_bind(r.common_form_id.as_ref().map(|v|v.to_string()))
-                .push(" AND field.value->>'id'=").push_bind(condition.field_id.clone())
-                .push(" AND field.value->>'type'=").push_bind(condition.field_type.clone()).push(")")
-                .build_query_scalar().fetch_one(&mut **tx).await?;
+            known = build_query(user, &r.query, at)
+                .push(
+                    r#"
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM filtered, json_each(form_snapshot, '$.form_schema.fields') field
+                        WHERE source_form->>'id' =
+                    "#,
+                )
+                .push_bind(r.common_form_id.as_ref().map(|v| v.to_string()))
+                .push(" AND field.value->>'id'=")
+                .push_bind(condition.field_id.clone())
+                .push(" AND field.value->>'type'=")
+                .push_bind(condition.field_type.clone())
+                .push(")")
+                .build_query_scalar()
+                .fetch_one(&mut **tx)
+                .await?;
         }
         if !known {
             return Err(invalid(
@@ -300,12 +371,24 @@ pub async fn filter_targets(
     let forms: Vec<(String, String)> = base(user, &r.query, at, &scope)
         .push(
             r#"
-        SELECT form_id,label FROM (
-            SELECT source_form->>'id' AS form_id,COALESCE(common_form_name,form_snapshot->>'form_title','共通フォーム') AS label,
-            row_number() OVER(PARTITION BY source_form->>'id' ORDER BY create_at COLLATE answer_time DESC,id DESC) AS form_rank
-            FROM map_scope WHERE source_form->>'id' IS NOT NULL
-        ) forms WHERE form_rank=1 ORDER BY form_id LIMIT 201
-    "#,
+            SELECT
+                form_id,
+                label
+            FROM (
+                SELECT
+                    source_form ->> 'id' AS form_id,
+                    COALESCE(common_form_name, form_snapshot ->> 'form_title', '共通フォーム') AS label,
+                    row_number() OVER (
+                        PARTITION BY source_form ->> 'id'
+                        ORDER BY create_at COLLATE answer_time DESC, id DESC
+                    ) AS form_rank
+                FROM map_scope
+                WHERE source_form ->> 'id' IS NOT NULL
+            ) forms
+            WHERE form_rank = 1
+            ORDER BY form_id
+            LIMIT 201
+            "#,
         )
         .build_query_as()
         .fetch_all(&mut *tx)
@@ -316,12 +399,25 @@ pub async fn filter_targets(
     let mut answer_count = 0;
     if !r.options_only {
         answer_count = matched(user, r, at, &scope)
-            .push(" SELECT count(*) FROM map_matched")
+            .push(
+                r#"
+                SELECT
+                    count(*)
+                FROM map_matched
+                "#,
+            )
             .build_query_scalar()
             .fetch_one(&mut *tx)
             .await?;
         targets = matched(user, r, at, &scope)
-            .push(" SELECT DISTINCT target_type||':'||target_id FROM map_matched ORDER BY 1")
+            .push(
+                r#"
+                SELECT DISTINCT
+                    target_type || ':' || target_id
+                FROM map_matched
+                ORDER BY 1
+                "#,
+            )
             .build_query_scalar()
             .fetch_all(&mut *tx)
             .await?;
@@ -360,16 +456,24 @@ mod field_tests {
 
     const FORM: &str = "10000000-0000-4000-8000-000000000001";
     const PREVIOUS: &str = r#"
-        SELECT field FROM (
-            SELECT f.value AS field,a.create_at,CAST(f.key AS INTEGER) AS position,
-                row_number() OVER(PARTITION BY f.value ORDER BY a.create_at COLLATE answer_time DESC,a.id DESC,a.target_type,CAST(f.key AS INTEGER)) AS definition_rank
-            FROM map_scope a,json_each(a.form_snapshot,'$.form_schema.fields') f
-            WHERE source_form->>'id'=
-    "#;
+        SELECT field
+        FROM (
+            SELECT
+                f.value AS field,
+                a.create_at,
+                CAST(f.key AS INTEGER) AS position,
+                row_number() OVER (
+                    PARTITION BY f.value
+                    ORDER BY a.create_at COLLATE answer_time DESC, a.id DESC, a.target_type,
+                        CAST(f.key AS INTEGER)
+                ) AS definition_rank
+            FROM map_scope a, json_each(a.form_snapshot, '$.form_schema.fields') f
+            WHERE source_form->>'id' =
+        "#;
     const PREVIOUS_END: &str = r#"
         ) definitions WHERE definition_rank=1
         ORDER BY create_at COLLATE answer_time DESC,position,field LIMIT 10001
-    "#;
+        "#;
 
     fn record(id: u128, kind: &str, at: &str, snapshot: Option<Value>) -> Value {
         json!({"id":Uuid::from_u128(id),"target_type":kind,"create_at":at,
@@ -404,7 +508,7 @@ mod field_tests {
                     json_object('id',json_extract(r.value,'$.form_id')) AS source_form,
                     json_extract(r.value,'$.submitted_values') AS submitted_values
                 FROM json_each(
-        "#,
+            "#,
         );
         b.push_bind(rows).push(") r) ");
         if previous {

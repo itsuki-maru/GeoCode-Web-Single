@@ -144,22 +144,36 @@ async fn image_upload_creates_a_thumbnail_and_enforces_read_and_delete_ownership
     let thumbnail = image::open(&thumb).unwrap();
     assert_eq!((thumbnail.width(), thumbnail.height()), (450, 225));
     let path = format!("/static/images/{filename}");
-    sqlx::query("UPDATE user_model SET is_private=false WHERE id=$1")
-        .bind(owner.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE user_model
+        SET
+            is_private = false
+        WHERE id = $1
+        "#,
+    )
+    .bind(owner.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     for user in [Some(owner), Some(other), None] {
         let response = get(&app, user, &path).await;
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()["content-type"], "image/png");
         assert!(image::load_from_memory(&bytes(response).await).is_ok());
     }
-    sqlx::query("UPDATE user_model SET is_private=true WHERE id=$1")
-        .bind(owner.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE user_model
+        SET
+            is_private = true
+        WHERE id = $1
+        "#,
+    )
+    .bind(owner.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     for user in [Some(other), None] {
         assert_eq!(get(&app, user, &path).await.status(), StatusCode::NOT_FOUND);
     }
@@ -169,22 +183,36 @@ async fn image_upload_creates_a_thumbnail_and_enforces_read_and_delete_ownership
     assert_eq!(json(response).await["error"], "database error");
     assert!(file.is_file() && thumb.is_file());
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM image_model WHERE id=$1")
-            .bind(id)
-            .fetch_one(&pool)
-            .await
-            .unwrap(),
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT
+                count(*)
+            FROM image_model
+            WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
         1
     );
     let response = delete(&app, owner, id).await;
     assert_eq!(response.status(), StatusCode::OK);
     assert!(!file.exists() && !thumb.exists());
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM image_model WHERE id=$1")
-            .bind(id)
-            .fetch_one(&pool)
-            .await
-            .unwrap(),
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT
+                count(*)
+            FROM image_model
+            WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
         0
     );
 }
@@ -269,7 +297,25 @@ async fn image_search_escapes_wildcards_limits_blank_queries_and_never_leaks_oth
         } else {
             format!("item-{index}.png")
         };
-        sqlx::query("INSERT INTO image_model(id,user_id,filename,uuid_filename,create_at) VALUES($1,$2,$3,$4,$5)").bind(id.to_string()).bind(user.to_string()).bind(name).bind(format!("{id}.png")).bind(base + chrono::Duration::seconds(index as i64)).execute(&pool).await.unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO image_model (
+                id,
+                user_id,
+                filename,
+                uuid_filename,
+                create_at
+            ) VALUES ($1, $2, $3, $4, $5)
+            "#,
+        )
+        .bind(id.to_string())
+        .bind(user.to_string())
+        .bind(name)
+        .bind(format!("{id}.png"))
+        .bind(base + chrono::Duration::seconds(index as i64))
+        .execute(&pool)
+        .await
+        .unwrap();
     }
     let response = get(&app, Some(owner), "/images/eneble-images").await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -361,11 +407,18 @@ async fn invalid_document_headers_extensions_and_oversized_posters_create_no_dat
     .await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM image_model WHERE user_id=$1")
-            .bind(owner.to_string())
-            .fetch_one(&pool)
-            .await
-            .unwrap(),
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT
+                count(*)
+            FROM image_model
+            WHERE user_id = $1
+            "#,
+        )
+        .bind(owner.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
         0
     );
 }

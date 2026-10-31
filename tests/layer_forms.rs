@@ -278,7 +278,20 @@ async fn managed_forms_apply_move_propagate_restrict_and_keep_history() {
         post_public(&app, path, None, Some("new-password")).await,
         StatusCode::OK
     );
-    let rows:Vec<(Value,Value)>=sqlx::query_as("SELECT source_form,form_snapshot FROM marker_form_submission_model WHERE marker_id=$1 ORDER BY create_at,id").bind(id.to_string()).fetch_all(&pool).await.unwrap();
+    let rows: Vec<(Value, Value)> = sqlx::query_as(
+        r#"
+        SELECT
+            source_form,
+            form_snapshot
+        FROM marker_form_submission_model
+        WHERE marker_id = $1
+        ORDER BY create_at, id
+        "#,
+    )
+    .bind(id.to_string())
+    .fetch_all(&pool)
+    .await
+    .unwrap();
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].0["version"], 1);
     assert_eq!(rows[0].1["form_title"], "A");
@@ -385,11 +398,18 @@ async fn managed_forms_apply_move_propagate_restrict_and_keep_history() {
         .0,
         StatusCode::NOT_FOUND
     );
-    let detail: String = sqlx::query_scalar("SELECT detail FROM marker_info_model WHERE id=$1")
-        .bind(id.to_string())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let detail: String = sqlx::query_scalar(
+        r#"
+        SELECT
+            detail
+        FROM marker_info_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     bind(&app, user, first, None).await;
     let cleared = config(&app, user, "marker", id).await;
     assert_eq!(cleared["enabled"], false);
@@ -397,16 +417,28 @@ async fn managed_forms_apply_move_propagate_restrict_and_keep_history() {
     assert!(cleared["managed_layer_id"].is_null());
     assert_ne!(cleared["public_path"], rotated["public_path"]);
     assert_eq!(
-        sqlx::query_scalar::<_, String>("SELECT detail FROM marker_info_model WHERE id=$1")
-            .bind(id.to_string())
-            .fetch_one(&pool)
-            .await
-            .unwrap(),
+        sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT
+                detail
+            FROM marker_info_model
+            WHERE id = $1
+            "#,
+        )
+        .bind(id.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
         detail
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
-            "SELECT count(*) FROM marker_form_submission_model WHERE marker_id=$1"
+            r#"
+            SELECT
+                count(*)
+            FROM marker_form_submission_model
+            WHERE marker_id = $1
+            "#
         )
         .bind(id.to_string())
         .fetch_one(&pool)
@@ -444,7 +476,47 @@ async fn bulk_application_is_complete_conflicts_are_atomic_and_master_is_not_glo
     let layer = layer(&app, user, "bulk").await;
     let form = common_form(&app, user, "bulk").await;
     let actual_master = marker(&app, user, master).await;
-    sqlx::query("WITH RECURSIVE series(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM series WHERE i<10001) INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) SELECT printf('%08x-0000-4000-8000-%012x',i,i),$1,$2,'bulk',35,139,'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP FROM series").bind(user.to_string()).bind(layer.to_string()).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        WITH RECURSIVE
+            series (i) AS (
+                SELECT
+                    1
+                UNION ALL
+                SELECT
+                    i + 1
+                FROM series
+                WHERE i < 10001
+            )
+        INSERT INTO marker_info_model (
+            id,
+            user_id,
+            layer_id,
+            marker_name,
+            latitude,
+            longitude,
+            detail,
+            create_at,
+            update_at
+        )
+        SELECT
+            printf('%08x-0000-4000-8000-%012x', i, i),
+            $1,
+            $2,
+            'bulk',
+            35,
+            139,
+            '',
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        FROM series
+        "#,
+    )
+    .bind(user.to_string())
+    .bind(layer.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let stale = change_body(&app, user, layer, Some(&form)).await;
     let added = marker(&app, user, layer).await;
     assert_eq!(
@@ -463,7 +535,12 @@ async fn bulk_application_is_complete_conflicts_are_atomic_and_master_is_not_glo
     bind(&app, user, layer, Some(&form)).await;
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
-            "SELECT count(*) FROM marker_form_config_model WHERE managed_layer_id=$1"
+            r#"
+            SELECT
+                count(*)
+            FROM marker_form_config_model
+            WHERE managed_layer_id = $1
+            "#
         )
         .bind(layer.to_string())
         .fetch_one(&pool)
@@ -629,29 +706,134 @@ async fn layer_form_upgrade_keeps_legacy_data_and_is_idempotent() {
     let layer = layer(&app, user, "legacy").await;
     let id = marker(&app, user, layer).await;
     let cfg = save_config(&app, user, "marker", id, definition("legacy")).await;
-    sqlx::query("UPDATE marker_form_config_model SET password_hash='legacy-hash',enabled=true WHERE marker_id=$1").bind(id.to_string()).execute(&pool).await.unwrap();
-    sqlx::query("INSERT INTO marker_form_submission_model(id,marker_id,submitted_values,rendered_markdown,create_at) VALUES($1,$2,'{\"n\":0,\"flag\":false}','legacy markdown',CURRENT_TIMESTAMP)").bind(Uuid::new_v4().to_string()).bind(id.to_string()).execute(&pool).await.unwrap();
-    sqlx::raw_sql("DROP INDEX idx_layer_common_form; DROP INDEX idx_marker_form_managed_layer; DROP INDEX idx_shape_form_managed_layer; ALTER TABLE marker_form_config_model DROP COLUMN managed_layer_id; ALTER TABLE shape_form_config_model DROP COLUMN managed_layer_id; ALTER TABLE layer_model DROP COLUMN common_form_version; ALTER TABLE layer_model DROP COLUMN common_form_id; ALTER TABLE layer_model DROP COLUMN form_binding_revision; ALTER TABLE common_form_model DROP COLUMN password_hash; DELETE FROM schema_migrations WHERE version=18;").execute(&pool).await.unwrap();
-    let before:(String,String,String,bool)=sqlx::query_as("SELECT public_id,form_schema,password_hash,enabled FROM marker_form_config_model WHERE marker_id=$1").bind(id.to_string()).fetch_one(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        UPDATE marker_form_config_model
+        SET
+            password_hash = 'legacy-hash',
+            enabled = true
+        WHERE marker_id = $1
+        "#,
+    )
+    .bind(id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO marker_form_submission_model (
+            id,
+            marker_id,
+            submitted_values,
+            rendered_markdown,
+            create_at
+        ) VALUES (
+            $1,
+            $2,
+            '{"n":0,"flag":false}',
+            'legacy markdown',
+            CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(
+        r#"
+        DROP INDEX idx_layer_common_form;
+
+        DROP INDEX idx_marker_form_managed_layer;
+
+        DROP INDEX idx_shape_form_managed_layer;
+
+        ALTER TABLE marker_form_config_model
+        DROP COLUMN managed_layer_id;
+
+        ALTER TABLE shape_form_config_model
+        DROP COLUMN managed_layer_id;
+
+        ALTER TABLE layer_model
+        DROP COLUMN common_form_version;
+
+        ALTER TABLE layer_model
+        DROP COLUMN common_form_id;
+
+        ALTER TABLE layer_model
+        DROP COLUMN form_binding_revision;
+
+        ALTER TABLE common_form_model
+        DROP COLUMN password_hash;
+
+        DELETE FROM schema_migrations
+        WHERE version = 18;
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let before: (String, String, String, bool) = sqlx::query_as(
+        r#"
+        SELECT
+            public_id,
+            form_schema,
+            password_hash,
+            enabled
+        FROM marker_form_config_model
+        WHERE marker_id = $1
+        "#,
+    )
+    .bind(id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     geocode_web_single::db::run_migrations(&pool).await.unwrap();
     geocode_web_single::db::run_migrations(&pool).await.unwrap();
-    let after:(String,String,String,bool)=sqlx::query_as("SELECT public_id,form_schema,password_hash,enabled FROM marker_form_config_model WHERE marker_id=$1").bind(id.to_string()).fetch_one(&pool).await.unwrap();
+    let after: (String, String, String, bool) = sqlx::query_as(
+        r#"
+        SELECT
+            public_id,
+            form_schema,
+            password_hash,
+            enabled
+        FROM marker_form_config_model
+        WHERE marker_id = $1
+        "#,
+    )
+    .bind(id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(before, after);
     let after = config(&app, user, "marker", id).await;
     assert_eq!(cfg["public_path"], after["public_path"]);
     assert!(after["managed_layer_id"].is_null());
     let answer: Value = sqlx::query_scalar(
-        "SELECT submitted_values FROM marker_form_submission_model WHERE marker_id=$1",
+        r#"
+        SELECT
+            submitted_values
+        FROM marker_form_submission_model
+        WHERE marker_id = $1
+        "#,
     )
     .bind(id.to_string())
     .fetch_one(&pool)
     .await
     .unwrap();
     assert_eq!(answer, json!({"n":0,"flag":false}));
-    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM schema_migrations WHERE version=18")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            count(*)
+        FROM schema_migrations
+        WHERE version = 18
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(count, 1);
 }
 #[tokio::test]
@@ -696,11 +878,18 @@ async fn input_policy_blocks_free_writes_but_keeps_names_moves_and_form_answers(
         .0,
         StatusCode::BAD_REQUEST
     );
-    let original: Value = sqlx::query_scalar("SELECT geojson FROM shape_model WHERE id=$1")
-        .bind(sid.to_string())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let original: Value = sqlx::query_scalar(
+        r#"
+        SELECT
+            geojson
+        FROM shape_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(sid.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     let before = definition("元フォーム");
     for (kind, object) in [("marker", id), ("shape", sid)] {
         let mut config = before.clone();
@@ -860,16 +1049,30 @@ async fn input_policy_blocks_free_writes_but_keeps_names_moves_and_form_answers(
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
     }
-    let detail: String = sqlx::query_scalar("SELECT detail FROM marker_info_model WHERE id=$1")
-        .bind(id.to_string())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    let geojson: Value = sqlx::query_scalar("SELECT geojson FROM shape_model WHERE id=$1")
-        .bind(sid.to_string())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let detail: String = sqlx::query_scalar(
+        r#"
+        SELECT
+            detail
+        FROM marker_info_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let geojson: Value = sqlx::query_scalar(
+        r#"
+        SELECT
+            geojson
+        FROM shape_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(sid.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert!(detail.contains("42"));
     assert!(
         geojson["properties"]["memo"]
@@ -931,10 +1134,16 @@ async fn input_policy_blocks_free_writes_but_keeps_names_moves_and_form_answers(
         "marker_form_submission_model",
         "shape_form_submission_model",
     ] {
-        let total: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let total: i64 = sqlx::query_scalar(&format!(
+            r#"
+            SELECT
+                count(*)
+            FROM {table}
+            "#,
+        ))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(total, 2);
     }
     ok(
@@ -962,11 +1171,18 @@ async fn input_policy_is_rechecked_after_concurrent_setting_change() {
     let l = layer(&app, user, "race").await;
     let m = marker(&app, user, l).await;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
-    sqlx::query("UPDATE layer_model SET restrict_free_text=true WHERE id=$1")
-        .bind(l.to_string())
-        .execute(&mut *tx)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE layer_model
+        SET
+            restrict_free_text = true
+        WHERE id = $1
+        "#,
+    )
+    .bind(l.to_string())
+    .execute(&mut *tx)
+    .await
+    .unwrap();
     let mut request = tokio::spawn(async move {
         call(
             &app,
@@ -984,11 +1200,18 @@ async fn input_policy_is_rechecked_after_concurrent_setting_change() {
     );
     tx.commit().await.unwrap();
     assert_eq!(request.await.unwrap().0, StatusCode::BAD_REQUEST);
-    let detail: String = sqlx::query_scalar("SELECT detail FROM marker_info_model WHERE id=$1")
-        .bind(m.to_string())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let detail: String = sqlx::query_scalar(
+        r#"
+        SELECT
+            detail
+        FROM marker_info_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(m.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(detail, "");
     common::close_file_test_pool(pool, path).await;
 }
@@ -1102,10 +1325,29 @@ async fn answer_correction_preserves_identity_latest_order_and_body_integrity() 
             StatusCode::OK
         );
         owner_post(&app, user, kind, target, "42").await;
-        let id: String = sqlx::query_scalar(&format!("SELECT id FROM {kind}_form_submission_model WHERE {kind}_id=$1 ORDER BY create_at,id LIMIT 1")).bind(target.to_string()).fetch_one(&pool).await.unwrap();
+        let id: String = sqlx::query_scalar(&format!(
+            r#"
+            SELECT
+                id
+            FROM {kind}_form_submission_model
+            WHERE {kind}_id = $1
+            ORDER BY create_at, id
+            LIMIT 1
+            "#,
+        ))
+        .bind(target.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         let id = Uuid::parse_str(&id).unwrap();
         let before: (String, String) = sqlx::query_as(&format!(
-            "SELECT create_at,form_snapshot FROM {kind}_form_submission_model WHERE id=$1"
+            r#"
+            SELECT
+                create_at,
+                form_snapshot
+            FROM {kind}_form_submission_model
+            WHERE id = $1
+            "#
         ))
         .bind(id.to_string())
         .fetch_one(&pool)
@@ -1172,7 +1414,21 @@ async fn answer_correction_preserves_identity_latest_order_and_body_integrity() 
             correct(&app, user, kind, id, request).await.0,
             StatusCode::CONFLICT
         );
-        let after: (String,String,i64,bool)=sqlx::query_as(&format!("SELECT create_at,form_snapshot,revision,edited_at IS NOT NULL FROM {kind}_form_submission_model WHERE id=$1")).bind(id.to_string()).fetch_one(&pool).await.unwrap();
+        let after: (String, String, i64, bool) = sqlx::query_as(&format!(
+            r#"
+            SELECT
+                create_at,
+                form_snapshot,
+                revision,
+                edited_at IS NOT NULL
+            FROM {kind}_form_submission_model
+            WHERE id = $1
+            "#,
+        ))
+        .bind(id.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!((after.0, after.1), before);
         assert_eq!(after.2, 2);
         assert!(after.3);
@@ -1236,7 +1492,20 @@ async fn ambiguous_legacy_answers_require_explicit_reconciliation_and_recheck_bo
     save_config(&app, user, "marker", m, definition("重複回答")).await;
     owner_post(&app, user, "marker", m, "20").await;
     owner_post(&app, user, "marker", m, "20").await;
-    let id: String = sqlx::query_scalar("SELECT id FROM marker_form_submission_model WHERE marker_id=$1 ORDER BY create_at,id LIMIT 1").bind(m.to_string()).fetch_one(&pool).await.unwrap();
+    let id: String = sqlx::query_scalar(
+        r#"
+        SELECT
+            id
+        FROM marker_form_submission_model
+        WHERE marker_id = $1
+        ORDER BY create_at, id
+        LIMIT 1
+        "#,
+    )
+    .bind(m.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     let id = Uuid::parse_str(&id).unwrap();
     // New submissions already carry stable IDs, even when their rendered texts are identical.
     assert_eq!(
@@ -1251,11 +1520,18 @@ async fn ambiguous_legacy_answers_require_explicit_reconciliation_and_recheck_bo
         .0,
         StatusCode::OK
     );
-    sqlx::query("UPDATE marker_info_model SET form_body_parts=NULL WHERE id=$1")
-        .bind(m.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE marker_info_model
+        SET
+            form_body_parts = NULL
+        WHERE id = $1
+        "#,
+    )
+    .bind(m.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let meta = ok(
         &app,
         user,
@@ -1312,7 +1588,18 @@ async fn ambiguous_legacy_answers_require_explicit_reconciliation_and_recheck_bo
         .0,
         StatusCode::BAD_REQUEST
     );
-    sqlx::query("UPDATE marker_form_submission_model SET submitted_values=json_set(submitted_values,'$.unmapped','preserve') WHERE id=$1").bind(id.to_string()).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        UPDATE marker_form_submission_model
+        SET
+            submitted_values = json_set(submitted_values, '$.unmapped', 'preserve')
+        WHERE id = $1
+        "#,
+    )
+    .bind(id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(
         call(
             &app,
@@ -1337,11 +1624,18 @@ async fn ambiguous_legacy_answers_require_explicit_reconciliation_and_recheck_bo
         .0,
         StatusCode::BAD_REQUEST
     );
-    sqlx::query("UPDATE marker_form_submission_model SET form_snapshot=NULL WHERE id=$1")
-        .bind(id.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE marker_form_submission_model
+        SET
+            form_snapshot = NULL
+        WHERE id = $1
+        "#,
+    )
+    .bind(id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(
         call(
             &app,
@@ -1412,12 +1706,18 @@ async fn correction_images_preserve_keep_remove_and_rollback_with_the_body() {
         .push(json!({"id":"pic","type":"image","label":"写真"}));
     save_config(&app, user, "marker", m, definition).await;
     owner_post(&app, user, "marker", m, "1").await;
-    let id: String =
-        sqlx::query_scalar("SELECT id FROM marker_form_submission_model WHERE marker_id=$1")
-            .bind(m.to_string())
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let id: String = sqlx::query_scalar(
+        r#"
+        SELECT
+            id
+        FROM marker_form_submission_model
+        WHERE marker_id = $1
+        "#,
+    )
+    .bind(m.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     let id = Uuid::parse_str(&id).unwrap();
     let (status, saved) = correct_image(
         &app,
@@ -1462,14 +1762,46 @@ async fn correction_images_preserve_keep_remove_and_rollback_with_the_body() {
     .await;
     assert_eq!(status, StatusCode::OK, "{saved}");
     assert!(!saved["object"]["detail"].as_str().unwrap().contains(url));
-    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM image_model WHERE user_id=$1")
-        .bind(user.to_string())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            count(*)
+        FROM image_model
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(user.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(count, 1);
-    let before: (String,String,i64)=sqlx::query_as("SELECT s.submitted_values,m.detail,s.revision FROM marker_form_submission_model s JOIN marker_info_model m ON m.id=s.marker_id WHERE s.id=$1").bind(id.to_string()).fetch_one(&pool).await.unwrap();
-    sqlx::raw_sql("CREATE TRIGGER correction_failure BEFORE UPDATE OF detail ON marker_info_model BEGIN SELECT RAISE(ABORT, 'test body failure'); END;").execute(&pool).await.unwrap();
+    let before: (String, String, i64) = sqlx::query_as(
+        r#"
+        SELECT
+            s.submitted_values,
+            m.detail,
+            s.revision
+        FROM marker_form_submission_model s
+        JOIN marker_info_model m ON m.id = s.marker_id
+        WHERE s.id = $1
+        "#,
+    )
+    .bind(id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(
+        r#"
+        CREATE TRIGGER correction_failure
+        BEFORE UPDATE OF detail ON marker_info_model
+        BEGIN
+            SELECT RAISE(ABORT, 'test body failure');
+        END;
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(
         correct_image(
             &app,
@@ -1481,13 +1813,34 @@ async fn correction_images_preserve_keep_remove_and_rollback_with_the_body() {
         .0,
         StatusCode::INTERNAL_SERVER_ERROR
     );
-    let after: (String,String,i64)=sqlx::query_as("SELECT s.submitted_values,m.detail,s.revision FROM marker_form_submission_model s JOIN marker_info_model m ON m.id=s.marker_id WHERE s.id=$1").bind(id.to_string()).fetch_one(&pool).await.unwrap();
+    let after: (String, String, i64) = sqlx::query_as(
+        r#"
+        SELECT
+            s.submitted_values,
+            m.detail,
+            s.revision
+        FROM marker_form_submission_model s
+        JOIN marker_info_model m ON m.id = s.marker_id
+        WHERE s.id = $1
+        "#,
+    )
+    .bind(id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(before, after);
-    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM image_model WHERE user_id=$1")
-        .bind(user.to_string())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            count(*)
+        FROM image_model
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(user.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(count, 1);
     common::close_file_test_pool(pool, temporary_path).await;
 }
@@ -1505,7 +1858,13 @@ async fn shape_correction_length_limit_rolls_back_answer_and_projection() {
     save_config(&app, user, "shape", g, definition("長さ制限")).await;
     owner_post(&app, user, "shape", g, "1").await;
     let (id, markdown): (String, String) = sqlx::query_as(
-        "SELECT id,rendered_markdown FROM shape_form_submission_model WHERE shape_id=$1",
+        r#"
+        SELECT
+            id,
+            rendered_markdown
+        FROM shape_form_submission_model
+        WHERE shape_id = $1
+        "#,
     )
     .bind(g.to_string())
     .fetch_one(&pool)
@@ -1517,7 +1876,20 @@ async fn shape_correction_length_limit_rolls_back_answer_and_projection() {
         markdown
     );
     let id = Uuid::parse_str(&id).unwrap();
-    sqlx::query("UPDATE shape_model SET geojson=json_set(geojson,'$.properties.memo',$1),form_body_parts=NULL WHERE id=$2").bind(&memo).bind(g.to_string()).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        UPDATE shape_model
+        SET
+            geojson = json_set(geojson, '$.properties.memo', $1),
+            form_body_parts = NULL
+        WHERE id = $2
+        "#,
+    )
+    .bind(&memo)
+    .bind(g.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(
         correct(
             &app,
@@ -1531,7 +1903,13 @@ async fn shape_correction_length_limit_rolls_back_answer_and_projection() {
         StatusCode::PAYLOAD_TOO_LARGE
     );
     let (revision, value): (i64, String) = sqlx::query_as(
-        "SELECT revision,CAST(submitted_values->>'n' AS TEXT) FROM shape_form_submission_model WHERE id=$1",
+        r#"
+        SELECT
+            revision,
+            CAST(submitted_values ->> 'n' AS TEXT)
+        FROM shape_form_submission_model
+        WHERE id = $1
+        "#,
     )
     .bind(id.to_string())
     .fetch_one(&pool)
@@ -1539,12 +1917,18 @@ async fn shape_correction_length_limit_rolls_back_answer_and_projection() {
     .unwrap();
     assert_eq!(revision, 1);
     assert_eq!(value, "1");
-    let body: String =
-        sqlx::query_scalar("SELECT geojson->'properties'->>'memo' FROM shape_model WHERE id=$1")
-            .bind(g.to_string())
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let body: String = sqlx::query_scalar(
+        r#"
+        SELECT
+            geojson -> 'properties' ->> 'memo'
+        FROM shape_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(g.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(body, memo);
     common::close_file_test_pool(pool, temporary_path).await;
 }
@@ -1562,12 +1946,18 @@ async fn concurrent_answer_corrections_do_not_overwrite_each_other() {
     let m = marker(&app, user, l).await;
     save_config(&app, user, "marker", m, definition("競合回答")).await;
     owner_post(&app, user, "marker", m, "1").await;
-    let id: String =
-        sqlx::query_scalar("SELECT id FROM marker_form_submission_model WHERE marker_id=$1")
-            .bind(m.to_string())
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let id: String = sqlx::query_scalar(
+        r#"
+        SELECT
+            id
+        FROM marker_form_submission_model
+        WHERE marker_id = $1
+        "#,
+    )
+    .bind(m.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     let id = Uuid::parse_str(&id).unwrap();
     let (left, right) = tokio::join!(
         correct(
@@ -1603,11 +1993,37 @@ async fn concurrent_answer_corrections_do_not_overwrite_each_other() {
     common::close_file_test_pool(pool, temporary_path).await;
 }
 async fn stored_shape(pool: &SqlitePool, id: Uuid) -> Value {
-    sqlx::query_scalar("SELECT json_object('id',id,'user_id',user_id,'layer_id',layer_id,'shape_type',shape_type,'name',name,'geojson',json(geojson),'created_at',created_at,'updated_at',updated_at,'form_body_parts',json(form_body_parts)) FROM shape_model WHERE id=$1")
-        .bind(id.to_string())
-        .fetch_one(pool)
-        .await
-        .unwrap()
+    sqlx::query_scalar(
+        r#"
+        SELECT
+            json_object(
+                'id',
+                id,
+                'user_id',
+                user_id,
+                'layer_id',
+                layer_id,
+                'shape_type',
+                shape_type,
+                'name',
+                name,
+                'geojson',
+                json(geojson),
+                'created_at',
+                created_at,
+                'updated_at',
+                updated_at,
+                'form_body_parts',
+                json(form_body_parts)
+            )
+        FROM shape_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(id.to_string())
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 fn vertex_request(shape: &Value, coordinates: Value, next_type: &str) -> Value {
     json!({"base_shape_type":shape["shape_type"],"base_geometry":shape["geojson"]["geometry"],"shape_type":next_type,"coordinates":coordinates})
@@ -1638,7 +2054,20 @@ async fn vertex_updates_keep_latest_form_answers_and_reject_mixed_writes() {
     // The vertex editor starts before another form answer is saved/corrected.
     owner_post(&app, user, "shape", id, "1").await;
     owner_post(&app, user, "shape", id, "2").await;
-    let answer: String = sqlx::query_scalar("SELECT id FROM shape_form_submission_model WHERE shape_id=$1 ORDER BY create_at,id LIMIT 1").bind(id.to_string()).fetch_one(&pool).await.unwrap();
+    let answer: String = sqlx::query_scalar(
+        r#"
+        SELECT
+            id
+        FROM shape_form_submission_model
+        WHERE shape_id = $1
+        ORDER BY create_at, id
+        LIMIT 1
+        "#,
+    )
+    .bind(id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     let answer = Uuid::parse_str(&answer).unwrap();
     assert_eq!(
         correct(
@@ -1653,7 +2082,44 @@ async fn vertex_updates_keep_latest_form_answers_and_reject_mixed_writes() {
         StatusCode::OK
     );
     let before = stored_shape(&pool, id).await;
-    let answers:Value=sqlx::query_scalar("SELECT json_group_array(json_object('id',id,'shape_id',shape_id,'submitted_values',json(submitted_values),'rendered_markdown',rendered_markdown,'create_at',create_at,'source_form',json(source_form),'form_snapshot',json(form_snapshot),'revision',revision,'edited_at',edited_at)) FROM (SELECT * FROM shape_form_submission_model WHERE shape_id=$1 ORDER BY create_at,id)").bind(id.to_string()).fetch_one(&pool).await.unwrap();
+    let answers: Value = sqlx::query_scalar(
+        r#"
+        SELECT
+            json_group_array(
+                json_object(
+                    'id',
+                    id,
+                    'shape_id',
+                    shape_id,
+                    'submitted_values',
+                    json(submitted_values),
+                    'rendered_markdown',
+                    rendered_markdown,
+                    'create_at',
+                    create_at,
+                    'source_form',
+                    json(source_form),
+                    'form_snapshot',
+                    json(form_snapshot),
+                    'revision',
+                    revision,
+                    'edited_at',
+                    edited_at
+                )
+            )
+        FROM (
+            SELECT
+                *
+            FROM shape_form_submission_model
+            WHERE shape_id = $1
+            ORDER BY create_at, id
+        )
+        "#,
+    )
+    .bind(id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     let mut request = vertex_request(
         &initial,
         json!([[139, 35], [139.5, 35.5], [140, 36]]),
@@ -1673,7 +2139,44 @@ async fn vertex_updates_keep_latest_form_answers_and_reject_mixed_writes() {
     assert_eq!(saved["layer_id"], before["layer_id"]);
     let after = stored_shape(&pool, id).await;
     assert_eq!(after["form_body_parts"], before["form_body_parts"]);
-    let after_answers:Value=sqlx::query_scalar("SELECT json_group_array(json_object('id',id,'shape_id',shape_id,'submitted_values',json(submitted_values),'rendered_markdown',rendered_markdown,'create_at',create_at,'source_form',json(source_form),'form_snapshot',json(form_snapshot),'revision',revision,'edited_at',edited_at)) FROM (SELECT * FROM shape_form_submission_model WHERE shape_id=$1 ORDER BY create_at,id)").bind(id.to_string()).fetch_one(&pool).await.unwrap();
+    let after_answers: Value = sqlx::query_scalar(
+        r#"
+        SELECT
+            json_group_array(
+                json_object(
+                    'id',
+                    id,
+                    'shape_id',
+                    shape_id,
+                    'submitted_values',
+                    json(submitted_values),
+                    'rendered_markdown',
+                    rendered_markdown,
+                    'create_at',
+                    create_at,
+                    'source_form',
+                    json(source_form),
+                    'form_snapshot',
+                    json(form_snapshot),
+                    'revision',
+                    revision,
+                    'edited_at',
+                    edited_at
+                )
+            )
+        FROM (
+            SELECT
+                *
+            FROM shape_form_submission_model
+            WHERE shape_id = $1
+            ORDER BY create_at, id
+        )
+        "#,
+    )
+    .bind(id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(answers, after_answers);
     let page = ok(
         &app,
@@ -1954,8 +2457,23 @@ async fn risk_layer_icon_ownership_and_invalid_updates_preserve_saved_layer() {
     let own_icon = Uuid::new_v4();
     let foreign_icon = Uuid::new_v4();
     for (icon, user) in [(own_icon, owner), (foreign_icon, other)] {
-        sqlx::query("INSERT INTO marker_icon_model (id,user_id,filename,uuid_filename,create_at) VALUES ($1,$2,'icon.png',$3,'2026-01-01 00:00:00')")
-            .bind(icon.to_string()).bind(user.to_string()).bind(format!("{icon}.png")).execute(&pool).await.unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO marker_icon_model (
+                id,
+                user_id,
+                filename,
+                uuid_filename,
+                create_at
+            ) VALUES ($1, $2, 'icon.png', $3, '2026-01-01 00:00:00')
+            "#,
+        )
+        .bind(icon.to_string())
+        .bind(user.to_string())
+        .bind(format!("{icon}.png"))
+        .execute(&pool)
+        .await
+        .unwrap();
     }
     ok(
         &app,
@@ -1965,12 +2483,41 @@ async fn risk_layer_icon_ownership_and_invalid_updates_preserve_saved_layer() {
         Some(json!({"name":"original","marker_icon_id":own_icon,"update_marker_icon":true})),
     )
     .await;
-    let before: Value =
-        sqlx::query_scalar("SELECT json_object('id',id,'user_id',user_id,'layer_name',layer_name,'is_master',is_master,'create_at',create_at,'update_at',update_at,'marker_icon_id',marker_icon_id,'common_form_id',common_form_id,'common_form_version',common_form_version,'form_binding_revision',form_binding_revision,'restrict_free_text',restrict_free_text) FROM layer_model WHERE id=$1")
-            .bind(id.to_string())
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let before: Value = sqlx::query_scalar(
+        r#"
+        SELECT
+            json_object(
+                'id',
+                id,
+                'user_id',
+                user_id,
+                'layer_name',
+                layer_name,
+                'is_master',
+                is_master,
+                'create_at',
+                create_at,
+                'update_at',
+                update_at,
+                'marker_icon_id',
+                marker_icon_id,
+                'common_form_id',
+                common_form_id,
+                'common_form_version',
+                common_form_version,
+                'form_binding_revision',
+                form_binding_revision,
+                'restrict_free_text',
+                restrict_free_text
+            )
+        FROM layer_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     for (actor, body, expected) in [
         (
             owner,
@@ -1998,12 +2545,41 @@ async fn risk_layer_icon_ownership_and_invalid_updates_preserve_saved_layer() {
         )
         .await;
         assert_eq!(status, expected, "{result}");
-        let after: Value =
-            sqlx::query_scalar("SELECT json_object('id',id,'user_id',user_id,'layer_name',layer_name,'is_master',is_master,'create_at',create_at,'update_at',update_at,'marker_icon_id',marker_icon_id,'common_form_id',common_form_id,'common_form_version',common_form_version,'form_binding_revision',form_binding_revision,'restrict_free_text',restrict_free_text) FROM layer_model WHERE id=$1")
-                .bind(id.to_string())
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let after: Value = sqlx::query_scalar(
+            r#"
+            SELECT
+                json_object(
+                    'id',
+                    id,
+                    'user_id',
+                    user_id,
+                    'layer_name',
+                    layer_name,
+                    'is_master',
+                    is_master,
+                    'create_at',
+                    create_at,
+                    'update_at',
+                    update_at,
+                    'marker_icon_id',
+                    marker_icon_id,
+                    'common_form_id',
+                    common_form_id,
+                    'common_form_version',
+                    common_form_version,
+                    'form_binding_revision',
+                    form_binding_revision,
+                    'restrict_free_text',
+                    restrict_free_text
+                )
+            FROM layer_model
+            WHERE id = $1
+            "#,
+        )
+        .bind(id.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(after, before, "rejected layer update changed stored state");
     }
     ok(
@@ -2014,12 +2590,19 @@ async fn risk_layer_icon_ownership_and_invalid_updates_preserve_saved_layer() {
         Some(json!({"name":" renamed ","update_marker_icon":true,"marker_icon_id":null})),
     )
     .await;
-    let saved: (String, Option<String>) =
-        sqlx::query_as("SELECT layer_name,marker_icon_id FROM layer_model WHERE id=$1")
-            .bind(id.to_string())
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let saved: (String, Option<String>) = sqlx::query_as(
+        r#"
+        SELECT
+            layer_name,
+            marker_icon_id
+        FROM layer_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(saved, ("renamed".into(), None));
 }
 
@@ -2060,26 +2643,34 @@ async fn risk_invalid_shape_destinations_preserve_geometry_body_answers_and_conf
 
 async fn saved_answer_rows(pool: &SqlitePool, id: Uuid) -> Vec<Vec<String>> {
     use sqlx::{Row, ValueRef};
-    sqlx::query("SELECT * FROM shape_form_submission_model WHERE shape_id=$1 ORDER BY id")
-        .bind(id.to_string())
-        .fetch_all(pool)
-        .await
-        .unwrap()
-        .iter()
-        .map(|row| {
-            (0..row.len())
-                .map(|i| {
-                    if row.try_get_raw(i).unwrap().is_null() {
-                        "NULL".to_string()
-                    } else {
-                        format!(
-                            "{:?}",
-                            row.try_get::<String, _>(i)
-                                .unwrap_or_else(|_| row.get::<i64, _>(i).to_string())
-                        )
-                    }
-                })
-                .collect()
-        })
-        .collect()
+    sqlx::query(
+        r#"
+        SELECT
+            *
+        FROM shape_form_submission_model
+        WHERE shape_id = $1
+        ORDER BY id
+        "#,
+    )
+    .bind(id.to_string())
+    .fetch_all(pool)
+    .await
+    .unwrap()
+    .iter()
+    .map(|row| {
+        (0..row.len())
+            .map(|i| {
+                if row.try_get_raw(i).unwrap().is_null() {
+                    "NULL".to_string()
+                } else {
+                    format!(
+                        "{:?}",
+                        row.try_get::<String, _>(i)
+                            .unwrap_or_else(|_| row.get::<i64, _>(i).to_string())
+                    )
+                }
+            })
+            .collect()
+    })
+    .collect()
 }

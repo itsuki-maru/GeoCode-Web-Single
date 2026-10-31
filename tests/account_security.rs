@@ -51,13 +51,44 @@ async fn error(response: Response, status: StatusCode, message: &str) {
     assert_eq!(body["error"], message);
 }
 async fn state(pool: &SqlitePool, id: Uuid) -> (i64, bool, i64, NaiveDateTime) {
-    sqlx::query_as("SELECT failed_count, is_locked, auth_version, next_challenge_time FROM user_model WHERE id=$1")
-        .bind(id.to_string()).fetch_one(pool).await.unwrap()
+    sqlx::query_as(
+        r#"
+        SELECT
+            failed_count,
+            is_locked,
+            auth_version,
+            next_challenge_time
+        FROM user_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(id.to_string())
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 async fn settings(pool: &SqlitePool, values: &[(&str, &str)]) {
     for (key, value) in values {
-        sqlx::query("INSERT INTO application_settings(id,setting_key,setting_value,create_at,updated_at) VALUES($3,$1,$2,$4,$4) ON CONFLICT(setting_key) DO UPDATE SET setting_value=EXCLUDED.setting_value")
-            .bind(key).bind(value).bind(Uuid::new_v4().to_string()).bind(past()).execute(pool).await.unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO application_settings (
+                id,
+                setting_key,
+                setting_value,
+                create_at,
+                updated_at
+            ) VALUES ($3, $1, $2, $4, $4)
+            ON CONFLICT (setting_key) DO UPDATE SET
+                setting_value = EXCLUDED.setting_value
+            "#,
+        )
+        .bind(key)
+        .bind(value)
+        .bind(Uuid::new_v4().to_string())
+        .bind(past())
+        .execute(pool)
+        .await
+        .unwrap();
     }
 }
 fn cookie(response: &Response, name: &str) -> String {
@@ -107,12 +138,19 @@ async fn lockout_and_retry_windows_preserve_state_and_revoke_old_sessions() {
         )
         .await;
         let id = common::create_test_user(&pool, name).await;
-        sqlx::query("UPDATE user_model SET next_challenge_time=$1 WHERE id=$2")
-            .bind(past())
-            .bind(id.to_string())
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            r#"
+            UPDATE user_model
+            SET
+                next_challenge_time = $1
+            WHERE id = $2
+            "#,
+        )
+        .bind(past())
+        .bind(id.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
         let token = create_token(&id.to_string(), 30, "access_token", 0).unwrap();
         error(
             login(&pool, name, "wrong").await,
@@ -144,12 +182,20 @@ async fn lockout_and_retry_windows_preserve_state_and_revoke_old_sessions() {
             after,
             "waiting must not change the lockout state"
         );
-        sqlx::query("UPDATE user_model SET failed_count=3,next_challenge_time=$1 WHERE id=$2")
-            .bind(past())
-            .bind(id.to_string())
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            r#"
+            UPDATE user_model
+            SET
+                failed_count = 3,
+                next_challenge_time = $1
+            WHERE id = $2
+            "#,
+        )
+        .bind(past())
+        .bind(id.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
         error(
             login(&pool, name, "password123").await,
             StatusCode::UNAUTHORIZED,
@@ -177,7 +223,14 @@ async fn successful_login_resets_failures_and_issues_versioned_cookie_pairs() {
     let pool = common::test_pool().await;
     let id = common::create_test_user(&pool, "login-success").await;
     sqlx::query(
-        "UPDATE user_model SET failed_count=2,auth_version=7,next_challenge_time=$1 WHERE id=$2",
+        r#"
+        UPDATE user_model
+        SET
+            failed_count = 2,
+            auth_version = 7,
+            next_challenge_time = $1
+        WHERE id = $2
+        "#,
     )
     .bind(past())
     .bind(id.to_string())
@@ -222,12 +275,20 @@ async fn invalid_or_unavailable_login_settings_use_defaults() {
         ],
     )
     .await;
-    sqlx::query("UPDATE user_model SET failed_count=4,next_challenge_time=$1 WHERE id=$2")
-        .bind(past())
-        .bind(id.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE user_model
+        SET
+            failed_count = 4,
+            next_challenge_time = $1
+        WHERE id = $2
+        "#,
+    )
+    .bind(past())
+    .bind(id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let reference = Utc::now().naive_utc();
     error(
         login(&pool, "default-settings", "wrong").await,
@@ -239,16 +300,28 @@ async fn invalid_or_unavailable_login_settings_use_defaults() {
     assert_eq!((after.0, after.1, after.2), (5, false, 0));
     assert!(after.3 > reference + chrono::Duration::minutes(2));
     assert!(after.3 < reference + chrono::Duration::minutes(8));
-    sqlx::query("DROP TABLE application_settings")
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("UPDATE user_model SET failed_count=0,next_challenge_time=$1 WHERE id=$2")
-        .bind(past())
-        .bind(id.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        DROP TABLE application_settings
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE user_model
+        SET
+            failed_count = 0,
+            next_challenge_time = $1
+        WHERE id = $2
+        "#,
+    )
+    .bind(past())
+    .bind(id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(
         login(&pool, "default-settings", "password123")
             .await
@@ -261,11 +334,18 @@ async fn invalid_or_unavailable_login_settings_use_defaults() {
 async fn malformed_password_hash_does_not_modify_credentials_or_issue_cookies() {
     let pool = common::test_pool().await;
     let id = common::create_test_user(&pool, "broken-hash").await;
-    sqlx::query("UPDATE user_model SET password='invalid-hash' WHERE id=$1")
-        .bind(id.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE user_model
+        SET
+            password = 'invalid-hash'
+        WHERE id = $1
+        "#,
+    )
+    .bind(id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let before = state(&pool, id).await;
     error(
         login(&pool, "broken-hash", "password123").await,
@@ -293,11 +373,18 @@ async fn malformed_password_hash_does_not_modify_credentials_or_issue_cookies() 
     .await;
     assert_eq!(state(&pool, id).await, before);
     assert_eq!(
-        sqlx::query_scalar::<_, String>("SELECT password FROM user_model WHERE id=$1")
-            .bind(id.to_string())
-            .fetch_one(&pool)
-            .await
-            .unwrap(),
+        sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT
+                password
+            FROM user_model
+            WHERE id = $1
+            "#,
+        )
+        .bind(id.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
         "invalid-hash"
     );
 }
@@ -307,11 +394,18 @@ async fn password_change_rejects_invalid_requests_and_revokes_previous_sessions(
     let pool = common::test_pool().await;
     let id = common::create_test_user(&pool, "change-password").await;
     let old_token = create_token(&id.to_string(), 30, "access_token", 0).unwrap();
-    let original = sqlx::query_scalar::<_, String>("SELECT password FROM user_model WHERE id=$1")
-        .bind(id.to_string())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let original = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT
+            password
+        FROM user_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     for (user, current, new, status) in [
         (id, "password123", "short", StatusCode::BAD_REQUEST),
         (id, "wrong", "new-password123", StatusCode::UNAUTHORIZED),
@@ -337,11 +431,18 @@ async fn password_change_rejects_invalid_requests_and_revokes_previous_sessions(
         assert_eq!(response.status(), status);
         assert!(response.headers().get(SET_COOKIE).is_none());
         assert_eq!(
-            sqlx::query_scalar::<_, String>("SELECT password FROM user_model WHERE id=$1")
-                .bind(id.to_string())
-                .fetch_one(&pool)
-                .await
-                .unwrap(),
+            sqlx::query_scalar::<_, String>(
+                r#"
+                SELECT
+                    password
+                FROM user_model
+                WHERE id = $1
+                "#,
+            )
+            .bind(id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
             original
         );
         assert_eq!(state(&pool, id).await.2, 0);
@@ -365,11 +466,18 @@ async fn password_change_rejects_invalid_requests_and_revokes_previous_sessions(
         .collect();
     assert_eq!(cookies.len(), 2);
     assert!(cookies.iter().all(|v| v.contains("Max-Age=0")));
-    let new_hash = sqlx::query_scalar::<_, String>("SELECT password FROM user_model WHERE id=$1")
-        .bind(id.to_string())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let new_hash = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT
+            password
+        FROM user_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_ne!(new_hash, original);
     assert!(bcrypt::verify("new-password123", &new_hash).unwrap());
     assert!(!bcrypt::verify("password123", &new_hash).unwrap());
@@ -386,11 +494,18 @@ async fn password_change_rejects_invalid_requests_and_revokes_previous_sessions(
         .await,
         StatusCode::OK
     );
-    sqlx::query("UPDATE user_model SET is_locked=true WHERE id=$1")
-        .bind(id.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE user_model
+        SET
+            is_locked = true
+        WHERE id = $1
+        "#,
+    )
+    .bind(id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     error(
         account_password_update_handler(
             Extension(id.to_string()),

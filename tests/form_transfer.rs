@@ -118,24 +118,37 @@ async fn export(app: &Router, layer: &str, suffix: &str) -> Value {
     serde_json::from_slice(&bytes).unwrap()
 }
 async fn master(pool: &Pool, user: &str) -> String {
-    sqlx::query_scalar(&sql(
-        "SELECT id::text FROM layer_model WHERE user_id=$1 AND is_master=true",
-    ))
+    sqlx::query_scalar(&sql(r#"
+        SELECT id::text
+        FROM layer_model
+        WHERE user_id = $1 AND is_master = true
+        "#))
     .bind(dbid(user))
     .fetch_one(pool)
     .await
     .unwrap()
 }
 async fn count(pool: &Pool, table: &str, user: &str) -> i64 {
-    sqlx::query_scalar(&format!("SELECT count(*) FROM {table} WHERE user_id=$1"))
-        .bind(dbid(user))
-        .fetch_one(pool)
-        .await
-        .unwrap()
+    sqlx::query_scalar(&format!(
+        r#"
+        SELECT
+            count(*)
+        FROM {table}
+        WHERE user_id = $1
+        "#,
+    ))
+    .bind(dbid(user))
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 async fn named_id(pool: &Pool, table: &str, name_column: &str, name: &str, user: &str) -> String {
     sqlx::query_scalar(&sql(&format!(
-        "SELECT id::text FROM {table} WHERE user_id=$1 AND {name_column}=$2"
+        r#"
+        SELECT id::text
+        FROM {table}
+        WHERE user_id = $1 AND {name_column} = $2
+        "#
     )))
     .bind(dbid(user))
     .bind(name)
@@ -175,13 +188,45 @@ async fn transfer_recreates_another_owners_forms_history_and_latest_answers() {
     // Model an existing installation's public/password configuration. None of
     // these credentials may leave the source or become active on the recipient.
     let public = Uuid::new_v4().to_string();
-    sqlx::query("UPDATE marker_form_config_model SET enabled=true,password_hash='private-hash',public_id=$1 WHERE marker_id=(SELECT id FROM marker_info_model WHERE user_id=$2 AND marker_name='管理対象')").bind(dbid(&public)).bind(dbid(&owner)).execute(&pool).await.unwrap();
-    sqlx::query("UPDATE common_form_model SET password_hash='common-private-hash'")
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE marker_form_config_model
+        SET
+            enabled = true,
+            password_hash = 'private-hash',
+            public_id = $1
+        WHERE marker_id = (
+            SELECT
+                id
+            FROM marker_info_model
+            WHERE user_id = $2
+                AND marker_name = '管理対象'
+        )
+        "#,
+    )
+    .bind(dbid(&public))
+    .bind(dbid(&owner))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE common_form_model
+        SET
+            password_hash = 'common-private-hash'
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     let defaults: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM layer_model WHERE user_id=$1 AND restrict_free_text=true",
+        r#"
+        SELECT
+            count(*)
+        FROM layer_model
+        WHERE user_id = $1
+            AND restrict_free_text = true
+        "#,
     )
     .bind(dbid(&owner))
     .fetch_one(&pool)
@@ -189,7 +234,13 @@ async fn transfer_recreates_another_owners_forms_history_and_latest_answers() {
     .unwrap();
     assert_eq!(defaults, 0, "older v3 input defaults to unrestricted");
     sqlx::query(
-        "UPDATE layer_model SET restrict_free_text=true WHERE user_id=$1 AND is_master=false",
+        r#"
+        UPDATE layer_model
+        SET
+            restrict_free_text = true
+        WHERE user_id = $1
+            AND is_master = false
+        "#,
     )
     .bind(dbid(&owner))
     .execute(&pool)
@@ -215,7 +266,13 @@ async fn transfer_recreates_another_owners_forms_history_and_latest_answers() {
     assert_eq!(upload(&receiver, &package).await, StatusCode::OK);
     let copied = export(&receiver, &master(&pool, &recipient).await, "").await;
     let restrictions: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM layer_model WHERE user_id=$1 AND restrict_free_text=true",
+        r#"
+        SELECT
+            count(*)
+        FROM layer_model
+        WHERE user_id = $1
+            AND restrict_free_text = true
+        "#,
     )
     .bind(dbid(&recipient))
     .fetch_one(&pool)
@@ -255,12 +312,19 @@ async fn transfer_recreates_another_owners_forms_history_and_latest_answers() {
     )
     .await;
     assert_eq!(foreign.0, StatusCode::NOT_FOUND);
-    let masters: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM layer_model WHERE user_id=$1 AND is_master=true")
-            .bind(dbid(&recipient))
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let masters: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            count(*)
+        FROM layer_model
+        WHERE user_id = $1
+            AND is_master = true
+        "#,
+    )
+    .bind(dbid(&recipient))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(masters, 1);
     let marker = copied["markers"]
         .as_array()
@@ -311,7 +375,23 @@ async fn transfer_recreates_another_owners_forms_history_and_latest_answers() {
         old_version["total"], 0,
         "filter must follow latest selection"
     );
-    let private: i64 = sqlx::query_scalar("SELECT count(*) FROM marker_form_config_model c JOIN marker_info_model m ON m.id=c.marker_id WHERE m.user_id=$1 AND (c.enabled=true OR c.password_hash IS NOT NULL)").bind(dbid(&recipient)).fetch_one(&pool).await.unwrap();
+    let private: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            count(*)
+        FROM marker_form_config_model c
+        JOIN marker_info_model m ON m.id = c.marker_id
+        WHERE m.user_id = $1
+            AND (
+            c.enabled = true
+            OR c.password_hash IS NOT NULL
+        )
+        "#,
+    )
+    .bind(dbid(&recipient))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(private, 0);
     let signature = |page: Value| {
         page["rows"]
@@ -334,14 +414,33 @@ async fn transfer_recreates_another_owners_forms_history_and_latest_answers() {
         "history priority across marker/shape tables must be preserved"
     );
     let distinct_layers: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM layer_model WHERE user_id=$1 AND layer_name='同名'",
+        r#"
+        SELECT
+            count(*)
+        FROM layer_model
+        WHERE user_id = $1
+            AND layer_name = '同名'
+        "#,
     )
     .bind(dbid(&recipient))
     .fetch_one(&pool)
     .await
     .unwrap();
     assert_eq!(distinct_layers, 2);
-    let managed: i64 = sqlx::query_scalar("SELECT count(*) FROM marker_form_config_model c JOIN marker_info_model m ON m.id=c.marker_id WHERE m.user_id=$1 AND c.managed_layer_id=m.layer_id").bind(dbid(&recipient)).fetch_one(&pool).await.unwrap();
+    let managed: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            count(*)
+        FROM marker_form_config_model c
+        JOIN marker_info_model m ON m.id = c.marker_id
+        WHERE m.user_id = $1
+            AND c.managed_layer_id = m.layer_id
+        "#,
+    )
+    .bind(dbid(&recipient))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(managed, 1);
     let manual = copied["form_configs"]
         .as_array()
@@ -378,7 +477,13 @@ async fn transfer_recreates_another_owners_forms_history_and_latest_answers() {
         StatusCode::OK
     );
     let updated: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM layer_model WHERE user_id=$1 AND common_form_version=3",
+        r#"
+        SELECT
+            count(*)
+        FROM layer_model
+        WHERE user_id = $1
+            AND common_form_version = 3
+        "#,
     )
     .bind(dbid(&recipient))
     .fetch_one(&pool)
@@ -407,7 +512,15 @@ async fn transfer_scopes_exports_and_keeps_v2_and_legacy_inputs() {
         .to_string();
     let app = app(&pool, &user);
     assert_eq!(upload(&app, &fixture()).await, StatusCode::OK);
-    let layer: String = sqlx::query_scalar(&sql("SELECT id::text FROM layer_model WHERE user_id=$1 AND common_form_id IS NOT NULL AND layer_name='同名'")).bind(dbid(&user)).fetch_one(&pool).await.unwrap();
+    let layer: String = sqlx::query_scalar(&sql(r#"
+        SELECT id::text
+        FROM layer_model
+        WHERE user_id = $1 AND common_form_id IS NOT NULL AND layer_name = '同名'
+        "#))
+    .bind(dbid(&user))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     let scoped = export(&app, &layer, "").await;
     assert_eq!(scoped["layers"].as_array().unwrap().len(), 1);
     assert_eq!(scoped["markers"].as_array().unwrap().len(), 1);
@@ -549,7 +662,18 @@ async fn transfer_rolls_back_all_records_on_database_failure() {
     let user = common::create_test_user(&pool, "transfer-rollback")
         .await
         .to_string();
-    sqlx::raw_sql("CREATE TRIGGER reject_transfer_answer BEFORE INSERT ON marker_form_submission_model BEGIN SELECT RAISE(ABORT, 'test failure'); END;").execute(&pool).await.unwrap();
+    sqlx::raw_sql(
+        r#"
+        CREATE TRIGGER reject_transfer_answer
+        BEFORE INSERT ON marker_form_submission_model
+        BEGIN
+            SELECT RAISE(ABORT, 'test failure');
+        END;
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(
         upload(&app(&pool, &user), &fixture()).await,
         StatusCode::INTERNAL_SERVER_ERROR
@@ -587,12 +711,19 @@ async fn transfer_enforces_exact_byte_boundaries_and_export_limits() {
         StatusCode::PAYLOAD_TOO_LARGE
     );
     let target = named_id(&pool, "marker_info_model", "marker_name", "管理対象", &user).await;
-    sqlx::query("UPDATE marker_info_model SET detail=$1 WHERE id=$2")
-        .bind("x".repeat(20 * 1024 * 1024))
-        .bind(dbid(&target))
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE marker_info_model
+        SET
+            detail = $1
+        WHERE id = $2
+        "#,
+    )
+    .bind("x".repeat(20 * 1024 * 1024))
+    .bind(dbid(&target))
+    .execute(&pool)
+    .await
+    .unwrap();
     let master = master(&pool, &user).await;
     for suffix in ["", "?version=3"] {
         let (status, bytes) = request(
@@ -690,18 +821,32 @@ async fn transfer_preserves_latest_when_timezones_and_submicrosecond_times_colla
     let recipient = common::create_test_user(&pool, "fine-time-destination").await;
     let sender = app(&pool, &owner);
     assert_eq!(upload(&sender, &fixture()).await, StatusCode::OK);
-    sqlx::query("UPDATE marker_form_submission_model SET create_at=$1 WHERE rendered_markdown=$2")
-        .bind("2026-10-20T12:34:56.123456900Z")
-        .bind("元の回答Markdown 1")
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("UPDATE marker_form_submission_model SET create_at=$1 WHERE rendered_markdown=$2")
-        .bind("2026-10-20T21:34:56.123456100+09:00")
-        .bind("元の回答Markdown 2")
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE marker_form_submission_model
+        SET
+            create_at = $1
+        WHERE rendered_markdown = $2
+        "#,
+    )
+    .bind("2026-10-20T12:34:56.123456900Z")
+    .bind("元の回答Markdown 1")
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE marker_form_submission_model
+        SET
+            create_at = $1
+        WHERE rendered_markdown = $2
+        "#,
+    )
+    .bind("2026-10-20T21:34:56.123456100+09:00")
+    .bind("元の回答Markdown 2")
+    .execute(&pool)
+    .await
+    .unwrap();
     let package = export(&sender, &master(&pool, &owner).await, "").await;
     let first = package["submissions"]
         .as_array()
@@ -746,17 +891,37 @@ async fn corrected_answers_and_body_bindings_survive_transfer_with_fresh_ids() {
     let sender = app(&pool, &user);
     assert_eq!(upload(&sender, &fixture()).await, StatusCode::OK);
     let target = named_id(&pool, "marker_info_model", "marker_name", "管理対象", &user).await;
-    let records: Vec<(String,String)>=sqlx::query_as("SELECT id,rendered_markdown FROM marker_form_submission_model WHERE marker_id=$1 ORDER BY create_at,id").bind(dbid(&target)).fetch_all(&pool).await.unwrap();
+    let records: Vec<(String, String)> = sqlx::query_as(
+        r#"
+        SELECT
+            id,
+            rendered_markdown
+        FROM marker_form_submission_model
+        WHERE marker_id = $1
+        ORDER BY create_at, id
+        "#,
+    )
+    .bind(dbid(&target))
+    .fetch_all(&pool)
+    .await
+    .unwrap();
     let body = format!(
         "移行する自由記述\n{}",
         records.iter().map(|(_, m)| m.as_str()).collect::<String>()
     );
-    sqlx::query("UPDATE marker_info_model SET detail=$1 WHERE id=$2")
-        .bind(&body)
-        .bind(dbid(&target))
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE marker_info_model
+        SET
+            detail = $1
+        WHERE id = $2
+        "#,
+    )
+    .bind(&body)
+    .bind(dbid(&target))
+    .execute(&pool)
+    .await
+    .unwrap();
     let answer = records.first().unwrap().0.clone();
     let (status, bytes) = request(
         &sender,
@@ -788,8 +953,23 @@ async fn corrected_answers_and_body_bindings_survive_transfer_with_fresh_ids() {
         "{}",
         String::from_utf8_lossy(&bytes)
     );
-    sqlx::query("UPDATE layer_model SET restrict_free_text=true WHERE id=(SELECT layer_id FROM marker_info_model WHERE id=$1)")
-        .bind(&target).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        UPDATE layer_model
+        SET
+            restrict_free_text = true
+        WHERE id = (
+            SELECT
+                layer_id
+            FROM marker_info_model
+            WHERE id = $1
+        )
+        "#,
+    )
+    .bind(&target)
+    .execute(&pool)
+    .await
+    .unwrap();
     let package = export(&sender, &master(&pool, &user).await, "").await;
     // The PostgreSQL cross-engine test consumes the edited SQLite export too.
     std::fs::create_dir_all("target/transfer-tests").unwrap();
@@ -816,16 +996,29 @@ async fn corrected_answers_and_body_bindings_survive_transfer_with_fresh_ids() {
         &recipient,
     )
     .await;
-    let (copied_body, parts): (String, Value) =
-        sqlx::query_as("SELECT detail,form_body_parts FROM marker_info_model WHERE id=$1")
-            .bind(dbid(&copied))
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let (copied_body, parts): (String, Value) = sqlx::query_as(
+        r#"
+        SELECT
+            detail,
+            form_body_parts
+        FROM marker_info_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(dbid(&copied))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(copied_body, exported["detail"].as_str().unwrap());
     assert!(!parts.to_string().contains(&answer.to_string()));
     let id: String = sqlx::query_scalar(
-        "SELECT id FROM marker_form_submission_model WHERE marker_id=$1 AND edited_at IS NOT NULL",
+        r#"
+        SELECT
+            id
+        FROM marker_form_submission_model
+        WHERE marker_id = $1
+            AND edited_at IS NOT NULL
+        "#,
     )
     .bind(dbid(&copied))
     .fetch_one(&pool)

@@ -88,7 +88,16 @@ pub async fn ensure_owned_layer(
     layer_id: &String,
 ) -> Result<(), AppError> {
     let owned = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM layer_model WHERE id = $1 AND user_id = $2)",
+        r#"
+        SELECT
+            EXISTS (
+                SELECT
+                    1
+                FROM layer_model
+                WHERE id = $1
+                    AND user_id = $2
+            )
+        "#,
     )
     .bind(layer_id)
     .bind(user_id)

@@ -93,11 +93,54 @@ async fn all_map_pages_load_their_owners_latest_tiles() {
         }
     }
     let temp_id = Uuid::new_v4().to_string();
-    sqlx::query("INSERT INTO temporary_urls(id,user_id,url,expiration,layers,markers,shapes,include_tile_overlays,create_at) VALUES($1,$2,'/test',datetime('now', '+1 hour'),'{}','{}','{}',1,CURRENT_TIMESTAMP)")
-        .bind(&temp_id).bind(&owner).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO temporary_urls (
+            id,
+            user_id,
+            url,
+            expiration,
+            layers,
+            markers,
+            shapes,
+            include_tile_overlays,
+            create_at
+        ) VALUES (
+            $1,
+            $2,
+            '/test',
+            datetime('now', '+1 hour'),
+            '{}',
+            '{}',
+            '{}',
+            1,
+            CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .bind(&temp_id)
+    .bind(&owner)
+    .execute(&pool)
+    .await
+    .unwrap();
     let public_id = Uuid::new_v4().to_string();
-    sqlx::query("INSERT INTO live_map(id,public_id,name,created_by,expires_at) VALUES($1,$2,'test',$3,datetime('now', '+1 hour'))")
-        .bind(Uuid::new_v4().to_string()).bind(&public_id).bind(&owner).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO live_map (
+            id,
+            public_id,
+            name,
+            created_by,
+            expires_at
+        ) VALUES ($1, $2, 'test', $3, datetime('now', '+1 hour'))
+        "#,
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(&public_id)
+    .bind(&owner)
+    .execute(&pool)
+    .await
+    .unwrap();
     let mut pages = Vec::new();
     for agent in ["Desktop", "Mobile"] {
         let mut headers = HeaderMap::new();
@@ -307,10 +350,16 @@ async fn permissions_selection_isolation_and_definition_lifecycle() {
     )
     .await
     .unwrap();
-    let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_tile_overlay_model")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let remaining: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            COUNT(*)
+        FROM user_tile_overlay_model
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(remaining, 0);
 }
 
@@ -319,8 +368,19 @@ async fn upgrade_preserves_existing_data_and_cascades_user_deletion() {
     let pool = common::test_pool().await;
     let user = common::create_test_admin(&pool, "upgrade-tile-user").await;
     // この機能のマイグレーションを適用する直前のスキーマを再現する。
-    sqlx::raw_sql("DROP TABLE user_tile_overlay_model; DROP TABLE tile_overlay_model; DELETE FROM schema_migrations WHERE version=11;")
-        .execute(&pool).await.unwrap();
+    sqlx::raw_sql(
+        r#"
+        DROP TABLE user_tile_overlay_model;
+
+        DROP TABLE tile_overlay_model;
+
+        DELETE FROM schema_migrations
+        WHERE version = 11;
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     geocode_web_single::db::run_migrations(&pool).await.unwrap();
     geocode_web_single::db::run_migrations(&pool).await.unwrap();
     let Json(tile) = admin_create(
@@ -339,20 +399,38 @@ async fn upgrade_preserves_existing_data_and_cascades_user_deletion() {
     .await
     .unwrap();
     assert_eq!(selected_tiles(&pool, &user).await.unwrap().len(), 1);
-    sqlx::query("DELETE FROM user_model WHERE id=$1")
-        .bind(&user)
-        .execute(&pool)
-        .await
-        .unwrap();
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_tile_overlay_model")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        DELETE FROM user_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(&user)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            COUNT(*)
+        FROM user_tile_overlay_model
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(count, 0);
-    let invalid = sqlx::query("UPDATE tile_overlay_model SET opacity=2 WHERE id=$1")
-        .bind(&tile.id)
-        .execute(&pool)
-        .await;
+    let invalid = sqlx::query(
+        r#"
+        UPDATE tile_overlay_model
+        SET
+            opacity = 2
+        WHERE id = $1
+        "#,
+    )
+    .bind(&tile.id)
+    .execute(&pool)
+    .await;
     assert!(invalid.is_err());
 }
 
@@ -382,11 +460,18 @@ async fn selection_waits_for_concurrent_disable() {
     .await
     .unwrap();
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
-    sqlx::query("UPDATE tile_overlay_model SET enabled=false WHERE id=$1")
-        .bind(&tile.id)
-        .execute(&mut *tx)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE tile_overlay_model
+        SET
+            enabled = false
+        WHERE id = $1
+        "#,
+    )
+    .bind(&tile.id)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
     let worker_pool = pool.clone();
     let task = tokio::spawn(async move {
         user_select(
@@ -403,10 +488,16 @@ async fn selection_waits_for_concurrent_disable() {
         task.await.unwrap(),
         Err(geocode_web_single::error::AppError::NotFound)
     ));
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_tile_overlay_model")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            COUNT(*)
+        FROM user_tile_overlay_model
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(count, 0);
     pool.close().await;
     // Windows ではプールを閉じた直後もファイルが使用中の場合があるため、
@@ -433,8 +524,23 @@ async fn live_map_query_controls_initial_overlay_visibility() {
     let pool = common::test_pool().await;
     let owner = common::create_test_admin(&pool, "query-owner").await;
     let public_id = uuid::Uuid::new_v4().to_string();
-    sqlx::query("INSERT INTO live_map(id,public_id,name,created_by,expires_at) VALUES($1,$2,'query-test',$3,datetime('now','+1 hour'))")
-        .bind(uuid::Uuid::new_v4().to_string()).bind(&public_id).bind(owner).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO live_map (
+            id,
+            public_id,
+            name,
+            created_by,
+            expires_at
+        ) VALUES ($1, $2, 'query-test', $3, datetime('now', '+1 hour'))
+        "#,
+    )
+    .bind(uuid::Uuid::new_v4().to_string())
+    .bind(&public_id)
+    .bind(owner)
+    .execute(&pool)
+    .await
+    .unwrap();
     let tera = geocode_web_single::build_tera_extension().unwrap();
     tera.lock()
         .await
@@ -523,12 +629,18 @@ async fn temporary_overlay_sharing_is_opt_in_and_query_only_controls_visibility(
             assert_eq!(&created.id, id);
         }
         previous_id = Some(created.id.clone());
-        let saved: bool =
-            sqlx::query_scalar("SELECT include_tile_overlays FROM temporary_urls WHERE id=$1")
-                .bind(&created.id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let saved: bool = sqlx::query_scalar(
+            r#"
+            SELECT
+                include_tile_overlays
+            FROM temporary_urls
+            WHERE id = $1
+            "#,
+        )
+        .bind(&created.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(saved, enabled);
         for agent in ["Desktop", "Mobile"] {
             for (query, visible) in [
@@ -562,12 +674,19 @@ async fn temporary_overlay_sharing_is_opt_in_and_query_only_controls_visibility(
                 .await;
                 assert_eq!(body, format!("{}|{}|false", usize::from(enabled), visible));
                 // パスワード入力、再試行の失敗、認証成功の後も、同じ選択が維持されることを検証する。
-                sqlx::query("UPDATE temporary_urls SET password_hash=$1 WHERE id=$2")
-                    .bind(bcrypt::hash("pass1234", 4).unwrap())
-                    .bind(&created.id)
-                    .execute(&pool)
-                    .await
-                    .unwrap();
+                sqlx::query(
+                    r#"
+                    UPDATE temporary_urls
+                    SET
+                        password_hash = $1
+                    WHERE id = $2
+                    "#,
+                )
+                .bind(bcrypt::hash("pass1234", 4).unwrap())
+                .bind(&created.id)
+                .execute(&pool)
+                .await
+                .unwrap();
                 let prompt = html(
                     temporary_map_get_handler(
                         headers.clone(),
@@ -613,11 +732,18 @@ async fn temporary_overlay_sharing_is_opt_in_and_query_only_controls_visibility(
                 )
                 .await;
                 assert_eq!(authenticated, body);
-                sqlx::query("UPDATE temporary_urls SET password_hash=NULL WHERE id=$1")
-                    .bind(&created.id)
-                    .execute(&pool)
-                    .await
-                    .unwrap();
+                sqlx::query(
+                    r#"
+                    UPDATE temporary_urls
+                    SET
+                        password_hash = NULL
+                    WHERE id = $1
+                    "#,
+                )
+                .bind(&created.id)
+                .execute(&pool)
+                .await
+                .unwrap();
             }
         }
     }
@@ -632,11 +758,18 @@ async fn live_map_tile_usage_is_saved_and_cannot_be_overridden_by_url() {
     use uuid::Uuid;
     let owner = common::create_test_admin(&pool, "usage-owner").await;
     let editor = common::create_test_admin(&pool, "usage-editor").await;
-    sqlx::query("UPDATE user_model SET can_share_live_location=true WHERE id=$1")
-        .bind(&owner)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE user_model
+        SET
+            can_share_live_location = true
+        WHERE id = $1
+        "#,
+    )
+    .bind(&owner)
+    .execute(&pool)
+    .await
+    .unwrap();
     let Json(tile) = admin_create(
         Extension(owner.clone()),
         Extension(pool.clone()),
@@ -697,12 +830,18 @@ async fn live_map_tile_usage_is_saved_and_cannot_be_overridden_by_url() {
             .await
             .unwrap();
         assert_eq!(maps[0].use_tile_overlays, enabled);
-        let stored_owner: String =
-            sqlx::query_scalar("SELECT created_by FROM live_map WHERE id=$1")
-                .bind(&created.id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let stored_owner: String = sqlx::query_scalar(
+            r#"
+            SELECT
+                created_by
+            FROM live_map
+            WHERE id = $1
+            "#,
+        )
+        .bind(&created.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(stored_owner, owner);
         for agent in ["Desktop", "Mobile"] {
             for (query, checked) in [
@@ -728,12 +867,19 @@ async fn live_map_tile_usage_is_saved_and_cannot_be_overridden_by_url() {
                 assert_eq!(body, format!("{}|{}", usize::from(enabled), checked));
             }
         }
-        sqlx::query("UPDATE live_map SET password_hash=$1 WHERE id=$2")
-            .bind(bcrypt::hash("test-password", 4).unwrap())
-            .bind(&created.id)
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            r#"
+            UPDATE live_map
+            SET
+                password_hash = $1
+            WHERE id = $2
+            "#,
+        )
+        .bind(bcrypt::hash("test-password", 4).unwrap())
+        .bind(&created.id)
+        .execute(&pool)
+        .await
+        .unwrap();
         let auth = authenticate_live_map_handler(
             HeaderMap::new(),
             Extension(pool.clone()),
@@ -768,11 +914,18 @@ async fn live_map_tile_usage_is_saved_and_cannot_be_overridden_by_url() {
         )
         .await;
         assert_eq!(authenticated, format!("{}|true", usize::from(enabled)));
-        sqlx::query("UPDATE live_map SET password_hash=NULL WHERE id=$1")
-            .bind(&created.id)
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            r#"
+            UPDATE live_map
+            SET
+                password_hash = NULL
+            WHERE id = $1
+            "#,
+        )
+        .bind(&created.id)
+        .execute(&pool)
+        .await
+        .unwrap();
         let Json(rotated) = rotate_live_map_url_handler(
             Extension(editor.clone()),
             Extension(pool.clone()),

@@ -387,7 +387,11 @@ fn append_answer_source(
         } else {
             ("shape_model", "COALESCE(m.name, '名称なし')")
         };
-        b.push("SELECT ");
+        b.push(
+            r#"
+            SELECT
+            "#,
+        );
         // History counts need no answer ID, so target/create indexes can
         // cover the submission scan. Latest ranking still breaks ties by ID.
         if !matches!(projection, AnswerProjection::Count(q) if q.mode != "latest") {
@@ -401,11 +405,18 @@ fn append_answer_source(
         match projection {
             AnswerProjection::Full => {
                 b.push(format!(
-                    r#",
-                    {name} AS target_name, m.layer_id, l.layer_name,
+                    r#"
+                    ,
+                    {name} AS target_name,
+                    m.layer_id,
+                    l.layer_name,
                     s.create_at COLLATE answer_time AS create_at,
-                    s.edited_at, s.revision, s.submitted_values, s.form_snapshot,
-                    s.source_form, cf.form_title AS common_form_name,
+                    s.edited_at,
+                    s.revision,
+                    s.submitted_values,
+                    s.form_snapshot,
+                    s.source_form,
+                    cf.form_title AS common_form_name,
                     cf.deleted AS common_form_deleted
                     "#
                 ));
@@ -466,10 +477,21 @@ fn build_query_with_projection(
     at: DateTime<Utc>,
     projection: AnswerProjection<'_>,
 ) -> QueryBuilder<'static, Sqlite> {
-    let mut b = QueryBuilder::new("WITH owned AS (");
+    let mut b = QueryBuilder::new(
+        r#"
+        WITH owned AS (
+        "#,
+    );
     append_answer_source(&mut b, user, projection, None);
-    b.push("), scoped AS (SELECT * FROM owned WHERE create_at COLLATE answer_time <= ")
-        .push_bind(at.naive_utc());
+    b.push(
+        r#"
+        ), scoped AS (
+            SELECT *
+            FROM owned
+            WHERE create_at COLLATE answer_time <=
+        "#,
+    )
+    .push_bind(at.naive_utc());
     if let Some(id) = &q.common_form_id {
         b.push(" AND source_form ->> 'id' = ").push_bind(id.clone());
     }
@@ -505,18 +527,31 @@ fn build_query_with_projection(
     if q.mode == "latest" {
         b.push(
             r#"
-        ), ranked AS (
-            SELECT *, row_number() OVER (
-                PARTITION BY target_type, target_id, COALESCE(source_form ->> 'id', 'individual')
-                ORDER BY create_at COLLATE answer_time DESC, id DESC
-            ) AS rn FROM scoped
-        ), filtered AS (
-            SELECT * FROM ranked WHERE rn = 1
-        "#,
+            ), ranked AS (
+                SELECT
+                    *,
+                    row_number() OVER (
+                        PARTITION BY
+                            target_type, target_id, COALESCE(source_form->>'id', 'individual')
+                        ORDER BY create_at COLLATE answer_time DESC, id DESC
+                    ) AS rn
+                FROM scoped
+            ), filtered AS (
+                SELECT *
+                FROM ranked
+                WHERE rn = 1
+            "#,
         );
     } else {
         // History does not need to rank or sort every answer before filtering.
-        b.push("), filtered AS (SELECT * FROM scoped WHERE TRUE");
+        b.push(
+            r#"
+            ), filtered AS (
+                SELECT *
+                FROM scoped
+                WHERE TRUE
+            "#,
+        );
     }
     if let Some(v) = q.version {
         b.push(" AND CAST(source_form ->> 'version' AS TEXT) = ")
@@ -611,12 +646,31 @@ pub(super) fn append_conditions(b: &mut QueryBuilder<'_, Sqlite>, conditions: &[
 }
 
 const ROW_COLUMNS: &str = r#"
-    id, target_type, target_id, target_name, layer_id, layer_name, create_at, edited_at, revision, submitted_values, form_snapshot,
-        source_form, common_form_name, common_form_deleted
+    id,
+    target_type,
+    target_id,
+    target_name,
+    layer_id,
+    layer_name,
+    create_at,
+    edited_at,
+    revision,
+    submitted_values,
+    form_snapshot,
+    source_form,
+    common_form_name,
+    common_form_deleted
     "#;
 
 fn append_page_query(b: &mut QueryBuilder<'static, Sqlite>, q: &AnswerQuery, columns: &str) {
-    b.push(format!("SELECT {columns} FROM filtered WHERE TRUE"));
+    b.push(format!(
+        r#"
+        SELECT
+            {columns}
+        FROM filtered
+        WHERE TRUE
+        "#,
+    ));
     if let Some(c) = &q.cursor {
         b.push(" AND (create_at COLLATE answer_time,id,target_type) < (")
             .push_bind(c.at)
@@ -626,8 +680,13 @@ fn append_page_query(b: &mut QueryBuilder<'static, Sqlite>, q: &AnswerQuery, col
             .push_bind(c.target_type.clone())
             .push(")");
     }
-    b.push(" ORDER BY create_at COLLATE answer_time DESC,id DESC,target_type DESC LIMIT ")
-        .push_bind(q.limit.unwrap_or(50) + 1);
+    b.push(
+        r#"
+        ORDER BY create_at COLLATE answer_time DESC, id DESC, target_type DESC
+        LIMIT
+        "#,
+    )
+    .push_bind(q.limit.unwrap_or(50) + 1);
 }
 
 async fn selected_answer_rows(
@@ -640,9 +699,19 @@ async fn selected_answer_rows(
     }
     // IDs already reflect all filters and latest-answer decisions. Resolve
     // only that bounded set, in the same read transaction and ownership scope.
-    let mut b = QueryBuilder::new(format!("SELECT {ROW_COLUMNS} FROM ("));
+    let mut b = QueryBuilder::new(format!(
+        r#"
+        SELECT {ROW_COLUMNS}
+        FROM (
+        "#,
+    ));
     append_answer_source(&mut b, user, AnswerProjection::Full, Some(keys));
-    b.push(") page ORDER BY create_at COLLATE answer_time DESC,id DESC,target_type DESC");
+    b.push(
+        r#"
+        ) page
+        ORDER BY create_at COLLATE answer_time DESC, id DESC, target_type DESC
+        "#,
+    );
     b.build_query_as().fetch_all(&mut **tx).await
 }
 
@@ -658,11 +727,11 @@ pub async fn search_answers_handler(
         build_query_with_projection(&user, &q, at, AnswerProjection::Count(&q))
             .push(
                 r#"
-            SELECT
-                count(*),
-                count(DISTINCT target_type || ':' || target_id)
-            FROM filtered
-            "#,
+                SELECT
+                    count(*),
+                    count(DISTINCT target_type || ':' || target_id)
+                FROM filtered
+                "#,
             )
             .build_query_as()
             .fetch_one(&mut *tx)
@@ -763,50 +832,77 @@ fn append_field_definitions(b: &mut QueryBuilder<'static, Sqlite>, source: &'sta
     // Only arrays can be grouped by their extracted JSON text. A JSON string
     // can extract to that same text, and JSON null and a missing path both
     // extract to SQL NULL. Preserve those values and expand original snapshots.
-    b.push(format!(r#"
-    SELECT
-        field
-    FROM (
-        SELECT field, observed, position
+    b.push(format!(
+        r#"
+        SELECT
+            field
         FROM (
-            SELECT f.value AS field, a.create_at AS observed,
-                CAST(f.key AS INTEGER) AS position,
-                row_number() OVER (
-                    PARTITION BY f.value
-                    ORDER BY a.create_at COLLATE answer_time DESC, a.id DESC,
-                        a.target_type DESC, CAST(f.key AS INTEGER)
-                ) AS definition_rank
+            SELECT
+                field,
+                observed,
+                position
             FROM (
-                SELECT form_snapshot, create_at, id, target_type
+                SELECT
+                    f.value AS field,
+                    a.create_at AS observed,
+                    CAST(f.key AS INTEGER) AS position,
+                    row_number() OVER (
+                        PARTITION BY f.value
+                        ORDER BY a.create_at COLLATE answer_time DESC,
+                            a.id DESC,
+                            a.target_type DESC,
+                            CAST(f.key AS INTEGER)
+                    ) AS definition_rank
                 FROM (
-                    SELECT form_snapshot, create_at, id, target_type,
-                        row_number() OVER (
-                            PARTITION BY json_extract(form_snapshot, '$.form_schema.fields') COLLATE BINARY
-                            ORDER BY create_at COLLATE answer_time DESC, id DESC, target_type DESC
-                        ) AS snapshot_rank
+                    SELECT
+                        form_snapshot,
+                        create_at,
+                        id,
+                        target_type
+                    FROM (
+                        SELECT
+                            form_snapshot,
+                            create_at,
+                            id,
+                            target_type,
+                            row_number() OVER (
+                                PARTITION BY
+                                    json_extract(form_snapshot, '$.form_schema.fields')
+                                        COLLATE BINARY
+                                ORDER BY create_at COLLATE answer_time DESC,
+                                    id DESC,
+                                    target_type DESC
+                            ) AS snapshot_rank
+                        FROM {source}
+                        WHERE json_type(form_snapshot, '$.form_schema.fields') = 'array'
+                    ) arrays
+                    WHERE snapshot_rank = 1
+                    UNION ALL
+                    SELECT
+                        form_snapshot,
+                        create_at,
+                        id,
+                        target_type
                     FROM {source}
-                    WHERE json_type(form_snapshot, '$.form_schema.fields') = 'array'
-                ) arrays
-                WHERE snapshot_rank = 1
-                UNION ALL
-                SELECT form_snapshot, create_at, id, target_type
-                FROM {source}
-                WHERE json_type(form_snapshot, '$.form_schema.fields') IS NOT 'array'
-            ) a, json_each(a.form_snapshot, '$.form_schema.fields') f
-        ) snapshots
-        WHERE definition_rank = 1
-        UNION ALL
-        SELECT json_object('id', f.key, 'label', f.key, 'type', 'unknown'),
-            max(a.create_at COLLATE answer_time), NULL
-        FROM {source} a, json_each(a.submitted_values) f
-        WHERE a.form_snapshot IS NULL
-        GROUP BY f.key
-    ) definitions
-    ORDER BY observed COLLATE answer_time DESC,
-    position NULLS LAST,
-    field
-    LIMIT 10001
-    "#));
+                    WHERE json_type(form_snapshot, '$.form_schema.fields') IS NOT 'array'
+                ) a,
+                json_each(a.form_snapshot, '$.form_schema.fields') f
+            ) snapshots
+            WHERE definition_rank = 1
+            UNION ALL
+            SELECT
+                json_object('id', f.key, 'label', f.key, 'type', 'unknown'),
+                max(a.create_at COLLATE answer_time),
+                NULL
+            FROM {source} a,
+            json_each(a.submitted_values) f
+            WHERE a.form_snapshot IS NULL
+            GROUP BY f.key
+        ) definitions
+        ORDER BY observed COLLATE answer_time DESC, position NULLS LAST, field
+        LIMIT 10001
+        "#,
+    ));
 }
 
 pub async fn answer_options_handler(
@@ -846,8 +942,7 @@ pub async fn answer_options_handler(
                     WHERE m.user_id = $1
                 )
             )
-        ORDER BY f.update_at DESC,
-        f.id
+        ORDER BY f.update_at DESC, f.id
         "#,
     )
     .bind(&user)
@@ -1086,12 +1181,30 @@ impl ExportScope {
         match self {
             Self::Answers(q) => {
                 let mut b = build_query(user, q, at);
-                b.push(", export_rows AS (SELECT * FROM filtered)");
+                b.push(
+                    r#"
+                    ,
+                    export_rows AS (
+                        SELECT
+                            *
+                        FROM filtered
+                    )
+                    "#,
+                );
                 b
             },
             Self::Map { request, scope } => {
                 let mut b = super::answer_map_filter::matched(user, request, at, scope);
-                b.push(", export_rows AS (SELECT * FROM map_matched)");
+                b.push(
+                    r#"
+                    ,
+                    export_rows AS (
+                        SELECT
+                            *
+                        FROM map_matched
+                    )
+                    "#,
+                );
                 b
             },
         }
@@ -1155,9 +1268,7 @@ pub(super) fn stream_csv(
                 SELECT
                     {ROW_COLUMNS}
                 FROM export_rows
-                ORDER BY create_at COLLATE answer_time DESC,
-                id DESC,
-                target_type DESC
+                ORDER BY create_at COLLATE answer_time DESC, id DESC, target_type DESC
                 LIMIT 200
                 OFFSET
                 "#
@@ -1219,7 +1330,7 @@ mod tests {
         ) definitions
         ORDER BY observed COLLATE answer_time DESC, position NULLS LAST, field
         LIMIT 10001
-    "#;
+        "#;
 
     async fn field_test_pool() -> SqlitePool {
         sqlx::sqlite::SqlitePoolOptions::new()
@@ -1241,7 +1352,7 @@ mod tests {
                     json_extract(r.value, '$.form_snapshot') AS form_snapshot,
                     json_extract(r.value, '$.submitted_values') AS submitted_values
                 FROM json_each(
-        "#,
+            "#,
         );
         b.push_bind(rows).push(") r) ");
         b

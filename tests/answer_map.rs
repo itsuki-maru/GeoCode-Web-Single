@@ -133,16 +133,90 @@ async fn answer_map_transport_restores_stored_and_ambiguous_bodies_and_keeps_fal
                 ),
             };
             if kind == "marker" {
-                sqlx::query("INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at,form_body_parts) VALUES($1,$2,$3,'transport',35,139,$4,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,$5)")
-                    .bind(target.to_string()).bind(user.to_string()).bind(layer.to_string()).bind(&body).bind(&parts).execute(&pool).await.unwrap();
+                sqlx::query(
+                    r#"
+                    INSERT INTO marker_info_model (
+                        id,
+                        user_id,
+                        layer_id,
+                        marker_name,
+                        latitude,
+                        longitude,
+                        detail,
+                        create_at,
+                        update_at,
+                        form_body_parts
+                    ) VALUES (
+                        $1,
+                        $2,
+                        $3,
+                        'transport',
+                        35,
+                        139,
+                        $4,
+                        CURRENT_TIMESTAMP,
+                        CURRENT_TIMESTAMP,
+                        $5
+                    )
+                    "#,
+                )
+                .bind(target.to_string())
+                .bind(user.to_string())
+                .bind(layer.to_string())
+                .bind(&body)
+                .bind(&parts)
+                .execute(&pool)
+                .await
+                .unwrap();
             } else {
-                sqlx::query("INSERT INTO shape_model(id,user_id,layer_id,shape_type,name,geojson,created_at,updated_at,form_body_parts) VALUES($1,$2,$3,'polyline','transport',$4,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,$5)")
+                sqlx::query(
+                    r#"
+                    INSERT INTO shape_model (
+                        id,
+                        user_id,
+                        layer_id,
+                        shape_type,
+                        name,
+                        geojson,
+                        created_at,
+                        updated_at,
+                        form_body_parts
+                    ) VALUES (
+                        $1,
+                        $2,
+                        $3,
+                        'polyline',
+                        'transport',
+                        $4,
+                        CURRENT_TIMESTAMP,
+                        CURRENT_TIMESTAMP,
+                        $5
+                    )
+                    "#,
+                )
                     .bind(target.to_string()).bind(user.to_string()).bind(layer.to_string()).bind(json!({"type":"Feature","properties":{"memo":body,"normalBodyReferences":{"version":"user data"}},"geometry":{"type":"LineString","coordinates":[[139,35],[140,36]]}}))
                     .bind(&parts).execute(&pool).await.unwrap();
             }
             for i in 0..2 {
-                sqlx::query(&format!("INSERT INTO {kind}_form_submission_model(id,{kind}_id,create_at,submitted_values,rendered_markdown) VALUES($1,$2,$3,$4,$5)"))
-                    .bind(ids[i].to_string()).bind(target.to_string()).bind(at+Duration::seconds(i as i64)).bind(json!({"n":i})).bind(answers[i]).execute(&pool).await.unwrap();
+                sqlx::query(&format!(
+                    r#"
+                    INSERT INTO {kind}_form_submission_model (
+                        id,
+                        {kind}_id,
+                        create_at,
+                        submitted_values,
+                        rendered_markdown
+                    ) VALUES ($1, $2, $3, $4, $5)
+                    "#,
+                ))
+                .bind(ids[i].to_string())
+                .bind(target.to_string())
+                .bind(at + Duration::seconds(i as i64))
+                .bind(json!({"n":i}))
+                .bind(answers[i])
+                .execute(&pool)
+                .await
+                .unwrap();
             }
         }
     }
@@ -260,10 +334,67 @@ async fn insert_popup_case(
         .collect();
     let stored = case.stored_parts(&ids);
     if kind == "marker" {
-        sqlx::query("INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at,form_body_parts) VALUES($1,$2,$3,'popup',35,139,$4,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,$5)")
-            .bind(target.to_string()).bind(user.to_string()).bind(layer.to_string()).bind(case.body).bind(stored).execute(pool).await.unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO marker_info_model (
+                id,
+                user_id,
+                layer_id,
+                marker_name,
+                latitude,
+                longitude,
+                detail,
+                create_at,
+                update_at,
+                form_body_parts
+            ) VALUES (
+                $1,
+                $2,
+                $3,
+                'popup',
+                35,
+                139,
+                $4,
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP,
+                $5
+            )
+            "#,
+        )
+        .bind(target.to_string())
+        .bind(user.to_string())
+        .bind(layer.to_string())
+        .bind(case.body)
+        .bind(stored)
+        .execute(pool)
+        .await
+        .unwrap();
     } else {
-        sqlx::query("INSERT INTO shape_model(id,user_id,layer_id,shape_type,name,geojson,created_at,updated_at,form_body_parts) VALUES($1,$2,$3,'polyline','popup',$4,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,$5)")
+        sqlx::query(
+            r#"
+            INSERT INTO shape_model (
+                id,
+                user_id,
+                layer_id,
+                shape_type,
+                name,
+                geojson,
+                created_at,
+                updated_at,
+                form_body_parts
+            ) VALUES (
+                $1,
+                $2,
+                $3,
+                'polyline',
+                'popup',
+                $4,
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP,
+                $5
+            )
+            "#,
+        )
             .bind(target.to_string()).bind(user.to_string()).bind(layer.to_string()).bind(json!({"type":"Feature","properties":{"memo":case.body},"geometry":{"type":"LineString","coordinates":[[139,35],[140,36]]}})).bind(stored).execute(pool).await.unwrap();
     }
     let base = chrono::NaiveDate::from_ymd_opt(2026, 10, 1)
@@ -278,11 +409,31 @@ async fn insert_popup_case(
                 "unused_snapshot_metadata":"snapshot🗾".repeat(256)
             })
         });
-        sqlx::query(&format!("INSERT INTO {kind}_form_submission_model(id,{kind}_id,create_at,submitted_values,rendered_markdown,form_snapshot,revision,edited_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)"))
-            .bind(ids[i].to_string()).bind(target.to_string()).bind(base+Duration::seconds(offsets[i]))
-            .bind(json!({"n":values[i],"unused_payload":"使わない値".repeat(512)}))
-            .bind(case.markdown[i]).bind(snapshot).bind(i as i64+2).bind(base+Duration::days(5))
-            .execute(pool).await.unwrap();
+        sqlx::query(&format!(
+            r#"
+            INSERT INTO {kind}_form_submission_model (
+                id,
+                {kind}_id,
+                create_at,
+                submitted_values,
+                rendered_markdown,
+                form_snapshot,
+                revision,
+                edited_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            "#,
+        ))
+        .bind(ids[i].to_string())
+        .bind(target.to_string())
+        .bind(base + Duration::seconds(offsets[i]))
+        .bind(json!({"n":values[i],"unused_payload":"使わない値".repeat(512)}))
+        .bind(case.markdown[i])
+        .bind(snapshot)
+        .bind(i as i64 + 2)
+        .bind(base + Duration::days(5))
+        .execute(pool)
+        .await
+        .unwrap();
     }
     ids
 }
@@ -397,7 +548,13 @@ async fn popup_projection_matches_full_answer_body_for_stored_legacy_empty_and_u
                 "geojson->'properties'->>'memo'"
             };
             let stored: (String, Option<Value>) = sqlx::query_as(&format!(
-                "SELECT {body_column},form_body_parts FROM {table} WHERE id=$1"
+                r#"
+                SELECT
+                    {body_column},
+                    form_body_parts
+                FROM {table}
+                WHERE id = $1
+                "#
             ))
             .bind(target.to_string())
             .fetch_one(&pool)
@@ -509,9 +666,62 @@ async fn matches_all_pages_deduplicates_and_preserves_owner_and_latest_rules() {
         (ids[2], owner, layer, "回答なし"),
         (ids[3], other, other_layer, "他人の対象"),
     ] {
-        sqlx::query("INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES($1,$2,$3,$4,35,139,'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)").bind(id.to_string()).bind(user.to_string()).bind(group.to_string()).bind(name).execute(&pool).await.unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO marker_info_model (
+                id,
+                user_id,
+                layer_id,
+                marker_name,
+                latitude,
+                longitude,
+                detail,
+                create_at,
+                update_at
+            ) VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                35,
+                139,
+                '',
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .bind(id.to_string())
+        .bind(user.to_string())
+        .bind(group.to_string())
+        .bind(name)
+        .execute(&pool)
+        .await
+        .unwrap();
     }
-    sqlx::query("INSERT INTO shape_model(id,user_id,layer_id,shape_type,name,geojson,created_at,updated_at) VALUES($1,$2,$3,'polyline','該当図形',$4,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)").bind(ids[0].to_string()).bind(owner.to_string()).bind(layer.to_string()).bind(json!({"type":"Feature","properties":{},"geometry":{"type":"LineString","coordinates":[[139,35],[140,36]]}})).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO shape_model (
+            id,
+            user_id,
+            layer_id,
+            shape_type,
+            name,
+            geojson,
+            created_at,
+            updated_at
+        ) VALUES (
+            $1,
+            $2,
+            $3,
+            'polyline',
+            '該当図形',
+            $4,
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        )
+        "#,
+    ).bind(ids[0].to_string()).bind(owner.to_string()).bind(layer.to_string()).bind(json!({"type":"Feature","properties":{},"geometry":{"type":"LineString","coordinates":[[139,35],[140,36]]}})).execute(&pool).await.unwrap();
     let form = Uuid::new_v4();
     let at = (Utc::now() - Duration::days(1)).naive_utc();
     for (kind, target, n, offset) in [
@@ -521,7 +731,19 @@ async fn matches_all_pages_deduplicates_and_preserves_owner_and_latest_rules() {
         ("shape", ids[0], 1, 0),
         ("marker", ids[3], 1, 0),
     ] {
-        sqlx::query(&format!("INSERT INTO {kind}_form_submission_model(id,{kind}_id,create_at,submitted_values,rendered_markdown,source_form,form_snapshot) VALUES($1,$2,$3,$4,'',$5,$6)"))
+        sqlx::query(&format!(
+            r#"
+            INSERT INTO {kind}_form_submission_model (
+                id,
+                {kind}_id,
+                create_at,
+                submitted_values,
+                rendered_markdown,
+                source_form,
+                form_snapshot
+            ) VALUES ($1, $2, $3, $4, '', $5, $6)
+            "#,
+        ))
             .bind(Uuid::new_v4().to_string()).bind(target.to_string()).bind(at+Duration::seconds(offset)).bind(json!({"n":n})).bind(json!({"id":form,"version":1})).bind(json!({"form_title":"記録","form_schema":{"fields":[{"id":"n","label":"数値","type":"number"}]}})).execute(&pool).await.unwrap();
     }
     let base = json!({"common_form_id":form,"limit":1,"conditions":[{"field_id":"n","field_type":"number","op":"eq","value":"1"}]});
@@ -622,11 +844,18 @@ async fn matches_all_pages_deduplicates_and_preserves_owner_and_latest_rules() {
     )
     .unwrap();
     assert!(!normal.contains("answerPreview:"));
-    sqlx::query("UPDATE marker_info_model SET latitude=999 WHERE id=$1")
-        .bind(ids[0].to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE marker_info_model
+        SET
+            latitude = 999
+        WHERE id = $1
+        "#,
+    )
+    .bind(ids[0].to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let invalid_position = answer_map_handler(
         Extension(owner.to_string()),
         Extension(pool.clone()),
@@ -691,19 +920,84 @@ async fn twenty_thousand_targets_support_map_and_filter_without_truncation() {
     let pool = common::test_pool().await;
     let user = test_user(&pool, "map-limits").await;
     let layer = test_layer(&pool, &user).await;
-    sqlx::query(r#"
-        WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<20000)
-        INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at)
-        SELECT '00000000-0000-4000-8000-'||printf('%012x',i),$1,$2,'対象'||i,35,139,'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP FROM n
-        "#).bind(user.to_string()).bind(layer.to_string()).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        WITH RECURSIVE
+            n (i) AS (
+                SELECT
+                    1
+                UNION ALL
+                SELECT
+                    i + 1
+                FROM n
+                WHERE i < 20000
+            )
+        INSERT INTO marker_info_model (
+            id,
+            user_id,
+            layer_id,
+            marker_name,
+            latitude,
+            longitude,
+            detail,
+            create_at,
+            update_at
+        )
+        SELECT
+            '00000000-0000-4000-8000-' || printf('%012x', i),
+            $1,
+            $2,
+            '対象' || i,
+            35,
+            139,
+            '',
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        FROM n
+        "#,
+    )
+    .bind(user.to_string())
+    .bind(layer.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let form = Uuid::new_v4().to_string();
-    sqlx::query(r#"
-        WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<20000)
-        INSERT INTO marker_form_submission_model(id,marker_id,create_at,submitted_values,rendered_markdown,source_form,form_snapshot)
-        SELECT '00000000-0000-4000-8000-'||printf('%012x',i),'00000000-0000-4000-8000-'||printf('%012x',i),
-            '2026-01-01 00:00:00',json_object('n',i),'',json_object('id',$1,'version',1),
-            '{"form_schema":{"fields":[{"id":"n","label":"番号","type":"number"}]}}' FROM n
-        "#).bind(&form).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        WITH RECURSIVE
+            n (i) AS (
+                SELECT
+                    1
+                UNION ALL
+                SELECT
+                    i + 1
+                FROM n
+                WHERE i < 20000
+            )
+        INSERT INTO marker_form_submission_model (
+            id,
+            marker_id,
+            create_at,
+            submitted_values,
+            rendered_markdown,
+            source_form,
+            form_snapshot
+        )
+        SELECT
+            '00000000-0000-4000-8000-' || printf('%012x', i),
+            '00000000-0000-4000-8000-' || printf('%012x', i),
+            '2026-01-01 00:00:00',
+            json_object('n', i),
+            '',
+            json_object('id', $1, 'version', 1),
+            '{"form_schema":{"fields":[{"id":"n","label":"番号","type":"number"}]}}'
+        FROM n
+        "#,
+    )
+    .bind(&form)
+    .execute(&pool)
+    .await
+    .unwrap();
     let owner = user.to_string();
     let q = query(json!({"limit":1,"as_of":"2026-10-28T00:00:00Z"}));
     let data = load_answer_map(&pool, &owner, &q).await.unwrap();
@@ -784,10 +1078,64 @@ async fn popup_snapshots_separate_all_answers_and_keep_ambiguous_legacy_read_onl
         (id, owner.clone(), layer.clone()),
         (foreign, other, other_layer),
     ] {
-        sqlx::query("INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES($1,$2,$3,'対象',35,139,'自由\n回答A\n回答B\n',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
-            .bind(target.to_string()).bind(user.to_string()).bind(group.to_string()).execute(&pool).await.unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO marker_info_model (
+                id,
+                user_id,
+                layer_id,
+                marker_name,
+                latitude,
+                longitude,
+                detail,
+                create_at,
+                update_at
+            ) VALUES (
+                $1,
+                $2,
+                $3,
+                '対象',
+                35,
+                139,
+                '自由
+回答A
+回答B
+',
+                    CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP
+                )
+            "#,
+        )
+        .bind(target.to_string())
+        .bind(user.to_string())
+        .bind(group.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
     }
-    sqlx::query("INSERT INTO shape_model(id,user_id,layer_id,shape_type,name,geojson,created_at,updated_at) VALUES($1,$2,$3,'polyline','図形',$4,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
+    sqlx::query(
+        r#"
+        INSERT INTO shape_model (
+            id,
+            user_id,
+            layer_id,
+            shape_type,
+            name,
+            geojson,
+            created_at,
+            updated_at
+        ) VALUES (
+            $1,
+            $2,
+            $3,
+            'polyline',
+            '図形',
+            $4,
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        )
+        "#,
+    )
         .bind(id.to_string()).bind(owner.to_string()).bind(layer.to_string()).bind(json!({"type":"Feature","properties":{"memo":"同じ回答\n同じ回答\n"},"geometry":{"type":"LineString","coordinates":[[139,35],[140,36]]}})).execute(&pool).await.unwrap();
     let at = (Utc::now() - Duration::days(1)).naive_utc();
     for (kind, target, markdown, n) in [
@@ -796,8 +1144,25 @@ async fn popup_snapshots_separate_all_answers_and_keep_ambiguous_legacy_read_onl
         ("shape", id, "同じ回答\n", 1),
         ("marker", foreign, "他人の秘密", 1),
     ] {
-        sqlx::query(&format!("INSERT INTO {kind}_form_submission_model(id,{kind}_id,create_at,submitted_values,rendered_markdown) VALUES($1,$2,$3,$4,$5)"))
-            .bind(Uuid::new_v4().to_string()).bind(target.to_string()).bind(at+Duration::seconds(n)).bind(json!({"n":n})).bind(markdown).execute(&pool).await.unwrap();
+        sqlx::query(&format!(
+            r#"
+            INSERT INTO {kind}_form_submission_model (
+                id,
+                {kind}_id,
+                create_at,
+                submitted_values,
+                rendered_markdown
+            ) VALUES ($1, $2, $3, $4, $5)
+            "#,
+        ))
+        .bind(Uuid::new_v4().to_string())
+        .bind(target.to_string())
+        .bind(at + Duration::seconds(n))
+        .bind(json!({"n":n}))
+        .bind(markdown)
+        .execute(&pool)
+        .await
+        .unwrap();
     }
     let q = query(
         json!({"target_type":"marker","target_id":id,"conditions":[{"field_id":"n","field_type":"unknown","op":"contains","value":"1"}]}),
@@ -818,12 +1183,19 @@ async fn popup_snapshots_separate_all_answers_and_keep_ambiguous_legacy_read_onl
     );
     assert_eq!(data.popup_bodies[&format!("shape:{id}")]["free_text"], "");
     // Display projection reads do not adopt/persist old records or rewrite their bodies.
-    let row: (String, bool) =
-        sqlx::query_as("SELECT detail,form_body_parts IS NULL FROM marker_info_model WHERE id=$1")
-            .bind(id.to_string())
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let row: (String, bool) = sqlx::query_as(
+        r#"
+        SELECT
+            detail,
+            form_body_parts IS NULL
+        FROM marker_info_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(row, ("自由\n回答A\n回答B\n".into(), true));
 }
 
@@ -844,11 +1216,54 @@ async fn passes_valid_initial_views_to_the_map_without_changing_answer_targets()
     let owner = common::create_test_user(&pool, "initial-view-owner").await;
     let layer = common::master_layer_id(&pool, &owner).await;
     let marker = Uuid::new_v4().to_string();
-    sqlx::query("INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES($1,$2,$3,'表示位置確認',35,139,'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
-        .bind(&marker).bind(&owner).bind(&layer).execute(&pool).await.unwrap();
-    sqlx::query("INSERT INTO marker_form_submission_model(id,marker_id,create_at,submitted_values,rendered_markdown) VALUES($1,$2,$3,'{}','')")
-        .bind(Uuid::new_v4().to_string()).bind(&marker).bind((Utc::now()-Duration::days(1)).naive_utc())
-        .execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO marker_info_model (
+            id,
+            user_id,
+            layer_id,
+            marker_name,
+            latitude,
+            longitude,
+            detail,
+            create_at,
+            update_at
+        ) VALUES (
+            $1,
+            $2,
+            $3,
+            '表示位置確認',
+            35,
+            139,
+            '',
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .bind(&marker)
+    .bind(&owner)
+    .bind(&layer)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO marker_form_submission_model (
+            id,
+            marker_id,
+            create_at,
+            submitted_values,
+            rendered_markdown
+        ) VALUES ($1, $2, $3, '{}', '')
+        "#,
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(&marker)
+    .bind((Utc::now() - Duration::days(1)).naive_utc())
+    .execute(&pool)
+    .await
+    .unwrap();
     let templates = geocode_web_single::build_tera_extension().unwrap();
     let query = json!({"target_type":"marker","target_id":marker,"as_of":Utc::now()}).to_string();
     let valid = json!({"latitude": 35.6812, "longitude": 139.7671, "zoom": 14.5});

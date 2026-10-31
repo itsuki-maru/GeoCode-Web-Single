@@ -127,9 +127,16 @@ async fn insert_marker(pool: &SqlitePool, user_id: &str, layer_id: &str) -> Stri
     sqlx::query(
         r#"
         INSERT INTO marker_info_model (
-            id, user_id, layer_id, marker_name, latitude, longitude, detail, create_at, update_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            id,
+            user_id,
+            layer_id,
+            marker_name,
+            latitude,
+            longitude,
+            detail,
+            create_at,
+            update_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         "#,
     )
     .bind(&marker_id)
@@ -154,9 +161,15 @@ async fn insert_shape(pool: &SqlitePool, user_id: &str, layer_id: &str) -> Strin
     sqlx::query(
         r#"
         INSERT INTO shape_model (
-            id, user_id, layer_id, shape_type, name, geojson, created_at, updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            id,
+            user_id,
+            layer_id,
+            shape_type,
+            name,
+            geojson,
+            created_at,
+            updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         "#,
     )
     .bind(&shape_id)
@@ -363,7 +376,13 @@ async fn map_object_query_returns_matching_markers_and_shapes() {
     let shape_id = insert_shape(&pool, &user_id, &layer_id).await;
 
     sqlx::query(
-        "UPDATE marker_info_model SET marker_name = '避難対象', detail = '駅前' WHERE id = $1",
+        r#"
+        UPDATE marker_info_model
+        SET
+            marker_name = '避難対象',
+            detail = '駅前'
+        WHERE id = $1
+        "#,
     )
     .bind(&marker_id)
     .execute(&pool)
@@ -372,21 +391,36 @@ async fn map_object_query_returns_matching_markers_and_shapes() {
 
     let mut shape_geojson = valid_polygon_geojson();
     shape_geojson["properties"]["memo"] = json!("立入禁止");
-    sqlx::query("UPDATE shape_model SET name = '避難対象区域', geojson = $1 WHERE id = $2")
-        .bind(shape_geojson.to_string())
-        .bind(&shape_id)
-        .execute(&pool)
-        .await
-        .expect("shape search data should update");
+    sqlx::query(
+        r#"
+        UPDATE shape_model
+        SET
+            name = '避難対象区域',
+            geojson = $1
+        WHERE id = $2
+        "#,
+    )
+    .bind(shape_geojson.to_string())
+    .bind(&shape_id)
+    .execute(&pool)
+    .await
+    .expect("shape search data should update");
 
     let foreign_user_id = common::create_test_user(&pool, "foreign-map-object-search-user").await;
     let foreign_layer_id = common::master_layer_id(&pool, &foreign_user_id).await;
     let foreign_shape_id = insert_shape(&pool, &foreign_user_id, &foreign_layer_id).await;
-    sqlx::query("UPDATE shape_model SET name = '避難対象区域' WHERE id = $1")
-        .bind(&foreign_shape_id)
-        .execute(&pool)
-        .await
-        .expect("foreign shape search data should update");
+    sqlx::query(
+        r#"
+        UPDATE shape_model
+        SET
+            name = '避難対象区域'
+        WHERE id = $1
+        "#,
+    )
+    .bind(&foreign_shape_id)
+    .execute(&pool)
+    .await
+    .expect("foreign shape search data should update");
 
     let Json(name_results) = query_map_objects_handler(
         Extension(user_id.clone()),
@@ -547,11 +581,18 @@ async fn shape_handlers_cover_create_read_delete_and_validation() {
         .is_err(),
         "invalid geometry update should be rejected"
     );
-    let stored_geojson: Value = sqlx::query_scalar("SELECT geojson FROM shape_model WHERE id = $1")
-        .bind(&created.id)
-        .fetch_one(&pool)
-        .await
-        .expect("stored shape should be returned");
+    let stored_geojson: Value = sqlx::query_scalar(
+        r#"
+        SELECT
+            geojson
+        FROM shape_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(&created.id)
+    .fetch_one(&pool)
+    .await
+    .expect("stored shape should be returned");
     assert_eq!(stored_geojson, valid_polygon);
 
     assert!(
@@ -644,12 +685,18 @@ async fn account_handlers_cover_signup_login_profile_and_tokens() {
         serde_json::from_slice(&bytes).expect("account info should be json");
     assert_eq!(info["is_private"], false);
 
-    let initial_auth_version: i64 =
-        sqlx::query_scalar("SELECT auth_version FROM user_model WHERE id = $1")
-            .bind(&user_id)
-            .fetch_one(&pool)
-            .await
-            .expect("initial auth version should be returned");
+    let initial_auth_version: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            auth_version
+        FROM user_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(&user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("initial auth version should be returned");
 
     assert!(
         account_password_update_handler(
@@ -693,12 +740,18 @@ async fn account_handlers_cover_signup_login_profile_and_tokens() {
             && cookie.contains("Max-Age=0")
             && cookie.contains("Path=/account/refresh")
     }));
-    let password_auth_version: i64 =
-        sqlx::query_scalar("SELECT auth_version FROM user_model WHERE id = $1")
-            .bind(&user_id)
-            .fetch_one(&pool)
-            .await
-            .expect("password auth version should be returned");
+    let password_auth_version: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            auth_version
+        FROM user_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(&user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("password auth version should be returned");
     assert_eq!(password_auth_version, initial_auth_version + 1);
 
     let refresh_response =
@@ -713,12 +766,18 @@ async fn account_handlers_cover_signup_login_profile_and_tokens() {
         .expect("disable token response should be built")
         .into_response();
     assert_eq!(disabled_response.status(), StatusCode::OK);
-    let logout_auth_version: i64 =
-        sqlx::query_scalar("SELECT auth_version FROM user_model WHERE id = $1")
-            .bind(&user_id)
-            .fetch_one(&pool)
-            .await
-            .expect("logout auth version should be returned");
+    let logout_auth_version: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            auth_version
+        FROM user_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(&user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("logout auth version should be returned");
     assert_eq!(logout_auth_version, password_auth_version + 1);
 }
 
@@ -750,11 +809,18 @@ async fn admin_handlers_cover_user_management() {
     .await
     .expect("admin should reset password");
 
-    sqlx::query("UPDATE user_model SET is_locked = true WHERE id = $1")
-        .bind(&target_id)
-        .execute(&pool)
-        .await
-        .expect("target user should be locked for test");
+    sqlx::query(
+        r#"
+        UPDATE user_model
+        SET
+            is_locked = true
+        WHERE id = $1
+        "#,
+    )
+    .bind(&target_id)
+    .execute(&pool)
+    .await
+    .expect("target user should be locked for test");
 
     let _ = unlock_account_handler(
         Extension(admin_id.clone()),
@@ -797,8 +863,13 @@ async fn image_and_asset_handlers_cover_listing_serving_preview_and_delete() {
 
     sqlx::query(
         r#"
-        INSERT INTO image_model (id, user_id, filename, uuid_filename, create_at)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO image_model (
+            id,
+            user_id,
+            filename,
+            uuid_filename,
+            create_at
+        ) VALUES ($1, $2, $3, $4, $5)
         "#,
     )
     .bind(&image_id)
@@ -996,7 +1067,13 @@ async fn file_handlers_cover_export_and_import() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let imported_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM marker_info_model WHERE user_id = $1 AND marker_name = 'imported'",
+        r#"
+        SELECT
+            COUNT(*)
+        FROM marker_info_model
+        WHERE user_id = $1
+            AND marker_name = 'imported'
+        "#,
     )
     .bind(&user_id)
     .fetch_one(&pool)
@@ -1060,14 +1137,26 @@ async fn file_import_rejects_invalid_shape_without_partial_writes() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let marker_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM marker_info_model WHERE user_id = $1 AND marker_name = 'must not be imported'",
+        r#"
+        SELECT
+            COUNT(*)
+        FROM marker_info_model
+        WHERE user_id = $1
+            AND marker_name = 'must not be imported'
+        "#,
     )
     .bind(&user_id)
     .fetch_one(&pool)
     .await
     .expect("marker count should be returned");
     let layer_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM layer_model WHERE user_id = $1 AND layer_name = 'invalid imported layer'",
+        r#"
+        SELECT
+            COUNT(*)
+        FROM layer_model
+        WHERE user_id = $1
+            AND layer_name = 'invalid imported layer'
+        "#,
     )
     .bind(&user_id)
     .fetch_one(&pool)
@@ -1338,12 +1427,18 @@ async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
 async fn totp_handlers_cover_setup_verify_login_and_disable() {
     let pool = common::test_pool().await;
     let user_id = common::create_test_user(&pool, "totp-user").await;
-    let initial_auth_version: i64 =
-        sqlx::query_scalar("SELECT auth_version FROM user_model WHERE id = $1")
-            .bind(&user_id)
-            .fetch_one(&pool)
-            .await
-            .expect("initial auth version should be returned");
+    let initial_auth_version: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            auth_version
+        FROM user_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(&user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("initial auth version should be returned");
     let initial_access_token = create_token(&user_id, 30, "access_token", initial_auth_version)
         .expect("initial access token should be created");
 
@@ -1352,20 +1447,32 @@ async fn totp_handlers_cover_setup_verify_login_and_disable() {
         .expect("totp setup should succeed")
         .into_response();
     assert_eq!(setup_response.status(), StatusCode::OK);
-    let setup_auth_version: i64 =
-        sqlx::query_scalar("SELECT auth_version FROM user_model WHERE id = $1")
-            .bind(&user_id)
-            .fetch_one(&pool)
-            .await
-            .expect("setup auth version should be returned");
+    let setup_auth_version: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            auth_version
+        FROM user_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(&user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("setup auth version should be returned");
     assert_eq!(setup_auth_version, initial_auth_version);
 
-    let temp_secret: String =
-        sqlx::query_scalar("SELECT totp_temp_secret FROM user_model WHERE id = $1")
-            .bind(&user_id)
-            .fetch_one(&pool)
-            .await
-            .expect("temp secret should be stored");
+    let temp_secret: String = sqlx::query_scalar(
+        r#"
+        SELECT
+            totp_temp_secret
+        FROM user_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(&user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("temp secret should be stored");
     let totp = TOTP::new(
         Algorithm::SHA1,
         6,
@@ -1481,12 +1588,18 @@ async fn totp_handlers_cover_setup_verify_login_and_disable() {
         .is_err(),
         "invalid TOTP token must not disable two-factor authentication"
     );
-    let auth_version_after_invalid_disable: i64 =
-        sqlx::query_scalar("SELECT auth_version FROM user_model WHERE id = $1")
-            .bind(&user_id)
-            .fetch_one(&pool)
-            .await
-            .expect("auth version after invalid disable should be returned");
+    let auth_version_after_invalid_disable: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            auth_version
+        FROM user_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(&user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("auth version after invalid disable should be returned");
     assert_eq!(
         auth_version_after_invalid_disable,
         enabled_access_claims.auth_version
@@ -1620,10 +1733,16 @@ async fn layer_ownership_is_enforced_for_markers_and_shapes() {
     );
     for table in ["marker_info_model", "shape_model"] {
         assert_eq!(
-            sqlx::query_scalar::<_, i64>(&format!("SELECT count(*) FROM {table}"))
-                .fetch_one(&pool)
-                .await
-                .unwrap(),
+            sqlx::query_scalar::<_, i64>(&format!(
+                r#"
+                SELECT
+                    count(*)
+                FROM {table}
+                "#,
+            ))
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
             0,
             "rejected creation must not leave a row in {table}"
         );

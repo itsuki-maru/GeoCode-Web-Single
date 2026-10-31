@@ -37,7 +37,38 @@ fn schema(added: bool) -> Value {
 
 async fn marker(pool: &SqlitePool, user: Uuid, layer: Uuid, name: &str) -> Uuid {
     let id = Uuid::new_v4();
-    sqlx::query("INSERT INTO marker_info_model (id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES($1,$2,$3,$4,35,139,'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)").bind(id.to_string()).bind(user.to_string()).bind(layer.to_string()).bind(name).execute(pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO marker_info_model (
+            id,
+            user_id,
+            layer_id,
+            marker_name,
+            latitude,
+            longitude,
+            detail,
+            create_at,
+            update_at
+        ) VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            35,
+            139,
+            '',
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .bind(id.to_string())
+    .bind(user.to_string())
+    .bind(layer.to_string())
+    .bind(name)
+    .execute(pool)
+    .await
+    .unwrap();
     id
 }
 
@@ -51,18 +82,58 @@ async fn form_options_keep_only_owned_active_or_referenced_deleted_forms() {
     let owned_marker = marker(&pool, user, layer, "owned marker").await;
     let foreign_marker = marker(&pool, other, other_layer, "foreign marker").await;
     let owned_shape = Uuid::new_v4();
-    sqlx::query("INSERT INTO shape_model(id,user_id,layer_id,shape_type,name,geojson,created_at,updated_at) VALUES($1,$2,$3,'polyline','owned shape',$4,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
+    sqlx::query(
+        r#"
+        INSERT INTO shape_model (
+            id,
+            user_id,
+            layer_id,
+            shape_type,
+            name,
+            geojson,
+            created_at,
+            updated_at
+        ) VALUES (
+            $1,
+            $2,
+            $3,
+            'polyline',
+            'owned shape',
+            $4,
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        )
+        "#,
+    )
         .bind(owned_shape.to_string()).bind(user.to_string()).bind(layer.to_string())
         .bind(json!({"type":"Feature","properties":{},"geometry":{"type":"LineString","coordinates":[[139,35],[140,36]]}}))
         .execute(&pool).await.unwrap();
     let forms: Vec<Uuid> = (0..6).map(|_| Uuid::new_v4()).collect();
     let at = (Utc::now() - Duration::days(1)).naive_utc();
     for (index, id) in forms.iter().enumerate() {
-        sqlx::query("INSERT INTO common_form_model(id,user_id,form_title,form_description,form_schema,deleted,create_at,update_at) VALUES($1,$2,'option form','',$3,$4,$5,$6)")
-            .bind(id.to_string()).bind(if index == 5 { other } else { user }.to_string())
-            .bind(schema(false)["form_schema"].clone()).bind(index != 0)
-            .bind(at).bind(at + Duration::seconds(index as i64))
-            .execute(&pool).await.unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO common_form_model (
+                id,
+                user_id,
+                form_title,
+                form_description,
+                form_schema,
+                deleted,
+                create_at,
+                update_at
+            ) VALUES ($1, $2, 'option form', '', $3, $4, $5, $6)
+            "#,
+        )
+        .bind(id.to_string())
+        .bind(if index == 5 { other } else { user }.to_string())
+        .bind(schema(false)["form_schema"].clone())
+        .bind(index != 0)
+        .bind(at)
+        .bind(at + Duration::seconds(index as i64))
+        .execute(&pool)
+        .await
+        .unwrap();
     }
     for (kind, target, form) in [
         ("marker", owned_marker, forms[1]),
@@ -71,10 +142,26 @@ async fn form_options_keep_only_owned_active_or_referenced_deleted_forms() {
         ("marker", foreign_marker, forms[3]),
         ("marker", owned_marker, forms[5]),
     ] {
-        sqlx::query(&format!("INSERT INTO {kind}_form_submission_model(id,{kind}_id,submitted_values,rendered_markdown,source_form,create_at) VALUES($1,$2,$3,'',$4,$5)"))
-            .bind(Uuid::new_v4().to_string()).bind(target.to_string()).bind(json!({}))
-            .bind(json!({"id":form,"version":1})).bind(at)
-            .execute(&pool).await.unwrap();
+        sqlx::query(&format!(
+            r#"
+            INSERT INTO {kind}_form_submission_model (
+                id,
+                {kind}_id,
+                submitted_values,
+                rendered_markdown,
+                source_form,
+                create_at
+            ) VALUES ($1, $2, $3, '', $4, $5)
+            "#,
+        ))
+        .bind(Uuid::new_v4().to_string())
+        .bind(target.to_string())
+        .bind(json!({}))
+        .bind(json!({"id":form,"version":1}))
+        .bind(at)
+        .execute(&pool)
+        .await
+        .unwrap();
     }
     let options = answer_options_handler(
         Extension(user.to_string()),
@@ -108,13 +195,67 @@ async fn owned_history_latest_typed_filters_and_csv_agree() {
     let b = marker(&pool, user, layer, "対象B").await;
     let foreign = marker(&pool, other, other_layer, "他人の対象").await;
     let shape = Uuid::new_v4();
-    sqlx::query("INSERT INTO shape_model(id,user_id,layer_id,shape_type,name,geojson,created_at,updated_at) VALUES($1,$2,$3,'polyline','図形S',$4,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)").bind(shape.to_string()).bind(user.to_string()).bind(layer.to_string()).bind(json!({"type":"Feature","properties":{},"geometry":{"type":"LineString","coordinates":[[139,35],[140,36]]}})).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO shape_model (
+            id,
+            user_id,
+            layer_id,
+            shape_type,
+            name,
+            geojson,
+            created_at,
+            updated_at
+        ) VALUES (
+            $1,
+            $2,
+            $3,
+            'polyline',
+            '図形S',
+            $4,
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        )
+        "#,
+    ).bind(shape.to_string()).bind(user.to_string()).bind(layer.to_string()).bind(json!({"type":"Feature","properties":{},"geometry":{"type":"LineString","coordinates":[[139,35],[140,36]]}})).execute(&pool).await.unwrap();
     let form = Uuid::new_v4();
     let second_form = Uuid::new_v4();
     for id in [form, second_form] {
-        sqlx::query("INSERT INTO common_form_model(id,user_id,form_title,form_description,form_schema,create_at,update_at) VALUES($1,$2,'共通フォーム','',$3,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)").bind(id.to_string()).bind(user.to_string()).bind(schema(true)["form_schema"].clone()).execute(&pool).await.unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO common_form_model (
+                id,
+                user_id,
+                form_title,
+                form_description,
+                form_schema,
+                create_at,
+                update_at
+            ) VALUES ($1, $2, '共通フォーム', '', $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            "#,
+        )
+        .bind(id.to_string())
+        .bind(user.to_string())
+        .bind(schema(true)["form_schema"].clone())
+        .execute(&pool)
+        .await
+        .unwrap();
         for v in [1, 2] {
-            sqlx::query("INSERT INTO common_form_revision_model(form_id,version,form_schema) VALUES($1,$2,$3)").bind(id.to_string()).bind(v).bind(schema(v==2)["form_schema"].clone()).execute(&pool).await.unwrap();
+            sqlx::query(
+                r#"
+                INSERT INTO common_form_revision_model (
+                    form_id,
+                    version,
+                    form_schema
+                ) VALUES ($1, $2, $3)
+                "#,
+            )
+            .bind(id.to_string())
+            .bind(v)
+            .bind(schema(v == 2)["form_schema"].clone())
+            .execute(&pool)
+            .await
+            .unwrap();
         }
     }
     let base = (Utc::now() - Duration::days(1)).naive_utc();
@@ -185,8 +326,28 @@ async fn owned_history_latest_typed_filters_and_csv_agree() {
             json!({"n":999,"note":"秘密"}),
         ),
     ] {
-        sqlx::query(&format!("INSERT INTO {kind}_form_submission_model(id,{kind}_id,create_at,submitted_values,rendered_markdown,source_form,form_snapshot) VALUES($1,$2,$3,$4,'',$5,$6)"))
-            .bind(id.to_string()).bind(target.to_string()).bind(base+Duration::seconds(offset)).bind(values).bind(source).bind(definition).execute(&pool).await.unwrap();
+        sqlx::query(&format!(
+            r#"
+            INSERT INTO {kind}_form_submission_model (
+                id,
+                {kind}_id,
+                create_at,
+                submitted_values,
+                rendered_markdown,
+                source_form,
+                form_snapshot
+            ) VALUES ($1, $2, $3, $4, '', $5, $6)
+            "#,
+        ))
+        .bind(id.to_string())
+        .bind(target.to_string())
+        .bind(base + Duration::seconds(offset))
+        .bind(values)
+        .bind(source)
+        .bind(definition)
+        .execute(&pool)
+        .await
+        .unwrap();
     }
     let history = search(&pool, user, json!({})).await;
     assert_eq!((history.total, history.target_count), (6, 3));
@@ -284,11 +445,18 @@ async fn owned_history_latest_typed_filters_and_csv_agree() {
     keys.sort();
     keys.dedup();
     assert_eq!(keys.len(), 6);
-    sqlx::query("UPDATE common_form_model SET deleted=true WHERE id=$1")
-        .bind(form.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE common_form_model
+        SET
+            deleted = true
+        WHERE id = $1
+        "#,
+    )
+    .bind(form.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let options = answer_options_handler(
         Extension(user.to_string()),
         Extension(pool.clone()),
@@ -344,7 +512,13 @@ async fn owned_history_latest_typed_filters_and_csv_agree() {
     revised_fields.retain(|field| field["id"] != "note");
     revised_fields.reverse();
     sqlx::query(
-        "UPDATE common_form_revision_model SET form_schema=$1 WHERE form_id=$2 AND version=2",
+        r#"
+        UPDATE common_form_revision_model
+        SET
+            form_schema = $1
+        WHERE form_id = $2
+            AND version = 2
+        "#,
     )
     .bind(revised)
     .bind(form.to_string())
@@ -468,9 +642,14 @@ async fn exact_numbers_json_types_and_mixed_timestamps_are_searchable() {
     {
         sqlx::query(
             r#"
-            INSERT INTO marker_form_submission_model
-                (id,marker_id,create_at,submitted_values,rendered_markdown,form_snapshot)
-            VALUES ($1,$2,$3,$4,'',$5)
+            INSERT INTO marker_form_submission_model (
+                id,
+                marker_id,
+                create_at,
+                submitted_values,
+                rendered_markdown,
+                form_snapshot
+            ) VALUES ($1, $2, $3, $4, '', $5)
             "#,
         )
         .bind(Uuid::new_v4().to_string())
@@ -534,11 +713,38 @@ async fn csv_is_chunked_and_retains_a_read_snapshot_during_writes() {
     let user = test_user(&pool, "answer-stream").await;
     let layer = test_layer(&pool, &user).await;
     let target = marker(&pool, user, layer, "出力対象").await;
-    sqlx::query(r#"
-        WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<201)
-        INSERT INTO marker_form_submission_model(id,marker_id,create_at,submitted_values,rendered_markdown)
-        SELECT '00000000-0000-4000-8000-'||printf('%012x',i),$1,'2026-01-01 00:00:00','{"note":"記録"}','' FROM n
-        "#).bind(target.to_string()).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        WITH RECURSIVE
+            n (i) AS (
+                SELECT
+                    1
+                UNION ALL
+                SELECT
+                    i + 1
+                FROM n
+                WHERE i < 201
+            )
+        INSERT INTO marker_form_submission_model (
+            id,
+            marker_id,
+            create_at,
+            submitted_values,
+            rendered_markdown
+        )
+        SELECT
+            '00000000-0000-4000-8000-' || printf('%012x', i),
+            $1,
+            '2026-01-01 00:00:00',
+            '{"note":"記録"}',
+            ''
+        FROM n
+        "#,
+    )
+    .bind(target.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let q = json!({"target_type":"marker","target_id":target});
     let response = export_answers_handler(
         Extension(user.to_string()),
@@ -547,10 +753,22 @@ async fn csv_is_chunked_and_retains_a_read_snapshot_during_writes() {
     )
     .await
     .unwrap();
-    sqlx::query(r#"
-        INSERT INTO marker_form_submission_model(id,marker_id,create_at,submitted_values,rendered_markdown)
-        VALUES($1,$2,'2026-01-02 00:00:00','{"later":"後からの回答"}','')
-        "#).bind(Uuid::new_v4().to_string()).bind(target.to_string()).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO marker_form_submission_model (
+            id,
+            marker_id,
+            create_at,
+            submitted_values,
+            rendered_markdown
+        ) VALUES ($1, $2, '2026-01-02 00:00:00', '{"later":"後からの回答"}', '')
+        "#,
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(target.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     use futures_util::StreamExt;
     let mut stream = response.into_body().into_data_stream();
     let mut chunks = vec![];
@@ -582,11 +800,38 @@ async fn csv_rejects_too_many_rows_and_columns() {
     let user = test_user(&pool, "answer-limits").await;
     let layer = test_layer(&pool, &user).await;
     let target = marker(&pool, user, layer, "大量回答").await;
-    sqlx::query(r#"
-        WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<10001)
-        INSERT INTO marker_form_submission_model(id,marker_id,create_at,submitted_values,rendered_markdown)
-        SELECT '00000000-0000-4000-8000-'||printf('%012x',i),$1,'2026-01-01 00:00:00','{}','' FROM n
-        "#).bind(target.to_string()).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        WITH RECURSIVE
+            n (i) AS (
+                SELECT
+                    1
+                UNION ALL
+                SELECT
+                    i + 1
+                FROM n
+                WHERE i < 10001
+            )
+        INSERT INTO marker_form_submission_model (
+            id,
+            marker_id,
+            create_at,
+            submitted_values,
+            rendered_markdown
+        )
+        SELECT
+            '00000000-0000-4000-8000-' || printf('%012x', i),
+            $1,
+            '2026-01-01 00:00:00',
+            '{}',
+            ''
+        FROM n
+        "#,
+    )
+    .bind(target.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     assert!(
         export_answers_handler(
             Extension(user.to_string()),
@@ -597,11 +842,38 @@ async fn csv_rejects_too_many_rows_and_columns() {
         .is_err()
     );
     let wide = marker(&pool, user, layer, "多数の項目").await;
-    sqlx::query(r#"
-        WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<201)
-        INSERT INTO marker_form_submission_model(id,marker_id,create_at,submitted_values,rendered_markdown)
-        SELECT '10000000-0000-4000-8000-'||printf('%012x',i),$1,'2026-01-01 00:00:00',json_object('field_'||i,'記録'),'' FROM n
-        "#).bind(wide.to_string()).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        WITH RECURSIVE
+            n (i) AS (
+                SELECT
+                    1
+                UNION ALL
+                SELECT
+                    i + 1
+                FROM n
+                WHERE i < 201
+            )
+        INSERT INTO marker_form_submission_model (
+            id,
+            marker_id,
+            create_at,
+            submitted_values,
+            rendered_markdown
+        )
+        SELECT
+            '10000000-0000-4000-8000-' || printf('%012x', i),
+            $1,
+            '2026-01-01 00:00:00',
+            json_object('field_' || i, '記録'),
+            ''
+        FROM n
+        "#,
+    )
+    .bind(wide.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     assert!(
         export_answers_handler(
             Extension(user.to_string()),
