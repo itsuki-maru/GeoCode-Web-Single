@@ -80,10 +80,16 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: src_frontend/template-scripts/package-lock.json
+          cache-dependency-path: |
+            src_frontend/template-scripts/package-lock.json
+            src_frontend/frontend/package-lock.json
 
       - name: Install dependencies
         run: npm ci --prefix src_frontend/template-scripts
+
+      # Shared integration suites import frontend tests, tsconfigs, and vendor assets.
+      - name: Install frontend test dependencies
+        run: npm ci --prefix src_frontend/frontend
 
       - name: Test
         run: npm test --prefix src_frontend/template-scripts
