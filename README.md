@@ -394,6 +394,8 @@ npm test --prefix src_frontend/template-scripts
 npm run test:run --prefix src_frontend/frontend
 ```
 
+バックエンドのテストとカバレッジは、開発用DBを使わずに実行できます。[計測手順](scripts/coverage/README.md)、[計測結果](docs/COVERAGE_BACKEND.md)、[テスト改善の反映内容](docs/BACKEND_TEST_PORT.md)を参照してください。
+
 ### 4. sqlx オフラインクエリの準備
 
 ```bash

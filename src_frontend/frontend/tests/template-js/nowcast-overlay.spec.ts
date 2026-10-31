@@ -1,4 +1,9 @@
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+const frontendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const readFrontendFile = (file: string, encoding: "utf8") =>
+  readFileSync(resolve(frontendRoot, file), encoding);
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createTileOverlayManager,
@@ -29,7 +34,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-09-15T03:01:00Z"));
   vi.spyOn(document, "hidden", "get").mockReturnValue(false);
-  window.eval(readFileSync("node_modules/leaflet/dist/leaflet-src.js", "utf8"));
+  window.eval(readFrontendFile("node_modules/leaflet/dist/leaflet-src.js", "utf8"));
   L = (window as any).L;
   L.Browser.any3d = true;
   const div = document.createElement("div");
@@ -93,7 +98,9 @@ describe("nowcast overlay with the shipped Leaflet", () => {
     const control = L.control.layers(null, null, { collapsed: false }).addTo(map);
     const anchor = control.getContainer();
     const host = anchor.parentElement;
-    const manager = createTileOverlayManager(L, map, control, undefined, true, { afterControl: anchor });
+    const manager = createTileOverlayManager(L, map, control, undefined, true, {
+      afterControl: anchor,
+    });
     manager.sync([tile]);
     await flush();
     const layer = control._layers[0].layer;

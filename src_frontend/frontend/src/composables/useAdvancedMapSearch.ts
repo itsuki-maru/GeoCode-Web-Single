@@ -30,8 +30,8 @@ export function useAdvancedMapSearch(
   const seen = new Map<string, number>();
   const context = () =>
     `${markers.recordCache.generation}:${layer.value}:${markers.attributeRevision}:${markers.mutationRevision}:${shapes.mutationRevision}`;
-  // During a failed layer switch, the displayed scope is restored before the
-  // toolbar selection. Rechecks belong to that displayed scope.
+  // レイヤ切り替えが失敗した場合は、ツールバーの選択より先に表示範囲を復元する。
+  // 再確認は、その表示範囲を対象に行う。
   const scope = () => `${markers.activeLayerId}:${markers.activeIsMaster}`;
   const cancelRecheck = () => {
     const previous = activeRequest;
@@ -111,8 +111,8 @@ export function useAdvancedMapSearch(
       const matchedMarkers = new Set(result.marker_ids),
         matchedShapes = new Set(result.shape_ids);
       if (full) {
-        // A save during this full read is rechecked next. Keep its previous
-        // membership until then, rather than publishing an older snapshot.
+        // この全件読み取り中の保存は、次の処理で再確認する。それまでは古いスナップショットを
+        // 公開せず、従来の所属状態を維持する。
         const preserve = (
           versions: Map<string, number>,
           since: number,
@@ -147,7 +147,7 @@ export function useAdvancedMapSearch(
           e instanceof Error ? e.message : "属性条件の再判定に失敗しました。再検索してください。",
         );
     } finally {
-      // Aborted transports may settle after a replacement has already started.
+      // 中断した通信は、代わりの通信が始まった後で完了する場合がある。
       if (activeRequest === job) {
         activeRequest = undefined;
         if (!disposed && (refreshAll || pending.size)) void flush();

@@ -93,9 +93,8 @@ apiClient.interceptors.response.use(
         }
       }
       return Promise.reject(error);
-    } else if (error.response?.status === 409) {
-      return Promise.reject(error);
     }
+    return Promise.reject(error);
   },
 );
 

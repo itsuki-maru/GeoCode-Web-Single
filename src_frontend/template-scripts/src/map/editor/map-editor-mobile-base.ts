@@ -560,30 +560,3 @@ function applyLocalMarkerSearch(query) {
   renderVisibleMarkers();
   renderVisibleShapes();
 }
-
-// 描画した形状を管理するレイヤーを作成
-
-// 親のVue画面が共通検索モーダルと一覧・地図の条件を管理する。
-const advancedSearchControl = L.control({ position: "topleft" });
-advancedSearchControl.onAdd = () => {
-  const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
-  const button = document.createElement("button");
-  button.type = "button";
-  button.id = "advanced-map-search-button";
-  button.textContent = "詳しい検索";
-  button.setAttribute("aria-pressed", "false");
-  button.style.cssText = "padding:8px;background:white;border:0;font:inherit;cursor:pointer";
-  button.addEventListener("click", () =>
-    window.parent.postMessage(
-      { type: "advancedMapSearchOpen" },
-      document.referrer ? new URL(document.referrer).origin : window.location.origin,
-    ),
-  );
-  container.append(button);
-  L.DomEvent.disableClickPropagation(container);
-  L.DomEvent.disableScrollPropagation(container);
-  return container;
-};
-advancedSearchControl.addTo(map);
-
-registerHideableMapControl(advancedSearchControl);

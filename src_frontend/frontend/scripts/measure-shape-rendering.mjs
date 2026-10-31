@@ -1,5 +1,5 @@
-// Actual Leaflet/SVG measurements. --revision=<git ref> loads source from that
-// revision through Vite, so the same fixtures can compare HEAD and the worktree.
+// 実際の Leaflet/SVG を計測する。--revision=<git ref> で指定したリビジョンのソースを
+// Vite 経由で読み込むため、同じテストデータで HEAD と作業ツリーを比較できる。
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";

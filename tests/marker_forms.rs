@@ -23,6 +23,7 @@ use geocode_web_single::{
 use serde_json::{Value, json};
 use sqlx::SqlitePool;
 use tower::ServiceExt;
+use uuid::Uuid;
 
 fn multipart_body(submission: &Value, image: Option<&[u8]>) -> (String, Vec<u8>) {
     const BOUNDARY: &str = "geocode-marker-form-boundary";
@@ -1045,4 +1046,397 @@ async fn concurrent_definition_changes_reject_posts_and_versions_are_atomic() {
         assert_eq!(count, 0);
     }
     common::close_file_test_pool(pool, path).await;
+}
+
+async fn owner_request(
+    app: &Router,
+    user: Option<Uuid>,
+    kind: &str,
+    id: Uuid,
+    submission: Option<Value>,
+    image: Option<&[u8]>,
+) -> (StatusCode, Value) {
+    let (method, path, body, content_type) = if let Some(submission) = submission {
+        let (ct, body) = multipart_body(&submission, image);
+        (
+            "POST",
+            format!("/{kind}/{id}/form/submissions"),
+            Body::from(body),
+            ct,
+        )
+    } else {
+        (
+            "GET",
+            format!("/{kind}/{id}/form/input"),
+            Body::empty(),
+            "application/json".into(),
+        )
+    };
+    let mut request = Request::builder()
+        .method(method)
+        .uri(path)
+        .header(header::CONTENT_TYPE, content_type);
+    if let Some(user) = user {
+        request = request.header(
+            "cookie",
+            format!(
+                "access_token={}",
+                geocode_web_single::auth::create_token(&user.to_string(), 30, "access_token", 0)
+                    .unwrap()
+            ),
+        );
+    }
+    let response = app
+        .clone()
+        .oneshot(request.body(body).unwrap())
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+
+#[tokio::test]
+async fn owner_inputs_work_with_private_forms_preserve_objects_and_are_searchable() {
+    let pool = common::test_pool().await;
+    let user = owner_test_user(&pool, "owner-input").await;
+    let other = owner_test_user(&pool, "other-input").await;
+    let layer = owner_test_layer(&pool, &user).await;
+    let marker = owner_test_marker(&pool, user, layer).await;
+    let shape = owner_test_shape(&pool, user, layer).await;
+    let app = geocode_web_single::router::build_router(
+        pool.clone(),
+        build_tera_extension().unwrap(),
+        None,
+    );
+    let schema:MarkerFormSchema=serde_json::from_value(json!({"fields":[
+        {"id":"n","label":"年数","type":"number","required":true},
+        {"id":"d","label":"日付","type":"date"},{"id":"flag","label":"確認","type":"checkbox"},
+        {"id":"material","label":"材質","type":"select","choices":["GX","塩ビ"]},
+        {"id":"text","label":"備考","type":"textarea"},{"id":"radio","label":"選択","type":"radio","choices":["A","B"]},
+        {"id":"photo","label":"画像","type":"image"}]})).unwrap();
+    for (kind, id) in [("marker", marker), ("shape", shape)] {
+        assert_eq!(
+            owner_request(&app, Some(user), kind, id, None, None)
+                .await
+                .0,
+            StatusCode::NOT_FOUND
+        );
+        let payload = MarkerFormConfigUpdate {
+            source_form: None,
+            enabled: false,
+            form_title: "所有者入力".into(),
+            form_description: "説明".into(),
+            form_schema: schema.clone(),
+            password_mode: "set".into(),
+            password: Some("private-password".into()),
+        };
+        if kind == "marker" {
+            let _ = update_marker_form_config_handler(
+                Extension(user.to_string()),
+                Extension(pool.clone()),
+                Path(id.to_string()),
+                Json(payload),
+            )
+            .await
+            .unwrap();
+        } else {
+            let _ = update_shape_form_config_handler(
+                Extension(user.to_string()),
+                Extension(pool.clone()),
+                Path(id.to_string()),
+                Json(payload),
+            )
+            .await
+            .unwrap();
+        }
+        for actor in [None, Some(other)] {
+            let expected = if actor.is_none() {
+                StatusCode::UNAUTHORIZED
+            } else {
+                StatusCode::NOT_FOUND
+            };
+            assert_eq!(
+                owner_request(&app, actor, kind, id, None, None).await.0,
+                expected
+            );
+            assert_eq!(
+                owner_request(
+                    &app,
+                    actor,
+                    kind,
+                    id,
+                    Some(json!({"values":{"n":"20"}})),
+                    None
+                )
+                .await
+                .0,
+                expected
+            );
+        }
+        let (status, input) = owner_request(&app, Some(user), kind, id, None, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(input["values"], json!({}));
+        assert!(!input.to_string().contains("private-password"));
+        assert!(input.get("password_hash").is_none());
+        let public_id: String = sqlx::query_scalar(&format!(
+            "SELECT public_id FROM {kind}_form_config_model WHERE {kind}_id=$1"
+        ))
+        .bind(id.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let public_path = if kind == "marker" {
+            format!("/forms/{public_id}")
+        } else {
+            format!("/shape-forms/{public_id}")
+        };
+        let denied = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(&public_path)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::NOT_FOUND);
+        let mut values = json!({"n":"0","d":"2020-04-01","flag":false,"material":"GX","text":" =SUM(1)","radio":"A"});
+        let missing = owner_request(
+            &app,
+            Some(user),
+            kind,
+            id,
+            Some(json!({"values":values})),
+            None,
+        )
+        .await;
+        assert_eq!(missing.0, StatusCode::CONFLICT);
+        values["n"] = json!("invalid");
+        assert_eq!(
+            owner_request(
+                &app,
+                Some(user),
+                kind,
+                id,
+                Some(json!({"config_token":input["config_token"],"values":values})),
+                None
+            )
+            .await
+            .0,
+            StatusCode::BAD_REQUEST
+        );
+        values["n"] = json!("0");
+        let image = std::fs::read("icons/icon.png").unwrap();
+        let (status, saved) = owner_request(
+            &app,
+            Some(user),
+            kind,
+            id,
+            Some(json!({"config_token":input["config_token"],"values":values})),
+            Some(&image),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{saved}");
+        assert_eq!(saved["object"]["id"], id.to_string());
+        assert_eq!(saved["object"]["layer_id"], layer.to_string());
+        if kind == "marker" {
+            assert_eq!(saved["object"]["marker_name"], "投稿先");
+            assert_eq!(saved["object"]["latitude"], 35.0);
+            assert!(
+                saved["object"]["detail"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("既存本文")
+            );
+        } else {
+            assert_eq!(saved["object"]["name"], "巡回経路");
+            assert_eq!(
+                saved["object"]["geojson"]["geometry"]["coordinates"],
+                json!([[139.0, 35.0], [139.1, 35.1]])
+            );
+            assert_eq!(
+                saved["object"]["geojson"]["properties"]["style"],
+                json!({"weight":4})
+            );
+            assert!(
+                saved["object"]["geojson"]["properties"]["memo"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("既存メモ")
+            );
+        }
+        let (submitted,snapshot):(Value,Value)=sqlx::query_as(&format!("SELECT submitted_values,form_snapshot FROM {kind}_form_submission_model WHERE {kind}_id=$1")).bind(id.to_string()).fetch_one(&pool).await.unwrap();
+        assert_eq!(submitted["n"], 0);
+        assert_eq!(submitted["flag"], false);
+        assert_eq!(snapshot["form_title"], "所有者入力");
+        assert!(submitted["photo"].is_object());
+        let latest = owner_request(&app, Some(user), kind, id, None, None)
+            .await
+            .1;
+        assert_eq!(latest["values"]["n"], "0");
+        assert_eq!(latest["values"]["flag"], false);
+        assert!(latest["values"].get("photo").is_none());
+        // 同じトークンでの次回回答も履歴追記。過去の回答・画像は残す。
+        values["n"] = json!("20");
+        assert_eq!(
+            owner_request(
+                &app,
+                Some(user),
+                kind,
+                id,
+                Some(json!({"config_token":latest["config_token"],"values":values})),
+                None
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+        let count: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM {kind}_form_submission_model WHERE {kind}_id=$1"
+        ))
+        .bind(id.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 2);
+        let q=serde_json::from_value(json!({"mode":"latest","target_type":kind,"target_id":id,"individual_only":true,"conditions":[{"field_id":"n","field_type":"number","op":"gte","value":"20"}]})).unwrap();
+        let results = geocode_web_single::handler::form_answers::search_answers_handler(
+            Extension(user.to_string()),
+            Extension(pool.clone()),
+            Json(q),
+        )
+        .await
+        .unwrap();
+        assert_eq!(results.0.total, 1);
+        // 表示後の設定変更は保存させず、履歴・本文を変更しない。
+        sqlx::query(&format!(
+            "UPDATE {kind}_form_config_model SET form_description='変更' WHERE {kind}_id=$1"
+        ))
+        .bind(id.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            owner_request(
+                &app,
+                Some(user),
+                kind,
+                id,
+                Some(json!({"config_token":latest["config_token"],"values":values})),
+                None
+            )
+            .await
+            .0,
+            StatusCode::CONFLICT
+        );
+        let count: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM {kind}_form_submission_model WHERE {kind}_id=$1"
+        ))
+        .bind(id.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 2);
+    }
+}
+
+#[tokio::test]
+async fn owner_prefill_uses_only_latest_same_form_and_matching_definitions() {
+    let pool = common::test_pool().await;
+    let user = owner_test_user(&pool, "prefill-owner").await;
+    let layer = owner_test_layer(&pool, &user).await;
+    let marker = owner_test_marker(&pool, user, layer).await;
+    let schema:MarkerFormSchema=serde_json::from_value(json!({"fields":[{"id":"n","type":"number","label":"数値"},{"id":"flag","type":"checkbox","label":"確認"},{"id":"new","type":"text","label":"新規"}]})).unwrap();
+    let _ = update_marker_form_config_handler(
+        Extension(user.to_string()),
+        Extension(pool.clone()),
+        Path(marker.to_string()),
+        Json(MarkerFormConfigUpdate {
+            source_form: None,
+            enabled: false,
+            form_title: "設定".into(),
+            form_description: String::new(),
+            form_schema: schema.clone(),
+            password_mode: "keep".into(),
+            password: None,
+        }),
+    )
+    .await
+    .unwrap();
+    let form = Uuid::new_v4();
+    sqlx::query("UPDATE marker_form_config_model SET source_form=$1 WHERE marker_id=$2")
+        .bind(json!({"id":form,"version":2}))
+        .bind(marker.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let snapshot = json!({"form_schema":{"fields":[{"id":"n","type":"number","label":"旧数値"},{"id":"flag","type":"text","label":"旧確認"}]}});
+    for (seconds, source, values, definition) in [
+        (
+            30,
+            Some(json!({"id":form,"version":1})),
+            json!({"n":1,"flag":true,"new":"過去の値"}),
+            Some(json!({"form_schema":schema})),
+        ),
+        (
+            20,
+            Some(json!({"id":form,"version":1})),
+            json!({"n":9007199254740993i64,"flag":"true"}),
+            Some(snapshot),
+        ),
+        (
+            10,
+            Some(json!({"id":Uuid::new_v4(),"version":1})),
+            json!({"n":999}),
+            Some(json!({"form_schema":schema})),
+        ),
+    ] {
+        // UTC の固定日時を保存し、実行日時やローカル時刻の解釈に依存させない。
+        let created_at = chrono::DateTime::parse_from_rfc3339("2020-01-01T00:00:00Z")
+            .unwrap()
+            .naive_utc()
+            - chrono::Duration::seconds(seconds);
+        sqlx::query("INSERT INTO marker_form_submission_model(id,marker_id,create_at,submitted_values,rendered_markdown,source_form,form_snapshot) VALUES($1,$2,$3,$4,'',$5,$6)")
+        .bind(Uuid::new_v4().to_string()).bind(marker.to_string()).bind(created_at).bind(values).bind(source).bind(definition).execute(&pool).await.unwrap();
+    }
+    let app = geocode_web_single::router::build_router(
+        pool.clone(),
+        build_tera_extension().unwrap(),
+        None,
+    );
+    let (_, input) = owner_request(&app, Some(user), "marker", marker, None, None).await;
+    assert_eq!(input["values"], json!({"n":"9007199254740993"}));
+    let (status,saved)=owner_request(&app,Some(user),"marker",marker,Some(json!({"config_token":input["config_token"],"values":{"n":"9007199254740995","flag":false,"new":""}})),None).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let (_, input) = owner_request(&app, Some(user), "marker", marker, None, None).await;
+    assert_eq!(input["values"]["n"], "9007199254740995");
+
+    let created_at = chrono::DateTime::parse_from_rfc3339("2020-01-01T00:00:00Z")
+        .unwrap()
+        .naive_utc();
+    sqlx::query("INSERT INTO marker_form_submission_model(id,marker_id,create_at,submitted_values,rendered_markdown,source_form) VALUES($1,$2,$3,'{\"n\":9}','','{}')")
+      .bind(Uuid::new_v4().to_string()).bind(marker.to_string()).bind(created_at).execute(&pool).await.unwrap();
+    sqlx::query("UPDATE marker_form_config_model SET source_form=NULL WHERE marker_id=$1")
+        .bind(marker.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (_, input) = owner_request(&app, Some(user), "marker", marker, None, None).await;
+    assert_eq!(input["values"], json!({})); // 定義がない既存回答を推測しない。
+    pool.close().await;
+}
+
+async fn owner_test_user(pool: &SqlitePool, name: &str) -> Uuid {
+    Uuid::parse_str(&common::create_test_user(pool, name).await).unwrap()
+}
+async fn owner_test_layer(pool: &SqlitePool, user: &Uuid) -> Uuid {
+    Uuid::parse_str(&common::master_layer_id(pool, &user.to_string()).await).unwrap()
+}
+async fn owner_test_marker(pool: &SqlitePool, user: Uuid, layer: Uuid) -> Uuid {
+    Uuid::parse_str(&insert_marker(pool, &user.to_string(), &layer.to_string()).await).unwrap()
+}
+async fn owner_test_shape(pool: &SqlitePool, user: Uuid, layer: Uuid) -> Uuid {
+    Uuid::parse_str(&insert_shape(pool, &user.to_string(), &layer.to_string()).await).unwrap()
 }

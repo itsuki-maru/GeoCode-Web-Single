@@ -248,7 +248,7 @@ const search = async (
   detail.value = null;
   try {
     const request = fresh ? buildRequest() : { ...applied.value };
-    // Initial requests are independent; wait for both before preparing page columns.
+    // 初回のリクエストは独立しているため、両方の完了を待ってからページの列を準備する。
     const [response, optionsReady] = await Promise.all([
       apiClient.post<Page>("/form-answers/search", { ...request, cursor }),
       initialOptions ?? true,

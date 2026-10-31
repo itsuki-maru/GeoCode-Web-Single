@@ -10,7 +10,7 @@ import { useMapObjectStore } from "@/stores/mapobjects";
 import { useShapeStore } from "@/stores/shapes";
 import { useLayersStore } from "@/stores/layers";
 vi.mock("@/axiosClient", () => ({
-  default: { get: vi.fn(), put: vi.fn(), isAxiosError: () => false },
+  default: { get: vi.fn(), put: vi.fn(), isAxiosError: vi.fn(() => false) },
 }));
 const marker = {
   id: "one",
@@ -70,6 +70,7 @@ async function setup(kind: "marker" | "shape" = "marker", restricted = false) {
   return { w, markers, shapes };
 }
 beforeEach(() => {
+  vi.mocked(apiClient.isAxiosError).mockReturnValue(false);
   vi.mocked(apiClient.get)
     .mockReset()
     .mockResolvedValue({ data: { form_schema: { fields: [{ id: "n" }] } } });
@@ -235,7 +236,7 @@ describe("制限付きレイヤへの所属変更", () => {
   it("編集中の内容を消さずに、制限先への変更を戻す", async () => {
     const { w } = await setup();
     await w.get("textarea").setValue("未保存の本文");
-    await destinations(w, true); // A policy change arriving during editing.
+    await destinations(w, true); // 編集中にポリシーの変更が届く場合。
     await w.get("select").setValue("locked");
     expect((w.get("select").element as HTMLSelectElement).value).toBe("layer");
     expect((w.get("textarea").element as HTMLTextAreaElement).value).toBe("未保存の本文");
@@ -313,4 +314,244 @@ describe("回答由来の本文と自由記述の分離", () => {
     expect((w.get("textarea").element as HTMLTextAreaElement).value).toBe("本文");
     w.unmount();
   });
+});
+
+describe("通常編集の保存・削除・Markdown挿入", () => {
+  it("選択範囲にMarkdownを挿入し、カーソル位置と添付操作を保つ", async () => {
+    const { w } = await setup();
+    const textarea = w.get<HTMLTextAreaElement>("textarea").element;
+    await w.get("textarea").setValue("前選択後");
+    textarea.setSelectionRange(1, 3);
+    (w.vm as any).insertUploadedMarkdown("**挿入**");
+    await flushPromises();
+    expect(textarea.value).toBe("前**挿入**後");
+    expect(textarea.selectionStart).toBe(7);
+    expect(textarea.selectionEnd).toBe(7);
+    await w.get('button[title="ファイルの追加"]').trigger("click");
+    expect(w.emitted("openImageUpload")).toHaveLength(1);
+    w.unmount();
+  });
+  it.each([true, false])("確認したマーカー削除の成功・失敗を通知する: %s", async (success) => {
+    const { w, markers } = await setup();
+    vi.spyOn(markers, "deleteMapObject").mockResolvedValue(success);
+    await w.get('button[title="マーカーを削除"]').trigger("click");
+    const confirmation = w.getComponent({ name: "ConfirmModal" });
+    confirmation.vm.$emit("cancel");
+    await flushPromises();
+    expect(markers.deleteMapObject).not.toHaveBeenCalled();
+    await w.get('button[title="マーカーを削除"]').trigger("click");
+    confirmation.vm.$emit("confirm");
+    await flushPromises();
+    expect(markers.deleteMapObject).toHaveBeenCalledExactlyOnceWith("one");
+    if (success) {
+      expect(w.emitted("deleted")).toEqual([["one"]]);
+      expect(w.emitted("close")).toHaveLength(1);
+    } else {
+      expect(w.emitted("close")).toBeUndefined();
+      expect(w.emitted("message")!.flat().join()).toContain("削除できません");
+    }
+    w.unmount();
+  });
+  it("名前・所属レイヤがない更新を送信しない", async () => {
+    const { w } = await setup();
+    await w.get('input[type="text"]').setValue(" ");
+    await button(w, "+更新").trigger("click");
+    await flushPromises();
+    expect(w.emitted("message")!.flat().join()).toContain("マーカー名");
+    expect(apiClient.put).not.toHaveBeenCalled();
+    await w.setProps({ targetId: "" });
+    await (w.vm as any).updateMapObject();
+    expect(w.emitted("message")!.flat().join()).toContain("所属レイヤ");
+    expect(apiClient.put).not.toHaveBeenCalled();
+    w.unmount();
+  });
+  it("図形更新失敗で編集を保持し、非折れ線のスタイルを保存する", async () => {
+    const { w, shapes } = await setup("shape");
+    const update = vi.spyOn(shapes, "updateShape").mockResolvedValueOnce(null);
+    await button(w, "+更新").trigger("click");
+    await flushPromises();
+    expect(w.emitted("message")!.flat().join()).toContain("図形情報を更新できません");
+    expect(w.emitted("close")).toBeUndefined();
+    const polygon = {
+      ...JSON.parse(JSON.stringify(shape)),
+      shape_type: "polygon",
+      geojson: {
+        ...shape.geojson,
+        geometry: {
+          type: "Polygon",
+          coordinates: [
+            [
+              [139, 35],
+              [140, 36],
+              [139, 36],
+              [139, 35],
+            ],
+          ],
+        },
+      },
+    };
+    shapes.shapeList.set("shape", polygon);
+    update.mockResolvedValue(polygon);
+    await w.setProps({ isOpen: false });
+    await w.setProps({ isOpen: true });
+    await flushPromises();
+    await button(w, "+更新").trigger("click");
+    await flushPromises();
+    expect(update.mock.lastCall![3]!.properties.style).toMatchObject({ fillColor: "#123456" });
+    expect(update.mock.lastCall![3]!.properties.style!.arrowType).toBeUndefined();
+    w.unmount();
+  });
+});
+
+describe("編集ツールバーの挿入と図形スタイル", () => {
+  it.each([
+    ["## を挿入", "## "],
+    ["### を挿入", "### "],
+    ["- を挿入", "- "],
+    ["1. を挿入", "1. "],
+    ["** を挿入", "**"],
+    ["[ Title ]( URL )を挿入", "[ Title ]( URL )"],
+    [":::details を挿入", ":::details タイトル\n非表示にする内容\n:::"],
+    [":::note を挿入", ":::note タイトル\n内容\n:::"],
+    [":::warning を挿入", ":::warning タイトル\n内容\n:::"],
+  ])("選択範囲へ %s を挿入する", async (title, text) => {
+    const { w } = await setup();
+    const textarea = w.get<HTMLTextAreaElement>("textarea");
+    await textarea.setValue("前本文後");
+    textarea.element.setSelectionRange(1, 3);
+    await w.get(`button[title="${title}"]`).trigger("click");
+    await flushPromises();
+    expect(textarea.element.value).toBe(`前${text}後`);
+    expect(textarea.element.selectionStart).toBe(1 + text.length);
+    w.unmount();
+  });
+  it("図形スタイルを入力して保存し、ファイル一覧と子モーダルの通知を伝える", async () => {
+    const { w, shapes } = await setup("shape");
+    const save = vi.spyOn(shapes, "updateShape").mockResolvedValue(shape);
+    await w.get('input[type="color"]').setValue("#abcdef");
+    const selects = w.findAll(".shape-line-select");
+    await selects[0]!.setValue("dashed");
+    await selects[1]!.setValue("both");
+    await w.get('input[type="range"]').setValue("7");
+    await button(w, "+更新").trigger("click");
+    await flushPromises();
+    expect(save.mock.lastCall![3]!.properties.style).toMatchObject({
+      color: "#abcdef",
+      weight: 7,
+      dashArray: expect.any(String),
+      arrowType: "both",
+    });
+    await w.get('button[title="ファイル一覧"]').trigger("click");
+    expect(w.emitted("openImageList")).toHaveLength(1);
+    await button(w, "入力フォーム設定").trigger("click");
+    w.getComponent(Settings).vm.$emit("message", "設定の通知");
+    w.getComponent(Settings).vm.$emit("close");
+    await flushPromises();
+    expect(w.emitted("message")).toContainEqual(["設定の通知"]);
+    expect(w.getComponent(Settings).props("isOpen")).toBe(false);
+    await button(w, "フォームで回答を登録").trigger("click");
+    w.getComponent(Message).vm.$emit("confirm");
+    await flushPromises();
+    w.getComponent(InputModal).vm.$emit("close");
+    await flushPromises();
+    expect(w.findComponent(InputModal).exists()).toBe(false);
+    w.unmount();
+  });
+});
+
+describe("本文取得失敗と編集中の権限変更", () => {
+  it.each(["marker", "shape"] as const)(
+    "%s: 本文取得失敗では保存と添付を止め、表示中の本文を維持する",
+    async (kind) => {
+      vi.mocked(apiClient.get).mockImplementation(async (url) => {
+        if (String(url).endsWith("/body")) throw Error("offline");
+        return { data: { form_schema: { fields: [{ id: "n" }] } } } as any;
+      });
+      const { w } = await setup(kind);
+      const text = w.get<HTMLTextAreaElement>("textarea");
+      expect(text.element.value).toBe(kind === "marker" ? "本文" : "メモ");
+      expect(text.element.readOnly).toBe(true);
+      expect(w.text()).toContain("本文・メモを確認できませんでした");
+      expect(button(w, "+更新").attributes("disabled")).toBeDefined();
+      expect(w.get('button[title="ファイルの追加"]').attributes("disabled")).toBeDefined();
+      await (w.vm as any).updateMapObject();
+      expect(apiClient.put).not.toHaveBeenCalled();
+      expect(w.emitted("close")).toBeUndefined();
+      w.unmount();
+    },
+  );
+  it("旧形式の404だけは本文を保持して通常編集を許可する", async () => {
+    vi.mocked(apiClient.isAxiosError).mockReturnValue(true);
+    vi.mocked(apiClient.get).mockImplementation(async (url) => {
+      if (String(url).endsWith("/body")) throw { response: { status: 404 } };
+      return { data: { form_schema: { fields: [] } } } as any;
+    });
+    const { w } = await setup();
+    await w.get("textarea").setValue("編集後");
+    await button(w, "+更新").trigger("click");
+    await flushPromises();
+    expect(apiClient.put).toHaveBeenCalledWith(
+      "/marker/update/one",
+      expect.objectContaining({ detail: "編集後" }),
+    );
+    expect(w.emitted("close")).toHaveLength(1);
+    w.unmount();
+  });
+  it.each(["marker", "shape"] as const)(
+    "%s: 編集開始後に入力制限が付いた場合、未保存内容を保持して送信を拒否する",
+    async (kind) => {
+      const { w, markers, shapes } = await setup(kind);
+      await w.get("textarea").setValue("保持する未保存の入力");
+      await w.setProps({ layerList: new Map([["layer", { ...layer, restrict_free_text: true }]]) });
+      await button(w, "+更新").trigger("click");
+      await flushPromises();
+      expect(apiClient.put).not.toHaveBeenCalled();
+      expect(w.emitted("close")).toBeUndefined();
+      expect(w.emitted("message")!.flat()).toContain(
+        "入力が制限されています。編集を開き直してください。",
+      );
+      expect(w.get<HTMLTextAreaElement>("textarea").element.value).toBe("保持する未保存の入力");
+      expect(markers.getById("one")!.detail).toBe("本文");
+      expect(shapes.getById("shape")!.geojson.properties.memo).toBe("メモ");
+      w.unmount();
+    },
+  );
+  it.each(["success", "failure"])(
+    "旧対象の本文取得が%sで遅れて完了しても、新しい編集と待機状態を壊さない",
+    async (outcome) => {
+      let resolve!: (value: any) => void, reject!: (error: any) => void;
+      const pending = new Promise((yes, no) => {
+        resolve = yes;
+        reject = no;
+      });
+      vi.mocked(apiClient.get).mockImplementation(async (url) =>
+        String(url) === "/marker/one/form/body"
+          ? (pending as any)
+          : {
+              data: String(url).endsWith("/body")
+                ? {
+                    free_text: "新しい対象の本文",
+                    parts: [],
+                    body_token: "new",
+                    sync_required: false,
+                  }
+                : { form_schema: { fields: [] } },
+            },
+      );
+      const { w, markers } = await setup();
+      markers.mapObjectList.set("two", { ...marker, id: "two", detail: "新しい対象の原文" });
+      await w.setProps({ targetId: "two" });
+      await flushPromises();
+      await w.get("textarea").setValue("新しい対象の未保存入力");
+      if (outcome === "success")
+        resolve({ data: { free_text: "古い対象", parts: [], sync_required: false } });
+      else reject(Error("late failure"));
+      await flushPromises();
+      expect(w.get<HTMLTextAreaElement>("textarea").element.value).toBe("新しい対象の未保存入力");
+      expect(w.get("textarea").attributes("disabled")).toBeUndefined();
+      expect(w.text()).not.toContain("本文・メモを確認できませんでした");
+      expect(apiClient.put).not.toHaveBeenCalled();
+      w.unmount();
+    },
+  );
 });

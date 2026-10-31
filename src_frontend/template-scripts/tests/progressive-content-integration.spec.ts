@@ -62,7 +62,7 @@ function open(details: HTMLDetailsElement) {
   details.dispatchEvent(new Event("toggle"));
 }
 beforeEach(() => {
-  // Content and work budgets are deterministic; timing cases override this clock explicitly.
+  // コンテンツ量と処理量の上限は一定とし、時間を確認するケースでは時計を明示的に置き換える。
   vi.spyOn(performance, "now").mockReturnValue(0);
   frames.clear();
   nextFrame = 0;
@@ -114,7 +114,7 @@ describe("whole popup content through the Markdown renderer", () => {
     expect(more(f.scope)?.disabled).toBe(true);
     expect(frames.size).toBeGreaterThan(0);
 
-    // Complete pending work before clicking again, even while the control is disabled.
+    // 操作部品が無効な間でも、再度クリックする前に待機中の処理を完了させる。
     expect(loadAll(f.scope)).toBeGreaterThan(0);
     expect([...f.host.querySelectorAll("p")].map((p) => p.textContent)).toEqual(
       Array.from({ length: 600 }, (_, i) => `段落 ${i}：太字と強調。`),
@@ -272,7 +272,7 @@ describe("whole popup content through the Markdown renderer", () => {
     expect(f.host.querySelector("img")?.hasAttribute("onerror")).toBe(false);
   });
   it("restarts the initial prefix when prepared HTML is mounted again", () => {
-    // Compare reset behavior with the same work budget, independent of CPU/JIT/GC timing.
+    // CPU・JIT・GC のタイミングに依存せず、同じ処理量の上限でリセット動作を比較する。
     vi.spyOn(performance, "now").mockReturnValue(0);
     const f = mount(paragraphs(600));
     const initial = f.host.querySelectorAll("p").length;
@@ -310,7 +310,7 @@ describe("whole popup content through the Markdown renderer", () => {
       f.host.innerHTML = f.html;
       setupDetailsLazyImages(f.host, render);
       const restarted = f.host.querySelectorAll("p");
-      // The time budget legitimately changes the prefix length, but not its starting position.
+      // 時間制限によって先頭から処理する長さは変わるが、開始位置は変わらない。
       expect(restarted.length).toBeGreaterThan(0);
       expect(restarted.length).toBeLessThan(600);
       expect(restarted.length).not.toBe(initial);

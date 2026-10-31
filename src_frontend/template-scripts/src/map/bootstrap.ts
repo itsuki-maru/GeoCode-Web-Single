@@ -85,7 +85,7 @@ export function readMapBootstrap(): MapBootstrap {
     throw new Error("Answer-map bootstrap data is invalid");
   }
   if (jsonNode) {
-    // Later readers, including print preparation, reuse the validated snapshot.
+    // 印刷の準備を含む後続の読み取りでは、検証済みのスナップショットを再利用する。
     window.__GEOCODE_MAP_BOOTSTRAP__ = value;
     jsonNode.remove();
   }

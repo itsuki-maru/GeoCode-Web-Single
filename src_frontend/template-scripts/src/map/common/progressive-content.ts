@@ -87,8 +87,8 @@ function attribute(value: string): string {
     .replace(/>/g, "&gt;");
 }
 
-// No browser DOM is used to parse unseen HTML. The stream parser also retains
-// raw-HTML parents spanning several Markdown blocks and suppresses script bodies.
+// 未表示の HTML の解析にはブラウザーの DOM を使わない。ストリームパーサーは、複数の Markdown ブロックをまたぐ
+// 生の HTML の親要素も保持し、script の本文は出力しない。
 function operationStream(create: HtmlSource, resources: ContentResources) {
   const iterator = create();
   const queue: Operation[] = [];
@@ -138,8 +138,8 @@ function operationStream(create: HtmlSource, resources: ContentResources) {
         if (end < pending.length && /[\uD800-\uDBFF]/.test(pending[end - 1]!)) end--;
         parser.write(pending.slice(offset, end));
         offset = end;
-        // Even wholly removed content (for example a large script body) must
-        // yield control instead of scanning the entire source synchronously.
+        // 大きな script 本文など、全体が削除される内容であっても、
+        // ソース全体を同期的に走査せず、途中で制御を戻す。
         queue.push({ type: "checkpoint" });
       }
       return queue[head];

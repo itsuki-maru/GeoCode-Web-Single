@@ -1,4 +1,4 @@
-// Real Leaflet/SVG workload comparisons for 40,000 pipe features.
+// 実際の Leaflet/SVG を使い、40,000 件の管路地物の処理負荷を比較する。
 import { execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";

@@ -372,6 +372,84 @@ describe("attribute and text search composition", () => {
     shape_ids,
     target_count: marker_ids.length + shape_ids.length,
   });
+  it.each([false, true])(
+    "preserves server text matches through attribute apply, recheck, and clear (matched=%s)",
+    async (matched) => {
+      const markers = useMapObjectStore(),
+        shapes = useShapeStore();
+      const record = marker("one", "a", "Ａ地点");
+      const figure = { ...shape("s1"), name: "Ａ地点" };
+      api.get.mockResolvedValueOnce({ data: { one: record } });
+      await markers.queryMapObject("a", false);
+      api.get.mockResolvedValueOnce({ data: [figure] });
+      await shapes.queryShapes("a", false);
+      // SQLite の LIKE は、この全角の大小文字違いを除外する。他の照合順序では一致する場合がある。
+      api.get.mockResolvedValueOnce({
+        data: { markers: matched ? { one: record } : {}, shape_ids: matched ? ["s1"] : [] },
+      });
+      await markers.queryWordMapObject("ａ", "", "a");
+      const expectMatches = () => {
+        expect([...markers.mapObjectList.keys()]).toEqual(matched ? ["one"] : []);
+        expect(markers.filteredShapeIds).toEqual(matched ? ["s1"] : []);
+      };
+      expectMatches();
+      markers.setAttributeSearch(criteria, result(["one"], ["s1"]));
+      expectMatches();
+      // 回答が変わっても、変更のないテキストを別の照合規則で再評価しない。
+      markers.upsertRecord({ ...record, update_at: "2026-01-02T00:00:00" });
+      shapes.upsertRecord({ ...figure, updated_at: "2026-01-02T00:00:00" });
+      markers.refreshSearchResults(true);
+      expectMatches();
+      markers.setAttributeSearch(null, null);
+      expectMatches();
+      // 再読み込みの失敗から復元する場合も、同じサーバー側の一致結果を保持する。
+      const search = markers.search;
+      markers.clearSearch();
+      markers.activateScope("a", false, search);
+      expectMatches();
+      // 実際にテキストを編集した場合は、従来どおりローカルで表示を更新する。
+      markers.upsertRecord({ ...record, marker_name: "ａ地点", update_at: "2026-01-03T00:00:00" });
+      shapes.upsertRecord({ ...figure, name: "ａ地点", updated_at: "2026-01-03T00:00:00" });
+      markers.refreshSearchResults();
+      expect([...markers.mapObjectList.keys()]).toEqual(["one"]);
+      expect(markers.filteredShapeIds).toEqual(["s1"]);
+      expect(api.get).toHaveBeenCalledTimes(3);
+    },
+  );
+  it("replays concurrent text edits over a delayed search and preserves them on attribute changes", async () => {
+    const markers = useMapObjectStore(),
+      shapes = useShapeStore();
+    markers.upsertRecord(marker("one"));
+    shapes.upsertRecord(shape("s1"));
+    const pending = deferred<{ data: { markers: {}; shape_ids: string[] } }>();
+    api.get.mockReturnValueOnce(pending.promise);
+    const searching = markers.queryWordMapObject("needle", "", "a");
+    markers.upsertRecord({ ...marker("one"), marker_name: "needle" });
+    shapes.upsertRecord({ ...shape("s1"), name: "needle" });
+    pending.resolve({ data: { markers: {}, shape_ids: [] } });
+    await searching;
+    markers.setAttributeSearch(criteria, result(["one"], ["s1"]));
+    expect([...markers.mapObjectList.keys()]).toEqual(["one"]);
+    expect(markers.filteredShapeIds).toEqual(["s1"]);
+    markers.setAccount("new-account");
+    expect(markers.search).toBeNull();
+    expect(markers.filteredShapeIds).toBeNull();
+  });
+  it("updates text matches when records move into the active layer without a text edit", async () => {
+    const markers = useMapObjectStore(),
+      shapes = useShapeStore();
+    markers.activateScope("a", false);
+    shapes.activateScope("a", false);
+    markers.upsertRecord(marker("one", "b", "needle"));
+    shapes.upsertRecord({ ...shape("s1", "b"), name: "needle" });
+    api.get.mockResolvedValueOnce({ data: { markers: {}, shape_ids: [] } });
+    await markers.queryWordMapObject("needle", "", "a");
+    markers.upsertRecord(marker("one", "a", "needle"));
+    shapes.upsertRecord({ ...shape("s1", "a"), name: "needle" });
+    markers.refreshSearchResults();
+    expect([...markers.mapObjectList.keys()]).toEqual(["one"]);
+    expect(markers.filteredShapeIds).toEqual(["s1"]);
+  });
   it("keeps canonical data, combines text and attribute IDs, and restores after clear", async () => {
     const markers = useMapObjectStore(),
       shapes = useShapeStore();

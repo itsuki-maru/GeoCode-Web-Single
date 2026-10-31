@@ -8,7 +8,7 @@ import SavedMapPresetsModal from "../SavedMapPresetsModal.vue";
 import type { SavedMapPreset } from "@/utils/answer-map-presets";
 import modalSource from "../AnswerMapModal.vue?raw";
 vi.mock("@/axiosClient", () => ({
-  default: { post: vi.fn(), get: vi.fn(), isAxiosError: () => false },
+  default: { post: vi.fn(), get: vi.fn(), isAxiosError: vi.fn(() => false) },
 }));
 const post = vi.mocked(apiClient.post);
 const action = "http://localhost:3000/form-answers/map";
@@ -36,6 +36,7 @@ const result = (targets = keys) => ({
   answer_count: targets.length,
 });
 beforeEach(() => {
+  vi.mocked(apiClient.isAxiosError).mockReturnValue(false);
   vi.mocked(apiClient.get).mockResolvedValue({ data: {} });
   post.mockReset();
   post.mockResolvedValue({ data: result() });
@@ -299,8 +300,8 @@ describe("回答地図の非同期絞り込み", () => {
     await vi.advanceTimersByTimeAsync(9_000);
     const request = deferredResult();
     post.mockReturnValueOnce(request.promise);
-    // Exercise latest-request protection even if an already queued action is
-    // delivered after the fieldset became disabled.
+    // すでに待機列に入った操作が fieldset の無効化後に届いた場合も、
+    // 最新リクエストを保護する仕組みを検証する。
     await click(w, "絞り込み実行");
     send(w, {
       type: "answer-map-filter-applied",
@@ -1177,6 +1178,226 @@ describe("回答地図の非同期絞り込み", () => {
     expect(w.text()).toContain("再試行してください");
     await click(w, "閉じる");
     expect(w.emitted("close")).toHaveLength(1);
+    w.unmount();
+  });
+});
+
+describe("回答地図の復旧と出力境界", () => {
+  it.each(["サーバーからの説明", { message: "説明メッセージ" }, { error: "検証エラー" }])(
+    "APIエラーの安全な説明を表示して直前の地図を保つ: %s",
+    async (data) => {
+      const w = await open();
+      await ready(w);
+      const frame = w.get("iframe").element;
+      vi.mocked(apiClient.isAxiosError).mockReturnValue(true);
+      post.mockRejectedValueOnce({ response: { data } });
+      await click(w, "絞り込み実行");
+      expect(w.text()).toContain(
+        typeof data === "string" ? data : "message" in data ? data.message : data.error,
+      );
+      expect(w.get("iframe").element).toBe(frame);
+      w.unmount();
+    },
+  );
+  it.each(["arrays", "targets"])(
+    "壊れた絞り込み結果を地図へ送らずエラーを表示する: %s",
+    async (kind) => {
+      const w = await open();
+      await ready(w);
+      const message = vi
+        .spyOn((w.get("iframe").element as HTMLIFrameElement).contentWindow!, "postMessage")
+        .mockImplementation(() => {});
+      post.mockResolvedValueOnce({
+        data:
+          kind === "arrays"
+            ? { ...result(), fields: null }
+            : { ...result(), targets: ["foreign"], target_count: 1 },
+      });
+      await click(w, "絞り込み実行");
+      expect(w.text()).toContain("直前の表示を維持");
+      expect(message).not.toHaveBeenCalled();
+      w.unmount();
+    },
+  );
+  it("表示件数だけの通知を反映し、表示対象への移動を要求する", async () => {
+    const w = await open();
+    await ready(w);
+    send(w, { type: "answer-map-filter-visible", updateId: "", visible: 1, renderable: 2 });
+    await flushPromises();
+    expect(w.text()).toContain("表示中1件");
+    const message = vi
+      .spyOn((w.get("iframe").element as HTMLIFrameElement).contentWindow!, "postMessage")
+      .mockImplementation(() => {});
+    await click(w, "表示範囲の移動");
+    expect(message).toHaveBeenCalledWith(
+      { type: "answer-map-fit", requestId: id(w) },
+      "http://localhost:3000",
+    );
+    w.unmount();
+  });
+  it.each(["CSV出力", "地図を印刷"])(
+    "準備応答がない%sを仮想時計で中断し再試行できる",
+    async (label) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+      const w = await open(true);
+      await ready(w);
+      await click(w, label);
+      await vi.advanceTimersByTimeAsync(15000);
+      expect(w.text()).toContain(
+        label === "CSV出力" ? "CSVの対象を取得できません" : "印刷対象を取得できません",
+      );
+      expect(
+        w
+          .findAll("button")
+          .find((b) => b.text() === label)!
+          .attributes("disabled"),
+      ).toBeUndefined();
+      w.unmount();
+    },
+  );
+  it("印刷応答のエラーと印刷キーを扱い、保存画面では印刷キーを伝播させない", async () => {
+    const w = await open(true);
+    await ready(w);
+    const message = vi
+      .spyOn((w.get("iframe").element as HTMLIFrameElement).contentWindow!, "postMessage")
+      .mockImplementation(() => {});
+    const press = (repeat = false) => {
+      const e = new KeyboardEvent("keydown", { key: "p", ctrlKey: true, cancelable: true, repeat });
+      window.dispatchEvent(e);
+      return e;
+    };
+    expect(press(true).defaultPrevented).toBe(true);
+    expect(message).not.toHaveBeenCalled();
+    expect(press().defaultPrevented).toBe(true);
+    await flushPromises();
+    const request = message.mock.lastCall![0];
+    send(w, { type: "answer-map-print-error", printRequestId: request.printRequestId });
+    await flushPromises();
+    expect(w.text()).toContain("印刷対象を取得できません");
+    await click(w, "検索条件を保存");
+    w.getComponent(SaveMapPresetModal).vm.$emit("saved");
+    await flushPromises();
+    expect(w.text()).toContain("検索条件を保存しました");
+    w.unmount();
+  });
+  it("色分け条件を保存用に複製し、不正な定義では保存画面を開かない", async () => {
+    const w = await open();
+    await ready(w);
+    const panel = w.getComponent(AnswerColoringPanel);
+    const value = {
+      common_form_id: query.common_form_id,
+      rules: [
+        {
+          id: "rule-1",
+          label: "分類",
+          color: "#123456",
+          conditions: [{ field_id: "n", field_type: "number", op: "gte", value: "1", upper: null }],
+        },
+      ],
+    };
+    panel.vm.$emit("save", value);
+    await flushPromises();
+    expect(w.getComponent(SaveMapPresetModal).props("draft")).toEqual({
+      kind: "coloring",
+      definition: value,
+    });
+    value.rules[0]!.label = "未反映";
+    expect(
+      (w.getComponent(SaveMapPresetModal).props("draft") as any).definition.rules[0].label,
+    ).toBe("分類");
+    w.getComponent(SaveMapPresetModal).vm.$emit("close");
+    await flushPromises();
+    panel.vm.$emit("save", { common_form_id: "", rules: [] });
+    await flushPromises();
+    expect(w.getComponent(SaveMapPresetModal).props("draft")).toBeNull();
+    w.unmount();
+  });
+});
+
+describe("回答地図の認証失敗と不正集計の保護", () => {
+  it("初回POSTの認証更新が失敗しても待機し続けず、元の要求を再試行できる", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    const w = await open(),
+      form = w.findAll("form").find((f) => f.attributes("action")?.includes("/form-answers/map"))!;
+    const nativeId = new URL(form.attributes("action")!).searchParams.get("native_request_id");
+    vi.mocked(apiClient.get).mockRejectedValueOnce(Error("refresh failed"));
+    send(w, { type: "native-form-auth-error", requestId: nativeId, error: "token_expired" });
+    await flushPromises();
+    expect(w.text()).toContain("認証を更新して再送信できませんでした");
+    expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(w.text()).toContain("認証を更新して再送信できませんでした");
+    await click(w, "再試行");
+    expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(w.get('input[name="query"]').attributes("value")!)).toMatchObject(query);
+    w.unmount();
+  });
+  it("ネイティブ送信の例外ではエラーを表示し、送信成功を扱わない", async () => {
+    vi.mocked(HTMLFormElement.prototype.submit).mockImplementationOnce(() => {
+      throw Error("blocked");
+    });
+    const w = await open();
+    expect(w.text()).toContain("地図を読み込めませんでした");
+    expect(w.text()).not.toContain("一致回答2件");
+    await click(w, "再試行");
+    expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(2);
+    w.unmount();
+  });
+  it.each([-1, 2.5, 10001])(
+    "不正なCSV件数 %s ではダウンロードせず、地図と再試行操作を保持する",
+    async (count) => {
+      const w = await open(true);
+      await ready(w);
+      const iframe = w.get("iframe").element as HTMLIFrameElement;
+      const message = vi.spyOn(iframe.contentWindow!, "postMessage").mockImplementation(() => {});
+      await click(w, "CSV出力");
+      const capture = message.mock.lastCall![0];
+      post.mockResolvedValueOnce({ data: { count } });
+      send(w, {
+        type: "answer-map-csv-targets",
+        csvRequestId: capture.csvRequestId,
+        updateId: capture.updateId,
+        targets: keys,
+      });
+      await flushPromises();
+      expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1);
+      expect(w.get("iframe").element).toBe(iframe);
+      expect(w.text()).toContain("地図の表示は維持");
+      expect(
+        w
+          .findAll("button")
+          .find((b) => b.text() === "CSV出力")!
+          .attributes("disabled"),
+      ).toBeUndefined();
+      w.unmount();
+    },
+  );
+  it("分類対象の件数不整合では更新を送信せず、元の表示を保持する", async () => {
+    const w = await open();
+    await ready(w);
+    const iframe = w.get("iframe").element as HTMLIFrameElement;
+    const message = vi.spyOn(iframe.contentWindow!, "postMessage").mockImplementation(() => {});
+    post.mockResolvedValueOnce({ data: { ...result(keys), target_count: 1 } });
+    w.getComponent(AnswerColoringPanel).vm.$emit("apply", {
+      common_form_id: query.common_form_id,
+      rules: [
+        {
+          id: "rule",
+          label: "分類",
+          color: "#123456",
+          conditions: [
+            { field_id: "n", field_type: "number", op: "gte", value: "10", upper: null },
+          ],
+        },
+      ],
+    });
+    await flushPromises();
+    expect(message).not.toHaveBeenCalled();
+    expect(w.get("iframe").element).toBe(iframe);
+    expect(w.text()).toContain("色分けの件数が不正");
+    expect(w.getComponent(AnswerColoringPanel).props("active")).toBe(false);
     w.unmount();
   });
 });

@@ -27,7 +27,7 @@ type MarkdownReferences = Record<string, { href: string; title: string | null }>
 type MarkdownTokens = unknown[] & { links: MarkdownReferences };
 
 interface DeferredDetailsOptions {
-  // Use the same Markdown renderer and sanitizer as the containing popup.
+  // 格納先のポップアップと同じ Markdown 描画処理とサニタイザーを使う。
   renderDeferredBody(markdown: string, links?: MarkdownReferences): string;
 }
 
@@ -54,8 +54,8 @@ function registerDeferredDetails(
   return key;
 }
 
-// Popup HTML can be reused after closing it. Release its sources only when that
-// HTML is replaced, including sources created by expanding nested sections.
+// ポップアップの HTML は、閉じた後も再利用できる。入れ子のセクションを展開して作成したものも含め、
+// その HTML が置き換わるときにのみ元データを解放する。
 export function releaseDeferredDetails(html: string): void {
   releaseProgressiveContent(html);
   for (const match of html.matchAll(/\bdata-deferred-details="([a-f0-9]{32})"/g)) {
@@ -100,17 +100,17 @@ function getMarked(): MarkedNamespace {
   return marked;
 }
 
-// Only the block structure and reference definitions are prepared up front.
-// Optional custom starts otherwise scan the remaining source at every block,
-// which was quadratic even for plain prose in the baseline measurements.
+// 最初に準備するのは、ブロック構造と参照定義だけとする。
+// 任意のカスタム開始位置の探索では、各ブロックで残りのソース全体を走査してしまい、
+// 基準計測では通常の文章でも処理量が二次関数的に増加していた。
 function lexerOptions(markdown: string): Record<string, any> {
   const marked = getMarked();
   const options = { ...marked.defaults };
   if (options.extensions) {
     options.extensions = { ...options.extensions };
     const starts = [...markdown.matchAll(/:::(?:details|note|warning)(?:\s|$)/g)];
-    // Blank-line-separated blocks are reached by the anchored tokenizer
-    // directly; scanning ahead at every preceding paragraph is unnecessary.
+    // 空行で区切られたブロックは、先頭一致のトークナイザーが直接処理するため、
+    // それより前の各段落で先読みする必要はない。
     const separated = starts.every((match) => {
       const index = match.index;
       if (!index) return true;
@@ -199,9 +199,9 @@ export function registerProgressiveHtml(
 function collectDeferredReferences(source: string, lexer: TokenizerContext["lexer"]): void {
   const links = lexer.tokens?.links;
   if (!links || !/^[\t ]*(?:>[\t ]?|[-+*][\t ]+|\d+[.)][\t ]+)*\[/m.test(source)) return;
-  // Only documents that might define references need this pass. Let Marked
-  // distinguish definitions from code/HTML/paragraphs and nested containers,
-  // while skipping all inline processing (including image tokenization).
+  // この処理は参照定義を含む可能性のある文書にのみ必要となる。Marked に定義と
+  // コード・HTML・段落・入れ子のコンテナーを判別させ、
+  // 画像のトークン化を含むすべてのインライン処理はスキップする。
   const marked = getMarked();
   const definitions = new marked.Lexer(lexerOptions(source));
   Object.assign(definitions.tokens.links, links);
@@ -254,8 +254,8 @@ export function createNestedTokenizer(typeName: string, options?: DeferredDetail
     tokenizer(this: TokenizerContext, source: string): NestedToken | null {
       if (!new RegExp(`^:::${typeName}(?:\\s|$)`).test(source)) return null;
 
-      // Find the block boundary without lexing its contents. In particular, a
-      // closed details section must not produce image tokens or image HTML.
+      // 内容を字句解析せずにブロックの境界を探す。特に、閉じた details セクションでは、
+      // 画像トークンや画像の HTML を生成しない。
       let nestLevel = 0;
       let lineStart = 0;
       let bodyStart = 0;
@@ -356,7 +356,7 @@ export function bindDeferredPopupLayout(popup: {
   once?(event: string, callback: () => void): unknown;
 }): () => void {
   const root = popup.getElement?.();
-  // Owner popups already preserve focus and update their layout themselves.
+  // 所有者用のポップアップは、すでに自身でフォーカスを保持し、レイアウトを更新している。
   if (!root || !popup.update || root.querySelector(".geocode-content-popup")) return () => {};
   const liveContent = root.querySelector<HTMLElement>(".md-detail-contents");
   const initialHtml = liveContent?.outerHTML;
@@ -405,8 +405,8 @@ export function setupDetailsLazyImages(
       const deferredKey = details.getAttribute("data-deferred-details");
       const deferred = deferredKey ? deferredDetails.get(deferredKey) : undefined;
       if (deferred && !details.hasAttribute("data-deferred-details-loaded")) {
-        // The HTML is generated and sanitized only on first expansion. Cache
-        // strings, never DOM nodes, so reopening a popup does not retain images.
+        // HTML の生成とサニタイズは、最初の展開時にのみ行う。ポップアップを開き直した際に画像を保持しないよう、
+        // DOM ノードではなく文字列をキャッシュする。
         deferred.html ??= withContentResources(deferred.resources, () =>
           deferred.render(deferred.markdown, deferred.links),
         );
@@ -435,8 +435,8 @@ export function setupDetailsLazyImages(
 
       restoreSources("img[data-src]");
       restoreSources("video[data-src]");
-      // An already-open child may have been initialized while its parent was
-      // closed. Its own deferred body can now be materialized.
+      // すでに開いている子要素は、親が閉じている間に初期化された可能性がある。
+      // その場合は、遅延していた子自身の本文をここで実体化できる。
       childDetails.forEach((child) => {
         if (child.open) child.dispatchEvent(new Event("toggle"));
       });

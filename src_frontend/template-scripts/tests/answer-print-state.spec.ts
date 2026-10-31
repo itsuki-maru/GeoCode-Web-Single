@@ -109,8 +109,8 @@ describe("frozen answer print snapshot", () => {
       const canonical = readMapBootstrap();
       if (canonical.page !== "form-answer-map") throw Error("Wrong page");
       expect((canonical.shapes[0].geojson.properties as any).memo).toBe(text);
-      // Both the restored normal body and the complete popup projection belong
-      // to print. The compact wire representation cannot bypass the byte cap.
+      // 復元した通常本文と完全なポップアップ表示用データは、どちらも印刷対象に含める。
+      // 圧縮した転送表現によって、バイト数の上限を回避できないようにする。
       expect(() => createAnswerPrintSnapshot(canonical, f.runtime, ["shape:same"])).toThrow("32MiB");
     } finally {
       node.remove();

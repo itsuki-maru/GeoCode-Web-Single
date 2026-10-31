@@ -7,7 +7,7 @@ import {
   isAnswerShapeVisible,
 } from "./answer-shapes";
 
-/** Only this dedicated iframe accepts answer filters. Cached layers are retained. */
+/** この専用 iframe だけが回答フィルターを受け付け、キャッシュ済みのレイヤは保持する。 */
 export function installAnswerFilter(
   runtime: any,
   preview: FormAnswerMapBootstrap["answerPreview"],
@@ -137,13 +137,13 @@ export function installAnswerFilter(
       lastUpdate = updateId;
       send("answer-map-filter-applied", { updateId, ...counts() });
     } catch {
-      // Both updates belong to the same acknowledged revision. Restore both if
-      // either renderer fails, keeping print/CSV tied to the previous revision.
+      // 両方の更新は、同じ確認済みリビジョンに属する。どちらかの描画処理が失敗した場合は両方を復元し、
+      // 印刷と CSV が直前のリビジョンに対応したままとなるようにする。
       try {
         if (coloring !== undefined) runtime.answerColoring?.apply(previousColoring);
         runtime.setAnswerTargets(previousTargets);
       } catch {
-        // The failed renderer already attempted its own rollback.
+        // 失敗した描画処理は、すでに自身のロールバックを試みている。
       }
       send("answer-map-filter-error", { updateId, message: "地図の表示を更新できませんでした。" });
     }

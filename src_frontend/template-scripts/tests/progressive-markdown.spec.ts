@@ -91,7 +91,7 @@ describe("progressive Markdown stream", () => {
     expect(stream.next().value).toBe("<p>");
     expect(calls).toHaveLength(0);
     expect(stream.next().value).toBe("<strong>");
-    // The nested call returns immediately instead of parsing all 3,000 images.
+    // 入れ子の呼び出しでは、3,000 枚の画像すべてを解析せず、すぐに戻る。
     expect(calls).toHaveLength(1);
     expect(stream.next().value).toContain('<img src="/image.jpg"');
   });

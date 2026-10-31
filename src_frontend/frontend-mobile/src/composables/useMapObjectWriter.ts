@@ -130,7 +130,7 @@ function shapeRecord(value: unknown): value is ShapeData {
   );
 }
 
-// The application owns the write even when its originating iframe is replaced.
+// 書き込み元の iframe が置き換わっても、書き込み処理はアプリが管理する。
 export function useMapObjectWriter() {
   const auth = useAuthStore(),
     markers = useMapObjectStore(),
@@ -141,11 +141,11 @@ export function useMapObjectWriter() {
   ): Promise<void> {
     let revalidate = (result: MapObjectWriteResult): MapObjectWriteResult => result;
     const respond = (result: MapObjectWriteResult) => {
-      // A disappearing frame must not turn a committed write into a failed request.
+      // フレームの消失を理由に、確定済みの書き込みを失敗したリクエストとして扱わない。
       try {
         reply(revalidate(result));
       } catch {
-        /* The canonical cache has already been updated. */
+        /* 正規キャッシュはすでに更新済みである。 */
       }
     };
     if (
@@ -211,7 +211,7 @@ export function useMapObjectWriter() {
         respond(failure(409, "保存要求の識別子が重複しています。"));
         return;
       }
-      // Preserve one HTTP request and one cache application for duplicate notifications.
+      // 通知が重複しても、HTTP リクエストとキャッシュへの反映はそれぞれ一度に保つ。
       session.entries.delete(request.requestId);
       session.entries.set(request.requestId, existing);
       respond(await existing.promise);
@@ -315,7 +315,7 @@ export function useMapObjectWriter() {
         }
         markers.refreshSearchResults();
       } catch (error) {
-        // Keep the actual successful HTTP result; the child can recover display synchronization.
+        // 実際に成功した HTTP 結果を保持し、子側で表示の同期を回復できるようにする。
         console.error("Saved map object could not be synchronized:", error);
       }
       return result;

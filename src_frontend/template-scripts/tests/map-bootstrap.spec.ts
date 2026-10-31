@@ -367,8 +367,8 @@ describe("readMapBootstrap", () => {
     (kind) => {
       const element = kind === "div" ? document.createElement("div") : document.createElement("script");
       element.id = "geocode-map-bootstrap";
-      // Append inertly; changing type afterward lets us check rejection without
-      // asking jsdom to execute the intentionally wrong JavaScript script type.
+      // 実行されない状態で追加し、その後に type を変えて拒否を確認する。
+      // 意図的に誤らせた JavaScript のスクリプト種別を、jsdom に実行させないためである。
       if (element instanceof HTMLScriptElement) element.type = "application/json";
       element.textContent = JSON.stringify(answerData());
       document.body.append(element);

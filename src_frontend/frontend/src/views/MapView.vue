@@ -240,10 +240,7 @@ const reloadMap = async (
     activeLayer.value === selectedLayerId;
   const previousDisplay = {
     accountId: authStore.accountId,
-    search:
-      displayedQuery.query1 || displayedQuery.query2
-        ? { ...displayedQuery, layerId: displayedLayerId }
-        : null,
+    search: displayedQuery.query1 || displayedQuery.query2 ? mapobjStore.search : null,
     attributeSearch: mapobjStore.attributeSearch,
     attributeMarkerIds: mapobjStore.attributeMarkerIds,
     attributeShapeIds: mapobjStore.attributeShapeIds,
@@ -951,7 +948,7 @@ watch(
   },
 );
 
-// --- Map object search (MapToolbarからエクスポート) ---
+// --- 地図オブジェクトの検索（MapToolbar からエクスポート） ---
 const mapToolbarRef = ref<InstanceType<typeof MapToolbar> | null>(null);
 const mapObjectQueryFormData = ref<QueryForm>({ query1: "", query2: "" });
 

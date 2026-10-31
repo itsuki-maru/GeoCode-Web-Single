@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
-import { createContext, runInContext } from "node:vm";
+import { createContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
+import { runSource } from "./support/vm-source";
 
 function setup() {
   const layers: any[] = [];
@@ -12,8 +12,8 @@ function setup() {
     updateMeasurementSelectionControl: vi.fn(),
     map: { getContainer: () => document.createElement("div") },
   });
-  runInContext(readFileSync("src/map/editor/map-editor-shape-geometry.ts", "utf8"), context);
-  // Geometry-handle cleanup is outside these cursor-style lifecycle tests.
+  runSource(context, "src/map/editor/map-editor-shape-geometry.ts");
+  // 図形の操作ハンドルの後処理は、カーソルのスタイルのライフサイクルを確認するこのテスト群の対象外とする。
   context.clearShapeGeometryEditing = vi.fn();
   const makeLayer = (shapeType = "polyline", properties: Record<string, unknown> = {}) => {
     const listeners = new Map<string, Array<() => void>>();

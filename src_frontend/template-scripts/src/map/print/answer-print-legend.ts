@@ -2,7 +2,7 @@ import type { AnswerColoring } from "../answer-coloring";
 import { makeSummaryDraggable } from "../common/draggable-summary";
 import type { FormAnswerMapBootstrap } from "../types";
 
-/** The legend owns a separate visibility mask; it never changes the source objects. */
+/** 凡例は独立した表示マスクを管理し、元のオブジェクトは変更しない。 */
 export function createAnswerPrintLegend(options: {
   coloring: AnswerColoring;
   bootstrap: FormAnswerMapBootstrap;
@@ -134,7 +134,7 @@ export function createAnswerPrintLegend(options: {
     onChange();
   };
   controls.addEventListener("change", update);
-  // Prevent legend dragging from panning or zooming the map underneath it.
+  // 凡例のドラッグで、その下の地図が移動やズームされることを防ぐ。
   const stop = (event: Event) => event.stopPropagation();
   for (const event of ["click", "dblclick", "wheel", "mousedown", "touchstart"])
     panel.addEventListener(event, stop);

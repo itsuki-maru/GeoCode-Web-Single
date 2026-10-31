@@ -24,7 +24,7 @@ interface MarkerClusteringOptions {
   initialEnabled?: boolean;
 }
 
-/** Keep the marker group identity used by filters, editing and answer coloring. */
+/** フィルター、編集、回答の色分けに使うマーカーグループの同一性を維持する。 */
 export function installMarkerClustering({
   leaflet,
   map,
@@ -43,8 +43,8 @@ export function installMarkerClustering({
   text.textContent = " クラスタ";
   label.append(input, text);
   row.append(label);
-  // Leaflet rebuilds the overlays list when tiles are added or removed. Keep
-  // this setting outside that list and outside its visibility bulk actions.
+  // Leaflet はタイルの追加・削除時にオーバーレイ一覧を作り直す。この設定は一覧の外に置き、
+  // 一覧の表示状態をまとめて変更する操作の対象からも外す。
   control.getContainer()?.querySelector(".leaflet-control-layers-list")?.append(row);
   leaflet.DomEvent.disableClickPropagation(row);
 
@@ -80,8 +80,8 @@ export function installMarkerClustering({
   };
   const finishSettling = () => {
     clearTimeout(settleTimer);
-    // animationend can fire inside the plugin's cleanup queue. Rebuild after
-    // the entire queue has returned, so it cannot remove the re-added markers.
+    // animationend は、プラグインの後処理キュー内で発火する場合がある。再追加したマーカーが削除されないよう、
+    // キュー全体の処理が戻ってから再構築する。
     settleTimer = setTimeout(() => {
       if (zooming || disposed) return;
       settling = false;
@@ -98,8 +98,8 @@ export function installMarkerClustering({
     settling = true;
     setEnabled(enabled);
     clearTimeout(settleTimer);
-    // Non-animated/empty groups may have fired animationend before this map
-    // handler. Also allow those groups to settle without relying on an event.
+    // アニメーションしないグループや空のグループでは、この地図側のハンドラーより前に animationend が
+    // 発火している場合がある。イベントに依存せず、これらのグループも安定状態に到達できるようにする。
     settleTimer = setTimeout(() => {
       settling = false;
       rebuild();

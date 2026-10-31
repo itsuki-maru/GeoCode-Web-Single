@@ -1576,3 +1576,56 @@ async fn map_parent_data_mode_omits_objects_and_keeps_direct_access() {
         }
     }
 }
+
+#[tokio::test]
+async fn layer_ownership_is_enforced_for_markers_and_shapes() {
+    let pool = common::test_pool().await;
+    let attacker = common::create_test_user(&pool, "ownership-attacker").await;
+    let owner = common::create_test_user(&pool, "ownership-owner").await;
+    let foreign_layer = common::master_layer_id(&pool, &owner).await;
+    assert_eq!(
+        create_marker_handler(
+            Extension(attacker.clone()),
+            Extension(pool.clone()),
+            Query(MarkerCreateRequestParams {
+                layer_id: Some(foreign_layer.clone()),
+                latitude: Some(35.0),
+                longitude: Some(139.0),
+            }),
+        )
+        .await
+        .err()
+        .unwrap()
+        .into_response()
+        .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        create_shape_handler(
+            Extension(attacker),
+            Extension(pool.clone()),
+            Json(ShapeCreateJsonData {
+                layer_id: foreign_layer,
+                shape_type: "polygon".to_string(),
+                name: Some("foreign shape".to_string()),
+                geojson: valid_polygon_geojson(),
+            }),
+        )
+        .await
+        .err()
+        .unwrap()
+        .into_response()
+        .status(),
+        StatusCode::NOT_FOUND
+    );
+    for table in ["marker_info_model", "shape_model"] {
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(&format!("SELECT count(*) FROM {table}"))
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0,
+            "rejected creation must not leave a row in {table}"
+        );
+    }
+}

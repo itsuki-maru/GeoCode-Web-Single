@@ -703,3 +703,25 @@ async fn an_actual_master_binding_becomes_an_independent_managed_layer_on_import
     );
     assert_eq!(snapshot(&pool, recipient).await, copied);
 }
+
+#[tokio::test]
+async fn failure_to_record_completion_also_rolls_back_all_imported_data() {
+    let pool = common::test_pool().await;
+    let user = create_user(&pool, "receipt-failure").await;
+    let app = app(&pool, user);
+    let key = Uuid::new_v4().to_string();
+    let before = snapshot(&pool, user).await;
+    sqlx::raw_sql("CREATE TRIGGER reject_import_receipt BEFORE INSERT ON json_import_receipt_model BEGIN SELECT RAISE(ABORT, 'receipt failure'); END;")
+        .execute(&pool).await.unwrap();
+    assert_eq!(
+        upload(&app, FIXTURE, Some(&key)).await.0,
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert_eq!(snapshot(&pool, user).await, before);
+    sqlx::raw_sql("DROP TRIGGER reject_import_receipt;")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(upload(&app, FIXTURE, Some(&key)).await.0, StatusCode::OK);
+    assert_eq!(receipts(&pool, user).await, 1);
+}

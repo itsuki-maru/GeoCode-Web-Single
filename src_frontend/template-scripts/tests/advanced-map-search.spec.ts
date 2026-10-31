@@ -88,7 +88,9 @@ describe("advanced map search", () => {
       target_count: 0,
     });
     expect(document.querySelector("dialog")?.open).toBe(true);
-    expect(document.querySelector('[role="status"]')?.textContent).toBe("検索結果：0件");
+    expect(document.querySelector('[role="status"]')?.textContent).toBe(
+      "属性条件のみの一致件数：0件",
+    );
     expect(document.querySelector<HTMLInputElement>("dialog input")?.value).toBe(
       "9007199254740993.0001",
     );
@@ -196,12 +198,13 @@ describe("advanced map search", () => {
           style.borderRadius,
           style.boxShadow,
           style.padding,
+          style.fontWeight === "normal" ? "400" : style.fontWeight,
         ];
       });
     const fullScreenStyles = styles();
     const pageStyle = document.createElement("style");
     try {
-      // Load the actual top page's global CSS, which is absent on the full-screen page.
+      // 全画面ページにはない、実際のトップページの全体用 CSS を読み込む。
       pageStyle.textContent = readFileSync(resolve("../frontend/src/views/MapView.vue"), "utf8")
         .split("<style>")[1]!
         .split("</style>")[0]!;
@@ -213,6 +216,13 @@ describe("advanced map search", () => {
         return [style.borderBottomWidth, style.borderBottomStyle];
       };
       const topHeadingBorder = headingBorder();
+      const typography = () =>
+        [...document.querySelectorAll("dialog label, dialog select, dialog input")].map((node) => {
+          const weight = getComputedStyle(node).fontWeight;
+          return weight === "normal" ? "400" : weight;
+        });
+      const topTypography = typography();
+      expect(topTypography.every((weight) => weight === "normal" || weight === "400")).toBe(true);
       const buttons = [...document.querySelectorAll("dialog button")];
       expect(new Set(buttons.map((b) => getComputedStyle(b).borderRadius))).toEqual(
         new Set(["8px"]),
@@ -224,7 +234,7 @@ describe("advanced map search", () => {
       expect(getComputedStyle(document.querySelector(".attribute-row > button")!).alignSelf).toBe(
         "end",
       );
-      // Match the full-screen page, including Markdown's !important first/last-child margins.
+      // Markdown の最初と最後の子要素に適用する !important の余白指定も含め、全画面ページに合わせる。
       const template = new DOMParser().parseFromString(
         readFileSync(resolve("../../src/templates/map-anather.html"), "utf8"),
         "text/html",
@@ -235,6 +245,12 @@ describe("advanced map search", () => {
         ),
         ...[...template.querySelectorAll("head style")].map((style) => style.textContent),
       ].join("\n");
+      expect(typography()).toEqual(topTypography);
+      expect(styles()).toEqual(fullScreenStyles);
+      const mapLabel = document.createElement("label");
+      mapLabel.textContent = "既存の地図コントロール";
+      map.append(mapLabel);
+      expect(getComputedStyle(mapLabel).fontWeight).toBe("bold");
       expect(headingBorder()).toEqual(topHeadingBorder);
       const markdownHeading = document.createElement("h2");
       markdownHeading.textContent = "Markdownの見出し";
@@ -245,7 +261,7 @@ describe("advanced map search", () => {
         "solid",
       ]);
       const dialog = getComputedStyle(document.querySelector("dialog")!);
-      // Appended dialogs are the last body child. Zero bottom margin must not anchor them below.
+      // 追加したダイアログは body の最後の子要素になる。下余白がゼロでも、画面下に固定されないことを確認する。
       expect(dialog.position).toBe("fixed");
       expect(dialog.top).toBe("50%");
       expect(dialog.left).toBe("50%");
@@ -400,7 +416,7 @@ describe("advanced map search", () => {
     const transport = vi.fn(
       (_path: string, body: unknown, signal: AbortSignal): Promise<unknown> => {
         if (body === undefined) return Promise.resolve(forms);
-        // A token-refresh interceptor can outlive the original signal's abort.
+        // トークン更新インターセプターの処理は、元のシグナルが中断された後も続く場合がある。
         return new Promise((complete) => searches.push({ signal, complete }));
       },
     );

@@ -133,7 +133,7 @@ window.runAnswerBenchmark = async ({
   let checkbox = document.querySelector<HTMLInputElement>(".column-options input");
   const columnToggleMs = await operation(() => checkbox!.click());
   await operation(() => checkbox!.click());
-  // Do not retain a detached input (and its former DOM tree) during GC measurements.
+  // GC の計測中に、切り離した入力要素や、その元の DOM ツリーを保持しない。
   checkbox = null;
   const requestsBeforeLocal = { ...requests };
   const helpToggleMs = await operation(() =>

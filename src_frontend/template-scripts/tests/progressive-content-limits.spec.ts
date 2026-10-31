@@ -64,7 +64,7 @@ function open(details: HTMLDetailsElement) {
 }
 
 beforeEach(() => {
-  // Verify work and DOM limits independently of CPU/JIT/GC timing.
+  // CPU・JIT・GC のタイミングに依存せず、処理量と DOM 数の上限を検証する。
   vi.spyOn(performance, "now").mockReturnValue(0);
   frames.clear();
   nextFrame = 0;

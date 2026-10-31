@@ -1,4 +1,4 @@
-"""Verify PDFs from check-print-preview.mjs. Requires pypdf; accepts output directory."""
+"""check-print-preview.mjs が生成した PDF を検証する。pypdf が必要で、出力ディレクトリを受け取る。"""
 from pathlib import Path
 import sys
 from pypdf import PdfReader

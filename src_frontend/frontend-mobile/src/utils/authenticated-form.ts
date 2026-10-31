@@ -1,6 +1,6 @@
 import apiClient from "@/axiosClient";
 
-/** Keep native HTML navigation / streaming downloads, and recover a rejected POST once. */
+/** HTML 標準の画面遷移とストリーミングダウンロードを維持し、拒否された POST を一度だけ再試行する。 */
 export function submitAuthenticatedForm(
   form: HTMLFormElement,
   frame: HTMLIFrameElement,
@@ -45,7 +45,7 @@ export function submitAuthenticatedForm(
     recovering = true;
     retried = true;
     try {
-      // /account/auth triggers the existing apiClient refresh/retry interceptor.
+      // /account/auth により、既存の apiClient の更新・再試行インターセプターが動作する。
       await apiClient.get("/account/auth", { signal: controller.signal });
       if (active) form.submit();
     } catch {

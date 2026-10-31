@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
   get: vi.fn(),
   request: vi.fn(),
   delete: vi.fn(),
+  post: vi.fn(),
   isAxiosError: vi.fn(() => false),
 }));
 vi.mock("@/axiosClient", () => ({ default: api }));
@@ -34,6 +35,7 @@ const existing = {
   public_path: "/forms/existing",
 };
 beforeEach(() => {
+  api.isAxiosError.mockReturnValue(false);
   api.get.mockImplementation(async (url: string) => ({
     data: url === "/common-forms" ? [common] : url.startsWith("/common-forms/") ? common : existing,
   }));
@@ -226,4 +228,220 @@ it("回答一覧を開いている間だけ生成し、閉じる・再表示で�
   await wrapper.setProps({ isOpen: false });
   expect(wrapper.findComponent({ name: "FormAnswersModal" }).exists()).toBe(false);
   wrapper.unmount();
+});
+
+describe("設定の検証・競合・公開URL操作", () => {
+  it.each([
+    ["title", "フォーム名を入力"],
+    ["empty", "入力項目を追加"],
+    ["label", "すべての項目名"],
+    ["choices", "選択肢が必要"],
+    ["password", "4〜64文字"],
+  ])("不正な設定を送信しない: %s", async (kind, message) => {
+    const config = structuredClone(existing);
+    if (kind === "title") config.form_title = " ";
+    if (kind === "empty") config.form_schema.fields = [];
+    if (kind === "label") config.form_schema.fields[0]!.label = " ";
+    if (kind === "choices")
+      Object.assign(config.form_schema.fields[0]!, { type: "select", choices: [] });
+    api.get.mockImplementation(async (url: string) => ({
+      data: url === "/common-forms" ? [] : config,
+    }));
+    const w = await open();
+    if (kind === "password") {
+      await w.get('input[type="radio"][value="set"]').setValue(true);
+      await w.get('input[type="password"]').setValue("abc");
+    }
+    await click(w, "フォーム設定を保存");
+    expect(api.request).not.toHaveBeenCalled();
+    expect(w.text()).toContain(message);
+    w.unmount();
+  });
+
+  it("項目を並べ替え・削除し選択肢を正規化する", async () => {
+    api.get.mockImplementation(async (url: string) => ({
+      data:
+        url === "/common-forms"
+          ? []
+          : {
+              ...existing,
+              form_schema: {
+                fields: [
+                  { ...field, id: "first", label: "先頭" },
+                  { ...field, id: "second", label: "後続", type: "select", choices: ["A"] },
+                ],
+              },
+            },
+    }));
+    const w = await open();
+    await w.get('button[aria-label="入力項目の編集について"]').trigger("click");
+    expect(w.text()).toContain("並べ替え");
+    await w
+      .findAll(".field-card")[0]!
+      .findAll("button")
+      .find((b) => b.text() === "↓")!
+      .trigger("click");
+    expect(
+      w.findAll(".field-card")[0]!.get<HTMLInputElement>('input[type="text"]').element.value,
+    ).toBe("後続");
+    expect(w.findAll(".field-card")[0]!.findAll("button")[0]!.attributes("disabled")).toBeDefined();
+    await w.findAll(".field-card")[0]!.get("textarea").setValue(" A \n\n B ");
+    await w.findAll(".field-card")[1]!.get("button.danger").trigger("click");
+    await click(w, "フォーム設定を保存");
+    expect(api.request.mock.calls[0]![0].data.form_schema.fields).toEqual([
+      expect.objectContaining({ id: "second", choices: ["A", "B"], max_length: null }),
+    ]);
+    w.unmount();
+  });
+
+  it.each([true, false])("公開URLをコピーし失敗時は手動コピーを案内する: %s", async (success) => {
+    const writeText = vi.fn();
+    if (success) writeText.mockResolvedValue(undefined);
+    else writeText.mockRejectedValue(new Error("denied"));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const w = await open();
+    await click(w, "URLをコピー");
+    expect(writeText).toHaveBeenCalledWith(window.location.origin + "/forms/existing");
+    expect(w.text()).toContain(success ? "URLをコピーしました" : "手動でコピー");
+    w.unmount();
+  });
+
+  it.each([true, false])("URL再発行を確認し失敗時は現在のURLを保持する: %s", async (success) => {
+    const w = await open();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await click(w, "URLを再発行");
+    expect(api.post).not.toHaveBeenCalled();
+    confirm.mockReturnValue(true);
+    if (success) api.post.mockResolvedValue({ data: { ...existing, public_path: "/forms/new" } });
+    else api.post.mockRejectedValue(new Error("offline"));
+    await click(w, "URLを再発行");
+    expect(api.post).toHaveBeenCalledWith("/marker/target/form/rotate-url");
+    expect(w.get("a").attributes("href")).toContain(success ? "/forms/new" : "/forms/existing");
+    expect(w.text()).toContain(success ? "再発行しました" : "再発行できません");
+    w.unmount();
+  });
+
+  it.each([409, 400])("サーバーの競合・検証エラーを表示して編集内容を保つ: %s", async (status) => {
+    const w = await open();
+    api.isAxiosError.mockReturnValue(true);
+    api.request.mockRejectedValue({
+      response: { status, data: { error: "validation error: 入力が無効です" } },
+    });
+    await click(w, "フォーム設定を保存");
+    expect(w.text()).toContain(status === 409 ? "別の画面で設定が更新" : "入力が無効です");
+    expect(w.get<HTMLInputElement>(".basic-settings input").element.value).toBe("既存");
+    w.unmount();
+  });
+
+  it("共通フォームの新版を検出したら古い定義を送信しない", async () => {
+    const w = await open({ commonMode: true, commonId: "template", targetId: "" });
+    api.get.mockResolvedValue({ data: { ...common, version: 4 } });
+    await click(w, "共通フォームを保存");
+    expect(api.request).not.toHaveBeenCalled();
+    expect(w.text()).toContain("別の画面で設定が更新");
+    w.unmount();
+  });
+
+  it("定義の取得失敗を通知して閉じ、適用失敗では元の定義を維持する", async () => {
+    const w = await open();
+    await w.get("select").setValue("template");
+    await click(w, "共通フォームを使用する");
+    api.get.mockRejectedValue(new Error("offline"));
+    await click(w.getComponent(MessageModal), "共通フォームを使用する");
+    expect(w.text()).toContain("共通フォームを読み込めません");
+    expect(w.get<HTMLInputElement>(".basic-settings input").element.value).toBe("既存");
+    await w.setProps({ isOpen: false });
+    await w.setProps({ isOpen: true });
+    await flushPromises();
+    expect(w.emitted("close")).toHaveLength(1);
+    w.unmount();
+  });
+});
+
+describe("共通フォーム管理の再読込と編集結果", () => {
+  const manage = async () => {
+    const w = mount(CommonFormsModal, {
+      props: { isOpen: false },
+      global: { stubs: { MapObjectFormSettingsModal: true, FormAnswersModal: true } },
+    });
+    await w.setProps({ isOpen: true });
+    await flushPromises();
+    return w;
+  };
+  it("一覧取得失敗を再読込で回復し、作成・編集・保存・閉じるを連携する", async () => {
+    api.get.mockRejectedValueOnce(new Error("offline"));
+    const w = await manage();
+    expect(w.text()).toContain("一覧を読み込めません");
+    await click(w, "共通フォームを作成");
+    const editor = w.getComponent({ name: "MapObjectFormSettingsModal" });
+    expect(editor.props("commonId")).toBe("");
+    editor.vm.$emit("close");
+    await flushPromises();
+    await w.get('input[value="list"]').setValue(true);
+    await click(w, "再読み込み");
+    await click(w, "編集");
+    expect(editor.props("commonId")).toBe("template");
+    editor.vm.$emit("message", "入力の説明");
+    await flushPromises();
+    expect(w.text()).toContain("入力の説明");
+    editor.vm.$emit("saved");
+    await flushPromises();
+    expect(w.text()).toContain("共通フォームを保存しました");
+    expect(editor.props("isOpen")).toBe(false);
+    await w.get('input[value="create"]').setValue(true);
+    await click(w, "回答一覧と分析");
+    expect(w.getComponent({ name: "FormAnswersModal" }).props("initialFormId")).toBe("");
+    await w.get("header .close-button").trigger("click");
+    expect(w.emitted("close")).toHaveLength(1);
+    w.unmount();
+  });
+  it("削除失敗は一覧を保持して再試行を案内する", async () => {
+    const w = await manage();
+    await w.get('input[value="list"]').setValue(true);
+    await w.get("article button:last-child").trigger("click");
+    api.delete.mockRejectedValueOnce(new Error("offline"));
+    const confirm = w.findAllComponents(MessageModal).find((m) => m.props("isOpen"))!;
+    confirm.vm.$emit("confirm");
+    await flushPromises();
+    expect(w.text()).toContain("削除できません");
+    expect(w.findAll("article")).toHaveLength(1);
+    w.unmount();
+  });
+  it("定義の全入力を保存へ反映し、共通フォーム一覧の失敗を個別設定の失敗にしない", async () => {
+    api.get.mockImplementation(async (url: string) => {
+      if (url === "/common-forms") throw new Error("offline");
+      return { data: existing };
+    });
+    const w = await open();
+    expect(w.text()).toContain("共通フォーム一覧を読み込めません");
+    await w.get(".basic-settings textarea").setValue("新しい説明");
+    await w.get('.field-card input[type="text"]').setValue("新しい項目名");
+    await w.get('.field-card input[type="number"]').setValue("500");
+    await w.get('.field-card input[type="checkbox"]').setValue(true);
+    await w.get('input[type="radio"][value="clear"]').setValue(true);
+    await click(w, "項目を追加");
+    await w.findAll(".field-card")[1]!.findAll("button")[0]!.trigger("click");
+    await click(w, "フォーム設定を保存");
+    expect(api.request.mock.lastCall![0].data).toMatchObject({
+      form_description: "新しい説明",
+      password_mode: "clear",
+      form_schema: {
+        fields: [
+          expect.anything(),
+          expect.objectContaining({ label: "新しい項目名", max_length: 500, required: true }),
+        ],
+      },
+    });
+    await w.get("header .close-button").trigger("click");
+    expect(w.emitted("close")).toHaveLength(1);
+    w.unmount();
+  });
+  it("保存前の反映先確認が失敗したら送信せず入力を保つ", async () => {
+    const w = await open({ commonMode: true, commonId: "template", targetId: "" });
+    api.get.mockRejectedValueOnce(new Error("offline"));
+    await click(w, "共通フォームを保存");
+    expect(api.request).not.toHaveBeenCalled();
+    expect(w.text()).toContain("反映先を確認できません");
+    w.unmount();
+  });
 });

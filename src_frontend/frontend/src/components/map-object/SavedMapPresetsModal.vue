@@ -103,7 +103,7 @@ watch(
 
 const restore = (preset: SavedMapPreset) => {
   if (disabled.value || deleting.value) return;
-  // Give the editor a separate object; editing a restored draft cannot change the list.
+  // 編集画面には別のオブジェクトを渡し、復元した下書きの編集で一覧が変わらないようにする。
   emit("restore", { ...preset, ...clonePresetDraft(preset) });
 };
 const remove = async () => {

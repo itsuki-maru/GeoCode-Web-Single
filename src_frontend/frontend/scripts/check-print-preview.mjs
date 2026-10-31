@@ -162,8 +162,8 @@ const server = await createServer({
             );
             return;
           }
-          // Ordinary print lazily loads each selected layer; serve the same fixture
-          // objects without a database, just as the answer-print snapshot does.
+          // 通常の印刷は選択された各レイヤを遅延読み込みする。回答印刷のスナップショットと同様に、
+          // データベースを使わず、同じテスト用オブジェクトを返す。
           if (path === "/marker/read/all" || path === "/shapes") {
             const query = new URL(req.url, "http://localhost").searchParams;
             const layer = query.get("layer") ?? query.get("layer_id");

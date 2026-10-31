@@ -1,7 +1,7 @@
-// Real Leaflet/Marked/XSS regression checks for progressive popup content.
-// Use --scroll-only for the position-retention cases, or --content-only
-// for the content cases. --load-all-only checks load-all/layout/lifecycle cases.
-// --playwright-path may point at the bundled runtime.
+// 段階表示するポップアップ内容について、実際の Leaflet・Marked・XSS 対策の回帰を確認する。
+// 位置保持の確認には --scroll-only、内容の確認には --content-only を使う。
+// --load-all-only では、全件読み込み・レイアウト・ライフサイクルを確認する。
+// --playwright-path には、同梱ランタイムのパスを指定できる。
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -21,8 +21,8 @@ const vendors = {
   "/vendor/marked.js": "marked/lib/marked.umd.js",
   "/vendor/xss.js": "xss/dist/xss.min.js",
 };
-// JSON strings inside a script element must never contain a literal </script>.
-// Keep the malicious fixture as data rather than letting the HTML parser run it.
+// script 要素内の JSON 文字列には、エスケープされていない </script> を含めない。
+// 悪意のあるテストデータはデータのまま保持し、HTML パーサーに実行させない。
 const scriptJson = (value) =>
   JSON.stringify(value).replace(
     /[<>&\u2028\u2029]/gu,
@@ -498,7 +498,7 @@ try {
     });
 
   if (!("content-only" in args) && !("load-all-only" in args)) {
-    // Delayed image decoding must not reset an inner or Leaflet outer scroller.
+    // 画像の遅延デコードによって、内側や Leaflet の外側のスクロール位置をリセットしない。
     for (const scroll of ["inner", "outer"])
       for (const publicPopup of [false, true])
         for (const outside of [false, true])
@@ -704,7 +704,7 @@ try {
       console.log(JSON.stringify({ publicPopup, loadAll: true, sourceOrder: true }));
     }
 
-    // Loading the root to the end must leave closed details bodies deferred.
+    // ルートを最後まで読み込んでも、閉じた details の本文は遅延読み込みのままにする。
     let content = await openFixture("manyDetails");
     assert.ok((await ownBody(content).locator("details").count()) < 300);
     assert.equal(await ownBody(content).locator("details p").count(), 0);
@@ -762,7 +762,7 @@ try {
     if (await ownAllButton(childContent).isVisible()) await loadRemaining(childContent);
     assert.equal(await ownBody(childContent).locator("img").count(), 301);
 
-    // Modes and popup reopen must use a fresh, bounded view of their source.
+    // モードの切り替えやポップアップの再表示では、元データから新しく範囲を限定した表示を作る。
     content = await openFixture("prose");
     await append(content);
     for (const mode of ["answers", "free", "normal"]) {

@@ -1,5 +1,5 @@
-// Real AnswerMapModal + production-built map modules + a localhost read-only Rust server.
-// Raw HTML/data/screenshots stay in target/. Reports contain counts/times/bytes only.
+// 実際の AnswerMapModal、本番ビルドの地図モジュール、ローカルの読み取り専用 Rust サーバーを使う。
+// 生の HTML・データ・スクリーンショットは target/ に保存し、レポートには件数・時間・バイト数のみを含める。
 import assert from "node:assert/strict";
 import { readFile, mkdir, writeFile, realpath } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -212,8 +212,8 @@ for (const mode of modes) {
               return measuredBytes <= MAX_ANSWER_PRINT_BYTES;`);
           }
           if (path === normalize(resolve(app, "src/axiosClient.ts"))) {
-            // No real authentication/session is used by the isolated read-only server.
-            // Keep real Axios requests; omit unrelated application routing/auth imports.
+            // 隔離した読み取り専用サーバーでは、実際の認証やセッションは使わない。
+            // 実際の Axios リクエストは維持し、無関係なアプリのルーティングや認証のインポートは省く。
             return 'import axios from "axios"; const client=axios.create({baseURL:"",withCredentials:true}); client.isAxiosError=axios.isAxiosError; export default client;';
           }
         },
@@ -335,7 +335,7 @@ function rawBootstrap(html) {
     position = skipSpace(html, position);
     const end = valueEnd(html, position);
     let raw = html.slice(position, end);
-    // Only this fixed three-number object uses JS identifiers/trailing comma.
+    // この固定の三つの数値からなるオブジェクトに限り、JS の識別子と末尾のカンマを使う。
     if (key === "initialView" && block.format === "legacy") raw = raw.replace(/\b(latitude|longitude|zoom)\s*:/g, '"$1":').replace(/,\s*}/g, "}");
     values.set(key, raw);
     position = skipSpace(html, end);
@@ -408,8 +408,8 @@ function markBootstrapHtml(html) {
   const { start, end, format } = block;
   let script = html.slice(start, end);
   if (!script.includes("data-benchmark-bootstrap=")) script = script.replace("<script", `<script data-benchmark-bootstrap="${format}"`);
-  // Separate scripts are essential: a mark inside the large script would run
-  // after the engine had already parsed/compiled that whole object literal.
+  // スクリプトを分ける必要がある。大きなスクリプト内に計測点を置くと、実行されるのは
+  // エンジンがオブジェクトリテラル全体を解析・コンパイルした後になる。
   return html.slice(0, start)
     + `<script>window.__benchmarkBootstrapFormat=${JSON.stringify(format)};window.__benchmarkMark?.("map.bootstrap.beforeScript");window.__benchmarkMemoryBoundary?.("map.bootstrap.beforeScript");</script>`
     + script
@@ -547,7 +547,7 @@ const server = createServer(async (request, response) => {
       });
       return;
     }
-    // All map tiles, private icon/image URLs and popup media are local placeholders.
+    // すべての地図タイル、非公開のアイコン・画像 URL、ポップアップのメディアにローカルの代替データを使う。
     response.writeHead(200, { "content-type": "image/svg+xml" }).end(svg);
   } catch {
     response.writeHead(500).end("Benchmark proxy failed");
@@ -562,16 +562,16 @@ async function browserProcessMemory(session) {
   if (process.platform !== "win32") return { available: false, reason: "windows_only" };
   if (!session) return { available: false, reason: "browser_cdp_unavailable" };
   try {
-    // Browser-scoped CDP is the only source of PIDs. Never enumerate Windows
-    // processes by name or query another browser/application's command line.
+    // PID の取得元はブラウザー単位の CDP のみとする。Windows プロセスを名前で列挙したり、
+    // 他のブラウザーやアプリのコマンドラインを照会したりしない。
     const information = await session.send("SystemInfo.getProcessInfo");
     const entries = information.processInfo;
     if (!Array.isArray(entries) || !entries.length || entries.some((entry) => typeof entry.id !== "number" || !Number.isSafeInteger(entry.id) || entry.id < 1 || entry.id > 0xffffffff)) {
       return { available: false, reason: "invalid_browser_process_ids", probeWallMs: performance.now() - started };
     }
     const ids = [...new Set(entries.map((entry) => entry.id))];
-    // Only validated decimal integers enter this fixed, noninteractive command.
-    // Get-Process receives explicit IDs; no all-process scan is performed.
+    // 固定の非対話コマンドには、検証済みの十進整数だけを渡す。
+    // Get-Process には明示的な ID を渡し、全プロセスの走査は行わない。
     const command = `
 $ErrorActionPreference = 'Stop'
 $answerMapRequestedPids = @(${ids.join(",")})
@@ -602,7 +602,7 @@ foreach ($answerMapProcess in $answerMapProcesses) {
       probeWallMs: performance.now() - started,
     };
   } catch {
-    // PowerShell/CDP error text can contain machine details; keep it out of logs.
+    // PowerShell や CDP のエラーテキストには端末情報が含まれる場合があるため、ログに出力しない。
     return { available: false, reason: "process_memory_snapshot_failed", probeWallMs: performance.now() - started };
   }
 }
@@ -619,7 +619,7 @@ try {
     }
     let processSession = null;
     if (processMemory) {
-      try { processSession = await browser.newBrowserCDPSession(); } catch { /* optional checkpoint diagnostic */ }
+      try { processSession = await browser.newBrowserCDPSession(); } catch { /* 任意のチェックポイント診断 */ }
     }
     const mobile = mode === "mobile";
     const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 }, isMobile: mobile, hasTouch: mobile, reducedMotion: "no-preference",
@@ -671,7 +671,7 @@ try {
         new PerformanceObserver((list) => {
           window.__benchmarkLongTasks.push(...list.getEntries().map((entry) => ({ at: performance.timeOrigin + entry.startTime, ms: entry.duration })));
         }).observe({ type: "longtask", buffered: true });
-      } catch { /* optional browser diagnostic */ }
+      } catch { /* 任意のブラウザー診断 */ }
     }, { sampleMemory: memorySampling });
     const page = await context.newPage();
     page.on("pageerror", () => { pageErrors++; });
@@ -750,7 +750,7 @@ try {
       }
       const tasks = [];
       for (const current of page.frames()) {
-        try { tasks.push(...await current.evaluate(({ start, end }) => (window.__benchmarkLongTasks || []).filter((item) => item.at >= start && item.at < end).map((item) => item.ms), { start: startedAt, end: finishedAt })); } catch { /* detached frame */ }
+        try { tasks.push(...await current.evaluate(({ start, end }) => (window.__benchmarkLongTasks || []).filter((item) => item.at >= start && item.at < end).map((item) => item.ms), { start: startedAt, end: finishedAt })); } catch { /* 切り離されたフレーム */ }
       }
       entry.longTasks = { count: tasks.length, maxMs: Math.max(0, ...tasks), totalMs: tasks.reduce((sum, ms) => sum + ms, 0) };
       result.phases.push(entry);
@@ -817,8 +817,8 @@ try {
       assert.equal(result.loadingIndicator.fullScreenOverlay, false);
       assert.notEqual(result.loadingIndicator.animationName, "none");
       const frameAtReady = await ready();
-      // Capture timing fields only. Never export NavigationTiming.name, URLs,
-      // resource names, DOM text, bootstrap objects or any object identifiers.
+      // 時間計測のフィールドだけを取得する。NavigationTiming.name、URL、リソース名、
+      // DOM テキスト、初期化オブジェクト、オブジェクト識別子は出力しない。
       const childTiming = await frameAtReady.evaluate(() => {
         const navigation = performance.getEntriesByType("navigation")[0];
         const fields = ["startTime", "fetchStart", "requestStart", "responseStart", "responseEnd", "domInteractive", "domContentLoadedEventStart", "domContentLoadedEventEnd", "loadEventStart", "loadEventEnd", "transferSize", "encodedBodySize", "decodedBodySize", "redirectCount"];
@@ -966,8 +966,8 @@ try {
             const images = new Set(mapElement.querySelectorAll(
               "img.leaflet-tile, .leaflet-marker-pane img, .leaflet-shadow-pane img",
             ));
-            // Match print readiness: collapsed popup details intentionally keep
-            // their images deferred, so do not count those as pending resources.
+            // 印刷の準備完了条件に合わせる。閉じたポップアップの details 内の画像は意図的に
+            // 遅延読み込みするため、待機中のリソースには数えない。
             for (const img of mapElement.querySelectorAll(".leaflet-popup-pane img[src]")) {
               let hidden = false;
               for (let parent = img.parentElement; parent; parent = parent.parentElement) {

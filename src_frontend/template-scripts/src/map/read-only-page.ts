@@ -171,7 +171,7 @@ export function initializeReadOnlyMapPage(
   const isPrint = isAnother && Boolean(printState);
   const isAnswerPreview =
     expectedPage === "form-answer-map" || (isAnother && Boolean(bootstrap.answerPreview));
-  // Top-page search is independent of the common-form answer/legend filters.
+  // トップページの検索は、共通フォームの回答フィルターや凡例フィルターとは独立している。
   const topPagePrint = isPrint && !isAnswerPreview;
   const printMarkerIds =
     topPagePrint && Array.isArray(printState?.markerIds) ? new Set(printState.markerIds) : null;

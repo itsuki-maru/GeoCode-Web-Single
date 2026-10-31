@@ -178,7 +178,7 @@ describe("answer print legend", () => {
       target.dispatchEvent(event);
       return event;
     };
-    // The panel body and native bottom-right resize handle retain their default behavior.
+    // パネル本文と、右下の標準のサイズ変更ハンドルは、既定の動作を維持する。
     expect(pointer("pointerdown", 10, 10).defaultPrevented).toBe(false);
     expect(f.panel.setPointerCapture).not.toHaveBeenCalled();
     pointer("pointerdown", 10, 10, f.panel.querySelector("strong")!);

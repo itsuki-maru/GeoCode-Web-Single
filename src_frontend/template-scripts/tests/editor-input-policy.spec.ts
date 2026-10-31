@@ -1,6 +1,5 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { createContext, runInContext } from "node:vm";
+import { runSource } from "./support/vm-source";
+import { createContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 
 function setup() {
@@ -16,7 +15,7 @@ function setup() {
     shapeGeometryEditHandles: { clearLayers: vi.fn() },
   });
   for (const file of ["map-editor-shape-metadata.ts", "map-editor-shape-geometry.ts"])
-    runInContext(readFileSync(resolve(`src/map/editor/${file}`), "utf8"), c);
+    runSource(c, `src/map/editor/${file}`);
   const geojson = {
     type: "Feature",
     properties: { memo: "既存メモ" },

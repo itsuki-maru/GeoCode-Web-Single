@@ -12,7 +12,7 @@ export const MAX_ANSWER_PRINT_BYTES = 32 * 1024 * 1024;
 const record = (v: any): v is Record<string, any> =>
   !!v && typeof v === "object" && !Array.isArray(v);
 
-/** The receiving frame is deliberately unable to fetch any further objects. */
+/** 受信側のフレームは、追加のオブジェクトを取得できない設計とする。 */
 export function isAnswerPrintSnapshot(v: any): v is AnswerPrintSnapshot {
   if (!record(v) || !isPrintMapState(v.state) || !record(v.bootstrap)) return false;
   const b = v.bootstrap;

@@ -109,7 +109,7 @@ describe("回答値の地図表示", () => {
     expect(s.cluster.options.iconCreateFunction({ getChildCount: () => 3 }).html).toContain(
       "background:#555",
     );
-    expect(analysis.visibleCounts()).toEqual([2, 0]); // invalid geometry is excluded from visible counts.
+    expect(analysis.visibleCounts()).toEqual([2, 0]); // 無効な図形は表示件数から除外する。
   });
   it("クラスタ内のマーカーを数え、表示切替を通知するが分類境界と全件数を変えない", () => {
     vi.useFakeTimers();

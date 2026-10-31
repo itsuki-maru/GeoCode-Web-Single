@@ -111,3 +111,28 @@ describe("既存回答の編集", () => {
     w.unmount();
   });
 });
+
+describe("回答画像と本文確認の境界", () => {
+  it.each(["https://example.test/photo.png", "javascript:alert(1)", "not-a-url"])(
+    "既存画像のURLを検証して安全な画像だけを表示する: %s",
+    async (url) => {
+      const data = config();
+      data.values.pic.url = url;
+      vi.mocked(api.get).mockResolvedValueOnce({ data });
+      const w = await open();
+      const previews = w
+        .findAll("img")
+        .filter((img) => img.attributes("src")?.includes("example.test"));
+      expect(previews.length).toBe(url.startsWith("https:") ? 1 : 0);
+      w.unmount();
+    },
+  );
+  it("旧本文の対応確認が未完了なら、submitイベントでも保存しない", async () => {
+    vi.mocked(api.get).mockResolvedValueOnce({ data: config(true) });
+    const w = await open();
+    await w.get("form").trigger("submit");
+    expect(api.put).not.toHaveBeenCalled();
+    expect(w.text()).toContain("自由記述として残す内容を確認");
+    w.unmount();
+  });
+});

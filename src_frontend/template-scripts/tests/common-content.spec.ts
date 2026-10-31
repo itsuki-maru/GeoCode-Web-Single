@@ -69,7 +69,7 @@ describe("map common content", () => {
       getElement: () => host,
       setContent: vi.fn(),
       update: vi.fn(() => {
-        // Leaflet removes and reattaches its retained content during update().
+        // Leaflet は update() 中に、保持している内容を取り外して付け直す。
         inner.remove();
         outer.append(inner);
         resetScroll();
@@ -79,7 +79,7 @@ describe("map common content", () => {
     button.focus();
     const focus = vi.spyOn(button, "focus").mockImplementation((options) => {
       HTMLElement.prototype.focus.call(button, options);
-      // Some browsers can also move a scroller while restoring focus.
+      // ブラウザーによっては、フォーカスの復元中にもスクロール位置が動く場合がある。
       resetScroll();
     });
     for (const [outerTop, outerLeft, innerTop, innerLeft] of [
@@ -90,8 +90,8 @@ describe("map common content", () => {
       outer.scrollLeft = outerLeft!;
       inner.scrollTop = innerTop!;
       inner.scrollLeft = innerLeft!;
-      // The second notification represents an image finishing loading after
-      // the user has already continued reading further down the popup.
+      // 二度目の通知は、ユーザーがすでにポップアップの下方を読み進めた後で、
+      // 画像の読み込みが完了した状況を表す。
       gallery.dispatchEvent(new Event("geocode:contentchange", { bubbles: true }));
       expect([outer.scrollTop, outer.scrollLeft, inner.scrollTop, inner.scrollLeft]).toEqual([
         outerTop,

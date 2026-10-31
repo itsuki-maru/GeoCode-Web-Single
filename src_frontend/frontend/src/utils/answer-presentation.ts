@@ -45,7 +45,7 @@ const typeLabel = (type: string) =>
     }) as Record<string, string>
   )[type] || type;
 
-// Names depend on the definition context (search result versus historical snapshot).
+// 名前は、検索結果か過去のスナップショットかという定義の文脈によって決まる。
 export function describeAnswerFields(fields: readonly AnswerField[]): AnswerColumn[] {
   const totals = new Map<string, number>(),
     positions = new Map<string, number>();
@@ -80,7 +80,7 @@ export function answerPreview(value: unknown): string {
   if (text.length <= ANSWER_PREVIEW_LENGTH) return text;
   let end = 0,
     count = 0;
-  // Stop after the preview, without allocating an array for the full long value.
+  // 長い値全体の配列を確保せず、プレビューに必要なところで処理を止める。
   for (const character of text) {
     if (count++ === ANSWER_PREVIEW_LENGTH) return text.slice(0, end) + "…";
     end += character.length;
@@ -108,7 +108,7 @@ interface PreparedAnswer {
   fields: Set<string> | null;
   cells: Map<string, string>;
 }
-// Bounded to the current page. Neither all results nor previous pages accumulate.
+// 現在のページ内に限定し、全結果や以前のページを蓄積しない。
 export class AnswerTablePresentation {
   private source: readonly FormAnswer[] | null = null;
   private prepared: PreparedAnswer[] = [];

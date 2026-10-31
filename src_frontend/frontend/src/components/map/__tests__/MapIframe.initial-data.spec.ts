@@ -112,7 +112,7 @@ describe("parent-owned map data", () => {
 
   it("acknowledges a saved mutation only after the parent applies it and deduplicates retries", () => {
     const { wrapper, send, post } = setup();
-    // The runtime message follows the transport load.
+    // 転送データの読み込み後に、実行時のメッセージが届く。
     (wrapper.vm as any).$el.querySelector("iframe").dispatchEvent(new Event("load"));
     send({ type: "mapRuntimeReady", runtimeId: "current" });
     const change = {

@@ -61,7 +61,7 @@ export function answerConditionOperations(kind: string | undefined) {
   ];
 }
 
-/** Keep numeric values as strings: PostgreSQL validates their exact decimal boundaries. */
+/** 数値は文字列のまま保持し、正確な小数の境界値は PostgreSQL で検証する。 */
 export function serializeAnswerConditions(rows: AnswerConditionRow[], fields: AnswerField[]) {
   return rows.map((row) => {
     const field = fields.find((candidate) => answerFieldKey(candidate) === row.key);
@@ -88,7 +88,7 @@ export function serializeAnswerConditions(rows: AnswerConditionRow[], fields: An
   });
 }
 
-/** Both API condition arrays are evaluated after latest-answer selection, on the same row. */
+/** API の両条件配列は、最新の回答を選択した後に、同じ行に対して評価する。 */
 export function createColorRuleRequest(
   query: Record<string, unknown>,
   filter: AnswerMapFilter,
@@ -107,9 +107,9 @@ export function createColorRuleRequest(
     baseConditions.length + moveCount > 10
   )
     throw Error("一覧・地図の絞り込み・各分類の条件は、合計20件以内にしてください。");
-  // Keep every new classification condition in the outer array: map-filter validates
-  // its field definitions and exact NUMERIC bounds there. Only already validated
-  // map-filter conditions may move into the base query to make room.
+  // 新しい分類条件はすべて外側の配列に保持する。map-filter はそこでフィールド定義と
+  // 正確な NUMERIC の境界値を検証する。条件の空きを作るために基本クエリへ移せるのは、
+  // すでに検証済みの map-filter 条件だけとする。
   return {
     query: {
       ...query,
