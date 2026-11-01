@@ -761,7 +761,7 @@ async fn common_forms_are_owned_copied_and_preserve_submission_definitions() {
         .await
         .is_err()
     );
-    // A template owned by a different user cannot be attached to one's own object.
+    // 別のユーザーが所有するテンプレートを、自分のオブジェクトに設定することはできない。
     let other_layer = common::master_layer_id(&pool, &other).await;
     let other_marker = insert_marker(&pool, &other, &other_layer).await;
     assert!(
@@ -890,7 +890,7 @@ async fn common_forms_are_owned_copied_and_preserve_submission_definitions() {
     .unwrap()
     .0;
     assert_eq!(target.form_schema.fields[0].label, "値");
-    // A local edit keeps the field ID, URL, and source version; earlier answers keep their original definition.
+    // ローカル編集ではフィールド ID、URL、転用元のバージョンを保持し、以前の回答には元の定義を残す。
     let edited = update_marker_form_config_handler(
         Extension(owner.clone()),
         Extension(pool.clone()),
@@ -992,7 +992,7 @@ async fn common_forms_are_owned_copied_and_preserve_submission_definitions() {
         .await
         .is_err()
     );
-    // Previously applied copies remain editable and accept answers after the template is deleted.
+    // テンプレートを削除した後も、適用済みのコピーは編集と回答の受け付けを継続できる。
     let _ = update_shape_form_config_handler(
         Extension(owner.clone()),
         Extension(pool.clone()),

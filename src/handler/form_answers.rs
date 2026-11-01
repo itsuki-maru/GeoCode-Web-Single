@@ -365,8 +365,8 @@ struct AnswerKey {
     target_type: String,
 }
 
-/// Share ownership and the complete row projection with the bounded detail
-/// fetch. Only search planning omits display joins and unused JSON columns.
+/// 所有権の条件と全列の射影を、件数を制限した詳細取得と共有する。
+/// 検索計画でのみ、表示用の結合と未使用の JSON 列を省略する。
 fn append_answer_source(
     b: &mut QueryBuilder<'static, Sqlite>,
     user: &str,
@@ -392,8 +392,8 @@ fn append_answer_source(
             SELECT
             "#,
         );
-        // History counts need no answer ID, so target/create indexes can
-        // cover the submission scan. Latest ranking still breaks ties by ID.
+        // 履歴の件数取得には回答 ID が不要なため、対象・作成日時のインデックスだけで
+        // 送信データを走査できる。最新回答の順位付けでは、引き続き ID で同順位を解消する。
         if !matches!(projection, AnswerProjection::Count(q) if q.mode != "latest") {
             b.push("s.id, ");
         }
@@ -441,8 +441,8 @@ fn append_answer_source(
                 }
             },
         }
-        // For bounded details, start with submission PK lookups. An ordinary
-        // join can instead scan every owned target before applying s.id IN.
+        // 件数を制限した詳細取得は、送信データの主キー検索から始める。通常の結合では、
+        // s.id IN の適用前に、所有するすべての対象が走査される場合がある。
         let target_join = if keys.is_some() { "CROSS JOIN" } else { "JOIN" };
         b.push(format!(
             r#"
@@ -543,7 +543,7 @@ fn build_query_with_projection(
             "#,
         );
     } else {
-        // History does not need to rank or sort every answer before filtering.
+        // 履歴のフィルタリング前に、すべての回答に順位を付けたり、並べ替えたりする必要はない。
         b.push(
             r#"
             ), filtered AS (
@@ -697,8 +697,8 @@ async fn selected_answer_rows(
     if keys.is_empty() {
         return Ok(vec![]);
     }
-    // IDs already reflect all filters and latest-answer decisions. Resolve
-    // only that bounded set, in the same read transaction and ownership scope.
+    // ID にはすべてのフィルターと最新回答の選択結果がすでに反映されている。同じ読み取り
+    // トランザクションと所有権の範囲内で、その限定された集合だけを解決する。
     let mut b = QueryBuilder::new(format!(
         r#"
         SELECT {ROW_COLUMNS}
@@ -829,9 +829,9 @@ pub(super) async fn fields_from_query(
 }
 
 fn append_field_definitions(b: &mut QueryBuilder<'static, Sqlite>, source: &'static str) {
-    // Only arrays can be grouped by their extracted JSON text. A JSON string
-    // can extract to that same text, and JSON null and a missing path both
-    // extract to SQL NULL. Preserve those values and expand original snapshots.
+    // 抽出した JSON テキストでグループ化できるのは配列だけである。JSON 文字列からも
+    // 同じテキストが抽出され得るうえ、JSON の null とパスの欠落はどちらも SQL の NULL になる。
+    // これらの値を保持し、元のスナップショットを展開する。
     b.push(format!(
         r#"
         SELECT
@@ -919,7 +919,7 @@ pub async fn answer_options_handler(
     validate(&q)?;
     let at = q.as_of.unwrap_or_else(Utc::now);
     let mut tx = super::answer_sqlite::begin_read(&pool).await?;
-    // Gather references once instead of rescanning all owned targets per deleted form.
+    // 削除されたフォームごとに所有する全対象を走査し直さず、参照を一度に収集する。
     let forms: Vec<(String, String, bool)> = sqlx::query_as(
         r#"
         SELECT
@@ -1308,8 +1308,8 @@ mod search_tests;
 mod tests {
     use super::*;
 
-    // Independent reference: complete SQLite field text, timestamp collation,
-    // legacy values, ordering and the definition limit must remain unchanged.
+    // 独立した参照実装として、SQLite の完全なフィールドテキスト、日時の照合、
+    // 旧形式の値、順序、定義数の上限が変わらないことを確認する。
     const PREVIOUS_FIELD_DEFINITIONS: &str = r#"
         SELECT field FROM (
             SELECT field, observed, position FROM (
@@ -1341,8 +1341,8 @@ mod tests {
     }
 
     fn field_source(rows: Value) -> QueryBuilder<'static, Sqlite> {
-        // Decode fixture records once, like reading stored answer columns.
-        // Inlining would reparse a large snapshot for each expanded field.
+        // 保存された回答の列を読む場合と同様に、テスト用レコードを一度だけデコードする。
+        // インライン化すると、展開するフィールドごとに大きなスナップショットを再解析してしまう。
         let mut b = QueryBuilder::new(
             r#"
             WITH filtered AS MATERIALIZED (
@@ -1396,7 +1396,7 @@ mod tests {
             snapshot(json!([current, first, text])),
             json!({}),
         ));
-        // Same instant and ID, with a different spelling of the timestamp.
+        // 同じ時点と ID を使い、日時の表記だけを変える。
         rows.push(field_record(
             1000,
             "shape",
@@ -1624,8 +1624,8 @@ mod tests {
             results.push(values);
         }
         assert_eq!(results[0], results[1]);
-        // Keep key order and numeric spellings significant for SQLite field
-        // text, even when serde_json would decode them to equivalent objects.
+        // serde_json では等価なオブジェクトにデコードされる場合でも、SQLite のフィールドテキストでは
+        // キーの順序と数値の表記を有意な違いとして保持する。
         let rows = json!([
             field_record(
                 1,

@@ -1,9 +1,9 @@
-//! Compact only the answer-map HTML transport; database/read-model bodies stay canonical.
+//! 回答地図の HTML 転送のみを圧縮し、データベースと読み取りモデルの本文は正規の表現を保つ。
 use serde_json::{Map, Value};
 use tera::Context;
 
-// Charge the complete optional sidecar (including the template's whitespace)
-// to every reference. This deliberately overestimates its amortized cost.
+// 任意の補助データ全体のサイズを、テンプレートの空白も含めて各参照に計上する。
+// これにより、参照ごとに分担されるコストを意図的に多めに見積もる。
 const REFERENCE_FIXED_BYTES: usize = concat!(
     ",\n            \"normalBodyReferences\": ",
     "{\"version\":1,\"markers\":[],\"shapes\":[]}"
@@ -11,7 +11,7 @@ const REFERENCE_FIXED_BYTES: usize = concat!(
 .len();
 
 pub(crate) fn encode_context(context: Context) -> tera::Result<Context> {
-    // Both conversions move the owned JSON values, including their large strings.
+    // どちらの変換も、大きな文字列を含む所有済みの JSON 値を移動する。
     let mut value = context.into_json();
     encode_values(&mut value);
     Context::from_value(value)
@@ -81,7 +81,7 @@ fn encode_values(value: &mut Value) {
 }
 
 fn can_reference(normal: Option<&Value>, popup: Option<&Value>, id: &str) -> bool {
-    // Unexpected legacy identifiers stay in the full representation.
+    // 想定外の旧形式の識別子は、省略しない完全な表現のまま保持する。
     if uuid::Uuid::parse_str(id).is_err() {
         return false;
     }
@@ -98,7 +98,7 @@ fn can_reference(normal: Option<&Value>, popup: Option<&Value>, id: &str) -> boo
     ) else {
         return false;
     };
-    // Whole-string equality, with no normalization or assumptions about parts.
+    // 正規化や各部分についての仮定を行わず、文字列全体の完全一致を確認する。
     if normal.strip_prefix(free) != Some(managed) {
         return false;
     }
@@ -107,14 +107,14 @@ fn can_reference(normal: Option<&Value>, popup: Option<&Value>, id: &str) -> boo
         html_safe_json_string_token_bytes(id)
             .and_then(|n| n.checked_add(REFERENCE_FIXED_BYTES + 1)),
     ) {
-        // Removing the property name/comma saves still more; ignore that saving.
+        // プロパティ名やカンマの削除でもサイズは減るが、その削減分は計算に含めない。
         (Some(removed), Some(added_upper_bound)) => removed > added_upper_bound,
         _ => false,
     }
 }
 
-/// Exact UTF-8 length of serde_json's string token followed by the production
-/// json_encode_for_html replacements. Count directly without copying the text.
+/// serde_json の文字列トークンに、本番の json_encode_for_html と同じ置換を適用した
+/// 正確な UTF-8 長を求める。テキストをコピーせず、直接数える。
 fn html_safe_json_string_token_bytes(text: &str) -> Option<usize> {
     text.chars().try_fold(2usize, |bytes, ch| {
         let width = match ch {
@@ -320,7 +320,7 @@ mod tests {
             assert_eq!(encoded.get("normalBodyReferences").is_some(), expected);
             assert_eq!(restore(encoded.clone()), input.clone().into_json());
             if expected {
-                // Compare the actual production template, not just the estimate.
+                // 見積もりだけでなく、実際の本番テンプレートで比較する。
                 let mut tera = crate::build_tera_from_embed().unwrap();
                 tera.add_raw_template("transport-size", concat!(
                     "{\"markers\":{{ markersFromAxum | json_encode_for_html | safe }}",

@@ -429,8 +429,8 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
             budget.add(parts)?;
         }
     }
-    // One priority order across marker and shape answers, even when timestamps
-    // collapse to the shared microsecond precision during transfer.
+    // 転送時に日時が共通のマイクロ秒精度に丸められても、マーカーと図形の回答を通じて
+    // 一貫した優先順序を保つ。
     answer_order.sort_unstable();
     for (index, (_, _, _, position)) in answer_order.into_iter().enumerate() {
         p.submissions[position].source_order = index as u64 + 1;
@@ -738,7 +738,7 @@ pub(super) async fn import(
         .await?;
     }
     for c in &p.form_configs {
-        let kind = &c.target.kind; // validated closed set, never interpolated from unvalidated input
+        let kind = &c.target.kind; // 検証済みの限定された値のみを使い、未検証の入力は展開しない。
         sqlx::query(&format!(
             r#"
             INSERT INTO {kind}_form_config_model (
@@ -773,8 +773,8 @@ pub(super) async fn import(
         .execute(&mut *tx)
         .await?;
     }
-    // Sorting fresh UUIDs preserves the source tie order without changing dates,
-    // adding persistent ordering fields, or reducing UUID randomness.
+    // 新規 UUID の並べ替えにより、日時の変更、永続的な順序フィールドの追加、
+    // UUID のランダム性の低下を伴わずに、転送元の同順位の順序を保つ。
     let mut ids: Vec<_> = p.submissions.iter().map(|_| Uuid::new_v4()).collect();
     ids.sort_unstable();
     let mut submissions: Vec<_> = p.submissions.iter().collect();

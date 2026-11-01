@@ -266,7 +266,7 @@ mod tests {
     }
     #[tokio::test(start_paused = true)]
     async fn upstream_wait_is_bounded() {
-        // Exercise the same deadline as cached(), without network or shared cache locks.
+        // ネットワークや共有キャッシュのロックを使わず、cached() と同じ期限を検証する。
         let request = within_request_deadline(std::future::pending());
         tokio::pin!(request);
         assert!(futures_util::poll!(request.as_mut()).is_pending());

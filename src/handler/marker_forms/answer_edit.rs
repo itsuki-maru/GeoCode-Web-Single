@@ -1,4 +1,4 @@
-//! Owner-only correction of an existing answer and its managed body projection.
+//! 所有者のみが、既存の回答と、それに連動して管理される本文の表示用データを修正できる。
 use super::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -29,7 +29,7 @@ struct PopupAnswer {
     rendered_markdown: String,
 }
 
-// Body matching needs only these references, including for full editing rows.
+// 本文の照合には、完全な編集用の行であっても、これらの参照だけが必要となる。
 trait AnswerText {
     fn id(&self) -> &str;
     fn rendered_markdown(&self) -> &str;
@@ -68,8 +68,8 @@ fn invalid(text: &str) -> AppError {
     AppError::Validation(text.into())
 }
 
-// Text matching is used only to adopt unambiguous legacy data. Afterwards the
-// persisted structure, rather than matching strings, identifies each answer.
+// テキストの照合は、曖昧さのない旧形式データを取り込む場合にのみ使う。その後は
+// 文字列の一致ではなく、永続化した構造によって各回答を識別する。
 fn adopt(body: &str, answers: &[impl AnswerText]) -> Option<Vec<BodyPart>> {
     let mut matches = Vec::new();
     for answer in answers {
@@ -264,8 +264,8 @@ fn info(doc: &Document) -> JsonValue {
         }).collect::<Vec<_>>()).unwrap_or_default() })
 }
 
-/// Read-only popup projections for an already authorized map snapshot. Four
-/// bounded queries cover every object; no per-object queries or writes occur.
+/// 認可済みの地図スナップショット用の、読み取り専用ポップアップ表示データ。
+/// 対象を限定した四つのクエリで全オブジェクトを取得し、個別のクエリや書き込みは行わない。
 pub(crate) async fn popup_bodies(
     tx: &mut Transaction<'_, Sqlite>,
     user: &str,
@@ -389,8 +389,8 @@ pub(crate) async fn append_parts(
     store_parts(tx, user, kind, target, parts.as_deref()).await
 }
 
-// The normal object API may update free text, but cannot change the projection
-// of structured answers. Older clients may still send an unchanged full body.
+// 通常のオブジェクト API は自由記述を更新できるが、構造化された回答の表示用データは
+// 変更できない。旧クライアントは、変更していない本文全体を送信する場合がある。
 pub(crate) async fn normal_body(
     tx: &mut Transaction<'_, Sqlite>,
     user: &str,
@@ -844,7 +844,7 @@ pub async fn update_handler(
         } else {doc.parts.clone().ok_or_else(||invalid("本文・メモと回答の対応確認が必要です。自由記述として残す内容を確認してください。"))?};
         for a in &mut doc.answers {if a.id==id {a.rendered_markdown=markdown.clone();}}
         let body=render(&parts,&doc.answers).ok_or(AppError::Conflict)?;
-        // Validate body before creating any image files.
+        // 画像ファイルを作成する前に、本文を検証する。
         if kind=="shape" && body.chars().count()>SHAPE_MEMO_MAX_LENGTH {return Err(AppError::PayloadTooLarge("図形メモは10000文字以内にしてください。".into()));}
         save_images(&mut tx,&user,&prepared).await?;
         sqlx::query(&format!(

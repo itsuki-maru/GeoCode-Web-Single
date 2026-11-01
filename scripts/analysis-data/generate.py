@@ -1,4 +1,4 @@
-"""Deterministic, backend-independent analysis fixtures (Python standard library)."""
+"""バックエンドに依存せず、再現可能な分析用テストデータ（Python 標準ライブラリを使用）。"""
 import argparse
 import json
 from collections import Counter
@@ -88,7 +88,7 @@ def generate(profile='basic', seed=20261020):
                 target_id = uid(f'target:{key}')
                 region = i % 3
                 lat, lng = [(35.68, 139.76), (35.45, 139.64), (35.88, 139.63)][region]
-                # Include overlapping points and a wider spread within each region.
+                # 各地域内で重なる点と、より広い範囲に分布する点を含める。
                 offset = 0 if i < 6 else ((i // 3 + seed % 11) % 20) * 0.001
                 lat, lng = round(lat + offset, 6), round(lng + offset, 6)
                 layer = uid(f'layer:{owner}:{region}')
@@ -130,7 +130,7 @@ def generate(profile='basic', seed=20261020):
                     markdown_parts.append(markdown)
                     add(f'{target}_form_submission_model', id=answer_id,
                         **{f'{target}_id': target_id}, submitted_values=values,
-                        # Search/analysis deliberately never depends on this display text.
+                        # 検索・分析では、この表示用テキストに依存しない設計とする。
                         rendered_markdown=markdown,
                         source_form=source, form_snapshot=snapshot, create_at=at)
                     answers.append(dict(id=answer_id, owner=owner, target_type=target,

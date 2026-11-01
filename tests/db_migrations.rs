@@ -1038,7 +1038,7 @@ async fn assert_receipt_constraints(pool: &SqlitePool) {
             .is_err()
         );
     }
-    // SQLite's type affinity alone does not enforce BLOB: reject 32-char TEXT too.
+    // SQLite の型親和性だけでは BLOB 型を強制できないため、32 文字の TEXT も拒否する。
     assert!(
         sqlx::query(
             r#"
@@ -1816,7 +1816,7 @@ async fn seed_pre_preset_data(pool: &SqlitePool) -> String {
     owner
 }
 
-// Capture every column, including BLOB values, without changing SQLite's stored types.
+// SQLite に保存された型を変えずに、BLOB 値を含むすべての列を取得する。
 async fn existing_data_snapshot(pool: &SqlitePool) -> Vec<(String, Vec<String>)> {
     let mut result = vec![];
     for table in [
@@ -1922,7 +1922,7 @@ async fn saved_condition_upgrade_from_twenty_one_preserves_all_existing_data_and
         "#;
     let preset_before: Vec<(String, String, String, String, i64, String, String, String)> =
         sqlx::query_as(preset_query).fetch_all(&pool).await.unwrap();
-    // Reopen the file as the next application startup would, preserving saved conditions.
+    // 次回のアプリ起動を想定してファイルを開き直し、保存済みの条件が維持されることを確認する。
     pool.close().await;
     let pool = SqlitePoolOptions::new()
         .max_connections(1)

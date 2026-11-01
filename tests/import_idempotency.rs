@@ -80,7 +80,7 @@ async fn receipts(pool: &SqlitePool, user: Uuid) -> i64 {
     .unwrap()
 }
 
-// Compare every stored row, including original IDs, bindings, history and receipts.
+// 元の ID、関連付け、履歴、処理記録を含め、保存されたすべての行を比較する。
 async fn snapshot(pool: &SqlitePool, user: Uuid) -> Vec<Vec<String>> {
     let queries = [
         r#"
@@ -191,7 +191,7 @@ async fn successful_replay_keeps_every_record_and_later_edits() {
     let first = upload(&app, FIXTURE, Some(&key)).await;
     assert_eq!(first.0, StatusCode::OK);
     let before = snapshot(&pool, user).await;
-    // Changing multipart framing does not change the raw JSON file hash.
+    // マルチパートの区切りを変えても、元の JSON ファイルのハッシュは変わらない。
     let replay = app
         .clone()
         .oneshot(upload_request(FIXTURE, Some(&key), "OTHER"))
@@ -233,7 +233,7 @@ async fn raw_file_changes_conflict_without_mutating_the_successful_import() {
     assert_eq!(upload(&app, FIXTURE, Some(&key)).await.0, StatusCode::OK);
     let before = snapshot(&pool, user).await;
     let mut changed = FIXTURE.to_vec();
-    changed.push(b' '); // Semantically identical JSON, different original bytes.
+    changed.push(b' '); // JSON としての意味は同じだが、元のバイト列は異なる。
     let response = upload(&app, &changed, Some(&key)).await;
     assert_eq!(response.0, StatusCode::CONFLICT);
     assert!(serde_json::from_slice::<Value>(&response.1).unwrap()["error"].is_string());
@@ -332,8 +332,8 @@ async fn waiting_writers_recheck_the_receipt_after_begin_immediate_for_v3_and_le
         include_bytes!("fixtures/transfer_v2.json").to_vec(),
     ] {
         let key = Uuid::new_v4().to_string();
-        // Both requests can read a missing receipt through WAL, but must wait
-        // for this independent connection before acquiring the writer lock.
+        // 両方のリクエストは WAL 経由で処理記録が未登録であることを読み取れるが、書き込みロックの取得前に
+        // この独立した接続の処理を待つ必要がある。
         let blocker = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
         let start = |bytes: Vec<u8>| {
             let app = app.clone();
@@ -525,7 +525,7 @@ async fn a_discarded_success_response_can_be_retried_without_another_import() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    drop(response); // Commit completed; the client never consumes the success response.
+    drop(response); // コミットは完了するが、クライアントは成功応答を受け取らない。
     let before = snapshot(&pool, user).await;
     let response = upload(&app, FIXTURE, Some(&key)).await;
     assert_eq!(response.0, StatusCode::OK);
@@ -726,7 +726,7 @@ async fn an_actual_master_binding_becomes_an_independent_managed_layer_on_import
     let sender = app(&pool, source);
     let receiver = app(&pool, recipient);
     assert_eq!(upload(&sender, FIXTURE, None).await.0, StatusCode::OK);
-    // Existing names and forms in the destination must not be reused or changed.
+    // 転送先に既存の名前やフォームを再利用したり、変更したりしない。
     assert_eq!(upload(&receiver, FIXTURE, None).await.0, StatusCode::OK);
     let existing = snapshot(&pool, recipient).await;
     let master = common::master_layer_id(&pool, &source.to_string()).await;

@@ -23,8 +23,8 @@ async fn fixture() -> Fixture {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    // Only the source columns are needed here. Existing integration tests use
-    // the complete migrated schema; this fixture isolates projection behavior.
+    // ここでは元の列だけを必要とする。既存の統合テストではマイグレーション適用済みの
+    // 完全なスキーマを使うが、このテストデータでは射影の動作だけを切り分ける。
     sqlx::raw_sql(
         r#"
         CREATE TABLE layer_model (id TEXT PRIMARY KEY, user_id TEXT, layer_name TEXT);
@@ -134,7 +134,7 @@ async fn fixture() -> Fixture {
         .await
         .unwrap();
     }
-    // Target and submission IDs may both coincide across marker and shape.
+    // マーカーと図形の間では、対象 ID と送信 ID の両方が重複する場合がある。
     sqlx::query(
         r#"
         INSERT INTO shape_model
@@ -249,7 +249,7 @@ async fn fixture() -> Fixture {
         .await
         .unwrap();
     }
-    // Exercise the existing limit=100 API and the extra pagination sentinel.
+    // 既存の limit=100 の API と、次ページの有無を判定する追加の一件を検証する。
     for n in 0..110 {
         sqlx::query(
             r#"
@@ -268,8 +268,8 @@ async fn fixture() -> Fixture {
     f
 }
 
-// This is the previous search path: full joined rows participate in both
-// count and page selection. It is independent of the new ID/detail stages.
+// 従来の検索経路では、結合済みの全列を含む行を、件数取得とページ選択の両方で使う。
+// これは、新しい ID 取得・詳細取得の各段階から独立した参照実装である。
 async fn full_search_page(f: &Fixture, q: &AnswerQuery) -> AnswerPage {
     let at = q.as_of.unwrap();
     let mut tx = super::super::answer_sqlite::begin_read(&f.pool)

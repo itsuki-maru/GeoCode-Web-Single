@@ -1,6 +1,6 @@
-//! Opt-in browser fixture: real authenticated SQLite API, isolated temporary database.
-//! Start with cargo test --test map_presets_browser -- --ignored --nocapture,
-//! then run node scripts/check-map-presets-sqlite.mjs.
+//! 明示的に有効化するブラウザーテスト用の環境。実際の認証付き SQLite API と、隔離した一時 DB を使う。
+//! 最初に cargo test --test map_presets_browser -- --ignored --nocapture を実行し、
+//! 続けて node scripts/check-map-presets-sqlite.mjs を実行する。
 #[allow(dead_code)]
 mod common;
 

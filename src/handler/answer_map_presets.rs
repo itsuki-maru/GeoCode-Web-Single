@@ -1,4 +1,4 @@
-//! Owner-only reusable definitions for answer-map filters and coloring.
+//! 回答地図のフィルターと色分けに使う、所有者専用の再利用可能な定義。
 use super::{
     answer_map_filter::validate_numeric_condition,
     form_answers::{
@@ -129,8 +129,8 @@ fn supported(kind: &str) -> bool {
     )
 }
 
-// Resolve only owned forms and their historical definitions. A soft-deleted form
-// may still describe existing answers, just as it does in map-filter.
+// 所有するフォームと、その過去の定義のみを解決する。論理削除されたフォームも
+// map-filter と同様に、既存の回答を説明する定義として利用できる。
 async fn form_fields(
     tx: &mut Transaction<'_, Sqlite>,
     user: &str,
@@ -259,7 +259,7 @@ fn validate_group(
     Ok(())
 }
 
-// Match the editor's reusable representation without rounding JSON numbers through f64.
+// JSON 数値を f64 経由で丸めず、編集画面の再利用可能な表現に合わせる。
 fn canonicalize_conditions(conditions: &mut [AnswerCondition]) {
     for condition in conditions {
         if matches!(condition.op.as_str(), "empty" | "filled" | "missing") {

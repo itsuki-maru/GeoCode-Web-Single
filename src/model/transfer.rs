@@ -1,4 +1,4 @@
-//! Database-independent JSON v3 transfer format. Keys have file-local scope.
+//! データベースに依存しない JSON v3 転送形式。キーの有効範囲はファイル内に限定する。
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

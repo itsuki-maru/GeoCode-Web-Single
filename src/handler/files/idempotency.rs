@@ -1,4 +1,4 @@
-//! Successful import receipts are committed atomically with the imported data.
+//! 成功したインポートの処理記録は、インポートしたデータと同一トランザクションで確定する。
 use axum::http::HeaderMap;
 use sha2::{Digest, Sha256};
 use sqlx::{Executor, Sqlite};
@@ -42,7 +42,7 @@ pub(super) fn verify_account(headers: &HeaderMap, user: &str) -> Result<(), AppE
 
 #[derive(Debug)]
 pub(super) struct ImportRequest {
-    // SQLite stores UUIDs as TEXT, so normalize accepted UUID spellings before binding.
+    // SQLite は UUID を TEXT で保存するため、受け付けた UUID の表記をバインド前に正規化する。
     id: String,
     payload_sha256: [u8; 32],
 }
@@ -69,7 +69,7 @@ impl ImportRequest {
     }
 }
 
-/// Recheck after BEGIN IMMEDIATE has acquired the writer before inserting import data.
+/// BEGIN IMMEDIATE で書き込み権を取得した後、インポートデータを挿入する前に再確認する。
 pub(super) async fn is_completed<'e, E>(
     executor: E,
     user: &str,
@@ -101,7 +101,7 @@ where
     Ok(false)
 }
 
-/// Call with the same BEGIN IMMEDIATE transaction that inserts the imported data.
+/// インポートデータの挿入と同じ BEGIN IMMEDIATE のトランザクションを渡して呼び出す。
 pub(super) async fn record_completion<'e, E>(
     executor: E,
     user: &str,

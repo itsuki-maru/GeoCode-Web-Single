@@ -26,7 +26,7 @@ pub(super) async fn begin_read(
     Ok(tx)
 }
 
-/// Reserve the writer before reading to avoid deferred-transaction upgrades.
+/// 遅延トランザクションからの昇格を避けるため、読み取り前に書き込み権を確保する。
 pub(super) async fn begin_write(
     pool: &SqlitePool,
 ) -> Result<Transaction<'static, Sqlite>, sqlx::Error> {
@@ -38,7 +38,7 @@ pub(super) async fn begin_write(
     Ok(tx)
 }
 
-/// Match PostgreSQL JSONB equality, including equivalent JSON number spellings.
+/// 等価な JSON 数値表記も含め、PostgreSQL の JSONB の等価判定に合わせる。
 pub(super) fn json_equal(a: &serde_json::Value, b: &serde_json::Value) -> bool {
     use serde_json::Value;
     match (a, b) {
@@ -91,7 +91,7 @@ struct TimestampCache {
 
 impl TimestampCache {
     fn parse(&mut self, raw: &str) -> (Option<NaiveDateTime>, bool) {
-        // Do not hash or retain unusually long values; parsing/fallback stays unchanged.
+        // 極端に長い値はハッシュ化も保持も行わず、解析とフォールバックの動作は維持する。
         if raw.len() > TIMESTAMP_CACHE_MAX_KEY_BYTES {
             return (timestamp(raw), false);
         }
@@ -99,8 +99,8 @@ impl TimestampCache {
             return (*parsed, true);
         }
         let parsed = timestamp(raw);
-        // Keep the initial working set instead of allocating on every cache miss.
-        // This also retains frequently reused query boundaries when dates are unique.
+        // キャッシュミスのたびに領域を確保せず、最初の作業用データを保持する。
+        // 日時がすべて異なる場合でも、頻繁に再利用するクエリの境界値を保持できる。
         if self.values.len() < TIMESTAMP_CACHE_MAX_ENTRIES
             && raw.len() <= TIMESTAMP_CACHE_MAX_BYTES.saturating_sub(self.key_bytes)
         {
@@ -116,8 +116,8 @@ impl TimestampCache {
         if self.comparisons < TIMESTAMP_CACHE_SAMPLE_COMPARISONS {
             return false;
         }
-        // A repeated as_of boundary keeps this useful even when every stored date
-        // differs. Stop when fewer than a quarter of comparisons reuse either date.
+        // 保存された日時がすべて異なっていても、as_of 境界を繰り返し使う場合には効果がある。
+        // どちらかの日時を再利用する比較が全体の四分の一未満になったら停止する。
         let unhelpful = self.reused_comparisons * 4 < self.comparisons;
         self.comparisons = 0;
         self.reused_comparisons = 0;
@@ -125,8 +125,8 @@ impl TimestampCache {
     }
 }
 
-/// Replaced at each read transaction's start. SQLite keeps the callback on its
-/// pooled connection after commit, so both entry count and retained key bytes are bounded.
+/// 読み取りトランザクションの開始ごとに置き換える。SQLite はコミット後もプール内の接続に
+/// コールバックを保持するため、項目数と保持するキーのバイト数の両方に上限を設ける。
 #[derive(Default)]
 struct CachedTimestampCollation {
     cache: Mutex<TimestampCache>,
@@ -382,15 +382,15 @@ mod tests {
         assert_eq!(cached.compare(a, b), compare_times(a, b));
         assert_eq!(cached.cache.lock().unwrap().values.len(), retained);
 
-        // begin_read registers a new default callback for every transaction.
+        // begin_read は、トランザクションごとに新しい既定のコールバックを登録する。
         let next_read = CachedTimestampCollation::default();
         assert_eq!(next_read.compare(a, b), compare_times(a, b));
         assert!(!next_read.disabled.load(AtomicOrdering::Relaxed));
         assert_eq!(next_read.cache.lock().unwrap().values.len(), 2);
     }
 
-    /// Comparator-only measurement: excludes SQLite, SQLx, I/O and UI work.
-    /// Run in release mode with --ignored --nocapture; there is no timing threshold.
+    /// 比較処理のみの計測とし、SQLite・SQLx・入出力・UI の処理は含めない。
+    /// リリースモードで --ignored --nocapture を指定して実行する。時間のしきい値は設けない。
     #[test]
     #[ignore = "manual timestamp collation performance measurement"]
     fn timestamp_collation_performance() {
@@ -460,7 +460,7 @@ mod tests {
                         .to_string()
                 })
                 .collect();
-            // Deterministic unsorted input; no random-number dependency is needed.
+            // 再現可能な未整列の入力を使い、乱数への依存を避ける。
             let mut state = 0x9e3779b97f4a7c15_u64;
             for i in (1..ROWS).rev() {
                 state ^= state << 13;

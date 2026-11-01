@@ -42,8 +42,8 @@ fn answer_bootstrap_json_block_round_trips_script_breakout_unicode_and_property_
     context.insert("latitude", &37.65);
     context.insert("longitude", &138.25);
     context.insert("zoom", &6);
-    // Keep the production filter and render the current source template, so
-    // this test does not depend on rebuilding the ignored embedded dist first.
+    // 本番のフィルターを維持して現在のソースのテンプレートを描画し、
+    // 無視対象の埋め込み用 dist を事前に再ビルドしなくても実行できるテストにする。
     let mut templates = geocode_web_single::build_tera_from_embed().unwrap();
     templates
         .add_raw_template(
@@ -104,8 +104,8 @@ async fn answer_map_transport_restores_stored_and_ambiguous_bodies_and_keeps_fal
                         {"type":"text","text":free},{"type":"answer","id":ids[0]},{"type":"answer","id":ids[1]}
                     ])),
                 ),
-                // Ambiguous legacy text still has sync_required=true. Exact
-                // normal == managed is enough for transport, not for adopting parts.
+                // 曖昧な旧形式のテキストでは、sync_required=true のままとなる。normal == managed の
+                // 完全一致は転送には十分だが、各部分を取り込む条件としては不十分である。
                 1 => (
                     format!("{answer_a}{answer_a}"),
                     [answer_a.as_str(), answer_a.as_str()],
@@ -401,7 +401,7 @@ async fn insert_popup_case(
         .unwrap()
         .and_hms_opt(0, 0, 0)
         .unwrap();
-    // Reverse insertion makes equal-time order depend on the answer ID, not insertion.
+    // 逆順で挿入し、同時刻の順序が挿入順ではなく回答 ID で決まるようにする。
     for i in (0..ids.len()).rev() {
         let snapshot = (!case.name.starts_with("legacy")).then(|| {
             json!({
@@ -479,7 +479,7 @@ async fn full_answer_popup_reference(
     assert!(response.status().is_success());
     let body: Value =
         serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
-    // This existing endpoint still reads full Answer rows; no lightweight popup DTO.
+    // この既存のエンドポイントは、軽量なポップアップ用 DTO ではなく、完全な Answer 行を読み込む。
     json!({"free_text":body["free_text"],"managed_markdown":body["managed_markdown"],"sync_required":body["sync_required"]})
 }
 
@@ -1182,7 +1182,7 @@ async fn popup_snapshots_separate_all_answers_and_keep_ambiguous_legacy_read_onl
         true
     );
     assert_eq!(data.popup_bodies[&format!("shape:{id}")]["free_text"], "");
-    // Display projection reads do not adopt/persist old records or rewrite their bodies.
+    // 表示用データの読み取りでは、旧レコードの取り込み・永続化や本文の書き換えを行わない。
     let row: (String, bool) = sqlx::query_as(
         r#"
         SELECT

@@ -192,8 +192,8 @@ async fn fields(
 }
 
 fn append_map_field_definitions(b: &mut QueryBuilder<'static, Sqlite>, form: &str) {
-    // Group only arrays by their BINARY JSON text. Strings can extract to the
-    // same text; null/missing/object/scalar values must keep their old expansion.
+    // BINARY で比較する JSON テキストによるグループ化は、配列だけに適用する。文字列からも同じテキストが
+    // 抽出され得るため、null・欠落・オブジェクト・スカラー値は従来どおり展開する。
     b.push(
         r#"
         , map_field_source AS (
@@ -698,8 +698,8 @@ mod field_tests {
                 other => panic!("Old/new field expansion differs: {other:?}"),
             }
         }
-        // JSON string "[]" and array [] extract to identical text, but only
-        // the string contributes a (non-field) definition and consumes the limit.
+        // JSON 文字列の "[]" と配列の [] からは同じテキストが抽出されるが、フィールドではない定義を
+        // 一つ追加して上限を消費するのは、文字列の場合だけである。
         let rows = json!([
             record(
                 1,

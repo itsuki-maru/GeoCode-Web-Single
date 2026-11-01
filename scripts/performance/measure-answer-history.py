@@ -1,4 +1,4 @@
-"""Compare shared full-row history SQL from two SQLite revisions in a memory DB."""
+"""SQLite の二つのリビジョンの共通履歴全行取得 SQL を、メモリ上の DB で比較する。"""
 
 import argparse
 import hashlib
@@ -23,9 +23,9 @@ def history_query(source):
         raise ValueError("This diagnostic supports the SQLite backend only")
     raw = re.findall(r'r#"([\s\S]*?)"#', function)
     if "fn append_answer_source(" in function:
-        # The current backend shares these Full-projection fragments with CSV,
-        # answer maps and the bounded detail fetch. Search/count use narrower
-        # projections; this diagnostic deliberately continues measuring Full.
+        # 現在のバックエンドでは、Full 射影の SQL 断片を CSV、回答地図、
+        # 件数を制限した詳細取得で共有する。検索と件数取得にはより狭い射影を使うが、
+        # この診断では引き続き Full を計測する。
         helper = function.split("fn append_answer_source(", 1)[1].split(
             "fn build_query_with_projection(", 1
         )[0]
@@ -39,7 +39,7 @@ def history_query(source):
 
         core = template("SELECT core", "AS target_type", "AS target_id")
         if "SELECT" not in core:
-            # Full retains s.id; only the history Count projection omits it.
+            # Full では s.id を保持し、履歴の Count 射影でのみ省略する。
             select = re.search(r'b\.push\("(SELECT\s+)"\)', helper)
             answer_id = re.search(r'b\.push\("(s\.id,\s*)"\)', helper)
             if not select or not answer_id:
@@ -48,8 +48,8 @@ def history_query(source):
         full_extra = template("additional columns", "{name} AS target_name", "s.submitted_values", "common_form_deleted")
         owner_from = template("FROM", "FROM {kind}_form_submission_model s", "{table} m ON m.id = s.{kind}_id")
         if "{target_join}" in owner_from:
-            # Shared Full history passes keys=None; CROSS JOIN belongs only to
-            # the bounded detail fetch and is outside this diagnostic's scope.
+            # 共通の Full 履歴では keys=None を渡す。CROSS JOIN は件数を制限した
+            # 詳細取得専用であり、この診断の対象外とする。
             target_join = re.search(
                 r'let target_join = if keys\.is_some\(\)\s*\{\s*"CROSS JOIN"\s*\}\s*else\s*\{\s*"(JOIN)"\s*\}',
                 helper,
@@ -63,7 +63,7 @@ def history_query(source):
             raise ValueError("Unrecognized Full-projection owner predicate")
         owner = core + full_extra + owner_from + full_joins + owner_where[1]
     else:
-        # Retain the original all-in-one templates, including 47b82c0/ecf2d71.
+        # 47b82c0/ecf2d71 を含め、元の一体型テンプレートを維持する。
         owner = next(sql for sql in raw if "s.submitted_values" in sql)
     branches = []
     for kind in ("marker", "shape"):
@@ -92,8 +92,8 @@ def history_query(source):
 
 def fixture(count, length):
     db = sqlite3.connect(":memory:")
-    # All fixture timestamps have the same fixed UTC format. This deliberately
-    # excludes the production Rust collation's parsing cost and mixed formats.
+    # テストデータの日時はすべて同じ固定 UTC 形式とする。これにより、本番の Rust の
+    # 照合処理における日時解析のコストや、形式の混在は計測から除外する。
     db.create_collation("answer_time", lambda a, b: (a > b) - (a < b))
     db.executescript(
         "CREATE TABLE layer_model(id TEXT PRIMARY KEY,user_id TEXT,layer_name TEXT);"

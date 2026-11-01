@@ -11,7 +11,7 @@ pub struct InputPolicy {
     pub restrict_free_text: bool,
 }
 
-// BEGIN IMMEDIATE serializes policy changes, object writes and form submissions.
+// BEGIN IMMEDIATE により、ポリシー変更、オブジェクトの書き込み、フォーム送信を直列化する。
 pub async fn update_handler(
     Extension(user): Extension<String>,
     Extension(pool): Extension<SqlitePool>,

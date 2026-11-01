@@ -35,7 +35,7 @@ fn definition(
     }
     let schema: MarkerFormSchema =
         serde_json::from_value(schema.clone()).map_err(|_| invalid("フォーム定義が不正です。"))?;
-    // Cleared, disabled object configurations legitimately have no title/fields.
+    // 内容をクリアして無効化したオブジェクト設定では、タイトルやフィールドがなくても正当である。
     super::super::marker_forms::validate_config(&MarkerFormConfigUpdate {
         source_form: None,
         enabled: false,
