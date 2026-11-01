@@ -177,7 +177,13 @@ pub async fn update_marker_form_config_handler(
             .filter(|s| Uuid::parse_str(s).is_ok())
         {
             password_hash = sqlx::query_scalar(
-                "SELECT password_hash FROM common_form_model WHERE id=$1 AND user_id=$2",
+                r#"
+                SELECT
+                    password_hash
+                FROM common_form_model
+                WHERE id = $1
+                    AND user_id = $2
+                "#,
             )
             .bind(&id)
             .bind(&user_id)
@@ -201,7 +207,8 @@ pub async fn update_marker_form_config_handler(
             form_schema,
             password_hash,
             create_at,
-            update_at, source_form
+            update_at,
+            source_form
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9)
         ON CONFLICT (marker_id) DO UPDATE SET
             source_form = EXCLUDED.source_form,
@@ -241,7 +248,9 @@ pub async fn rotate_marker_form_url_handler(
     let result = sqlx::query(
         r#"
         UPDATE marker_form_config_model
-        SET public_id = $1, update_at = $2
+        SET
+            public_id = $1,
+            update_at = $2
         WHERE marker_id = $3
         "#,
     )
@@ -350,7 +359,13 @@ pub async fn update_shape_form_config_handler(
             .filter(|s| Uuid::parse_str(s).is_ok())
         {
             password_hash = sqlx::query_scalar(
-                "SELECT password_hash FROM common_form_model WHERE id=$1 AND user_id=$2",
+                r#"
+                SELECT
+                    password_hash
+                FROM common_form_model
+                WHERE id = $1
+                    AND user_id = $2
+                "#,
             )
             .bind(&id)
             .bind(&user_id)
@@ -366,8 +381,16 @@ pub async fn update_shape_form_config_handler(
     sqlx::query(
         r#"
         INSERT INTO shape_form_config_model (
-            shape_id, public_id, enabled, form_title, form_description,
-            form_schema, password_hash, create_at, update_at, source_form
+            shape_id,
+            public_id,
+            enabled,
+            form_title,
+            form_description,
+            form_schema,
+            password_hash,
+            create_at,
+            update_at,
+            source_form
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9)
         ON CONFLICT (shape_id) DO UPDATE SET
             source_form = EXCLUDED.source_form,
@@ -739,8 +762,7 @@ async fn persist_submission(
                 filename,
                 uuid_filename,
                 create_at
-            )
-            VALUES (
+            ) VALUES (
                 $1,
                 $2,
                 $3,
@@ -766,8 +788,7 @@ async fn persist_submission(
                 owner_id,
                 stored_bytes,
                 create_at
-            )
-            VALUES (
+            ) VALUES (
                 $1,
                 $2,
                 $3,
@@ -793,7 +814,9 @@ async fn persist_submission(
             marker_id,
             submitted_values,
             rendered_markdown,
-            create_at, source_form, form_snapshot
+            create_at,
+            source_form,
+            form_snapshot
         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
     )
@@ -810,9 +833,31 @@ async fn persist_submission(
     let updated = sqlx::query_scalar::<_, JsonValue>(
         r#"
         UPDATE marker_info_model
-        SET detail = detail || $1, update_at = $2
-        WHERE id = $3 AND user_id = $4
-        RETURNING json_object('id',id,'user_id',user_id,'layer_id',layer_id,'marker_name',marker_name,'latitude',latitude,'longitude',longitude,'detail',detail,'create_at',create_at,'update_at',update_at)
+        SET
+            detail = detail || $1,
+            update_at = $2
+        WHERE id = $3
+            AND user_id = $4
+        RETURNING json_object(
+            'id',
+            id,
+            'user_id',
+            user_id,
+            'layer_id',
+            layer_id,
+            'marker_name',
+            marker_name,
+            'latitude',
+            latitude,
+            'longitude',
+            longitude,
+            'detail',
+            detail,
+            'create_at',
+            create_at,
+            'update_at',
+            update_at
+        )
         "#,
     )
     .bind(rendered_markdown)
@@ -963,8 +1008,7 @@ async fn persist_shape_submission(
                 filename,
                 uuid_filename,
                 create_at
-            )
-            VALUES (
+            ) VALUES (
                 $1,
                 $2,
                 $3,
@@ -989,8 +1033,7 @@ async fn persist_shape_submission(
                 owner_id,
                 stored_bytes,
                 create_at
-            )
-            VALUES (
+            ) VALUES (
                 $1,
                 $2,
                 $3,
@@ -1018,8 +1061,7 @@ async fn persist_shape_submission(
             create_at,
             source_form,
             form_snapshot
-        )
-        VALUES (
+        ) VALUES (
             $1,
             $2,
             $3,
@@ -1047,7 +1089,24 @@ async fn persist_shape_submission(
             updated_at = $2
         WHERE id = $3
             AND user_id = $4
-        RETURNING json_object('id',id,'user_id',user_id,'layer_id',layer_id,'name',name,'shape_type',shape_type,'geojson',json(geojson),'created_at',created_at,'updated_at',updated_at)
+        RETURNING json_object(
+            'id',
+            id,
+            'user_id',
+            user_id,
+            'layer_id',
+            layer_id,
+            'name',
+            name,
+            'shape_type',
+            shape_type,
+            'geojson',
+            json(geojson),
+            'created_at',
+            created_at,
+            'updated_at',
+            updated_at
+        )
         "#,
     )
     .bind(SqlJson(&geojson))
@@ -1150,12 +1209,21 @@ async fn fetch_shape_owner_form<'e>(
 ) -> Result<ShapeOwnerFormRow, AppError> {
     sqlx::query_as::<_, ShapeOwnerFormRow>(
         r#"
-        SELECT s.id AS shape_id, s.name AS shape_name, c.managed_layer_id, c.public_id, c.source_form, c.enabled,
-               c.form_title, c.form_description, c.form_schema,
-               (c.password_hash IS NOT NULL) AS is_password_protected
+        SELECT
+            s.id AS shape_id,
+            s.name AS shape_name,
+            c.managed_layer_id,
+            c.public_id,
+            c.source_form,
+            c.enabled,
+            c.form_title,
+            c.form_description,
+            c.form_schema,
+            (c.password_hash IS NOT NULL) AS is_password_protected
         FROM shape_model s
         LEFT JOIN shape_form_config_model c ON c.shape_id = s.id
-        WHERE s.id = $1 AND s.user_id = $2
+        WHERE s.id = $1
+            AND s.user_id = $2
         "#,
     )
     .bind(&shape_id)
@@ -1352,13 +1420,25 @@ async fn verify_submission_password(
 async fn check_shape_rate_limit(pool: &SqlitePool, shape_id: &str) -> Result<(), AppError> {
     let attempt_count = sqlx::query_scalar::<_, i32>(
         r#"
-        INSERT INTO shape_form_rate_limit_model (shape_id, window_started_at, attempt_count)
-        VALUES ($1, $2, 1)
-        ON CONFLICT (shape_id)
-        DO UPDATE SET attempt_count = CASE WHEN julianday(shape_form_rate_limit_model.window_started_at) <= julianday(EXCLUDED.window_started_at) - 60.0 / 86400.0 THEN 1 ELSE shape_form_rate_limit_model.attempt_count + 1 END,
-        window_started_at = CASE WHEN julianday(shape_form_rate_limit_model.window_started_at) <= julianday(EXCLUDED.window_started_at) - 60.0 / 86400.0 THEN EXCLUDED.window_started_at ELSE shape_form_rate_limit_model.window_started_at END
-        RETURNING
+        INSERT INTO shape_form_rate_limit_model (
+            shape_id,
+            window_started_at,
             attempt_count
+        ) VALUES ($1, $2, 1)
+        ON CONFLICT (shape_id) DO UPDATE SET
+            attempt_count = CASE
+                WHEN julianday(shape_form_rate_limit_model.window_started_at)
+                    <= julianday(EXCLUDED.window_started_at) - 60.0 / 86400.0
+                THEN 1
+                ELSE shape_form_rate_limit_model.attempt_count + 1
+            END,
+            window_started_at = CASE
+                WHEN julianday(shape_form_rate_limit_model.window_started_at)
+                    <= julianday(EXCLUDED.window_started_at) - 60.0 / 86400.0
+                THEN EXCLUDED.window_started_at
+                ELSE shape_form_rate_limit_model.window_started_at
+            END
+        RETURNING attempt_count
         "#,
     )
     .bind(&shape_id)
@@ -1377,13 +1457,25 @@ async fn check_shape_rate_limit(pool: &SqlitePool, shape_id: &str) -> Result<(),
 async fn check_rate_limit(pool: &SqlitePool, marker_id: &str) -> Result<(), AppError> {
     let attempt_count = sqlx::query_scalar::<_, i32>(
         r#"
-        INSERT INTO marker_form_rate_limit_model ( marker_id, window_started_at, attempt_count )
-        VALUES ($1, $2, 1)
-        ON CONFLICT (marker_id)
-        DO UPDATE SET attempt_count = CASE WHEN julianday(marker_form_rate_limit_model.window_started_at) <= julianday(EXCLUDED.window_started_at) - 60.0 / 86400.0 THEN 1 ELSE marker_form_rate_limit_model.attempt_count + 1 END,
-        window_started_at = CASE WHEN julianday(marker_form_rate_limit_model.window_started_at) <= julianday(EXCLUDED.window_started_at) - 60.0 / 86400.0 THEN EXCLUDED.window_started_at ELSE marker_form_rate_limit_model.window_started_at END
-        RETURNING
+        INSERT INTO marker_form_rate_limit_model (
+            marker_id,
+            window_started_at,
             attempt_count
+        ) VALUES ($1, $2, 1)
+        ON CONFLICT (marker_id) DO UPDATE SET
+            attempt_count = CASE
+                WHEN julianday(marker_form_rate_limit_model.window_started_at)
+                    <= julianday(EXCLUDED.window_started_at) - 60.0 / 86400.0
+                THEN 1
+                ELSE marker_form_rate_limit_model.attempt_count + 1
+            END,
+            window_started_at = CASE
+                WHEN julianday(marker_form_rate_limit_model.window_started_at)
+                    <= julianday(EXCLUDED.window_started_at) - 60.0 / 86400.0
+                THEN EXCLUDED.window_started_at
+                ELSE marker_form_rate_limit_model.window_started_at
+            END
+        RETURNING attempt_count
         "#,
     )
     .bind(&marker_id)
@@ -1989,18 +2081,18 @@ pub async fn list_common_forms_handler(
     Ok(Json(
         sqlx::query_as::<_, CommonForm>(
             r#"
-        SELECT
-            id,
-            version,
-            form_title,
-            form_description,
-            form_schema,
-            (password_hash IS NOT NULL) AS is_password_protected
-        FROM common_form_model
-        WHERE user_id = $1
-            AND NOT deleted
-        ORDER BY update_at DESC, id
-        "#,
+            SELECT
+                id,
+                version,
+                form_title,
+                form_description,
+                form_schema,
+                (password_hash IS NOT NULL) AS is_password_protected
+            FROM common_form_model
+            WHERE user_id = $1
+                AND NOT deleted
+            ORDER BY update_at DESC, id
+            "#,
         )
         .bind(&user_id)
         .fetch_all(&pool)
@@ -2014,7 +2106,26 @@ pub async fn get_common_form_handler(
     Path(id): Path<String>,
 ) -> Result<Json<CommonForm>, AppError> {
     let mut tx = pool.begin().await?;
-    let mut form=sqlx::query_as::<_,CommonForm>("SELECT id,version,form_title,form_description,form_schema,(password_hash IS NOT NULL) AS is_password_protected FROM common_form_model WHERE id=$1 AND user_id=$2 AND NOT deleted").bind(&id).bind(&user_id).fetch_optional(&mut *tx).await?.ok_or(AppError::NotFound)?;
+    let mut form = sqlx::query_as::<_, CommonForm>(
+        r#"
+        SELECT
+            id,
+            version,
+            form_title,
+            form_description,
+            form_schema,
+            (password_hash IS NOT NULL) AS is_password_protected
+        FROM common_form_model
+        WHERE id = $1
+            AND user_id = $2
+            AND NOT deleted
+        "#,
+    )
+    .bind(&id)
+    .bind(&user_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
     let (layers, managed, applied) = super::layer_forms::usage(&mut tx, &user_id, &id).await?;
     form.managed_layer_count = layers;
     form.managed_target_count = managed;
@@ -2044,8 +2155,7 @@ pub async fn create_common_form_handler(
             form_schema,
             create_at,
             update_at
-        )
-        VALUES (
+        ) VALUES (
             $1,
             $2,
             $3,
@@ -2070,8 +2180,7 @@ pub async fn create_common_form_handler(
             form_id,
             version,
             form_schema
-        )
-        VALUES (
+        ) VALUES (
             $1,
             1,
             $2
@@ -2083,11 +2192,18 @@ pub async fn create_common_form_handler(
     .execute(&mut *tx)
     .await?;
     let password_hash = resolve_password_hash(&payload.config, None).await?;
-    sqlx::query("UPDATE common_form_model SET password_hash=$1 WHERE id=$2")
-        .bind(password_hash)
-        .bind(&id)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        r#"
+        UPDATE common_form_model
+        SET
+            password_hash = $1
+        WHERE id = $2
+        "#,
+    )
+    .bind(password_hash)
+    .bind(&id)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
     get_common_form_handler(Extension(user_id), Extension(pool), Path(id)).await
 }
@@ -2161,11 +2277,17 @@ pub async fn update_common_form_handler(
     {
         return Err(AppError::Conflict);
     }
-    let old_hash: Option<String> =
-        sqlx::query_scalar("SELECT password_hash FROM common_form_model WHERE id=$1")
-            .bind(&id)
-            .fetch_one(&mut *tx)
-            .await?;
+    let old_hash: Option<String> = sqlx::query_scalar(
+        r#"
+        SELECT
+            password_hash
+        FROM common_form_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(&id)
+    .fetch_one(&mut *tx)
+    .await?;
     let next_hash = resolve_password_hash(&payload.config, old_hash).await?;
     let next_version = current.version.checked_add(1).ok_or(AppError::Conflict)?;
     sqlx::query(
@@ -2194,8 +2316,7 @@ pub async fn update_common_form_handler(
             form_id,
             version,
             form_schema
-        )
-        VALUES (
+        ) VALUES (
             $1,
             $2,
             $3
@@ -2207,11 +2328,18 @@ pub async fn update_common_form_handler(
     .bind(&SqlJson(&payload.config.form_schema))
     .execute(&mut *tx)
     .await?;
-    sqlx::query("UPDATE common_form_model SET password_hash=$1 WHERE id=$2")
-        .bind(next_hash)
-        .bind(&id)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        r#"
+        UPDATE common_form_model
+        SET
+            password_hash = $1
+        WHERE id = $2
+        "#,
+    )
+    .bind(next_hash)
+    .bind(&id)
+    .execute(&mut *tx)
+    .await?;
     super::layer_forms::propagate(&mut tx, &user_id, &id, password_changed).await?;
     tx.commit().await?;
     get_common_form_handler(Extension(user_id), Extension(pool), Path(id)).await
@@ -2224,7 +2352,16 @@ pub async fn delete_common_form_handler(
 ) -> Result<StatusCode, AppError> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let used: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM layer_model WHERE common_form_id=$1 AND user_id=$2)",
+        r#"
+        SELECT
+            EXISTS (
+                SELECT
+                    1
+                FROM layer_model
+                WHERE common_form_id = $1
+                    AND user_id = $2
+            )
+        "#,
     )
     .bind(&id)
     .bind(&user_id)

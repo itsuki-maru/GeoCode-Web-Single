@@ -57,13 +57,13 @@ async fn input(pool: &SqlitePool, user: &str, id: &str, shape: bool) -> Result<R
         SELECT submitted_values, form_snapshot FROM shape_form_submission_model
         WHERE shape_id=$1 AND source_form->>'id' IS $2
         ORDER BY create_at COLLATE answer_time DESC,id DESC LIMIT 1
-    "#
+        "#
     } else {
         r#"
         SELECT submitted_values, form_snapshot FROM marker_form_submission_model
         WHERE marker_id=$1 AND source_form->>'id' IS $2
         ORDER BY create_at COLLATE answer_time DESC,id DESC LIMIT 1
-    "#
+        "#
     };
     let mut tx = super::super::answer_sqlite::begin_read(pool).await?;
     let latest: Option<(JsonValue, Option<JsonValue>)> = sqlx::query_as(query)

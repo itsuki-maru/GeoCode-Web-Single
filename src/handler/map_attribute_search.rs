@@ -70,8 +70,21 @@ pub async fn search_attributes(
     }
     let mut tx = super::answer_sqlite::begin_read(pool).await?;
     let (version, schema): (i32, SqlJson<MarkerFormSchema>) = sqlx::query_as(
-        "SELECT version,form_schema FROM common_form_model WHERE id=$1 AND user_id=$2 AND NOT deleted"
-    ).bind(&r.common_form_id).bind(user).fetch_optional(&mut *tx).await?.ok_or(AppError::NotFound)?;
+        r#"
+        SELECT
+            version,
+            form_schema
+        FROM common_form_model
+        WHERE id = $1
+            AND user_id = $2
+            AND NOT deleted
+        "#,
+    )
+    .bind(&r.common_form_id)
+    .bind(user)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
     if version != r.definition_version {
         return Err(AppError::Conflict);
     }
@@ -88,16 +101,31 @@ pub async fn search_attributes(
         super::answer_map_filter::validate_numeric_condition(c)?;
     }
     if let Some(layers) = &r.layer_ids {
-        let owned: Vec<String> = sqlx::query_scalar("SELECT id FROM layer_model WHERE user_id=$1")
-            .bind(user)
-            .fetch_all(&mut *tx)
-            .await?;
+        let owned: Vec<String> = sqlx::query_scalar(
+            r#"
+            SELECT
+                id
+            FROM layer_model
+            WHERE user_id = $1
+            "#,
+        )
+        .bind(user)
+        .fetch_all(&mut *tx)
+        .await?;
         if layers.iter().any(|id| !owned.contains(id)) {
             return Err(AppError::NotFound);
         }
     }
     let mut b = build_query(user, &q, at);
-    b.push(" SELECT DISTINCT target_type,target_id FROM filtered WHERE TRUE");
+    b.push(
+        r#"
+        SELECT DISTINCT
+            target_type,
+            target_id
+        FROM filtered
+        WHERE TRUE
+        "#,
+    );
     if let Some(layers) = &r.layer_ids {
         b.push(" AND (FALSE");
         for id in layers {

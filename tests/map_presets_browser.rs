@@ -20,10 +20,34 @@ async fn serve_sqlite_map_presets_browser_fixture() {
     let layer = common::master_layer_id(&pool, &owner).await;
     let form = Uuid::new_v4().to_string();
     let schema = json!({"fields":[{"id":"n","type":"number","label":"耐用年数"}]});
-    sqlx::query("INSERT INTO common_form_model(id,user_id,version,form_title,form_description,form_schema,create_at,update_at) VALUES($1,$2,1,'設備点検','',$3,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
-        .bind(&form).bind(&owner).bind(&schema).execute(&pool).await.unwrap();
     sqlx::query(
-        "INSERT INTO common_form_revision_model(form_id,version,form_schema) VALUES($1,1,$2)",
+        r#"
+        INSERT INTO common_form_model (
+            id,
+            user_id,
+            version,
+            form_title,
+            form_description,
+            form_schema,
+            create_at,
+            update_at
+        ) VALUES ($1, $2, 1, '設備点検', '', $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        "#,
+    )
+    .bind(&form)
+    .bind(&owner)
+    .bind(&schema)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO common_form_revision_model (
+            form_id,
+            version,
+            form_schema
+        ) VALUES ($1, 1, $2)
+        "#,
     )
     .bind(&form)
     .bind(&schema)
@@ -32,22 +56,98 @@ async fn serve_sqlite_map_presets_browser_fixture() {
     .unwrap();
     for index in 0..10 {
         let marker = Uuid::new_v4().to_string();
-        sqlx::query("INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES($1,$2,$3,$4,35.68,139.76,'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
-            .bind(&marker).bind(&owner).bind(&layer).bind(format!("設備{}", index + 1))
-            .execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO marker_form_submission_model(id,marker_id,submitted_values,rendered_markdown,create_at,source_form,form_snapshot) VALUES($1,$2,$3,'',CURRENT_TIMESTAMP,$4,$5)")
-            .bind(Uuid::new_v4().to_string()).bind(&marker)
-            .bind(json!({"n":if index < 9 {60}else{20}}))
-            .bind(json!({"id":form,"version":1}))
-            .bind(json!({"form_title":"設備点検","form_schema":schema}))
-            .execute(&pool).await.unwrap();
-    }
-    sqlx::query("DELETE FROM tileserver_model")
+        sqlx::query(
+            r#"
+            INSERT INTO marker_info_model (
+                id,
+                user_id,
+                layer_id,
+                marker_name,
+                latitude,
+                longitude,
+                detail,
+                create_at,
+                update_at
+            ) VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                35.68,
+                139.76,
+                '',
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .bind(&marker)
+        .bind(&owner)
+        .bind(&layer)
+        .bind(format!("設備{}", index + 1))
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO tileserver_model(id,layer_name,label,url,attribution,include_foreign_tiles,min_zoom,max_zoom,create_at,updated_at) VALUES(1,'検証地図','検証地図','/sqlite-check-tile.svg','SQLite TEST',1,0,20,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
-        .execute(&pool).await.unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO marker_form_submission_model (
+                id,
+                marker_id,
+                submitted_values,
+                rendered_markdown,
+                create_at,
+                source_form,
+                form_snapshot
+            ) VALUES ($1, $2, $3, '', CURRENT_TIMESTAMP, $4, $5)
+            "#,
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(&marker)
+        .bind(json!({"n":if index < 9 {60}else{20}}))
+        .bind(json!({"id":form,"version":1}))
+        .bind(json!({"form_title":"設備点検","form_schema":schema}))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        r#"
+        DELETE FROM tileserver_model
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO tileserver_model (
+            id,
+            layer_name,
+            label,
+            url,
+            attribution,
+            include_foreign_tiles,
+            min_zoom,
+            max_zoom,
+            create_at,
+            updated_at
+        ) VALUES (
+            1,
+            '検証地図',
+            '検証地図',
+            '/sqlite-check-tile.svg',
+            'SQLite TEST',
+            1,
+            0,
+            20,
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();

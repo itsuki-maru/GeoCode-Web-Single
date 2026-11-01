@@ -144,12 +144,19 @@ async fn icon_upload_listing_search_and_deletion_are_owner_scoped() {
     let (status, ordinary) = upload(&app, Some(owner), "upload_file", "ordinary.png", &png()).await;
     assert_eq!(status, StatusCode::OK);
     let layer = common::master_layer_id(&pool, &owner).await;
-    sqlx::query("UPDATE layer_model SET marker_icon_id=$1 WHERE id=$2")
-        .bind(id)
-        .bind(layer.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE layer_model
+        SET
+            marker_icon_id = $1
+        WHERE id = $2
+        "#,
+    )
+    .bind(id)
+    .bind(layer.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     for (user, expected_count) in [(owner, 1), (other, 0)] {
         for path in [
             "/marker-icons",
@@ -199,7 +206,12 @@ async fn icon_upload_listing_search_and_deletion_are_owner_scoped() {
     assert!(!file.exists());
     assert!(
         sqlx::query_scalar::<_, Option<String>>(
-            "SELECT marker_icon_id FROM layer_model WHERE id=$1"
+            r#"
+            SELECT
+                marker_icon_id
+            FROM layer_model
+            WHERE id = $1
+            "#
         )
         .bind(layer.to_string())
         .fetch_one(&pool)
@@ -303,11 +315,18 @@ async fn icon_upload_rejects_unauthenticated_invalid_and_oversized_inputs() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM marker_icon_model WHERE user_id=$1")
-            .bind(owner.to_string())
-            .fetch_one(&pool)
-            .await
-            .unwrap(),
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT
+                count(*)
+            FROM marker_icon_model
+            WHERE user_id = $1
+            "#,
+        )
+        .bind(owner.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
         0
     );
 }
@@ -318,7 +337,19 @@ async fn failed_icon_insert_removes_its_file_and_missing_files_do_not_block_dele
     let _serial = FILE_TESTS.lock().await;
     let owner = common::create_test_user(&pool, "icon-cleanup").await;
     let app = app(&pool);
-    sqlx::query("CREATE TRIGGER reject_test_icon BEFORE INSERT ON marker_icon_model WHEN NEW.filename = 'reject.png' BEGIN SELECT RAISE(ABORT, 'fixture rejection'); END").execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        CREATE TRIGGER reject_test_icon
+        BEFORE INSERT ON marker_icon_model
+        WHEN NEW.filename = 'reject.png'
+        BEGIN
+            SELECT RAISE(ABORT, 'fixture rejection');
+        END
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     let directory = std::path::Path::new(&CONFIG.images_path).join("marker-icons");
     tokio::fs::create_dir_all(&directory).await.unwrap();
     let names = || {
@@ -398,18 +429,32 @@ async fn external_site_settings_require_login_and_are_normalized_and_isolated() 
         json_request(&app, Some(other), "GET", "/external-site-url", Value::Null).await;
     assert_eq!(other_setting, default);
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM external_site_urls WHERE user_id=$1")
-            .bind(owner.to_string())
-            .fetch_one(&pool)
-            .await
-            .unwrap(),
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT
+                count(*)
+            FROM external_site_urls
+            WHERE user_id = $1
+            "#,
+        )
+        .bind(owner.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
         1
     );
-    sqlx::query("UPDATE external_site_urls SET url='   ' WHERE user_id=$1")
-        .bind(owner.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE external_site_urls
+        SET
+            url = '   '
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(owner.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let (_, blank) =
         json_request(&app, Some(owner), "GET", "/external-site-url", Value::Null).await;
     assert_eq!(blank, default);

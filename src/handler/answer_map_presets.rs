@@ -136,11 +136,19 @@ async fn form_fields(
     user: &str,
     form: &str,
 ) -> Result<(String, BTreeMap<(String, String), FieldOption>), AppError> {
-    let current: Option<(String, String, SqlJson<MarkerFormSchema>)> =
-        sqlx::query_as("SELECT user_id,form_title,form_schema FROM common_form_model WHERE id=$1")
-            .bind(form)
-            .fetch_optional(&mut **tx)
-            .await?;
+    let current: Option<(String, String, SqlJson<MarkerFormSchema>)> = sqlx::query_as(
+        r#"
+        SELECT
+            user_id,
+            form_title,
+            form_schema
+        FROM common_form_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(form)
+    .fetch_optional(&mut **tx)
+    .await?;
     if current.as_ref().is_some_and(|(owner, _, _)| owner != user) {
         return Err(AppError::NotFound);
     }
@@ -154,8 +162,19 @@ async fn form_fields(
         title.clone()
     } else {
         build_query(user, &query, at)
-            .push(" SELECT COALESCE(form_snapshot->>'form_title','共通フォーム') FROM filtered ORDER BY create_at COLLATE answer_time DESC,id DESC LIMIT 1")
-            .build_query_scalar::<String>().fetch_optional(&mut **tx).await?.ok_or(AppError::NotFound)?
+            .push(
+                r#"
+                SELECT
+                    COALESCE(form_snapshot ->> 'form_title', '共通フォーム')
+                FROM filtered
+                ORDER BY create_at COLLATE answer_time DESC, id DESC
+                LIMIT 1
+                "#,
+            )
+            .build_query_scalar::<String>()
+            .fetch_optional(&mut **tx)
+            .await?
+            .ok_or(AppError::NotFound)?
     };
     let mut fields = BTreeMap::new();
     let mut order = vec![];
@@ -165,8 +184,20 @@ async fn form_fields(
         }
     }
     let schemas: Vec<SqlJson<MarkerFormSchema>> = sqlx::query_scalar(
-        "SELECT r.form_schema FROM common_form_revision_model r JOIN common_form_model f ON f.id=r.form_id WHERE f.id=$1 AND f.user_id=$2 ORDER BY r.version DESC",
-    ).bind(form).bind(user).fetch_all(&mut **tx).await?;
+        r#"
+        SELECT
+            r.form_schema
+        FROM common_form_revision_model r
+        JOIN common_form_model f ON f.id = r.form_id
+        WHERE f.id = $1
+            AND f.user_id = $2
+        ORDER BY r.version DESC
+        "#,
+    )
+    .bind(form)
+    .bind(user)
+    .fetch_all(&mut **tx)
+    .await?;
     for schema in schemas {
         for field in schema.0.fields {
             merge_field(&mut fields, &mut order, field);
@@ -344,10 +375,35 @@ pub async fn create_preset(
             .collect(),
     };
     let row: PresetRow = sqlx::query_as(
-        "INSERT INTO answer_map_saved_condition_model(id,user_id,kind,name,schema_version,definition,display,create_at) VALUES($1,$2,$3,$4,1,$5,$6,$7) RETURNING id,kind,name,schema_version,definition,display,create_at",
-    ).bind(Uuid::new_v4().to_string()).bind(user).bind(request.kind.as_str()).bind(name)
-        .bind(SqlJson(definition)).bind(SqlJson(display)).bind(Utc::now().naive_utc())
-        .fetch_one(&mut *tx).await?;
+        r#"
+        INSERT INTO answer_map_saved_condition_model (
+            id,
+            user_id,
+            kind,
+            name,
+            schema_version,
+            definition,
+            display,
+            create_at
+        ) VALUES ($1, $2, $3, $4, 1, $5, $6, $7)
+        RETURNING id,
+        kind,
+        name,
+        schema_version,
+        definition,
+        display,
+        create_at
+        "#,
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(user)
+    .bind(request.kind.as_str())
+    .bind(name)
+    .bind(SqlJson(definition))
+    .bind(SqlJson(display))
+    .bind(Utc::now().naive_utc())
+    .fetch_one(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(row.into())
 }
@@ -367,14 +423,38 @@ pub async fn list_presets(
     }
     let mut tx = super::answer_sqlite::begin_read(pool).await?;
     let total = sqlx::query_scalar(
-        "SELECT count(*) FROM answer_map_saved_condition_model WHERE user_id=$1",
+        r#"
+        SELECT
+            count(*)
+        FROM answer_map_saved_condition_model
+        WHERE user_id = $1
+        "#,
     )
     .bind(user)
     .fetch_one(&mut *tx)
     .await?;
     let rows: Vec<PresetRow> = sqlx::query_as(
-        "SELECT id,kind,name,schema_version,definition,display,create_at FROM answer_map_saved_condition_model WHERE user_id=$1 ORDER BY create_at COLLATE answer_time DESC,id DESC LIMIT $2 OFFSET $3",
-    ).bind(user).bind(page_size).bind(offset.unwrap()).fetch_all(&mut *tx).await?;
+        r#"
+        SELECT
+            id,
+            kind,
+            name,
+            schema_version,
+            definition,
+            display,
+            create_at
+        FROM answer_map_saved_condition_model
+        WHERE user_id = $1
+        ORDER BY create_at COLLATE answer_time DESC, id DESC
+        LIMIT $2
+        OFFSET $3
+        "#,
+    )
+    .bind(user)
+    .bind(page_size)
+    .bind(offset.unwrap())
+    .fetch_all(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(PresetPage {
         items: rows.into_iter().map(Into::into).collect(),
@@ -385,12 +465,17 @@ pub async fn list_presets(
 }
 
 pub async fn delete_preset(pool: &SqlitePool, user: &str, id: &str) -> Result<(), AppError> {
-    let result =
-        sqlx::query("DELETE FROM answer_map_saved_condition_model WHERE id=$1 AND user_id=$2")
-            .bind(id)
-            .bind(user)
-            .execute(pool)
-            .await?;
+    let result = sqlx::query(
+        r#"
+        DELETE FROM answer_map_saved_condition_model
+        WHERE id = $1
+            AND user_id = $2
+        "#,
+    )
+    .bind(id)
+    .bind(user)
+    .execute(pool)
+    .await?;
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound);
     }

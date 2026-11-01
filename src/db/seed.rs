@@ -26,9 +26,15 @@ pub async fn check_and_insert_initial_data(pool: &Pool<Sqlite>) -> Result<(), sq
     }
 
     // 管理者アカウント初期データの存在確認を確認
-    let row: (i64,) = query_as("SELECT COUNT(*) FROM user_model")
-        .fetch_one(pool)
-        .await?;
+    let row: (i64,) = query_as(
+        r#"
+        SELECT
+            COUNT(*)
+        FROM user_model
+        "#,
+    )
+    .fetch_one(pool)
+    .await?;
 
     if row.0 == 0 {
         insert_initial_admin_data(pool).await?;
@@ -60,8 +66,7 @@ async fn insert_initial_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Error> {
             max_zoom,
             create_at,
             updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING id
         "#,
         "国土地理院（航空写真）",
@@ -97,8 +102,7 @@ async fn insert_initial_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Error> {
             max_zoom,
             create_at,
             updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING id
         "#,
         "国土地理院（通常地図）",
@@ -168,8 +172,7 @@ async fn insert_initial_admin_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Erro
             is_basic_authed_at,
             totp_secret,
             totp_temp_secret
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         RETURNING id
         "#,
         new_admin_id,
@@ -206,8 +209,7 @@ async fn insert_initial_admin_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Erro
                     is_master,
                     create_at,
                     update_at
-                )
-                VALUES ($1, $2, $3, $4, $5, $6)
+                ) VALUES ($1, $2, $3, $4, $5, $6)
                 RETURNING id
                 "#,
                 new_layer_id,
@@ -258,8 +260,7 @@ async fn insert_initial_admin_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Erro
             description,
             create_at,
             updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6)
+        ) VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id
         "#,
         new_settings_id,
@@ -300,8 +301,7 @@ async fn insert_initial_admin_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Erro
             description,
             create_at,
             updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6)
+        ) VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id
         "#,
         new_settings_id,
@@ -342,8 +342,7 @@ async fn insert_initial_admin_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Erro
             description,
             create_at,
             updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6)
+        ) VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id
         "#,
         new_settings_id,

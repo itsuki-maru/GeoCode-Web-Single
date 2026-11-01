@@ -284,8 +284,7 @@ pub async fn import_json_handler(
                         is_master,
                         create_at,
                         update_at
-                    )
-                    VALUES (
+                    ) VALUES (
                         $1,
                         $2,
                         $3,
@@ -334,8 +333,7 @@ pub async fn import_json_handler(
                         detail,
                         create_at,
                         update_at
-                    )
-                    VALUES (
+                    ) VALUES (
                         $1,
                         $2,
                         $3,
@@ -394,8 +392,7 @@ pub async fn import_json_handler(
                         geojson,
                         created_at,
                         updated_at
-                    )
-                    VALUES (
+                    ) VALUES (
                         $1,
                         $2,
                         $3,

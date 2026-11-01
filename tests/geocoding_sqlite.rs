@@ -39,11 +39,18 @@ async fn address_search_uses_sqlite_login_and_rejects_revoked_sessions() {
     });
     let pool = common::test_pool().await;
     let user = common::create_test_user(&pool, "geocoder-user").await;
-    let version: i64 = sqlx::query_scalar("SELECT auth_version FROM user_model WHERE id = ?")
-        .bind(&user)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let version: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            auth_version
+        FROM user_model
+        WHERE id = ?
+        "#,
+    )
+    .bind(&user)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     let token = create_token(&user, 5, "access_token", version).unwrap();
     let app = Router::new()
         .route("/geocode", post(search_handler))
@@ -74,11 +81,18 @@ async fn address_search_uses_sqlite_login_and_rejects_revoked_sessions() {
     assert_eq!(body["results"][0]["address"], "東京都/新宿区");
     assert_eq!(body["results"][0]["latitude"], 35.69);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
-    sqlx::query("UPDATE user_model SET auth_version = auth_version + 1 WHERE id = ?")
-        .bind(&user)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE user_model
+        SET
+            auth_version = auth_version + 1
+        WHERE id = ?
+        "#,
+    )
+    .bind(&user)
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(
         app.oneshot(request(Some(&token))).await.unwrap().status(),
         StatusCode::UNAUTHORIZED

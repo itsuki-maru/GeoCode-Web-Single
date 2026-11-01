@@ -471,8 +471,7 @@ pub async fn upload_image_handler(
             filename,
             uuid_filename,
             create_at
-        )
-        VALUES ($1, $2, $3, $4, $5)
+        ) VALUES ($1, $2, $3, $4, $5)
         RETURNING id
         "#,
         new_id,

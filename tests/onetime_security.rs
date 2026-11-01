@@ -143,28 +143,96 @@ async fn body(response: Response) -> String {
     .unwrap()
 }
 async fn snapshot(pool: &SqlitePool, user: Uuid) -> Value {
-    sqlx::query_scalar("SELECT json_object('id',id,'user_id',user_id,'url',url,'expiration',expiration,'layers',json(layers),'markers',json(markers),'shapes',json(shapes),'password_hash',password_hash,'include_tile_overlays',include_tile_overlays,'create_at',create_at) FROM temporary_urls WHERE user_id=$1")
-        .bind(user.to_string())
-        .fetch_one(pool)
-        .await
-        .unwrap()
+    sqlx::query_scalar(
+        r#"
+        SELECT
+            json_object(
+                'id',
+                id,
+                'user_id',
+                user_id,
+                'url',
+                url,
+                'expiration',
+                expiration,
+                'layers',
+                json(layers),
+                'markers',
+                json(markers),
+                'shapes',
+                json(shapes),
+                'password_hash',
+                password_hash,
+                'include_tile_overlays',
+                include_tile_overlays,
+                'create_at',
+                create_at
+            )
+        FROM temporary_urls
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(user.to_string())
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 async fn set_expiration(pool: &SqlitePool, id: String, expiration: NaiveDateTime) {
-    sqlx::query("UPDATE temporary_urls SET expiration=$1 WHERE id=$2")
-        .bind(expiration)
-        .bind(id.to_string())
-        .execute(pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE temporary_urls
+        SET
+            expiration = $1
+        WHERE id = $2
+        "#,
+    )
+    .bind(expiration)
+    .bind(id.to_string())
+    .execute(pool)
+    .await
+    .unwrap();
 }
 async fn fixture(pool: &SqlitePool, name: &str) -> (Uuid, Uuid, Uuid, Uuid) {
     let user = common::create_test_user(pool, name).await;
     let layer = common::master_layer_id(pool, &user).await;
     let marker = Uuid::new_v4();
     let shape = Uuid::new_v4();
-    sqlx::query("INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES($1,$2,$3,'fixture',35,139,'private snapshot',$4,$4)")
-        .bind(marker.to_string()).bind(user.to_string()).bind(layer.to_string()).bind(past()).execute(pool).await.unwrap();
-    sqlx::query("INSERT INTO shape_model(id,user_id,layer_id,shape_type,name,geojson,created_at,updated_at) VALUES($1,$2,$3,'circle','fixture',$4,$5,$5)")
+    sqlx::query(
+        r#"
+        INSERT INTO marker_info_model (
+            id,
+            user_id,
+            layer_id,
+            marker_name,
+            latitude,
+            longitude,
+            detail,
+            create_at,
+            update_at
+        ) VALUES ($1, $2, $3, 'fixture', 35, 139, 'private snapshot', $4, $4)
+        "#,
+    )
+    .bind(marker.to_string())
+    .bind(user.to_string())
+    .bind(layer.to_string())
+    .bind(past())
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO shape_model (
+            id,
+            user_id,
+            layer_id,
+            shape_type,
+            name,
+            geojson,
+            created_at,
+            updated_at
+        ) VALUES ($1, $2, $3, 'circle', 'fixture', $4, $5, $5)
+        "#,
+    )
         .bind(shape.to_string()).bind(user.to_string()).bind(layer.to_string()).bind(json!({"type":"Feature","properties":{"radius":10},"geometry":{"type":"Point","coordinates":[139,35]}})).bind(past()).execute(pool).await.unwrap();
     (user, layer, marker, shape)
 }
@@ -194,11 +262,18 @@ async fn shares_snapshot_only_owned_records_and_refresh_or_rotate_without_leakin
         assert!(initial[key].get(id.to_string()).is_some());
         assert!(initial[key].get(foreign.to_string()).is_none());
     }
-    sqlx::query("UPDATE marker_info_model SET detail='updated snapshot' WHERE id=$1")
-        .bind(marker.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE marker_info_model
+        SET
+            detail = 'updated snapshot'
+        WHERE id = $1
+        "#,
+    )
+    .bind(marker.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(
         snapshot(&pool, owner).await,
         initial,
@@ -320,7 +395,12 @@ async fn expired_shares_are_removed_without_waiting() {
             }
             assert_eq!(
                 sqlx::query_scalar::<_, i64>(
-                    "SELECT count(*) FROM temporary_urls WHERE user_id=$1"
+                    r#"
+                    SELECT
+                        count(*)
+                    FROM temporary_urls
+                    WHERE user_id = $1
+                    "#
                 )
                 .bind(owner.to_string())
                 .fetch_one(&pool)
@@ -372,21 +452,35 @@ async fn password_pages_never_expose_snapshot_and_preserve_normalized_map_state(
         );
         assert!(text.contains("private snapshot"));
     }
-    sqlx::query("UPDATE temporary_urls SET password_hash='invalid-hash' WHERE id=$1")
-        .bind(&created.id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE temporary_urls
+        SET
+            password_hash = 'invalid-hash'
+        WHERE id = $1
+        "#,
+    )
+    .bind(&created.id)
+    .execute(&pool)
+    .await
+    .unwrap();
     assert!(
         body(send(&public, &path, Some("secure-pass"), false).await)
             .await
             .starts_with("PASSWORD|1.0|")
     );
-    sqlx::query("UPDATE temporary_urls SET password_hash=NULL WHERE id=$1")
-        .bind(&created.id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE temporary_urls
+        SET
+            password_hash = NULL
+        WHERE id = $1
+        "#,
+    )
+    .bind(&created.id)
+    .execute(&pool)
+    .await
+    .unwrap();
     assert!(
         body(send(&public, &path, Some("unused"), true).await)
             .await
@@ -488,10 +582,15 @@ async fn storage_failures_are_reported_and_failed_updates_keep_the_existing_snap
         "shape_model",
         "temporary_urls",
     ] {
-        sqlx::query(&format!("ALTER TABLE {table} RENAME TO fixture_hidden"))
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(&format!(
+            r#"
+            ALTER TABLE {table}
+            RENAME TO fixture_hidden
+            "#,
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
         assert_error(
             generate_url_handler(
                 Extension(owner.to_string()),
@@ -503,13 +602,29 @@ async fn storage_failures_are_reported_and_failed_updates_keep_the_existing_snap
             StatusCode::INTERNAL_SERVER_ERROR,
         )
         .await;
-        sqlx::query(&format!("ALTER TABLE fixture_hidden RENAME TO {table}"))
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(&format!(
+            r#"
+            ALTER TABLE fixture_hidden
+            RENAME TO {table}
+            "#,
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
     }
 
-    sqlx::query("CREATE TRIGGER reject_share BEFORE INSERT ON temporary_urls BEGIN SELECT RAISE(ABORT, 'fixture rejection'); END").execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        CREATE TRIGGER reject_share
+        BEFORE INSERT ON temporary_urls
+        BEGIN
+            SELECT RAISE(ABORT, 'fixture rejection');
+        END
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_error(
         generate_url_handler(
             Extension(owner.to_string()),
@@ -521,13 +636,28 @@ async fn storage_failures_are_reported_and_failed_updates_keep_the_existing_snap
         StatusCode::INTERNAL_SERVER_ERROR,
     )
     .await;
-    sqlx::query("DROP TRIGGER reject_share")
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        DROP TRIGGER reject_share
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     let created = create(&pool, owner, vec![layer], None, false).await;
     let before = snapshot(&pool, owner).await;
-    sqlx::query("CREATE TRIGGER reject_share BEFORE UPDATE ON temporary_urls BEGIN SELECT RAISE(ABORT, 'fixture rejection'); END").execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        CREATE TRIGGER reject_share
+        BEFORE UPDATE ON temporary_urls
+        BEGIN
+            SELECT RAISE(ABORT, 'fixture rejection');
+        END
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_error(
         generate_url_handler(
             Extension(owner.to_string()),
@@ -540,12 +670,27 @@ async fn storage_failures_are_reported_and_failed_updates_keep_the_existing_snap
     )
     .await;
     assert_eq!(snapshot(&pool, owner).await, before);
-    sqlx::query("DROP TRIGGER reject_share")
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        DROP TRIGGER reject_share
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     set_expiration(&pool, created.id.clone(), past()).await;
-    sqlx::query("CREATE TRIGGER reject_share BEFORE DELETE ON temporary_urls BEGIN SELECT RAISE(ABORT, 'fixture rejection'); END").execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        CREATE TRIGGER reject_share
+        BEFORE DELETE ON temporary_urls
+        BEGIN
+            SELECT RAISE(ABORT, 'fixture rejection');
+        END
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_error(
         invalidate_url_handler(Extension(owner.to_string()), Extension(pool.clone()))
             .await
@@ -595,35 +740,59 @@ async fn database_and_template_failures_do_not_render_private_snapshots() {
         StatusCode::INTERNAL_SERVER_ERROR,
     )
     .await;
-    sqlx::query("UPDATE temporary_urls SET password_hash='invalid-hash' WHERE id=$1")
-        .bind(&created.id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE temporary_urls
+        SET
+            password_hash = 'invalid-hash'
+        WHERE id = $1
+        "#,
+    )
+    .bind(&created.id)
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_error(
         send(&broken, &path, None, false).await,
         StatusCode::INTERNAL_SERVER_ERROR,
     )
     .await;
-    sqlx::query("UPDATE temporary_urls SET password_hash=NULL WHERE id=$1")
-        .bind(&created.id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE temporary_urls
+        SET
+            password_hash = NULL
+        WHERE id = $1
+        "#,
+    )
+    .bind(&created.id)
+    .execute(&pool)
+    .await
+    .unwrap();
     let public = app(&pool, templates());
-    sqlx::query("ALTER TABLE tileserver_model RENAME TO fixture_tiles")
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        ALTER TABLE tileserver_model
+        RENAME TO fixture_tiles
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_error(
         send(&public, &path, None, false).await,
         StatusCode::INTERNAL_SERVER_ERROR,
     )
     .await;
-    sqlx::query("ALTER TABLE fixture_tiles RENAME TO tileserver_model")
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        ALTER TABLE fixture_tiles
+        RENAME TO tileserver_model
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     pool.close().await;
     assert_error(
         current_url_handler(Extension(owner.to_string()), Extension(pool.clone()))

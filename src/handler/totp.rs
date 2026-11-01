@@ -136,12 +136,16 @@ pub async fn totp_verify_handler(
     let auth_version = sqlx::query_scalar::<_, i64>(
         r#"
         UPDATE user_model
-        SET totp_secret = $1, totp_temp_secret = '',
+        SET
+            totp_secret = $1,
+            totp_temp_secret = '',
             auth_version = auth_version + 1,
             totp_challenge_id = NULL,
             totp_challenge_expires_at = NULL,
             totp_challenge_attempts = 0
-        WHERE id = $2 AND totp_temp_secret = $1 AND totp_temp_secret <> ''
+        WHERE id = $2
+            AND totp_temp_secret = $1
+            AND totp_temp_secret <> ''
         RETURNING auth_version
         "#,
     )
@@ -323,12 +327,16 @@ pub async fn totp_disable_handler(
     let auth_version = sqlx::query_scalar::<_, i64>(
         r#"
         UPDATE user_model
-        SET totp_secret = '', totp_temp_secret = '',
+        SET
+            totp_secret = '',
+            totp_temp_secret = '',
             auth_version = auth_version + 1,
             totp_challenge_id = NULL,
             totp_challenge_expires_at = NULL,
             totp_challenge_attempts = 0
-        WHERE id = $1 AND totp_secret = $2 AND is_locked = false
+        WHERE id = $1
+            AND totp_secret = $2
+            AND is_locked = false
         RETURNING auth_version
         "#,
     )

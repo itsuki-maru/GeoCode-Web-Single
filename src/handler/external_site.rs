@@ -57,8 +57,7 @@ pub async fn update_external_site_url_handler(
             url,
             create_at,
             updated_at
-        )
-        VALUES ($1, $2, $3, $4)
+        ) VALUES ($1, $2, $3, $4)
         ON CONFLICT (user_id)
         DO UPDATE SET
             url = EXCLUDED.url,

@@ -95,8 +95,7 @@ pub async fn create_live_location_session_handler(
             observed_at,
             received_at,
             started_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         ON CONFLICT (user_id) DO UPDATE SET
             session_id = EXCLUDED.session_id,
             latitude = EXCLUDED.latitude,
@@ -207,12 +206,30 @@ async fn record_history(connection: &mut SqliteConnection, user_id: &str) -> Res
         sqlx::query(
             r#"
             INSERT INTO live_location_history (
-                user_id, session_id, sequence_no, latitude, longitude,
-                accuracy_m, heading_deg, speed_mps, observed_at, received_at
+                user_id,
+                session_id,
+                sequence_no,
+                latitude,
+                longitude,
+                accuracy_m,
+                heading_deg,
+                speed_mps,
+                observed_at,
+                received_at
             )
-            SELECT user_id, session_id, sequence_no, latitude, longitude,
-                accuracy_m, heading_deg, speed_mps, observed_at, received_at
-            FROM live_location_session WHERE user_id = $1
+            SELECT
+                user_id,
+                session_id,
+                sequence_no,
+                latitude,
+                longitude,
+                accuracy_m,
+                heading_deg,
+                speed_mps,
+                observed_at,
+                received_at
+            FROM live_location_session
+            WHERE user_id = $1
             "#,
         )
         .bind(user_id)

@@ -41,10 +41,34 @@ async fn fixture(pool: &SqlitePool) -> Fixture {
         {"id":"legacy","type":"text","label":"過去の項目"},
         {"id":"material","type":"select","label":"旧材質","choices":["旧材"]}
     ]});
-    sqlx::query("INSERT INTO common_form_model(id,user_id,version,form_title,form_description,form_schema,create_at,update_at) VALUES($1,$2,2,'設備台帳','',$3,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
-        .bind(form.to_string()).bind(owner.to_string()).bind(schema).execute(pool).await.unwrap();
     sqlx::query(
-        "INSERT INTO common_form_revision_model(form_id,version,form_schema) VALUES($1,1,$2)",
+        r#"
+        INSERT INTO common_form_model (
+            id,
+            user_id,
+            version,
+            form_title,
+            form_description,
+            form_schema,
+            create_at,
+            update_at
+        ) VALUES ($1, $2, 2, '設備台帳', '', $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        "#,
+    )
+    .bind(form.to_string())
+    .bind(owner.to_string())
+    .bind(schema)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO common_form_revision_model (
+            form_id,
+            version,
+            form_schema
+        ) VALUES ($1, 1, $2)
+        "#,
     )
     .bind(form.to_string())
     .bind(old.clone())
@@ -52,12 +76,58 @@ async fn fixture(pool: &SqlitePool) -> Fixture {
     .await
     .unwrap();
     let marker = Uuid::new_v4();
-    sqlx::query("INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES($1,$2,$3,'設備',35,139,'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
-        .bind(marker.to_string()).bind(owner.to_string()).bind(layer).execute(pool).await.unwrap();
-    sqlx::query("INSERT INTO marker_form_submission_model(id,marker_id,submitted_values,rendered_markdown,create_at,source_form,form_snapshot) VALUES($1,$2,$3,'',CURRENT_TIMESTAMP,$4,$5)")
-        .bind(Uuid::new_v4().to_string()).bind(marker.to_string()).bind(json!({"legacy":"過去","material":"旧材"}))
-        .bind(json!({"id":form,"version":1})).bind(json!({"form_title":"旧設備台帳","form_schema":old}))
-        .execute(pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO marker_info_model (
+            id,
+            user_id,
+            layer_id,
+            marker_name,
+            latitude,
+            longitude,
+            detail,
+            create_at,
+            update_at
+        ) VALUES (
+            $1,
+            $2,
+            $3,
+            '設備',
+            35,
+            139,
+            '',
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .bind(marker.to_string())
+    .bind(owner.to_string())
+    .bind(layer)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO marker_form_submission_model (
+            id,
+            marker_id,
+            submitted_values,
+            rendered_markdown,
+            create_at,
+            source_form,
+            form_snapshot
+        ) VALUES ($1, $2, $3, '', CURRENT_TIMESTAMP, $4, $5)
+        "#,
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(marker.to_string())
+    .bind(json!({"legacy":"過去","material":"旧材"}))
+    .bind(json!({"id":form,"version":1}))
+    .bind(json!({"form_title":"旧設備台帳","form_schema":old}))
+    .execute(pool)
+    .await
+    .unwrap();
     Fixture {
         owner,
         other,
@@ -439,11 +509,18 @@ async fn form_ownership_and_historical_soft_deleted_definitions_are_respected() 
         save(&pool, f.owner, filter(Some(Uuid::new_v4()), json!([]))).await,
         Err(AppError::NotFound)
     ));
-    sqlx::query("UPDATE common_form_model SET deleted=true WHERE id=$1")
-        .bind(f.form.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE common_form_model
+        SET
+            deleted = true
+        WHERE id = $1
+        "#,
+    )
+    .bind(f.form.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let preset = save(&pool, f.owner, historical.clone()).await.unwrap();
     assert!(
         preset["display"]["fields"]
@@ -460,7 +537,19 @@ async fn form_ownership_and_historical_soft_deleted_definitions_are_respected() 
             .any(|f| f["label"] == "材質")
     );
     // 保存後の定義変更によって表示用スナップショットは変化しない。
-    sqlx::query("UPDATE common_form_model SET form_title='名称変更',form_schema='{\"fields\":[]}' WHERE id=$1").bind(f.form.to_string()).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        UPDATE common_form_model
+        SET
+            form_title = '名称変更',
+            form_schema = '{"fields":[]}'
+        WHERE id = $1
+        "#,
+    )
+    .bind(f.form.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let list = list_presets(&pool, &f.owner.to_string(), ListQuery::default())
         .await
         .unwrap();
@@ -468,11 +557,16 @@ async fn form_ownership_and_historical_soft_deleted_definitions_are_respected() 
         list.items[0].display.form_label.as_deref(),
         Some("設備台帳")
     );
-    sqlx::query("DELETE FROM common_form_model WHERE id=$1")
-        .bind(f.form.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        DELETE FROM common_form_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(f.form.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let saved = save(&pool, f.owner, historical).await.unwrap();
     assert_eq!(saved["display"]["form_label"], "旧設備台帳");
     assert!(matches!(
@@ -552,16 +646,26 @@ async fn pagination_is_stable_owner_scoped_and_account_deletion_cascades() {
             .total,
         2
     );
-    sqlx::query("DELETE FROM user_model WHERE id=$1")
-        .bind(f.owner.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
-    let remaining: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM answer_map_saved_condition_model")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    sqlx::query(
+        r#"
+        DELETE FROM user_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(f.owner.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let remaining: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            count(*)
+        FROM answer_map_saved_condition_model
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(remaining, 1);
 }
 
@@ -571,13 +675,54 @@ async fn saved_filter_and_coloring_definitions_execute_in_the_current_owned_map_
     let f = fixture(&pool).await;
     let layer = common::master_layer_id(&pool, &f.owner.to_string()).await;
     let second = Uuid::new_v4();
-    sqlx::query("INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES($1,$2,$3,'範囲外の設備',35,139,'保持する本文',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
-        .bind(second.to_string()).bind(f.owner.to_string()).bind(layer).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO marker_info_model (
+            id,
+            user_id,
+            layer_id,
+            marker_name,
+            latitude,
+            longitude,
+            detail,
+            create_at,
+            update_at
+        ) VALUES (
+            $1,
+            $2,
+            $3,
+            '範囲外の設備',
+            35,
+            139,
+            '保持する本文',
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .bind(second.to_string())
+    .bind(f.owner.to_string())
+    .bind(layer)
+    .execute(&pool)
+    .await
+    .unwrap();
     for (marker, years) in [
         (f.marker, "50.00000000000000000001"),
         (second, "49.99999999999999999999"),
     ] {
-        sqlx::query("INSERT INTO marker_form_submission_model(id,marker_id,submitted_values,rendered_markdown,create_at,source_form,form_snapshot) VALUES($1,$2,$3,'',CURRENT_TIMESTAMP,$4,$5)")
+        sqlx::query(
+            r#"
+            INSERT INTO marker_form_submission_model (
+                id,
+                marker_id,
+                submitted_values,
+                rendered_markdown,
+                create_at,
+                source_form,
+                form_snapshot
+            ) VALUES ($1, $2, $3, '', CURRENT_TIMESTAMP, $4, $5)
+            "#,
+        )
             .bind(Uuid::new_v4().to_string()).bind(marker.to_string()).bind(json!({"n":years}))
             .bind(json!({"id":f.form,"version":2}))
             .bind(json!({"form_title":"設備台帳","form_schema":{"fields":[{"id":"n","type":"number","label":"耐用年数"}]}}))
@@ -637,18 +782,31 @@ async fn saved_filter_and_coloring_definitions_execute_in_the_current_owned_map_
         assert_eq!(matched["answer_count"], 1);
     }
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM marker_form_submission_model")
-            .fetch_one(&pool)
-            .await
-            .unwrap(),
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT
+                count(*)
+            FROM marker_form_submission_model
+            "#,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
         3
     );
     assert_eq!(
-        sqlx::query_scalar::<_, String>("SELECT detail FROM marker_info_model WHERE id=$1")
-            .bind(second.to_string())
-            .fetch_one(&pool)
-            .await
-            .unwrap(),
+        sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT
+                detail
+            FROM marker_info_model
+            WHERE id = $1
+            "#,
+        )
+        .bind(second.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
         "保持する本文"
     );
 }

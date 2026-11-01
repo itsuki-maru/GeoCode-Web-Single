@@ -31,11 +31,18 @@ fn position(sequence_no: i64) -> LiveLocationPositionPayload {
     }
 }
 async fn allow(pool: &SqlitePool, user: &str) {
-    sqlx::query("UPDATE user_model SET can_share_live_location = true WHERE id = $1")
-        .bind(user)
-        .execute(pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE user_model
+        SET
+            can_share_live_location = true
+        WHERE id = $1
+        "#,
+    )
+    .bind(user)
+    .execute(pool)
+    .await
+    .unwrap();
 }
 async fn start(pool: &SqlitePool, user: &str) -> String {
     create_live_location_session_handler(
@@ -49,13 +56,30 @@ async fn start(pool: &SqlitePool, user: &str) -> String {
     .session_id
 }
 async fn age(pool: &SqlitePool, user: &str) {
-    sqlx::query("UPDATE live_location_session SET received_at = datetime('now', '-2 seconds') WHERE user_id = $1").bind(user).execute(pool).await.unwrap();
+    sqlx::query(
+        r#"
+        UPDATE live_location_session
+        SET
+            received_at = datetime('now', '-2 seconds')
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(user)
+    .execute(pool)
+    .await
+    .unwrap();
 }
 async fn count(pool: &SqlitePool) -> i64 {
-    sqlx::query_scalar("SELECT COUNT(*) FROM live_location_history")
-        .fetch_one(pool)
-        .await
-        .unwrap()
+    sqlx::query_scalar(
+        r#"
+        SELECT
+            COUNT(*)
+        FROM live_location_history
+        "#,
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 
 // LIVE_LOCATION_HISTORY_ENABLED を有効・無効に切り替え、それぞれ別のプロセスで実行する。
@@ -94,13 +118,30 @@ async fn history_lifecycle_and_types() {
         .is_err()
     );
     // 実行負荷で数秒経過しても利用頻度の制限を検証できるよう、保存時刻を先へ進める。
-    let received_at: String =
-        sqlx::query_scalar("SELECT received_at FROM live_location_session WHERE user_id = $1")
-            .bind(&user)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    sqlx::query("UPDATE live_location_session SET received_at = datetime(received_at, '+1 hour') WHERE user_id = $1").bind(&user).execute(&pool).await.unwrap();
+    let received_at: String = sqlx::query_scalar(
+        r#"
+        SELECT
+            received_at
+        FROM live_location_session
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(&user)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE live_location_session
+        SET
+            received_at = datetime(received_at, '+1 hour')
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(&user)
+    .execute(&pool)
+    .await
+    .unwrap();
     assert!(matches!(
         update_live_location_session_handler(
             Extension(user.clone()),
@@ -112,12 +153,19 @@ async fn history_lifecycle_and_types() {
         Err(AppError::TooManyRequests(_))
     ));
     // 履歴との一致を検証する前に、元の値を文字列表現も含めて復元する。
-    sqlx::query("UPDATE live_location_session SET received_at = $1 WHERE user_id = $2")
-        .bind(received_at)
-        .bind(&user)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE live_location_session
+        SET
+            received_at = $1
+        WHERE user_id = $2
+        "#,
+    )
+    .bind(received_at)
+    .bind(&user)
+    .execute(&pool)
+    .await
+    .unwrap();
     let mut invalid = position(3);
     invalid.latitude = 91.0;
     assert!(
@@ -130,11 +178,17 @@ async fn history_lifecycle_and_types() {
         .await
         .is_err()
     );
-    let rows: Vec<i64> =
-        sqlx::query_scalar("SELECT sequence_no FROM live_location_history ORDER BY sequence_no")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+    let rows: Vec<i64> = sqlx::query_scalar(
+        r#"
+        SELECT
+            sequence_no
+        FROM live_location_history
+        ORDER BY sequence_no
+        "#,
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
     assert_eq!(
         rows,
         if CONFIG.live_location_history_enabled {
@@ -145,14 +199,34 @@ async fn history_lifecycle_and_types() {
     );
     if CONFIG.live_location_history_enabled {
         let (observed, received): (chrono::DateTime<Utc>, chrono::DateTime<Utc>) = sqlx::query_as(
-            "SELECT observed_at, received_at FROM live_location_history WHERE sequence_no = 1",
+            r#"
+            SELECT
+                observed_at,
+                received_at
+            FROM live_location_history
+            WHERE sequence_no = 1
+            "#,
         )
         .fetch_one(&pool)
         .await
         .unwrap();
         assert!(observed <= Utc::now());
         assert!(received <= Utc::now());
-        let (id_type, coordinate_type, sequence_type, time_type): (String,String,String,String) = sqlx::query_as("SELECT typeof(user_id), typeof(latitude), typeof(sequence_no), typeof(received_at) FROM live_location_history LIMIT 1").fetch_one(&pool).await.unwrap();
+        let (id_type, coordinate_type, sequence_type, time_type): (String, String, String, String) =
+            sqlx::query_as(
+                r#"
+                SELECT
+                    typeof(user_id),
+                    typeof(latitude),
+                    typeof(sequence_no),
+                    typeof(received_at)
+                FROM live_location_history
+                LIMIT 1
+                "#,
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(
             (id_type, coordinate_type, sequence_type, time_type),
             (
@@ -172,7 +246,20 @@ async fn history_lifecycle_and_types() {
     .unwrap();
     let restarted = start(&pool, &user).await;
     if CONFIG.live_location_history_enabled {
-        let equal: bool = sqlx::query_scalar("SELECT h.received_at = s.received_at AND h.observed_at = s.observed_at FROM live_location_history h JOIN live_location_session s USING(session_id, sequence_no) WHERE s.session_id = $1").bind(&restarted).fetch_one(&pool).await.unwrap();
+        let equal: bool = sqlx::query_scalar(
+            r#"
+            SELECT
+                h.received_at = s.received_at
+                AND h.observed_at = s.observed_at
+            FROM live_location_history h
+            JOIN live_location_session s USING (session_id, sequence_no)
+            WHERE s.session_id = $1
+            "#,
+        )
+        .bind(&restarted)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert!(equal);
     }
     let admin = common::create_test_admin(&pool, "history-admin").await;
@@ -211,11 +298,16 @@ async fn history_lifecycle_and_types() {
             0
         }
     );
-    sqlx::query("DELETE FROM user_model WHERE id = $1")
-        .bind(user)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        DELETE FROM user_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(user)
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(count(&pool).await, 0);
 }
 
@@ -226,7 +318,18 @@ async fn failure_rolls_back_and_releases_transaction() {
     allow(&pool, &user).await;
     let session = start(&pool, &user).await;
     age(&pool, &user).await;
-    sqlx::query("CREATE TRIGGER reject_history BEFORE INSERT ON live_location_history BEGIN SELECT RAISE(ABORT, 'test failure'); END").execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        CREATE TRIGGER reject_history
+        BEFORE INSERT ON live_location_history
+        BEGIN
+            SELECT RAISE(ABORT, 'test failure');
+        END
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     let result = update_live_location_session_handler(
         Extension(user.clone()),
         Extension(pool.clone()),
@@ -235,10 +338,16 @@ async fn failure_rolls_back_and_releases_transaction() {
     )
     .await;
     assert_eq!(result.is_err(), CONFIG.live_location_history_enabled);
-    let sequence: i64 = sqlx::query_scalar("SELECT sequence_no FROM live_location_session")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let sequence: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            sequence_no
+        FROM live_location_session
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(
         sequence,
         if CONFIG.live_location_history_enabled {
@@ -255,16 +364,26 @@ async fn failure_rolls_back_and_releases_transaction() {
     .await;
     assert_eq!(result.is_err(), CONFIG.live_location_history_enabled);
     if CONFIG.live_location_history_enabled {
-        let current: String = sqlx::query_scalar("SELECT session_id FROM live_location_session")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(current, session);
-    }
-    sqlx::query("DROP TRIGGER reject_history")
-        .execute(&pool)
+        let current: String = sqlx::query_scalar(
+            r#"
+            SELECT
+                session_id
+            FROM live_location_session
+            "#,
+        )
+        .fetch_one(&pool)
         .await
         .unwrap();
+        assert_eq!(current, session);
+    }
+    sqlx::query(
+        r#"
+        DROP TRIGGER reject_history
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     start(&pool, &user).await;
 }
 
@@ -328,10 +447,16 @@ async fn concurrent_updates_and_revocation_are_serialized() {
         )
     );
     revoke.unwrap();
-    let live: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM live_location_session")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let live: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            COUNT(*)
+        FROM live_location_session
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(live, 0);
     assert_eq!(
         count(&pool).await,
@@ -359,23 +484,64 @@ async fn concurrent_updates_and_revocation_are_serialized() {
 async fn upgrades_existing_database_without_backfilling_history() {
     let pool = common::test_pool().await;
     let user = common::create_test_user(&pool, "history-upgrade").await;
-    sqlx::query("DROP TABLE live_location_history")
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("DELETE FROM schema_migrations WHERE version = 10")
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("INSERT INTO live_location_session (user_id, session_id, latitude, longitude, observed_at) VALUES ($1, $2, 35, 139, CURRENT_TIMESTAMP)").bind(&user).bind(Uuid::now_v7().to_string()).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        DROP TABLE live_location_history
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        DELETE FROM schema_migrations
+        WHERE version = 10
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO live_location_session (
+            user_id,
+            session_id,
+            latitude,
+            longitude,
+            observed_at
+        ) VALUES ($1, $2, 35, 139, CURRENT_TIMESTAMP)
+        "#,
+    )
+    .bind(&user)
+    .bind(Uuid::now_v7().to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     run_migrations(&pool).await.unwrap();
     run_migrations(&pool).await.unwrap();
     assert_eq!(count(&pool).await, 0);
-    let live: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM live_location_session")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let live: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            COUNT(*)
+        FROM live_location_session
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(live, 1);
-    let index: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_live_location_history_user_received'").fetch_one(&pool).await.unwrap();
+    let index: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            COUNT(*)
+        FROM sqlite_master
+        WHERE type = 'index'
+            AND name = 'idx_live_location_history_user_received'
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(index, 1);
 }

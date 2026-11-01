@@ -25,20 +25,52 @@ async fn fixture() -> Fixture {
         .unwrap();
     // Only the source columns are needed here. Existing integration tests use
     // the complete migrated schema; this fixture isolates projection behavior.
-    sqlx::raw_sql(r#"
-        CREATE TABLE layer_model(id TEXT PRIMARY KEY,user_id TEXT,layer_name TEXT);
-        CREATE TABLE common_form_model(id TEXT PRIMARY KEY,user_id TEXT,form_title TEXT,deleted BOOLEAN);
-        CREATE TABLE marker_info_model(id TEXT PRIMARY KEY,user_id TEXT,marker_name TEXT,layer_id TEXT);
-        CREATE TABLE shape_model(id TEXT PRIMARY KEY,user_id TEXT,name TEXT,layer_id TEXT);
-        CREATE TABLE marker_form_submission_model(
-            id TEXT PRIMARY KEY,marker_id TEXT,create_at TEXT,edited_at TEXT,revision INTEGER,
-            submitted_values TEXT,form_snapshot TEXT,source_form TEXT
+    sqlx::raw_sql(
+        r#"
+        CREATE TABLE layer_model (id TEXT PRIMARY KEY, user_id TEXT, layer_name TEXT);
+
+        CREATE TABLE common_form_model (
+            id TEXT PRIMARY KEY,
+            user_id TEXT,
+            form_title TEXT,
+            deleted BOOLEAN
         );
-        CREATE TABLE shape_form_submission_model(
-            id TEXT PRIMARY KEY,shape_id TEXT,create_at TEXT,edited_at TEXT,revision INTEGER,
-            submitted_values TEXT,form_snapshot TEXT,source_form TEXT
+
+        CREATE TABLE marker_info_model (
+            id TEXT PRIMARY KEY,
+            user_id TEXT,
+            marker_name TEXT,
+            layer_id TEXT
         );
-    "#).execute(&pool).await.unwrap();
+
+        CREATE TABLE shape_model (id TEXT PRIMARY KEY, user_id TEXT, name TEXT, layer_id TEXT);
+
+        CREATE TABLE marker_form_submission_model (
+            id TEXT PRIMARY KEY,
+            marker_id TEXT,
+            create_at TEXT,
+            edited_at TEXT,
+            revision INTEGER,
+            submitted_values TEXT,
+            form_snapshot TEXT,
+            source_form TEXT
+        );
+
+        CREATE TABLE shape_form_submission_model (
+            id TEXT PRIMARY KEY,
+            shape_id TEXT,
+            create_at TEXT,
+            edited_at TEXT,
+            revision INTEGER,
+            submitted_values TEXT,
+            form_snapshot TEXT,
+            source_form TEXT
+        );
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     let f = Fixture {
         pool,
         user: id(1),
@@ -53,20 +85,30 @@ async fn fixture() -> Fixture {
             .with_timezone(&Utc),
     };
     for (layer, owner) in [(&f.layer, f.user.clone()), (&f.foreign_layer, id(2))] {
-        sqlx::query("INSERT INTO layer_model VALUES($1,$2,'レイヤ表示名')")
-            .bind(layer)
-            .bind(owner)
-            .execute(&f.pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO layer_model
+            VALUES ($1, $2, 'レイヤ表示名')
+            "#,
+        )
+        .bind(layer)
+        .bind(owner)
+        .execute(&f.pool)
+        .await
+        .unwrap();
     }
     for (form, owner) in [(&f.form, f.user.clone()), (&f.foreign_form, id(2))] {
-        sqlx::query("INSERT INTO common_form_model VALUES($1,$2,'現在のフォーム名',true)")
-            .bind(form)
-            .bind(owner)
-            .execute(&f.pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO common_form_model
+            VALUES ($1, $2, '現在のフォーム名', true)
+            "#,
+        )
+        .bind(form)
+        .bind(owner)
+        .execute(&f.pool)
+        .await
+        .unwrap();
     }
     for (target, owner, name, layer) in [
         (f.marker.clone(), f.user.clone(), "Zone Aa%_", &f.layer),
@@ -78,22 +120,32 @@ async fn fixture() -> Fixture {
         ),
         (id(12), id(2), "他人の対象", &f.layer),
     ] {
-        sqlx::query("INSERT INTO marker_info_model VALUES($1,$2,$3,$4)")
-            .bind(target)
-            .bind(owner)
-            .bind(name)
-            .bind(layer)
-            .execute(&f.pool)
-            .await
-            .unwrap();
-    }
-    // Target and submission IDs may both coincide across marker and shape.
-    sqlx::query("INSERT INTO shape_model VALUES($1,$2,NULL,NULL)")
-        .bind(&f.marker)
-        .bind(&f.user)
+        sqlx::query(
+            r#"
+            INSERT INTO marker_info_model
+            VALUES ($1, $2, $3, $4)
+            "#,
+        )
+        .bind(target)
+        .bind(owner)
+        .bind(name)
+        .bind(layer)
         .execute(&f.pool)
         .await
         .unwrap();
+    }
+    // Target and submission IDs may both coincide across marker and shape.
+    sqlx::query(
+        r#"
+        INSERT INTO shape_model
+        VALUES ($1, $2, NULL, NULL)
+        "#,
+    )
+    .bind(&f.marker)
+    .bind(&f.user)
+    .execute(&f.pool)
+    .await
+    .unwrap();
     let snapshot = json!({"form_title":"投稿時の名前","form_schema":{"fields":[
         {"id":"n","type":"number","label":"数値"},
         {"id":"note","type":"textarea","label":"記録"}
@@ -181,7 +233,10 @@ async fn fixture() -> Fixture {
             at.naive_utc().to_string()
         };
         sqlx::query(&format!(
-            "INSERT INTO {kind}_form_submission_model VALUES($1,$2,$3,$4,2,$5,$6,$7)"
+            r#"
+            INSERT INTO {kind}_form_submission_model
+            VALUES ($1, $2, $3, $4, 2, $5, $6, $7)
+            "#
         ))
         .bind(id(answer_id))
         .bind(target)
@@ -197,7 +252,10 @@ async fn fixture() -> Fixture {
     // Exercise the existing limit=100 API and the extra pagination sentinel.
     for n in 0..110 {
         sqlx::query(
-            "INSERT INTO marker_form_submission_model VALUES($1,$2,$3,NULL,1,$4,NULL,NULL)",
+            r#"
+            INSERT INTO marker_form_submission_model
+            VALUES ($1, $2, $3, NULL, 1, $4, NULL, NULL)
+            "#,
         )
         .bind(id(1000 + n))
         .bind(&f.second_marker)
@@ -218,7 +276,14 @@ async fn full_search_page(f: &Fixture, q: &AnswerQuery) -> AnswerPage {
         .await
         .unwrap();
     let (total, target_count) = build_query(&f.user, q, at)
-        .push(" SELECT count(*),count(DISTINCT target_type || ':' || target_id) FROM filtered")
+        .push(
+            r#"
+            SELECT
+                count(*),
+                count(DISTINCT target_type || ':' || target_id)
+            FROM filtered
+            "#,
+        )
         .build_query_as::<(i64, i64)>()
         .fetch_one(&mut *tx)
         .await

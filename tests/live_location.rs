@@ -97,7 +97,12 @@ async fn shares_the_latest_position_without_redis_and_revokes_public_access() {
     .expect("permitted account should start sharing");
 
     sqlx::query(
-        "UPDATE live_location_session SET received_at = datetime('now', '-2 seconds') WHERE user_id = $1",
+        r#"
+        UPDATE live_location_session
+        SET
+            received_at = datetime('now', '-2 seconds')
+        WHERE user_id = $1
+        "#,
     )
     .bind(&user_id)
     .execute(&pool)
@@ -112,12 +117,18 @@ async fn shares_the_latest_position_without_redis_and_revokes_public_access() {
     .await
     .expect("newer position should replace the previous one");
 
-    let stored_rows: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM live_location_session WHERE user_id = $1")
-            .bind(&user_id)
-            .fetch_one(&pool)
-            .await
-            .expect("session row count should be available");
+    let stored_rows: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            COUNT(*)
+        FROM live_location_session
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(&user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("session row count should be available");
     assert_eq!(stored_rows, 1);
 
     let Json(created_map) = create_live_map_handler(
@@ -147,13 +158,20 @@ async fn shares_the_latest_position_without_redis_and_revokes_public_access() {
     assert_eq!(maps[0].share_url, created_map.share_url);
     assert_eq!(maps[0].members[0].display_name, "共有者A");
 
-    let member_id_before: String =
-        sqlx::query_scalar("SELECT id FROM live_map_member WHERE map_id = $1 AND user_id = $2")
-            .bind(&created_map.id)
-            .bind(&user_id)
-            .fetch_one(&pool)
-            .await
-            .expect("member ID should be available");
+    let member_id_before: String = sqlx::query_scalar(
+        r#"
+        SELECT
+            id
+        FROM live_map_member
+        WHERE map_id = $1
+            AND user_id = $2
+        "#,
+    )
+    .bind(&created_map.id)
+    .bind(&user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("member ID should be available");
     update_live_map_handler(
         Extension(admin_id.clone()),
         Extension(pool.clone()),
@@ -163,13 +181,20 @@ async fn shares_the_latest_position_without_redis_and_revokes_public_access() {
     )
     .await
     .expect("current map should be editable without Redis");
-    let member_id_after: String =
-        sqlx::query_scalar("SELECT id FROM live_map_member WHERE map_id = $1 AND user_id = $2")
-            .bind(&created_map.id)
-            .bind(&user_id)
-            .fetch_one(&pool)
-            .await
-            .expect("updated member ID should be available");
+    let member_id_after: String = sqlx::query_scalar(
+        r#"
+        SELECT
+            id
+        FROM live_map_member
+        WHERE map_id = $1
+            AND user_id = $2
+        "#,
+    )
+    .bind(&created_map.id)
+    .bind(&user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("updated member ID should be available");
     assert_eq!(member_id_after, member_id_before);
 
     let public_id = public_id(&created_map.share_url);

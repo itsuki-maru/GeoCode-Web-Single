@@ -66,26 +66,88 @@ async fn upload(app: &Router, bytes: &[u8], key: Option<&str>) -> (StatusCode, V
 }
 
 async fn receipts(pool: &SqlitePool, user: Uuid) -> i64 {
-    sqlx::query_scalar("SELECT count(*) FROM json_import_receipt_model WHERE user_id=$1")
-        .bind(user.to_string())
-        .fetch_one(pool)
-        .await
-        .unwrap()
+    sqlx::query_scalar(
+        r#"
+        SELECT
+            count(*)
+        FROM json_import_receipt_model
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(user.to_string())
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 
 // Compare every stored row, including original IDs, bindings, history and receipts.
 async fn snapshot(pool: &SqlitePool, user: Uuid) -> Vec<Vec<String>> {
     let queries = [
-        "SELECT x.* FROM layer_model x WHERE user_id=$1",
-        "SELECT x.* FROM common_form_model x WHERE user_id=$1",
-        "SELECT x.* FROM common_form_revision_model x JOIN common_form_model f ON f.id=x.form_id WHERE f.user_id=$1",
-        "SELECT x.* FROM marker_info_model x WHERE user_id=$1",
-        "SELECT x.* FROM shape_model x WHERE user_id=$1",
-        "SELECT x.* FROM marker_form_config_model x JOIN marker_info_model m ON m.id=x.marker_id WHERE m.user_id=$1",
-        "SELECT x.* FROM shape_form_config_model x JOIN shape_model s ON s.id=x.shape_id WHERE s.user_id=$1",
-        "SELECT x.* FROM marker_form_submission_model x JOIN marker_info_model m ON m.id=x.marker_id WHERE m.user_id=$1",
-        "SELECT x.* FROM shape_form_submission_model x JOIN shape_model s ON s.id=x.shape_id WHERE s.user_id=$1",
-        "SELECT x.* FROM json_import_receipt_model x WHERE user_id=$1",
+        r#"
+        SELECT
+            x.*
+        FROM layer_model x
+        WHERE user_id = $1
+        "#,
+        r#"
+        SELECT
+            x.*
+        FROM common_form_model x
+        WHERE user_id = $1
+        "#,
+        r#"
+        SELECT
+            x.*
+        FROM common_form_revision_model x
+        JOIN common_form_model f ON f.id = x.form_id
+        WHERE f.user_id = $1
+        "#,
+        r#"
+        SELECT
+            x.*
+        FROM marker_info_model x
+        WHERE user_id = $1
+        "#,
+        r#"
+        SELECT
+            x.*
+        FROM shape_model x
+        WHERE user_id = $1
+        "#,
+        r#"
+        SELECT
+            x.*
+        FROM marker_form_config_model x
+        JOIN marker_info_model m ON m.id = x.marker_id
+        WHERE m.user_id = $1
+        "#,
+        r#"
+        SELECT
+            x.*
+        FROM shape_form_config_model x
+        JOIN shape_model s ON s.id = x.shape_id
+        WHERE s.user_id = $1
+        "#,
+        r#"
+        SELECT
+            x.*
+        FROM marker_form_submission_model x
+        JOIN marker_info_model m ON m.id = x.marker_id
+        WHERE m.user_id = $1
+        "#,
+        r#"
+        SELECT
+            x.*
+        FROM shape_form_submission_model x
+        JOIN shape_model s ON s.id = x.shape_id
+        WHERE s.user_id = $1
+        "#,
+        r#"
+        SELECT
+            x.*
+        FROM json_import_receipt_model x
+        WHERE user_id = $1
+        "#,
     ];
     let mut result = Vec::new();
     for query in queries {
@@ -144,11 +206,18 @@ async fn successful_replay_keeps_every_record_and_later_edits() {
         first.1
     );
     assert_eq!(snapshot(&pool, user).await, before);
-    sqlx::query("UPDATE marker_info_model SET detail='edited after import' WHERE user_id=$1")
-        .bind(user.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE marker_info_model
+        SET
+            detail = 'edited after import'
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(user.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let edited = snapshot(&pool, user).await;
     assert_eq!(upload(&app, FIXTURE, Some(&key)).await, first);
     assert_eq!(snapshot(&pool, user).await, edited);
@@ -195,12 +264,18 @@ async fn operation_keys_are_scoped_to_the_owner_and_new_keys_create_new_copies()
         upload(&app(&pool, first), FIXTURE, Some(&new_key)).await.0,
         StatusCode::OK
     );
-    let markers: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM marker_info_model WHERE user_id=$1")
-            .bind(first.to_string())
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let markers: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            count(*)
+        FROM marker_info_model
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(first.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(markers, 6);
     assert_eq!(receipts(&pool, first).await, 2);
 }
@@ -346,12 +421,18 @@ async fn equivalent_uuid_spellings_share_one_receipt_and_match_the_expected_owne
         );
         assert_eq!(snapshot(&pool, user).await, before);
     }
-    let stored: String =
-        sqlx::query_scalar("SELECT request_id FROM json_import_receipt_model WHERE user_id=$1")
-            .bind(user.to_string())
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let stored: String = sqlx::query_scalar(
+        r#"
+        SELECT
+            request_id
+        FROM json_import_receipt_model
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(user.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(stored, key.to_string());
 }
 
@@ -362,17 +443,31 @@ async fn a_database_failure_rolls_back_receipt_and_same_key_can_retry() {
     let app = app(&pool, user);
     let key = Uuid::new_v4().to_string();
     let before = snapshot(&pool, user).await;
-    sqlx::raw_sql("CREATE TRIGGER reject_import_answer BEFORE INSERT ON marker_form_submission_model BEGIN SELECT RAISE(ABORT, 'test failure'); END;")
-        .execute(&pool).await.unwrap();
+    sqlx::raw_sql(
+        r#"
+        CREATE TRIGGER reject_import_answer
+        BEFORE INSERT ON marker_form_submission_model
+        BEGIN
+            SELECT RAISE(ABORT, 'test failure');
+        END;
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(
         upload(&app, FIXTURE, Some(&key)).await.0,
         StatusCode::INTERNAL_SERVER_ERROR
     );
     assert_eq!(snapshot(&pool, user).await, before);
-    sqlx::raw_sql("DROP TRIGGER reject_import_answer;")
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::raw_sql(
+        r#"
+        DROP TRIGGER reject_import_answer;
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(upload(&app, FIXTURE, Some(&key)).await.0, StatusCode::OK);
     assert_eq!(receipts(&pool, user).await, 1);
 }
@@ -388,17 +483,31 @@ async fn failure_to_record_completion_rolls_back_v3_and_legacy_data() {
     ] {
         let key = Uuid::new_v4().to_string();
         let before = snapshot(&pool, user).await;
-        sqlx::raw_sql("CREATE TRIGGER reject_import_receipt BEFORE INSERT ON json_import_receipt_model BEGIN SELECT RAISE(ABORT, 'receipt failure'); END;")
-        .execute(&pool).await.unwrap();
+        sqlx::raw_sql(
+            r#"
+            CREATE TRIGGER reject_import_receipt
+            BEFORE INSERT ON json_import_receipt_model
+            BEGIN
+                SELECT RAISE(ABORT, 'receipt failure');
+            END;
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         assert_eq!(
             upload(&app, bytes, Some(&key)).await.0,
             StatusCode::INTERNAL_SERVER_ERROR
         );
         assert_eq!(snapshot(&pool, user).await, before);
-        sqlx::raw_sql("DROP TRIGGER reject_import_receipt;")
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::raw_sql(
+            r#"
+            DROP TRIGGER reject_import_receipt;
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         assert_eq!(upload(&app, bytes, Some(&key)).await.0, StatusCode::OK);
     }
     assert_eq!(receipts(&pool, user).await, 2);
@@ -621,45 +730,104 @@ async fn an_actual_master_binding_becomes_an_independent_managed_layer_on_import
     assert_eq!(upload(&receiver, FIXTURE, None).await.0, StatusCode::OK);
     let existing = snapshot(&pool, recipient).await;
     let master = common::master_layer_id(&pool, &source.to_string()).await;
-    sqlx::query("UPDATE layer_model SET common_form_id=(SELECT id FROM common_form_model WHERE user_id=$1 AND form_title='共通フォーム'),common_form_version=2 WHERE id=$2")
-        .bind(source.to_string()).bind(master.to_string()).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        UPDATE layer_model
+        SET
+            common_form_id = (
+                SELECT
+                    id
+                FROM common_form_model
+                WHERE user_id = $1
+                    AND form_title = '共通フォーム'
+            ),
+            common_form_version = 2
+        WHERE id = $2
+        "#,
+    )
+    .bind(source.to_string())
+    .bind(master.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let marker: String = sqlx::query_scalar(
-        "SELECT id FROM marker_info_model WHERE user_id=$1 AND marker_name='管理対象'",
+        r#"
+        SELECT
+            id
+        FROM marker_info_model
+        WHERE user_id = $1
+            AND marker_name = '管理対象'
+        "#,
     )
     .bind(source.to_string())
     .fetch_one(&pool)
     .await
     .unwrap();
-    let shape: String =
-        sqlx::query_scalar("SELECT id FROM shape_model WHERE user_id=$1 AND name='管理図形'")
-            .bind(source.to_string())
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    sqlx::query("UPDATE marker_info_model SET layer_id=$1 WHERE id=$2")
-        .bind(master.to_string())
-        .bind(marker.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("UPDATE shape_model SET layer_id=$1 WHERE id=$2")
-        .bind(master.to_string())
-        .bind(shape.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("UPDATE marker_form_config_model SET managed_layer_id=$1 WHERE marker_id=$2")
-        .bind(master.to_string())
-        .bind(marker.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("UPDATE shape_form_config_model SET managed_layer_id=$1 WHERE shape_id=$2")
-        .bind(master.to_string())
-        .bind(shape.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    let shape: String = sqlx::query_scalar(
+        r#"
+        SELECT
+            id
+        FROM shape_model
+        WHERE user_id = $1
+            AND name = '管理図形'
+        "#,
+    )
+    .bind(source.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE marker_info_model
+        SET
+            layer_id = $1
+        WHERE id = $2
+        "#,
+    )
+    .bind(master.to_string())
+    .bind(marker.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE shape_model
+        SET
+            layer_id = $1
+        WHERE id = $2
+        "#,
+    )
+    .bind(master.to_string())
+    .bind(shape.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE marker_form_config_model
+        SET
+            managed_layer_id = $1
+        WHERE marker_id = $2
+        "#,
+    )
+    .bind(master.to_string())
+    .bind(marker.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE shape_form_config_model
+        SET
+            managed_layer_id = $1
+        WHERE shape_id = $2
+        "#,
+    )
+    .bind(master.to_string())
+    .bind(shape.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let response = sender
         .oneshot(
             Request::builder()
@@ -683,19 +851,87 @@ async fn an_actual_master_binding_becomes_an_independent_managed_layer_on_import
             "Existing rows must be unchanged"
         );
     }
-    let copied_master: String = sqlx::query_scalar("SELECT l.id FROM layer_model l JOIN marker_info_model m ON m.layer_id=l.id WHERE l.user_id=$1 AND NOT l.is_master AND l.layer_name=(SELECT layer_name FROM layer_model WHERE id=$2) AND m.marker_name='管理対象'")
-        .bind(recipient.to_string()).bind(master.to_string()).fetch_one(&pool).await.unwrap();
+    let copied_master: String = sqlx::query_scalar(
+        r#"
+        SELECT
+            l.id
+        FROM layer_model l
+        JOIN marker_info_model m ON m.layer_id = l.id
+        WHERE l.user_id = $1
+            AND NOT l.is_master
+            AND l.layer_name = (
+            SELECT
+                layer_name
+            FROM layer_model
+            WHERE id = $2
+        )
+            AND m.marker_name = '管理対象'
+        "#,
+    )
+    .bind(recipient.to_string())
+    .bind(master.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_ne!(
         copied_master,
         common::master_layer_id(&pool, &recipient.to_string()).await
     );
-    let marker_bindings: i64 = sqlx::query_scalar("SELECT count(*) FROM marker_info_model m JOIN marker_form_config_model c ON c.marker_id=m.id JOIN layer_model l ON l.id=m.layer_id WHERE m.layer_id=$1 AND c.managed_layer_id=l.id AND (c.source_form->>'id')=l.common_form_id")
-        .bind(copied_master.to_string()).fetch_one(&pool).await.unwrap();
-    let shape_bindings: i64 = sqlx::query_scalar("SELECT count(*) FROM shape_model s JOIN shape_form_config_model c ON c.shape_id=s.id JOIN layer_model l ON l.id=s.layer_id WHERE s.layer_id=$1 AND c.managed_layer_id=l.id AND (c.source_form->>'id')=l.common_form_id")
-        .bind(copied_master.to_string()).fetch_one(&pool).await.unwrap();
+    let marker_bindings: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            count(*)
+        FROM marker_info_model m
+        JOIN marker_form_config_model c ON c.marker_id = m.id
+        JOIN layer_model l ON l.id = m.layer_id
+        WHERE m.layer_id = $1
+            AND c.managed_layer_id = l.id
+            AND (c.source_form ->> 'id') = l.common_form_id
+        "#,
+    )
+    .bind(copied_master.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let shape_bindings: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            count(*)
+        FROM shape_model s
+        JOIN shape_form_config_model c ON c.shape_id = s.id
+        JOIN layer_model l ON l.id = s.layer_id
+        WHERE s.layer_id = $1
+            AND c.managed_layer_id = l.id
+            AND (c.source_form ->> 'id') = l.common_form_id
+        "#,
+    )
+    .bind(copied_master.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!((marker_bindings, shape_bindings), (1, 1));
-    let answers: i64 = sqlx::query_scalar("SELECT (SELECT count(*) FROM marker_form_submission_model a JOIN marker_info_model m ON m.id=a.marker_id WHERE m.layer_id=$1)+(SELECT count(*) FROM shape_form_submission_model a JOIN shape_model s ON s.id=a.shape_id WHERE s.layer_id=$1)")
-        .bind(copied_master.to_string()).fetch_one(&pool).await.unwrap();
+    let answers: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            (
+                SELECT
+                    count(*)
+                FROM marker_form_submission_model a
+                JOIN marker_info_model m ON m.id = a.marker_id
+                WHERE m.layer_id = $1
+            ) + (
+                SELECT
+                    count(*)
+                FROM shape_form_submission_model a
+                JOIN shape_model s ON s.id = a.shape_id
+                WHERE s.layer_id = $1
+            )
+        "#,
+    )
+    .bind(copied_master.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(answers, 4);
     assert_eq!(
         upload(&receiver, &package, Some(&key)).await.0,
@@ -711,17 +947,31 @@ async fn failure_to_record_completion_also_rolls_back_all_imported_data() {
     let app = app(&pool, user);
     let key = Uuid::new_v4().to_string();
     let before = snapshot(&pool, user).await;
-    sqlx::raw_sql("CREATE TRIGGER reject_import_receipt BEFORE INSERT ON json_import_receipt_model BEGIN SELECT RAISE(ABORT, 'receipt failure'); END;")
-        .execute(&pool).await.unwrap();
+    sqlx::raw_sql(
+        r#"
+        CREATE TRIGGER reject_import_receipt
+        BEFORE INSERT ON json_import_receipt_model
+        BEGIN
+            SELECT RAISE(ABORT, 'receipt failure');
+        END;
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(
         upload(&app, FIXTURE, Some(&key)).await.0,
         StatusCode::INTERNAL_SERVER_ERROR
     );
     assert_eq!(snapshot(&pool, user).await, before);
-    sqlx::raw_sql("DROP TRIGGER reject_import_receipt;")
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::raw_sql(
+        r#"
+        DROP TRIGGER reject_import_receipt;
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(upload(&app, FIXTURE, Some(&key)).await.0, StatusCode::OK);
     assert_eq!(receipts(&pool, user).await, 1);
 }

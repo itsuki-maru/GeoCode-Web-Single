@@ -162,7 +162,10 @@ pub async fn token_handler(
         query!(
             r#"
             UPDATE user_model
-            SET is_locked = $1, failed_count = $2, auth_version = auth_version + 1
+            SET
+                is_locked = $1,
+                failed_count = $2,
+                auth_version = auth_version + 1
             WHERE id = $3
             "#,
             true,
@@ -457,8 +460,11 @@ pub async fn account_password_update_handler(
     let result = query!(
         r#"
         UPDATE user_model
-        SET password = $1, auth_version = auth_version + 1
-        WHERE id = $2 AND password = $3
+        SET
+            password = $1,
+            auth_version = auth_version + 1
+        WHERE id = $2
+            AND password = $3
         "#,
         hashed_password,
         user_id,

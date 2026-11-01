@@ -170,8 +170,7 @@ async fn create_temporary_url(
             shapes,
             include_tile_overlays,
             create_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING id, url, expiration
         "#,
         temporary_url.id,
@@ -209,9 +208,17 @@ async fn update_temporary_url(
         CreateUpdatedTemporaryUrlResponse,
         r#"
         UPDATE temporary_urls
-        SET expiration = $1, password_hash = $2, layers = $3, markers = $4, shapes = $5, include_tile_overlays = $6
+        SET
+            expiration = $1,
+            password_hash = $2,
+            layers = $3,
+            markers = $4,
+            shapes = $5,
+            include_tile_overlays = $6
         WHERE user_id = $7
-        RETURNING id, url, expiration
+        RETURNING id,
+        url,
+        expiration
         "#,
         temporary_url.expiration,
         temporary_url.password_hash,

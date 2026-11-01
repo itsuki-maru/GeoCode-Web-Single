@@ -99,8 +99,7 @@ pub async fn create_layer_handler(
                     is_master,
                     create_at,
                     update_at
-                )
-                VALUES (
+                ) VALUES (
                     $1,
                     $2,
                     $3,

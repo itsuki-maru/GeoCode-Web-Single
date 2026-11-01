@@ -94,7 +94,26 @@ pub async fn create_marker_handler(
             let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
             super::layer_forms::ensure_owned(&mut tx, &user_id, &layer_id).await?;
             let saved = sqlx::query_as::<_, MarkerObject>(
-                "INSERT INTO marker_info_model (id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,layer_id,marker_name,latitude,longitude,detail,update_at"
+                r#"
+                INSERT INTO marker_info_model (
+                    id,
+                    user_id,
+                    layer_id,
+                    marker_name,
+                    latitude,
+                    longitude,
+                    detail,
+                    create_at,
+                    update_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                RETURNING id,
+                layer_id,
+                marker_name,
+                latitude,
+                longitude,
+                detail,
+                update_at
+                "#,
             )
             .bind(&new_marker_id)
             .bind(&user_id)
@@ -133,8 +152,22 @@ pub async fn update_marker_position_handler(
     match (params.marker_id, params.latitude, params.longitude) {
         (Some(marker_id), Some(latitude), Some(longitude)) => {
             let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-            let (layer_id, old_lat, old_lon): (String, f64, f64) = sqlx::query_as("SELECT layer_id, latitude, longitude FROM marker_info_model WHERE id=$1 AND user_id=$2")
-                .bind(&marker_id).bind(&user_id).fetch_optional(&mut *tx).await?.ok_or(AppError::NotFound)?;
+            let (layer_id, old_lat, old_lon): (String, f64, f64) = sqlx::query_as(
+                r#"
+                SELECT
+                    layer_id,
+                    latitude,
+                    longitude
+                FROM marker_info_model
+                WHERE id = $1
+                    AND user_id = $2
+                "#,
+            )
+            .bind(&marker_id)
+            .bind(&user_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or(AppError::NotFound)?;
             let restricted =
                 super::layer_input_policy::restricted(&mut tx, &user_id, &layer_id).await?;
             super::layer_input_policy::reject_change(
@@ -142,7 +175,22 @@ pub async fn update_marker_position_handler(
                 old_lat != latitude || old_lon != longitude,
             )?;
             let saved = sqlx::query_as::<_, MarkerObject>(
-                "UPDATE marker_info_model SET latitude=$1,longitude=$2,update_at=$3 WHERE id=$4 AND user_id=$5 RETURNING id,layer_id,marker_name,latitude,longitude,detail,update_at"
+                r#"
+                UPDATE marker_info_model
+                SET
+                    latitude = $1,
+                    longitude = $2,
+                    update_at = $3
+                WHERE id = $4
+                    AND user_id = $5
+                RETURNING id,
+                layer_id,
+                marker_name,
+                latitude,
+                longitude,
+                detail,
+                update_at
+                "#,
             )
             .bind(latitude)
             .bind(longitude)
@@ -170,13 +218,21 @@ pub async fn update_marker_info_handler(
     Json(payload): Json<MarkerInfoUpdateJsonData>,
 ) -> Result<Json<MarkerUpdatedResponse>, AppError> {
     let mut tx = super::answer_sqlite::begin_write(&pool).await?;
-    let (previous_layer, previous_detail): (String, String) =
-        sqlx::query_as("SELECT layer_id, detail FROM marker_info_model WHERE id=$1 AND user_id=$2")
-            .bind(&marker_id)
-            .bind(&user_id)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or(AppError::NotFound)?;
+    let (previous_layer, previous_detail): (String, String) = sqlx::query_as(
+        r#"
+        SELECT
+            layer_id,
+            detail
+        FROM marker_info_model
+        WHERE id = $1
+            AND user_id = $2
+        "#,
+    )
+    .bind(&marker_id)
+    .bind(&user_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
     // 現在時刻を取得
     let now = Utc::now().naive_utc();
 
@@ -206,7 +262,23 @@ pub async fn update_marker_info_handler(
     super::layer_forms::ensure_owned(&mut tx, &user_id, &payload.layer_id).await?;
 
     let saved = sqlx::query_as::<_, MarkerObject>(
-        "UPDATE marker_info_model SET marker_name=$1,layer_id=$2,detail=$3,update_at=$4 WHERE id=$5 AND user_id=$6 RETURNING id,layer_id,marker_name,latitude,longitude,detail,update_at"
+        r#"
+        UPDATE marker_info_model
+        SET
+            marker_name = $1,
+            layer_id = $2,
+            detail = $3,
+            update_at = $4
+        WHERE id = $5
+            AND user_id = $6
+        RETURNING id,
+        layer_id,
+        marker_name,
+        latitude,
+        longitude,
+        detail,
+        update_at
+        "#,
     )
     .bind(&payload.name)
     .bind(&payload.layer_id)
@@ -289,25 +361,8 @@ pub async fn query_marker_handler(
             0 => {
                 query_as!(
                     MarkerObject,
-                    "SELECT
-                        id,
-                        layer_id,
-                        marker_name,
-                        latitude,
-                        longitude,
-                        detail,
-                        update_at
-                    FROM marker_info_model
-                    WHERE user_id = $1",
-                    user_id
-                )
-                .fetch_all(&pool)
-                .await
-            },
-            1 => {
-                query_as!(
-                    MarkerObject,
-                    "SELECT
+                    r#"
+                    SELECT
                         id,
                         layer_id,
                         marker_name,
@@ -317,7 +372,31 @@ pub async fn query_marker_handler(
                         update_at
                     FROM marker_info_model
                     WHERE user_id = $1
-                    AND (marker_name LIKE $2 ESCAPE '\\' OR detail LIKE $2 ESCAPE '\\')",
+                    "#,
+                    user_id
+                )
+                .fetch_all(&pool)
+                .await
+            },
+            1 => {
+                query_as!(
+                    MarkerObject,
+                    r#"
+                    SELECT
+                        id,
+                        layer_id,
+                        marker_name,
+                        latitude,
+                        longitude,
+                        detail,
+                        update_at
+                    FROM marker_info_model
+                    WHERE user_id = $1
+                        AND (
+                        marker_name LIKE $2 ESCAPE '\'
+                        OR detail LIKE $2 ESCAPE '\'
+                    )
+                    "#,
                     user_id,
                     search_terms[0],
                 )
@@ -327,7 +406,8 @@ pub async fn query_marker_handler(
             _ => {
                 query_as!(
                     MarkerObject,
-                    "SELECT
+                    r#"
+                    SELECT
                         id,
                         layer_id,
                         marker_name,
@@ -337,8 +417,15 @@ pub async fn query_marker_handler(
                         update_at
                     FROM marker_info_model
                     WHERE user_id = $1
-                    AND (marker_name LIKE $2 ESCAPE '\\' OR detail LIKE $2 ESCAPE '\\')
-                    AND (marker_name LIKE $3 ESCAPE '\\' OR detail LIKE $3 ESCAPE '\\')",
+                        AND (
+                        marker_name LIKE $2 ESCAPE '\'
+                        OR detail LIKE $2 ESCAPE '\'
+                    )
+                        AND (
+                        marker_name LIKE $3 ESCAPE '\'
+                        OR detail LIKE $3 ESCAPE '\'
+                    )
+                    "#,
                     user_id,
                     search_terms[0],
                     search_terms[1],
@@ -353,7 +440,8 @@ pub async fn query_marker_handler(
             0 => {
                 query_as!(
                     MarkerObject,
-                    "SELECT
+                    r#"
+                    SELECT
                         id,
                         layer_id,
                         marker_name,
@@ -362,7 +450,9 @@ pub async fn query_marker_handler(
                         detail,
                         update_at
                     FROM marker_info_model
-                    WHERE user_id = $1 AND layer_id = $2",
+                    WHERE user_id = $1
+                        AND layer_id = $2
+                    "#,
                     user_id,
                     layer_id,
                 )
@@ -372,7 +462,8 @@ pub async fn query_marker_handler(
             1 => {
                 query_as!(
                     MarkerObject,
-                    "SELECT
+                    r#"
+                    SELECT
                         id,
                         layer_id,
                         marker_name,
@@ -381,8 +472,13 @@ pub async fn query_marker_handler(
                         detail,
                         update_at
                     FROM marker_info_model
-                    WHERE user_id = $1 AND layer_id = $2
-                    AND (marker_name LIKE $3 ESCAPE '\\' OR detail LIKE $3 ESCAPE '\\')",
+                    WHERE user_id = $1
+                        AND layer_id = $2
+                        AND (
+                        marker_name LIKE $3 ESCAPE '\'
+                        OR detail LIKE $3 ESCAPE '\'
+                    )
+                    "#,
                     user_id,
                     layer_id,
                     search_terms[0],
@@ -393,7 +489,8 @@ pub async fn query_marker_handler(
             _ => {
                 query_as!(
                     MarkerObject,
-                    "SELECT
+                    r#"
+                    SELECT
                         id,
                         layer_id,
                         marker_name,
@@ -402,9 +499,17 @@ pub async fn query_marker_handler(
                         detail,
                         update_at
                     FROM marker_info_model
-                    WHERE user_id = $1 AND layer_id = $2
-                    AND (marker_name LIKE $3 ESCAPE '\\' OR detail LIKE $3 ESCAPE '\\')
-                    AND (marker_name LIKE $4 ESCAPE '\\' OR detail LIKE $4 ESCAPE '\\')",
+                    WHERE user_id = $1
+                        AND layer_id = $2
+                        AND (
+                        marker_name LIKE $3 ESCAPE '\'
+                        OR detail LIKE $3 ESCAPE '\'
+                    )
+                        AND (
+                        marker_name LIKE $4 ESCAPE '\'
+                        OR detail LIKE $4 ESCAPE '\'
+                    )
+                    "#,
                     user_id,
                     layer_id,
                     search_terms[0],

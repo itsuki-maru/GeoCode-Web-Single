@@ -101,9 +101,13 @@ pub(super) fn too_large() -> AppError {
 
 pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<String, AppError> {
     let mut tx = read_transaction(pool).await?;
-    let master: bool = sqlx::query_scalar(&sql(
-        "SELECT is_master FROM layer_model WHERE id=$1 AND user_id=$2",
-    ))
+    let master: bool = sqlx::query_scalar(&sql(r#"
+        SELECT
+            is_master
+        FROM layer_model
+        WHERE id = $1
+            AND user_id = $2
+        "#))
     .bind(db_id(layer)?)
     .bind(db_id(user)?)
     .fetch_optional(&mut *tx)
@@ -130,9 +134,20 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
     let mut answer_keys = HashMap::new();
     let mut body_documents = HashMap::new();
     {
-        let text = sql(
-            "SELECT id::text AS id,layer_name,is_master,restrict_free_text,common_form_id::text AS common_form_id,common_form_version,create_at::text AS created_at,update_at::text AS updated_at FROM layer_model WHERE user_id=$1 AND ($2::uuid IS NULL OR id=$2) ORDER BY id",
-        );
+        let text = sql(r#"
+            SELECT
+                id::text AS id,
+                layer_name,
+                is_master,
+                restrict_free_text,
+                common_form_id::text AS common_form_id,
+                common_form_version,
+                create_at::text AS created_at,
+                update_at::text AS updated_at
+            FROM layer_model
+            WHERE user_id = $1 AND ($2::uuid IS NULL OR id = $2)
+            ORDER BY id
+            "#);
         let mut rows = sqlx::query(&text)
             .bind(db_id(user)?)
             .bind(&scope)
@@ -180,7 +195,21 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
             )
         };
         {
-            let text = sql(&format!("SELECT id::text AS id,layer_id::text AS layer_id,{data},form_body_parts,{created}::text AS created_at,{updated}::text AS updated_at FROM {table} WHERE user_id=$1 AND ($2::uuid IS NULL OR layer_id=$2) ORDER BY id")).into_owned();
+            let text = sql(&format!(
+                r#"
+                SELECT
+                    id::text AS id,
+                    layer_id::text AS layer_id,
+                    {data},
+                    form_body_parts,
+                    {created}::text AS created_at,
+                    {updated}::text AS updated_at
+                FROM {table}
+                WHERE user_id = $1 AND ($2::uuid IS NULL OR layer_id = $2)
+                ORDER BY id
+                "#,
+            ))
+            .into_owned();
             let mut rows = sqlx::query(&text)
                 .bind(db_id(user)?)
                 .bind(&scope)
@@ -235,7 +264,25 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
             }
         }
         {
-            let text = sql(&format!("SELECT c.{kind}_id::text AS id,c.form_title,c.form_description,c.form_schema,c.source_form,c.managed_layer_id::text AS managed_layer_id,c.create_at::text AS created_at,c.update_at::text AS updated_at FROM {kind}_form_config_model c JOIN {table} o ON o.id=c.{kind}_id WHERE o.user_id=$1 AND ($2::uuid IS NULL OR o.layer_id=$2) ORDER BY c.{kind}_id")).into_owned();
+            let text = sql(&format!(
+                r#"
+                SELECT
+                    c.{kind}_id::text AS id,
+                    c.form_title,
+                    c.form_description,
+                    c.form_schema,
+                    c.source_form,
+                    c.managed_layer_id::text AS managed_layer_id,
+                    c.create_at::text AS created_at,
+                    c.update_at::text AS updated_at
+                FROM {kind}_form_config_model c
+                JOIN {table} o
+                    ON o.id = c.{kind}_id
+                WHERE o.user_id = $1 AND ($2::uuid IS NULL OR o.layer_id = $2)
+                ORDER BY c.{kind}_id
+                "#,
+            ))
+            .into_owned();
             let mut rows = sqlx::query(&text)
                 .bind(db_id(user)?)
                 .bind(&scope)
@@ -277,7 +324,25 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
             }
         }
         {
-            let text = sql(&format!("SELECT s.id::text AS answer_id,s.{kind}_id::text AS id,s.submitted_values,s.form_snapshot,s.source_form,s.rendered_markdown,s.edited_at::text AS edited_at,s.create_at::text AS created_at FROM {kind}_form_submission_model s JOIN {table} o ON o.id=s.{kind}_id WHERE o.user_id=$1 AND ($2::uuid IS NULL OR o.layer_id=$2) ORDER BY s.create_at,s.id")).into_owned();
+            let text = sql(&format!(
+                r#"
+                SELECT
+                    s.id::text AS answer_id,
+                    s.{kind}_id::text AS id,
+                    s.submitted_values,
+                    s.form_snapshot,
+                    s.source_form,
+                    s.rendered_markdown,
+                    s.edited_at::text AS edited_at,
+                    s.create_at::text AS created_at
+                FROM {kind}_form_submission_model s
+                JOIN {table} o
+                    ON o.id = s.{kind}_id
+                WHERE o.user_id = $1 AND ($2::uuid IS NULL OR o.layer_id = $2)
+                ORDER BY s.create_at,s.id
+                "#,
+            ))
+            .into_owned();
             let mut rows = sqlx::query(&text)
                 .bind(db_id(user)?)
                 .bind(&scope)
@@ -373,9 +438,20 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
     p.submissions.sort_by_key(|s| s.source_order);
     let mut form_keys = HashMap::new();
     {
-        let text = sql(
-            "SELECT id::text AS id,version,deleted,form_title,form_description,form_schema,create_at::text AS created_at,update_at::text AS updated_at FROM common_form_model WHERE user_id=$1 ORDER BY id",
-        );
+        let text = sql(r#"
+            SELECT
+                id::text AS id,
+                version,
+                deleted,
+                form_title,
+                form_description,
+                form_schema,
+                create_at::text AS created_at,
+                update_at::text AS updated_at
+            FROM common_form_model
+            WHERE user_id = $1
+            ORDER BY id
+            "#);
         let mut rows = sqlx::query(&text).bind(db_id(user)?).fetch(&mut *tx);
         while let Some(row) = rows.try_next().await? {
             let id: String = row.try_get("id")?;
@@ -407,9 +483,17 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
             .enumerate()
             .map(|(i, f)| (f.key.clone(), i))
             .collect();
-        let text = sql(
-            "SELECT r.form_id::text AS form_id,r.version,r.form_schema FROM common_form_revision_model r JOIN common_form_model f ON f.id=r.form_id WHERE f.user_id=$1 ORDER BY r.form_id,r.version",
-        );
+        let text = sql(r#"
+            SELECT
+                r.form_id::text AS form_id,
+                r.version,
+                r.form_schema
+            FROM common_form_revision_model r
+            JOIN common_form_model f
+                ON f.id = r.form_id
+            WHERE f.user_id = $1
+            ORDER BY r.form_id, r.version
+            "#);
         let mut rows = sqlx::query(&text).bind(db_id(user)?).fetch(&mut *tx);
         while let Some(row) = rows.try_next().await? {
             let form_id: String = row.try_get("form_id")?;
@@ -467,11 +551,16 @@ pub(super) async fn import(
 ) -> Result<(), AppError> {
     validate(&p)?;
     let mut tx = write_transaction(pool).await?;
-    sqlx::query(&sql("SELECT id FROM user_model WHERE id=$1 FOR UPDATE"))
-        .bind(db_id(user)?)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(AppError::NotFound)?;
+    sqlx::query(&sql(r#"
+        SELECT
+            id
+        FROM user_model
+        WHERE id = $1 FOR UPDATE
+        "#))
+    .bind(db_id(user)?)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
     if idempotency::is_completed(&mut *tx, user, request).await? {
         tx.rollback().await?;
         return Ok(());
@@ -509,36 +598,180 @@ pub(super) async fn import(
         }))
         .collect();
     for f in &p.common_forms {
-        sqlx::query("INSERT INTO common_form_model (id,user_id,version,deleted,form_title,form_description,form_schema,create_at,update_at,password_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NULL)")
-            .bind(db_id(&forms[f.key.as_str()].to_string())?).bind(db_id(user)?).bind(f.version).bind(f.deleted).bind(&f.form_title).bind(&f.form_description).bind(Json(&f.form_schema)).bind(f.created_at.naive_utc()).bind(f.updated_at.naive_utc()).execute(&mut *tx).await?;
+        sqlx::query(
+            r#"
+            INSERT INTO common_form_model (
+                id,
+                user_id,
+                version,
+                deleted,
+                form_title,
+                form_description,
+                form_schema,
+                create_at,
+                update_at,
+                password_hash
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL)
+            "#,
+        )
+        .bind(db_id(&forms[f.key.as_str()].to_string())?)
+        .bind(db_id(user)?)
+        .bind(f.version)
+        .bind(f.deleted)
+        .bind(&f.form_title)
+        .bind(&f.form_description)
+        .bind(Json(&f.form_schema))
+        .bind(f.created_at.naive_utc())
+        .bind(f.updated_at.naive_utc())
+        .execute(&mut *tx)
+        .await?;
         for r in &f.revisions {
-            sqlx::query("INSERT INTO common_form_revision_model (form_id,version,form_schema) VALUES ($1,$2,$3)").bind(db_id(&forms[f.key.as_str()].to_string())?).bind(r.version).bind(Json(&r.form_schema)).execute(&mut *tx).await?;
+            sqlx::query(
+                r#"
+                INSERT INTO common_form_revision_model (
+                    form_id,
+                    version,
+                    form_schema
+                ) VALUES ($1, $2, $3)
+                "#,
+            )
+            .bind(db_id(&forms[f.key.as_str()].to_string())?)
+            .bind(r.version)
+            .bind(Json(&r.form_schema))
+            .execute(&mut *tx)
+            .await?;
         }
     }
     for l in &p.layers {
-        sqlx::query("INSERT INTO layer_model (id,user_id,layer_name,is_master,create_at,update_at,common_form_id,common_form_version,form_binding_revision,restrict_free_text) VALUES ($1,$2,$3,false,$4,$5,$6,$7,1,$8)")
-            .bind(db_id(&layers[l.key.as_str()].to_string())?).bind(db_id(user)?).bind(&l.layer_name).bind(l.created_at.naive_utc()).bind(l.updated_at.naive_utc()).bind(l.common_form.as_ref().map(|s| db_id(&forms[s.form_key.as_str()].to_string())).transpose()?).bind(l.common_form.as_ref().map(|s| s.version)).bind(l.restrict_free_text).execute(&mut *tx).await?;
+        sqlx::query(
+            r#"
+            INSERT INTO layer_model (
+                id,
+                user_id,
+                layer_name,
+                is_master,
+                create_at,
+                update_at,
+                common_form_id,
+                common_form_version,
+                form_binding_revision,
+                restrict_free_text
+            ) VALUES ($1, $2, $3, false, $4, $5, $6, $7, 1, $8)
+            "#,
+        )
+        .bind(db_id(&layers[l.key.as_str()].to_string())?)
+        .bind(db_id(user)?)
+        .bind(&l.layer_name)
+        .bind(l.created_at.naive_utc())
+        .bind(l.updated_at.naive_utc())
+        .bind(
+            l.common_form
+                .as_ref()
+                .map(|s| db_id(&forms[s.form_key.as_str()].to_string()))
+                .transpose()?,
+        )
+        .bind(l.common_form.as_ref().map(|s| s.version))
+        .bind(l.restrict_free_text)
+        .execute(&mut *tx)
+        .await?;
     }
     for m in &p.markers {
         let target = Target {
             kind: "marker".into(),
             key: m.key.clone(),
         };
-        sqlx::query("INSERT INTO marker_info_model (id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)")
-            .bind(db_id(&objects[&target].to_string())?).bind(db_id(user)?).bind(db_id(&layers[m.layer_key.as_str()].to_string())?).bind(&m.marker_name).bind(m.latitude).bind(m.longitude).bind(&m.detail).bind(m.created_at.naive_utc()).bind(m.updated_at.naive_utc()).execute(&mut *tx).await?;
+        sqlx::query(
+            r#"
+            INSERT INTO marker_info_model (
+                id,
+                user_id,
+                layer_id,
+                marker_name,
+                latitude,
+                longitude,
+                detail,
+                create_at,
+                update_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            "#,
+        )
+        .bind(db_id(&objects[&target].to_string())?)
+        .bind(db_id(user)?)
+        .bind(db_id(&layers[m.layer_key.as_str()].to_string())?)
+        .bind(&m.marker_name)
+        .bind(m.latitude)
+        .bind(m.longitude)
+        .bind(&m.detail)
+        .bind(m.created_at.naive_utc())
+        .bind(m.updated_at.naive_utc())
+        .execute(&mut *tx)
+        .await?;
     }
     for s in &p.shapes {
         let target = Target {
             kind: "shape".into(),
             key: s.key.clone(),
         };
-        sqlx::query("INSERT INTO shape_model (id,user_id,layer_id,shape_type,name,geojson,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)")
-            .bind(db_id(&objects[&target].to_string())?).bind(db_id(user)?).bind(db_id(&layers[s.layer_key.as_str()].to_string())?).bind(&s.shape_type).bind(&s.name).bind(Json(&s.geojson)).bind(s.created_at.naive_utc()).bind(s.updated_at.naive_utc()).execute(&mut *tx).await?;
+        sqlx::query(
+            r#"
+            INSERT INTO shape_model (
+                id,
+                user_id,
+                layer_id,
+                shape_type,
+                name,
+                geojson,
+                created_at,
+                updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            "#,
+        )
+        .bind(db_id(&objects[&target].to_string())?)
+        .bind(db_id(user)?)
+        .bind(db_id(&layers[s.layer_key.as_str()].to_string())?)
+        .bind(&s.shape_type)
+        .bind(&s.name)
+        .bind(Json(&s.geojson))
+        .bind(s.created_at.naive_utc())
+        .bind(s.updated_at.naive_utc())
+        .execute(&mut *tx)
+        .await?;
     }
     for c in &p.form_configs {
         let kind = &c.target.kind; // validated closed set, never interpolated from unvalidated input
-        sqlx::query(&format!("INSERT INTO {kind}_form_config_model ({kind}_id,public_id,enabled,form_title,form_description,form_schema,password_hash,source_form,managed_layer_id,create_at,update_at) VALUES ($1,$2,false,$3,$4,$5,NULL,$6,$7,$8,$9)"))
-            .bind(db_id(&objects[&c.target].to_string())?).bind(db_id(&Uuid::new_v4().to_string())?).bind(&c.form_title).bind(&c.form_description).bind(Json(&c.form_schema)).bind(source_db(&c.source_form,&forms)).bind(c.managed_layer_key.as_ref().map(|l| db_id(&layers[l.as_str()].to_string())).transpose()?).bind(c.created_at.naive_utc()).bind(c.updated_at.naive_utc()).execute(&mut *tx).await?;
+        sqlx::query(&format!(
+            r#"
+            INSERT INTO {kind}_form_config_model (
+                {kind}_id,
+                public_id,
+                enabled,
+                form_title,
+                form_description,
+                form_schema,
+                password_hash,
+                source_form,
+                managed_layer_id,
+                create_at,
+                update_at
+            ) VALUES ($1, $2, false, $3, $4, $5, NULL, $6, $7, $8, $9)
+            "#,
+        ))
+        .bind(db_id(&objects[&c.target].to_string())?)
+        .bind(db_id(&Uuid::new_v4().to_string())?)
+        .bind(&c.form_title)
+        .bind(&c.form_description)
+        .bind(Json(&c.form_schema))
+        .bind(source_db(&c.source_form, &forms))
+        .bind(
+            c.managed_layer_key
+                .as_ref()
+                .map(|l| db_id(&layers[l.as_str()].to_string()))
+                .transpose()?,
+        )
+        .bind(c.created_at.naive_utc())
+        .bind(c.updated_at.naive_utc())
+        .execute(&mut *tx)
+        .await?;
     }
     // Sorting fresh UUIDs preserves the source tie order without changing dates,
     // adding persistent ordering fields, or reducing UUID randomness.
@@ -550,8 +783,30 @@ pub(super) async fn import(
     for (s, id) in submissions.into_iter().zip(ids) {
         answer_ids.insert(s.key.clone(), id);
         let kind = &s.target.kind;
-        sqlx::query(&format!("INSERT INTO {kind}_form_submission_model (id,{kind}_id,submitted_values,rendered_markdown,create_at,source_form,form_snapshot,edited_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)"))
-            .bind(db_id(&id.to_string())?).bind(db_id(&objects[&s.target].to_string())?).bind(Json(&s.submitted_values)).bind(&s.rendered_markdown).bind(s.created_at.naive_utc()).bind(source_db(&s.source_form,&forms)).bind(s.form_snapshot.as_ref().map(Json)).bind(s.edited_at.map(|t|t.naive_utc())).execute(&mut *tx).await?;
+        sqlx::query(&format!(
+            r#"
+            INSERT INTO {kind}_form_submission_model (
+                id,
+                {kind}_id,
+                submitted_values,
+                rendered_markdown,
+                create_at,
+                source_form,
+                form_snapshot,
+                edited_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            "#,
+        ))
+        .bind(db_id(&id.to_string())?)
+        .bind(db_id(&objects[&s.target].to_string())?)
+        .bind(Json(&s.submitted_values))
+        .bind(&s.rendered_markdown)
+        .bind(s.created_at.naive_utc())
+        .bind(source_db(&s.source_form, &forms))
+        .bind(s.form_snapshot.as_ref().map(Json))
+        .bind(s.edited_at.map(|t| t.naive_utc()))
+        .execute(&mut *tx)
+        .await?;
     }
     for (target, parts) in p
         .markers

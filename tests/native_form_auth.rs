@@ -14,14 +14,53 @@ async fn expired_access_cookie_can_be_refreshed_and_the_original_native_posts_su
     let user = test_user(&pool, "native-retry").await;
     let layer = test_master(&pool, &user).await;
     let marker = uuid::Uuid::new_v4();
-    sqlx::query(r#"
-        INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at)
-        VALUES($1,$2,$3,'retry-target',35,139,'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-    "#).bind(marker.to_string()).bind(user.to_string()).bind(layer.to_string()).execute(&pool).await.unwrap();
-    sqlx::query(r#"
-        INSERT INTO marker_form_submission_model(id,marker_id,create_at,submitted_values,rendered_markdown)
-        VALUES($1,$2,CURRENT_TIMESTAMP,'{}','')
-    "#).bind(uuid::Uuid::new_v4().to_string()).bind(marker.to_string()).execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO marker_info_model (
+            id,
+            user_id,
+            layer_id,
+            marker_name,
+            latitude,
+            longitude,
+            detail,
+            create_at,
+            update_at
+        ) VALUES (
+            $1,
+            $2,
+            $3,
+            'retry-target',
+            35,
+            139,
+            '',
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .bind(marker.to_string())
+    .bind(user.to_string())
+    .bind(layer.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO marker_form_submission_model (
+            id,
+            marker_id,
+            create_at,
+            submitted_values,
+            rendered_markdown
+        ) VALUES ($1, $2, CURRENT_TIMESTAMP, '{}', '')
+        "#,
+    )
+    .bind(uuid::Uuid::new_v4().to_string())
+    .bind(marker.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let app = geocode_web_single::router::build_router(
         pool,
         geocode_web_single::build_tera_extension().unwrap(),

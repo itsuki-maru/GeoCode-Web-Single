@@ -34,9 +34,17 @@ pub async fn candidates(
     super::live_map::require_superuser(&admin_id, &pool).await?;
     Ok(Json(
         sqlx::query_as::<_, Layer>(
-            "SELECT l.id, l.layer_name, i.uuid_filename AS marker_icon_filename
-         FROM layer_model l LEFT JOIN marker_icon_model i ON i.id=l.marker_icon_id
-         WHERE l.user_id=$1 AND NOT l.is_master ORDER BY l.layer_name, l.id",
+            r#"
+            SELECT
+                l.id,
+                l.layer_name,
+                i.uuid_filename AS marker_icon_filename
+            FROM layer_model l
+            LEFT JOIN marker_icon_model i ON i.id = l.marker_icon_id
+            WHERE l.user_id = $1
+                AND NOT l.is_master
+            ORDER BY l.layer_name, l.id
+            "#,
         )
         .bind(admin_id)
         .fetch_all(&pool)
@@ -96,7 +104,10 @@ pub async fn sync(
     .await?;
     sqlx::query(
         r#"
-        INSERT INTO live_map_layer(map_id, layer_id)
+        INSERT INTO live_map_layer (
+            map_id,
+            layer_id
+        )
         SELECT
             $1,
             value
@@ -116,10 +127,18 @@ pub async fn own_selection(
     admin_id: &str,
 ) -> Result<Vec<String>, AppError> {
     Ok(sqlx::query_scalar(
-        "SELECT l.id FROM live_map_layer ml JOIN live_map m ON m.id=ml.map_id
-         JOIN layer_model l ON l.id=ml.layer_id
-         WHERE m.id=$1 AND m.layers_configured_by=$2 AND l.user_id=$2 AND NOT l.is_master
-         ORDER BY l.id",
+        r#"
+        SELECT
+            l.id
+        FROM live_map_layer ml
+        JOIN live_map m ON m.id = ml.map_id
+        JOIN layer_model l ON l.id = ml.layer_id
+        WHERE m.id = $1
+            AND m.layers_configured_by = $2
+            AND l.user_id = $2
+            AND NOT l.is_master
+        ORDER BY l.id
+        "#,
     )
     .bind(map_id)
     .bind(admin_id)
@@ -132,11 +151,19 @@ pub async fn published(pool: &SqlitePool, public_id: &str) -> Result<PublishedLa
     let mut tx = pool.begin().await?;
     let layers = sqlx::query_as::<_, Layer>(
         r#"
-        SELECT l.id, l.layer_name, i.uuid_filename AS marker_icon_filename
-        FROM live_map m JOIN live_map_layer ml ON ml.map_id=m.id
-        JOIN layer_model l ON l.id=ml.layer_id AND l.user_id=m.layers_configured_by AND NOT l.is_master
-        LEFT JOIN marker_icon_model i ON i.id=l.marker_icon_id
-        WHERE m.public_id=$1 AND m.revoked_at IS NULL AND julianday(m.expires_at)>julianday('now')
+        SELECT
+            l.id,
+            l.layer_name,
+            i.uuid_filename AS marker_icon_filename
+        FROM live_map m
+        JOIN live_map_layer ml ON ml.map_id = m.id
+        JOIN layer_model l ON l.id = ml.layer_id
+            AND l.user_id = m.layers_configured_by
+            AND NOT l.is_master
+        LEFT JOIN marker_icon_model i ON i.id = l.marker_icon_id
+        WHERE m.public_id = $1
+            AND m.revoked_at IS NULL
+            AND julianday(m.expires_at) > julianday('now')
         ORDER BY l.layer_name, l.id
         "#,
     )

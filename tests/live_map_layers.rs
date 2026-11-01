@@ -17,8 +17,24 @@ use uuid::Uuid;
 
 async fn layer(pool: &SqlitePool, owner: &str, name: &str) -> String {
     let id = Uuid::new_v4().to_string();
-    sqlx::query("INSERT INTO layer_model(id,user_id,layer_name,is_master,create_at,update_at) VALUES($1,$2,$3,false,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
-        .bind(&id).bind(owner).bind(name).execute(pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO layer_model (
+            id,
+            user_id,
+            layer_name,
+            is_master,
+            create_at,
+            update_at
+        ) VALUES ($1, $2, $3, false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        "#,
+    )
+    .bind(&id)
+    .bind(owner)
+    .bind(name)
+    .execute(pool)
+    .await
+    .unwrap();
     id
 }
 fn payload(member: &str, selection: Option<Vec<String>>) -> CreateLiveMapPayload {
@@ -49,11 +65,18 @@ async fn contents(pool: &SqlitePool, public: &str) -> Value {
 }
 async fn publisher(pool: &SqlitePool, name: &str) -> String {
     let id = common::create_test_admin(pool, name).await;
-    sqlx::query("UPDATE user_model SET can_share_live_location=true WHERE id=$1")
-        .bind(&id)
-        .execute(pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE user_model
+        SET
+            can_share_live_location = true
+        WHERE id = $1
+        "#,
+    )
+    .bind(&id)
+    .execute(pool)
+    .await
+    .unwrap();
     id
 }
 
@@ -111,11 +134,18 @@ async fn selection_is_owned_explicit_atomic_and_excludes_master() {
         .await
         .unwrap();
     assert_eq!(contents(&pool, public).await["layers"][0]["id"], json!(b));
-    let creator: String = sqlx::query_scalar("SELECT created_by FROM live_map WHERE id=$1")
-        .bind(&map.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let creator: String = sqlx::query_scalar(
+        r#"
+        SELECT
+            created_by
+        FROM live_map
+        WHERE id = $1
+        "#,
+    )
+    .bind(&map.id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(creator, first);
     update(&pool, &second, &map.id, &first, Some(vec![]))
         .await
@@ -130,9 +160,60 @@ async fn public_page_uses_latest_objects_and_respects_access_and_deletion() {
     let chosen = layer(&pool, &admin, "選択レイヤ").await;
     let master = common::master_layer_id(&pool, &admin).await;
     for id in [&chosen, &master] {
-        sqlx::query("INSERT INTO marker_info_model(id,user_id,layer_id,marker_name,latitude,longitude,detail,create_at,update_at) VALUES($1,$2,$3,'marker',35,139,'memo',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
-            .bind(Uuid::new_v4().to_string()).bind(&admin).bind(id).execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO shape_model(id,user_id,layer_id,shape_type,name,geojson,created_at,updated_at) VALUES($1,$2,$3,'circle','circle',$4,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
+        sqlx::query(
+            r#"
+            INSERT INTO marker_info_model (
+                id,
+                user_id,
+                layer_id,
+                marker_name,
+                latitude,
+                longitude,
+                detail,
+                create_at,
+                update_at
+            ) VALUES (
+                $1,
+                $2,
+                $3,
+                'marker',
+                35,
+                139,
+                'memo',
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(&admin)
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO shape_model (
+                id,
+                user_id,
+                layer_id,
+                shape_type,
+                name,
+                geojson,
+                created_at,
+                updated_at
+            ) VALUES (
+                $1,
+                $2,
+                $3,
+                'circle',
+                'circle',
+                $4,
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP
+            )
+            "#,
+        )
             .bind(Uuid::new_v4().to_string()).bind(&admin).bind(id).bind(json!({"type":"Feature","geometry":{"type":"Point","coordinates":[139,35]},"properties":{"radius":100}}).to_string()).execute(&pool).await.unwrap();
     }
     let Json(map) = create_live_map_handler(
@@ -147,11 +228,18 @@ async fn public_page_uses_latest_objects_and_respects_access_and_deletion() {
     let data = contents(&pool, public).await;
     assert_eq!(data["markers"].as_array().unwrap().len(), 1);
     assert_eq!(data["shapes"].as_array().unwrap().len(), 1);
-    sqlx::query("UPDATE marker_info_model SET detail='latest' WHERE layer_id=$1")
-        .bind(&chosen)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE marker_info_model
+        SET
+            detail = 'latest'
+        WHERE layer_id = $1
+        "#,
+    )
+    .bind(&chosen)
+    .execute(&pool)
+    .await
+    .unwrap();
     let tera = geocode_web_single::build_tera_extension().unwrap();
     tera.lock()
         .await
@@ -215,12 +303,20 @@ async fn public_page_uses_latest_objects_and_respects_access_and_deletion() {
         .await
         .unwrap();
     assert!(!std::str::from_utf8(&html).unwrap().contains("latest"));
-    sqlx::query("UPDATE live_map SET expires_at=$2, password_hash=NULL WHERE id=$1")
-        .bind(&map.id)
-        .bind(Utc::now() - Duration::minutes(1))
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE live_map
+        SET
+            expires_at = $2,
+            password_hash = NULL
+        WHERE id = $1
+        "#,
+    )
+    .bind(&map.id)
+    .bind(Utc::now() - Duration::minutes(1))
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(contents(&pool, new_public).await["layers"], json!([]));
     let expired = live_map_page_handler(
         HeaderMap::new(),
@@ -236,15 +332,26 @@ async fn public_page_uses_latest_objects_and_respects_access_and_deletion() {
         .unwrap();
     assert!(!std::str::from_utf8(&html).unwrap().contains("latest"));
 
-    sqlx::query("DELETE FROM layer_model WHERE id=$1")
-        .bind(&chosen)
-        .execute(&pool)
-        .await
-        .unwrap();
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM live_map_layer")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        DELETE FROM layer_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(&chosen)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            COUNT(*)
+        FROM live_map_layer
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(count, 0);
 }
 
@@ -346,11 +453,16 @@ async fn selection_waits_for_concurrent_layer_deletion() {
     .await
     .unwrap();
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
-    sqlx::query("DELETE FROM layer_model WHERE id=$1")
-        .bind(&b)
-        .execute(&mut *tx)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        DELETE FROM layer_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(&b)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
     let worker_pool = pool.clone();
     let map_id = map.id.clone();
     let worker =
@@ -361,12 +473,18 @@ async fn selection_waits_for_concurrent_layer_deletion() {
     assert!(!worker.is_finished());
     tx.commit().await.unwrap();
     assert!(worker.await.unwrap().is_err());
-    let ids: Vec<String> =
-        sqlx::query_scalar("SELECT layer_id FROM live_map_layer WHERE map_id=$1")
-            .bind(&map.id)
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+    let ids: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT
+            layer_id
+        FROM live_map_layer
+        WHERE map_id = $1
+        "#,
+    )
+    .bind(&map.id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
     assert_eq!(ids, vec![a]);
     pool.close().await;
     for attempt in 0..50 {

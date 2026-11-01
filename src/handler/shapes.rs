@@ -129,8 +129,7 @@ pub async fn create_shape_handler(
             geojson,
             created_at,
             updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING id,user_id,layer_id,shape_type,name,geojson,created_at,updated_at
         "#,
     )
@@ -200,8 +199,26 @@ pub async fn update_shape_geometry_handler(
 ) -> Result<Json<ShapeObject>, AppError> {
     let mut tx = super::answer_sqlite::begin_write(&pool).await?;
     let current = sqlx::query_as::<_, ShapeObject>(
-        "SELECT id,user_id,layer_id,shape_type,name,geojson,created_at,updated_at FROM shape_model WHERE id=$1 AND user_id=$2"
-    ).bind(&shape_id).bind(&user_id).fetch_optional(&mut *tx).await?.ok_or(AppError::NotFound)?;
+        r#"
+        SELECT
+            id,
+            user_id,
+            layer_id,
+            shape_type,
+            name,
+            geojson,
+            created_at,
+            updated_at
+        FROM shape_model
+        WHERE id = $1
+            AND user_id = $2
+        "#,
+    )
+    .bind(&shape_id)
+    .bind(&user_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
     let matches_base = current
         .geojson
         .get("geometry")
@@ -227,9 +244,31 @@ pub async fn update_shape_geometry_handler(
     geometry.insert("coordinates".into(), payload.coordinates);
     validate_shape_geojson(&payload.shape_type, &geojson)?;
     let saved = sqlx::query_as::<_, ShapeObject>(
-        "UPDATE shape_model SET geojson=$1,shape_type=$2,updated_at=$3 WHERE id=$4 AND user_id=$5 RETURNING id,user_id,layer_id,shape_type,name,geojson,created_at,updated_at"
-    ).bind(geojson).bind(payload.shape_type).bind(Utc::now().naive_utc()).bind(&shape_id).bind(&user_id)
-        .fetch_one(&mut *tx).await?;
+        r#"
+        UPDATE shape_model
+        SET
+            geojson = $1,
+            shape_type = $2,
+            updated_at = $3
+        WHERE id = $4
+            AND user_id = $5
+        RETURNING id,
+        user_id,
+        layer_id,
+        shape_type,
+        name,
+        geojson,
+        created_at,
+        updated_at
+        "#,
+    )
+    .bind(geojson)
+    .bind(payload.shape_type)
+    .bind(Utc::now().naive_utc())
+    .bind(&shape_id)
+    .bind(&user_id)
+    .fetch_one(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(Json(saved))
 }
@@ -242,13 +281,20 @@ pub async fn update_shape_handler(
     Json(payload): Json<ShapeUpdateJsonData>,
 ) -> Result<Json<ShapeUpdatedResponse>, AppError> {
     let mut tx = super::answer_sqlite::begin_write(&pool).await?;
-    let previous_layer: String =
-        sqlx::query_scalar("SELECT layer_id FROM shape_model WHERE id=$1 AND user_id=$2")
-            .bind(&shape_id)
-            .bind(&user_id)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or(AppError::NotFound)?;
+    let previous_layer: String = sqlx::query_scalar(
+        r#"
+        SELECT
+            layer_id
+        FROM shape_model
+        WHERE id = $1
+            AND user_id = $2
+        "#,
+    )
+    .bind(&shape_id)
+    .bind(&user_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
     let normalized_name = normalize_shape_name(payload.name.as_deref())?;
 
     let next_layer_id = payload.layer_id;

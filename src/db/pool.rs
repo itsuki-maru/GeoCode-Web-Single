@@ -71,8 +71,9 @@ const MIGRATIONS: &[Migration] = &[
                 detail CHARACTER VARYING NOT NULL,
                 create_at TEXT NOT NULL,
                 update_at TEXT NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES user_model(id) ON DELETE CASCADE,
-                FOREIGN KEY (layer_id) REFERENCES layer_model(id) ON DELETE CASCADE ON UPDATE CASCADE
+                FOREIGN KEY (user_id) REFERENCES user_model (id) ON DELETE CASCADE,
+                FOREIGN KEY (layer_id) REFERENCES layer_model (id)
+                    ON DELETE CASCADE ON UPDATE CASCADE
             );
             "#,
             r#"
@@ -117,13 +118,14 @@ const MIGRATIONS: &[Migration] = &[
                 id TEXT PRIMARY KEY NOT NULL,
                 user_id TEXT NOT NULL,
                 name TEXT,
-                shape_type CHARACTER VARYING(32) NOT NULL,
+                shape_type CHARACTER VARYING (32) NOT NULL,
                 geojson TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 layer_id TEXT NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES user_model(id) ON DELETE CASCADE,
-                FOREIGN KEY (layer_id) REFERENCES layer_model(id) ON DELETE CASCADE ON UPDATE CASCADE
+                FOREIGN KEY (user_id) REFERENCES user_model (id) ON DELETE CASCADE,
+                FOREIGN KEY (layer_id) REFERENCES layer_model (id)
+                    ON DELETE CASCADE ON UPDATE CASCADE
             );
             "#,
             r#"
@@ -203,7 +205,8 @@ const MIGRATIONS: &[Migration] = &[
             ON marker_icon_model(user_id, create_at DESC);
             "#,
             r#"
-            CREATE INDEX IF NOT EXISTS idx_layer_model_marker_icon_id ON layer_model(marker_icon_id);
+            CREATE INDEX IF NOT EXISTS idx_layer_model_marker_icon_id
+            ON layer_model (marker_icon_id);
             "#,
         ],
     },
@@ -211,10 +214,22 @@ const MIGRATIONS: &[Migration] = &[
         version: 5,
         name: "add_auth_session_security",
         statements: &[
-            "ALTER TABLE user_model ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 0;",
-            "ALTER TABLE user_model ADD COLUMN totp_challenge_id TEXT;",
-            "ALTER TABLE user_model ADD COLUMN totp_challenge_expires_at TEXT;",
-            "ALTER TABLE user_model ADD COLUMN totp_challenge_attempts INTEGER NOT NULL DEFAULT 0;",
+            r#"
+            ALTER TABLE user_model
+            ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 0;
+            "#,
+            r#"
+            ALTER TABLE user_model
+            ADD COLUMN totp_challenge_id TEXT;
+            "#,
+            r#"
+            ALTER TABLE user_model
+            ADD COLUMN totp_challenge_expires_at TEXT;
+            "#,
+            r#"
+            ALTER TABLE user_model
+            ADD COLUMN totp_challenge_attempts INTEGER NOT NULL DEFAULT 0;
+            "#,
             r#"
             CREATE UNIQUE INDEX IF NOT EXISTS user_model_totp_challenge_id_idx
             ON user_model(totp_challenge_id)
@@ -265,7 +280,8 @@ const MIGRATIONS: &[Migration] = &[
                 marker_id TEXT PRIMARY KEY NOT NULL,
                 window_started_at INTEGER NOT NULL,
                 attempt_count INTEGER NOT NULL CHECK (attempt_count >= 0),
-                FOREIGN KEY (marker_id) REFERENCES marker_form_config_model(marker_id) ON DELETE CASCADE
+                FOREIGN KEY (marker_id) REFERENCES marker_form_config_model (marker_id)
+                    ON DELETE CASCADE
             );
             "#,
             r#"
@@ -321,7 +337,8 @@ const MIGRATIONS: &[Migration] = &[
                 shape_id TEXT PRIMARY KEY NOT NULL,
                 window_started_at INTEGER NOT NULL,
                 attempt_count INTEGER NOT NULL CHECK (attempt_count >= 0),
-                FOREIGN KEY (shape_id) REFERENCES shape_form_config_model(shape_id) ON DELETE CASCADE
+                FOREIGN KEY (shape_id) REFERENCES shape_form_config_model (shape_id)
+                    ON DELETE CASCADE
             );
             "#,
         ],
@@ -331,83 +348,83 @@ const MIGRATIONS: &[Migration] = &[
         name: "create_live_location_models",
         statements: &[
             r#"
-ALTER TABLE user_model
-ADD COLUMN can_share_live_location BOOLEAN NOT NULL DEFAULT FALSE;
+            ALTER TABLE user_model
+            ADD COLUMN can_share_live_location BOOLEAN NOT NULL DEFAULT FALSE;
             "#,
             r#"
-CREATE TABLE IF NOT EXISTS live_location_session (
-    user_id TEXT PRIMARY KEY NOT NULL,
-    session_id TEXT NOT NULL UNIQUE,
-    latitude REAL NOT NULL CHECK (latitude BETWEEN -90 AND 90),
-    longitude REAL NOT NULL CHECK (longitude BETWEEN -180 AND 180),
-    accuracy_m REAL CHECK (accuracy_m IS NULL OR accuracy_m >= 0),
-    heading_deg REAL CHECK (heading_deg IS NULL OR heading_deg BETWEEN 0 AND 360),
-    speed_mps REAL CHECK (speed_mps IS NULL OR speed_mps >= 0),
-    sequence_no INTEGER NOT NULL DEFAULT 0 CHECK (sequence_no >= 0),
-    observed_at TEXT NOT NULL,
-    received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES user_model(id) ON DELETE CASCADE
-);
+            CREATE TABLE IF NOT EXISTS live_location_session (
+                user_id TEXT PRIMARY KEY NOT NULL,
+                session_id TEXT NOT NULL UNIQUE,
+                latitude REAL NOT NULL CHECK (latitude BETWEEN -90 AND 90),
+                longitude REAL NOT NULL CHECK (longitude BETWEEN -180 AND 180),
+                accuracy_m REAL CHECK (accuracy_m IS NULL OR accuracy_m >= 0),
+                heading_deg REAL CHECK (heading_deg IS NULL OR heading_deg BETWEEN 0 AND 360),
+                speed_mps REAL CHECK (speed_mps IS NULL OR speed_mps >= 0),
+                sequence_no INTEGER NOT NULL DEFAULT 0 CHECK (sequence_no >= 0),
+                observed_at TEXT NOT NULL,
+                received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES user_model(id) ON DELETE CASCADE
+            );
             "#,
             r#"
-CREATE INDEX IF NOT EXISTS idx_live_location_received_at
-ON live_location_session(received_at);
+            CREATE INDEX IF NOT EXISTS idx_live_location_received_at
+            ON live_location_session(received_at);
             "#,
             r#"
-CREATE TABLE IF NOT EXISTS live_map (
-    id TEXT PRIMARY KEY NOT NULL,
-    public_id TEXT NOT NULL,
-    name CHARACTER VARYING(100) NOT NULL,
-    created_by TEXT NOT NULL,
-    password_hash CHARACTER VARYING(256),
-    access_version INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    expires_at TEXT NOT NULL,
-    revoked_at TEXT,
-    FOREIGN KEY (created_by) REFERENCES user_model(id) ON DELETE CASCADE
-);
+            CREATE TABLE IF NOT EXISTS live_map (
+                id TEXT PRIMARY KEY NOT NULL,
+                public_id TEXT NOT NULL,
+                name CHARACTER VARYING(100) NOT NULL,
+                created_by TEXT NOT NULL,
+                password_hash CHARACTER VARYING(256),
+                access_version INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expires_at TEXT NOT NULL,
+                revoked_at TEXT,
+                FOREIGN KEY (created_by) REFERENCES user_model(id) ON DELETE CASCADE
+            );
             "#,
             r#"
-CREATE INDEX IF NOT EXISTS idx_live_map_active
-ON live_map(expires_at) WHERE revoked_at IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_live_map_active
+            ON live_map(expires_at) WHERE revoked_at IS NULL;
             "#,
             r#"
-CREATE UNIQUE INDEX IF NOT EXISTS idx_live_map_public_id
-ON live_map(public_id);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_live_map_public_id
+            ON live_map(public_id);
             "#,
             r#"
-CREATE UNIQUE INDEX IF NOT EXISTS idx_live_map_single_unrevoked
-ON live_map ((1))
-WHERE revoked_at IS NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_live_map_single_unrevoked
+            ON live_map ((1))
+            WHERE revoked_at IS NULL;
             "#,
             r#"
-CREATE TABLE IF NOT EXISTS live_map_member (
-    id TEXT PRIMARY KEY NOT NULL,
-    map_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    display_name CHARACTER VARYING(100) NOT NULL,
-    marker_color CHARACTER VARYING(7) NOT NULL DEFAULT '#1a73e8',
-    sort_order INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (map_id) REFERENCES live_map(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES user_model(id) ON DELETE CASCADE,
-    UNIQUE(map_id, user_id)
-);
+            CREATE TABLE IF NOT EXISTS live_map_member (
+                id TEXT PRIMARY KEY NOT NULL,
+                map_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                display_name CHARACTER VARYING(100) NOT NULL,
+                marker_color CHARACTER VARYING(7) NOT NULL DEFAULT '#1a73e8',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (map_id) REFERENCES live_map(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES user_model(id) ON DELETE CASCADE,
+                UNIQUE(map_id, user_id)
+            );
             "#,
             r#"
-CREATE INDEX IF NOT EXISTS idx_live_map_member_map
-ON live_map_member(map_id);
+            CREATE INDEX IF NOT EXISTS idx_live_map_member_map
+            ON live_map_member(map_id);
             "#,
             r#"
-CREATE TABLE IF NOT EXISTS live_map_password_rate_limit (
-    map_id TEXT NOT NULL,
-    client_key CHARACTER VARYING(64) NOT NULL,
-    window_started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
-    PRIMARY KEY (map_id, client_key),
-    FOREIGN KEY (map_id) REFERENCES live_map(id) ON DELETE CASCADE
-);
+            CREATE TABLE IF NOT EXISTS live_map_password_rate_limit (
+                map_id TEXT NOT NULL,
+                client_key CHARACTER VARYING(64) NOT NULL,
+                window_started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+                PRIMARY KEY (map_id, client_key),
+                FOREIGN KEY (map_id) REFERENCES live_map(id) ON DELETE CASCADE
+            );
             "#,
         ],
     },
@@ -429,8 +446,15 @@ CREATE TABLE IF NOT EXISTS live_map_password_rate_limit (
         version: 12,
         name: "add_include_tile_overlays_to_temporary_urls",
         statements: &[
-            "ALTER TABLE temporary_urls ADD COLUMN include_tile_overlays BOOLEAN NOT NULL DEFAULT 0;",
-            "UPDATE temporary_urls SET include_tile_overlays = 1;",
+            r#"
+            ALTER TABLE temporary_urls
+            ADD COLUMN include_tile_overlays BOOLEAN NOT NULL DEFAULT 0;
+            "#,
+            r#"
+            UPDATE temporary_urls
+            SET
+                include_tile_overlays = 1;
+            "#,
         ],
     },
     Migration {
@@ -561,8 +585,7 @@ pub async fn create_user_with_master_layer(
             is_basic_authed_at,
             totp_secret,
             totp_temp_secret
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         RETURNING id
         "#,
         new_user_id,
@@ -600,8 +623,7 @@ pub async fn create_user_with_master_layer(
             is_master,
             create_at,
             update_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6)
+        ) VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id
         "#,
         new_layer_id,
@@ -641,9 +663,15 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), Error> {
     .execute(&mut *tx)
     .await?;
 
-    let applied_rows = sqlx::query("SELECT version FROM schema_migrations")
-        .fetch_all(&mut *tx)
-        .await?;
+    let applied_rows = sqlx::query(
+        r#"
+        SELECT
+            version
+        FROM schema_migrations
+        "#,
+    )
+    .fetch_all(&mut *tx)
+    .await?;
     let applied_versions = applied_rows
         .iter()
         .map(|row| row.get::<i64, _>("version"))
@@ -660,8 +688,11 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), Error> {
 
         sqlx::query(
             r#"
-            INSERT INTO schema_migrations (version, name, applied_at)
-            VALUES ($1, $2, $3)
+            INSERT INTO schema_migrations (
+                version,
+                name,
+                applied_at
+            ) VALUES ($1, $2, $3)
             "#,
         )
         .bind(migration.version)

@@ -82,7 +82,13 @@ where
         return Ok(false);
     };
     let stored_hash: Option<Vec<u8>> = sqlx::query_scalar(
-        "SELECT payload_sha256 FROM json_import_receipt_model WHERE user_id=$1 AND request_id=$2",
+        r#"
+        SELECT
+            payload_sha256
+        FROM json_import_receipt_model
+        WHERE user_id = $1
+            AND request_id = $2
+        "#,
     )
     .bind(user.to_owned())
     .bind(request.id.clone())
@@ -108,7 +114,13 @@ where
         return Ok(());
     };
     sqlx::query(
-        "INSERT INTO json_import_receipt_model (user_id,request_id,payload_sha256) VALUES ($1,$2,$3)",
+        r#"
+        INSERT INTO json_import_receipt_model (
+            user_id,
+            request_id,
+            payload_sha256
+        ) VALUES ($1, $2, $3)
+        "#,
     )
     .bind(user.to_owned())
     .bind(request.id.clone())

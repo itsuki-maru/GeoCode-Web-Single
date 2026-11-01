@@ -20,7 +20,14 @@ pub async fn update_handler(
 ) -> Result<Json<InputPolicy>, AppError> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let updated = sqlx::query(
-        "UPDATE layer_model SET restrict_free_text=$1, update_at=$4 WHERE id=$2 AND user_id=$3",
+        r#"
+        UPDATE layer_model
+        SET
+            restrict_free_text = $1,
+            update_at = $4
+        WHERE id = $2
+            AND user_id = $3
+        "#,
     )
     .bind(policy.restrict_free_text)
     .bind(layer)
@@ -40,12 +47,20 @@ pub(crate) async fn restricted(
     user: &str,
     layer: &str,
 ) -> Result<bool, AppError> {
-    sqlx::query_scalar("SELECT restrict_free_text FROM layer_model WHERE id=$1 AND user_id=$2")
-        .bind(layer)
-        .bind(user)
-        .fetch_optional(&mut **tx)
-        .await?
-        .ok_or(AppError::NotFound)
+    sqlx::query_scalar(
+        r#"
+        SELECT
+            restrict_free_text
+        FROM layer_model
+        WHERE id = $1
+            AND user_id = $2
+        "#,
+    )
+    .bind(layer)
+    .bind(user)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(AppError::NotFound)
 }
 
 pub(crate) fn reject_change(restricted: bool, changed: bool) -> Result<(), AppError> {

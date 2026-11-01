@@ -194,22 +194,35 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .unwrap();
-        sqlx::query(r#"
-        CREATE TABLE temporary_urls (id TEXT PRIMARY KEY, password_hash TEXT, expiration TEXT NOT NULL)
-        "#)
-            .execute(&pool).await.unwrap();
+        sqlx::query(
+            r#"
+            CREATE TABLE temporary_urls (
+                id TEXT PRIMARY KEY,
+                password_hash TEXT,
+                expiration TEXT NOT NULL
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         let future = (chrono::Utc::now() + chrono::Duration::minutes(10))
             .naive_utc()
             .to_string();
         let secret = b"share-test-secret";
         for password in [None, Some("password-hash")] {
-            sqlx::query("INSERT OR REPLACE INTO temporary_urls VALUES (?, ?, ?)")
-                .bind("shared-map")
-                .bind(password)
-                .bind(&future)
-                .execute(&pool)
-                .await
-                .unwrap();
+            sqlx::query(
+                r#"
+                INSERT OR REPLACE INTO temporary_urls
+                VALUES (?, ?, ?)
+                "#,
+            )
+            .bind("shared-map")
+            .bind(password)
+            .bind(&future)
+            .execute(&pool)
+            .await
+            .unwrap();
             let claims = ShareClaims {
                 purpose: "address_search".into(),
                 id: "shared-map".into(),

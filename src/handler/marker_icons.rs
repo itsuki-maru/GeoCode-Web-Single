@@ -134,9 +134,13 @@ pub async fn upload_marker_icon_handler(
 
     let insert_result = sqlx::query(
         r#"
-        INSERT INTO marker_icon_model
-            (id, user_id, filename, uuid_filename, create_at)
-            VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO marker_icon_model (
+            id,
+            user_id,
+            filename,
+            uuid_filename,
+            create_at
+        ) VALUES ($1, $2, $3, $4, $5)
         "#,
     )
     .bind(&icon_id)

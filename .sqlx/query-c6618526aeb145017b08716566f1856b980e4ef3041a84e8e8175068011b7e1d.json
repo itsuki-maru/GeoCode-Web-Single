@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO layer_model (\n                    id,\n                    user_id,\n                    layer_name,\n                    is_master,\n                    create_at,\n                    update_at\n                ) VALUES ($1, $2, $3, $4, $5, $6)\n                RETURNING id\n                ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c6618526aeb145017b08716566f1856b980e4ef3041a84e8e8175068011b7e1d"
+}

@@ -354,8 +354,11 @@ pub async fn create_live_map_handler(
     sqlx::query(
         r#"
         UPDATE live_map
-        SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-        WHERE revoked_at IS NULL AND julianday(expires_at) <= julianday('now')
+        SET
+            revoked_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE revoked_at IS NULL
+            AND julianday(expires_at) <= julianday('now')
         "#,
     )
     .execute(&mut *transaction)
@@ -486,11 +489,21 @@ pub async fn update_live_map_handler(
     let result = sqlx::query(
         r#"
         UPDATE live_map
-        SET name = $1, expires_at = $2, use_tile_overlays = $6,
-            password_hash = CASE WHEN $3 THEN $4 ELSE password_hash END,
-            access_version = CASE WHEN $3 THEN access_version + 1 ELSE access_version END,
+        SET
+            name = $1,
+            expires_at = $2,
+            use_tile_overlays = $6,
+            password_hash = CASE
+                WHEN $3 THEN $4
+                ELSE password_hash
+            END,
+            access_version = CASE
+                WHEN $3 THEN access_version + 1
+                ELSE access_version
+            END,
             updated_at = CURRENT_TIMESTAMP
-        WHERE id = $5 AND revoked_at IS NULL
+        WHERE id = $5
+            AND revoked_at IS NULL
         "#,
     )
     .bind(payload.name.trim())
@@ -544,10 +557,19 @@ pub async fn rotate_live_map_url_handler(
     let row = sqlx::query_as::<_, LiveMapAccessRow>(
         r#"
         UPDATE live_map
-        SET public_id = $1, access_version = access_version + 1,
+        SET
+            public_id = $1,
+            access_version = access_version + 1,
             updated_at = CURRENT_TIMESTAMP
-        WHERE id = $2 AND revoked_at IS NULL AND julianday(expires_at) > julianday('now')
-        RETURNING id, public_id, name, password_hash, access_version, expires_at
+        WHERE id = $2
+            AND revoked_at IS NULL
+            AND julianday(expires_at) > julianday('now')
+        RETURNING id,
+        public_id,
+        name,
+        password_hash,
+        access_version,
+        expires_at
         "#,
     )
     .bind(&public_id)
