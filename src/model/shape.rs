@@ -41,7 +41,7 @@ pub struct ShapeUpdateJsonData {
     pub body_token: Option<String>,
 }
 
-/// Coordinate-only updates cannot carry memo, style, layer, or name changes.
+/// 座標のみの更新では、メモ、スタイル、レイヤ、名前の変更を受け付けない。
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ShapeGeometryUpdateData {

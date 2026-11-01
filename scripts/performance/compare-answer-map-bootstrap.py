@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Compare private answer-map HTML without executing JavaScript or printing data.
+"""JavaScript の実行やデータの出力を行わず、非公開の回答地図 HTML を比較する。
 
-Inputs and the aggregate-only report must remain below either checkout's target/.
-Accepts either a legacy JavaScript object literal or the application/json block;
-JavaScript is never evaluated. Object keys are sorted; array order, strings and
-all JSON numeric digits remain significant. Optional normal-body references are
-strictly restored to canonical data before comparison. Only
-answerPreview.query.as_of is excluded. Run outside timed trials.
+入力と集計結果だけのレポートは、いずれかのチェックアウトの target/ 内に置く。
+旧形式の JavaScript オブジェクトリテラルと application/json ブロックに対応するが、
+JavaScript は評価しない。オブジェクトのキーは並べ替え、配列の順序、文字列、
+JSON 数値の全桁は比較対象として保持する。任意の通常本文への参照は、
+比較前に厳密に正規データへ復元する。比較から除外するのは
+answerPreview.query.as_of のみとする。時間計測の対象外で実行する。
 
-Example (from the PostgreSQL checkout):
+実行例（PostgreSQL 版のチェックアウトから）:
   python -B scripts/performance/compare-answer-map-bootstrap.py \
     --before GeoCode-Web-Single/target/answer-map-popup-before/map.html \
     --after GeoCode-Web-Single/target/answer-map-popup-after/map.html \
     --output target/answer-map-popup-bootstrap-comparison.json
 
-Exit codes: 0 equal, 1 different, 2 invalid input/diagnostic failure.
-The optional --self-test uses synthetic values and does not read private files.
+終了コード: 0 は一致、1 は不一致、2 は入力不正または診断失敗。
+任意の --self-test は人工的な値を使い、非公開のファイルは読み込まない。
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ JSON_TYPE = re.compile(r'''\btype\s*=\s*["']application/json["']''', re.IGNORECA
 
 
 class DiagnosticError(Exception):
-    """The error code is fixed diagnostic text, never source content."""
+    """エラーコードには固定の診断テキストを使い、ソースの内容は含めない。"""
 
 
 def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -95,7 +95,7 @@ def json_value(source: str, position: int) -> tuple[Any, int]:
 
 
 def initial_view(source: str, position: int) -> tuple[dict[str, Any], int]:
-    # The template uses JS property identifiers here. Values themselves are JSON.
+    # テンプレートでは、ここに JS のプロパティ識別子を使う。値自体は JSON である。
     position = expect(source, position, "{")
     result: dict[str, Any] = {}
     while True:
@@ -178,16 +178,16 @@ def canonical_chunks(value: Any) -> Iterator[str]:
     elif value is False:
         yield "false"
     elif isinstance(value, str):
-        # ASCII escaping preserves Unicode code points and lone surrogate values.
+        # ASCII エスケープにより、Unicode のコードポイントと単独のサロゲート値を保持する。
         yield json.dumps(value, ensure_ascii=True)
     elif isinstance(value, int):
         yield str(value)
     elif isinstance(value, Decimal):
         if not value.is_finite():
             raise DiagnosticError("non_finite_json_number")
-        # No float conversion or Decimal.normalize(): both can round large values.
-        # Decimal retains all input digits and signed zero; exponent spelling is
-        # canonicalized by Decimal itself. Numeric reformatting can fail safely.
+        # 浮動小数点への変換や Decimal.normalize() は、大きな値を丸める可能性があるため使わない。
+        # Decimal は入力の全桁と符号付きゼロを保持し、指数表記は
+        # Decimal 自体が正規化する。数値の再整形に失敗しても安全に終了できる。
         yield str(value)
     elif isinstance(value, list):
         yield "["
@@ -232,7 +232,7 @@ def private_path(raw: str, *, existing: bool) -> Path:
 
 
 def restore_normal_body_references(value: dict[str, Any]) -> dict[str, Any]:
-    """Mirror the JSON-only product codec without eval or numeric conversion."""
+    """eval や数値変換を使わず、製品側の JSON 専用コーデックを再現する。"""
     if "normalBodyReferences" not in value:
         return {"present": False, "markers": 0, "shapes": 0}
     metadata = value["normalBodyReferences"]
@@ -290,8 +290,8 @@ def restore_normal_body_references(value: dict[str, Any]) -> dict[str, Any]:
                 or not isinstance(shape["geojson"].get("properties"), dict)):
             raise DiagnosticError("invalid_body_reference_shape")
         prepare("shape", item, shape["geojson"]["properties"], "memo")
-    # Validate every reference before changing any canonical value. JSON objects
-    # contain only own entries; __proto__ is an ordinary key, never a prototype.
+    # 正規の値を変更する前に、すべての参照を検証する。JSON オブジェクトに含まれるのは
+    # 自身の項目のみであり、__proto__ も通常のキーとして扱い、プロトタイプにはしない。
     for target, field, free, managed in updates:
         target[field] = free + managed
     del value["normalBodyReferences"]
@@ -299,8 +299,8 @@ def restore_normal_body_references(value: dict[str, Any]) -> dict[str, Any]:
 
 
 def fingerprint_source(source: str) -> dict[str, Any]:
-    # Cross-section references require a complete local value during restoration.
-    # It is never published or timed as part of the application/browser benchmark.
+    # セクションをまたぐ参照の復元には、ローカルで完全な値を用意する必要がある。
+    # この値は外部に公開せず、アプリやブラウザーのベンチマークの計測にも含めない。
     values = dict(bootstrap_sections(source))
     transport = restore_normal_body_references(values)
     sections: dict[str, Any] = {}
@@ -339,7 +339,7 @@ def fingerprint_source(source: str) -> dict[str, Any]:
 
 
 def fingerprint_file(path: Path) -> dict[str, Any]:
-    # Never print a decoder exception, HTML fragment, private key/path or content.
+    # デコーダーの例外、HTML 断片、非公開のキー・パス・内容は出力しない。
     result = fingerprint_source(path.read_text(encoding="utf-8"))
     result["htmlBytes"] = path.stat().st_size
     return result
@@ -447,7 +447,7 @@ def codec_self_tests() -> int:
     assert len(decoded["sections"]) == 11 and decoded["transport"] == {
         "present": True, "version": 1, "markers": 1, "shapes": 1}
     passed += 1
-    # Own prototype-named entries are ordinary JSON keys, not inherited lookups.
+    # プロトタイプと同名の自身の項目は、継承された値を参照せず、通常の JSON キーとして扱う。
     prototype = deepcopy(encoded)
     prototype["markers"]["__proto__"] = prototype["markers"].pop("same")
     prototype["markers"]["__proto__"]["id"] = "__proto__"
@@ -455,7 +455,7 @@ def codec_self_tests() -> int:
     prototype["normalBodyReferences"]["markers"] = ["__proto__"]
     assert fingerprint(prototype)["transport"]["markers"] == 1
     passed += 1
-    # Empty strings and an empty sidecar remain valid; unreferenced fields remain.
+    # 空文字列や空の補助データも有効とし、参照されていないフィールドはそのまま残す。
     empty = deepcopy(encoded)
     empty["popupBodies"]["shape:same"].update({"free_text": "", "managed_markdown": ""})
     empty_value = dict(bootstrap_sections(source(empty)))
@@ -467,7 +467,7 @@ def codec_self_tests() -> int:
     empty_metadata["normalBodyReferences"] = {"version": 1, "markers": [], "shapes": []}
     assert comparison(canonical, fingerprint(empty_metadata))["equalExceptQueryAsOf"]
     passed += 1
-    # UTF-16 concatenation can join surrogate halves without changing JSON text.
+    # UTF-16 の連結でサロゲートの片割れが結合しても、JSON テキストは変わらない。
     surrogate = deepcopy(encoded)
     surrogate["popupBodies"]["shape:same"].update({"free_text": "\ud83d", "managed_markdown": "\ude00"})
     surrogate_canonical = deepcopy(surrogate)
@@ -602,6 +602,6 @@ if __name__ == "__main__":
         print(json.dumps({"error": str(error)}), file=sys.stderr)
         raise SystemExit(2)
     except Exception:
-        # No tracebacks/JSON source excerpts or private path names in logs.
+        # トレースバック、JSON ソースの抜粋、非公開のパス名はログに出力しない。
         print(json.dumps({"error": "comparison_failed"}), file=sys.stderr)
         raise SystemExit(2)

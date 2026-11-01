@@ -203,7 +203,7 @@ fn onetime_url_test_tera() -> Arc<Mutex<Tera>> {
     Arc::new(Mutex::new(tera))
 }
 
-// レイヤの取得・作成・更新・削除と、master layer が削除拒否されることを確認する。
+// レイヤの取得・作成・更新・削除と、マスターレイヤが削除拒否されることを確認する。
 #[tokio::test]
 async fn layer_handlers_cover_create_read_update_delete() {
     let pool = common::test_pool().await;

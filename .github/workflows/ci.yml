@@ -52,7 +52,7 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefix ${{ matrix.app }}
 
-      # Frontend tests import the sibling template sources; jobs do not share node_modules.
+      # フロントエンドのテストは隣接するテンプレートのソースを読み込む。ジョブ間では node_modules を共有しない。
       - name: Install template test dependencies
         if: matrix.app == 'src_frontend/frontend'
         run: npm ci --prefix src_frontend/template-scripts
@@ -87,7 +87,7 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefix src_frontend/template-scripts
 
-      # Shared integration suites import frontend tests, tsconfigs, and vendor assets.
+      # 共通の統合テスト群は、フロントエンドのテスト、tsconfig、外部ライブラリのアセットを読み込む。
       - name: Install frontend test dependencies
         run: npm ci --prefix src_frontend/frontend
 

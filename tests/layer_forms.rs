@@ -857,7 +857,7 @@ async fn input_policy_blocks_free_writes_but_keeps_names_moves_and_form_answers(
         ok(&app, user, "GET", "/layer/read/all", None).await[locked.to_string()]["restrict_free_text"],
         false
     );
-    // Empty detail is valid, but a name is still required.
+    // 詳細が空でも有効だが、名前は引き続き必須とする。
     ok(
         &app,
         user,
@@ -922,7 +922,7 @@ async fn input_policy_blocks_free_writes_but_keeps_names_moves_and_form_answers(
         ok(&app, user, "GET", "/layer/read/all", None).await[locked.to_string()]["restrict_free_text"],
         true
     );
-    // Full legacy payload with unchanged protected values remains valid.
+    // 保護対象の値を変えていない、旧形式の完全なペイロードは引き続き有効とする。
     ok(
         &app,
         user,
@@ -980,7 +980,7 @@ async fn input_policy_blocks_free_writes_but_keeps_names_moves_and_form_answers(
             "{key}"
         );
     }
-    marker(&app, user, locked).await; // Initial coordinates with empty detail are allowed.
+    marker(&app, user, locked).await; // 詳細が空の初期座標も許可する。
     assert_eq!(
         call(
             &app,
@@ -1080,7 +1080,7 @@ async fn input_policy_blocks_free_writes_but_keeps_names_moves_and_form_answers(
             .unwrap()
             .contains("42")
     );
-    // Move alone is allowed; moving into a restricted layer also checks protected values.
+    // 移動だけなら許可するが、制限のあるレイヤへの移動では保護対象の値も確認する。
     ok(
         &app,
         user,
@@ -1507,7 +1507,7 @@ async fn ambiguous_legacy_answers_require_explicit_reconciliation_and_recheck_bo
     .await
     .unwrap();
     let id = Uuid::parse_str(&id).unwrap();
-    // New submissions already carry stable IDs, even when their rendered texts are identical.
+    // 新しい送信データには、描画したテキストが同一でも、すでに安定した ID が付いている。
     assert_eq!(
         correct(
             &app,
@@ -2051,7 +2051,7 @@ async fn vertex_updates_keep_latest_form_answers_and_reject_mixed_writes() {
         Some(json!({"restrict_free_text":true})),
     )
     .await;
-    // The vertex editor starts before another form answer is saved/corrected.
+    // 別のフォーム回答の保存・修正より前に、頂点の編集を開始する。
     owner_post(&app, user, "shape", id, "1").await;
     owner_post(&app, user, "shape", id, "2").await;
     let answer: String = sqlx::query_scalar(
@@ -2125,7 +2125,7 @@ async fn vertex_updates_keep_latest_form_answers_and_reject_mixed_writes() {
         json!([[139, 35], [139.5, 35.5], [140, 36]]),
         "polyline",
     );
-    // JS/JSON may spell stored integer coordinates as decimals or exponents.
+    // JS/JSON では、保存済みの整数座標が小数や指数形式で表記される場合がある。
     request["base_geometry"] =
         serde_json::from_str(r#"{"coordinates":[[139.0,35e0],[140,36.00]],"type":"LineString"}"#)
             .unwrap();
@@ -2194,7 +2194,7 @@ async fn vertex_updates_keep_latest_form_answers_and_reject_mixed_writes() {
             .iter()
             .any(|a| a["submitted_values"]["n"] == 3)
     );
-    // A stale geometry cannot overwrite a newer geometry.
+    // 古い図形情報で新しい図形情報を上書きできないようにする。
     assert_eq!(
         call(&app, Some(user), "PUT", &path, Some(request)).await.0,
         StatusCode::CONFLICT

@@ -1,4 +1,4 @@
-//! Read-only measurement of the real initial answer handlers; no application startup/migrations.
+//! 実際の回答ハンドラーの初回処理を読み取り専用で計測し、アプリの起動やマイグレーションは行わない。
 use axum::{Json, extract::Extension};
 use geocode_web_single::handler::form_answers::{
     AnswerQuery, answer_options_handler, search_answers_handler,
@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
         ..Default::default()
     };
     let mut trials = Vec::new();
-    // One warm-up, then the independent options and search requests run together.
+    // 一度ウォームアップしてから、互いに独立した選択肢取得と検索のリクエストを同時に実行する。
     for trial in 0..=samples {
         let started = Instant::now();
         let (options, page) = tokio::try_join!(

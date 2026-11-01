@@ -1,6 +1,6 @@
-// Real Vue components + authenticated SQLite HTTP API. Frontend sources are read only.
-// First: cargo test --test map_presets_browser -- --ignored --nocapture
-// Then: node scripts/check-map-presets-sqlite.mjs --playwright-path=/path/to/playwright/index.mjs
+// 実際の Vue コンポーネントと、認証付きの SQLite HTTP API を使う。フロントエンドのソースは読み取り専用とする。
+// 最初に実行: cargo test --test map_presets_browser -- --ignored --nocapture
+// 続けて実行: node scripts/check-map-presets-sqlite.mjs --playwright-path=/path/to/playwright/index.mjs
 import assert from "node:assert/strict";
 import { readFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";

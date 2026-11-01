@@ -1,4 +1,4 @@
-//! Read-only phase measurement of answer handlers; prints aggregate timings only.
+//! 回答ハンドラーの各段階を読み取り専用で計測し、集計した時間のみを出力する。
 use axum::{Json, extract::Extension};
 use geocode_web_single::handler::form_answers::{
     AnswerQuery, answer_options_handler, search_answers_handler,

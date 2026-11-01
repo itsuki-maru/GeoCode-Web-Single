@@ -185,8 +185,8 @@ async fn transfer_recreates_another_owners_forms_history_and_latest_answers() {
         .to_string();
     let sender = app(&pool, &owner);
     assert_eq!(upload(&sender, &fixture()).await, StatusCode::OK);
-    // Model an existing installation's public/password configuration. None of
-    // these credentials may leave the source or become active on the recipient.
+    // 既存の導入環境にある公開・パスワード設定を再現する。
+    // これらの認証情報を転送元から持ち出したり、転送先で有効にしたりしない。
     let public = Uuid::new_v4().to_string();
     sqlx::query(
         r#"
@@ -499,7 +499,7 @@ async fn transfer_recreates_another_owners_forms_history_and_latest_answers() {
         6,
         "re-import creates independent objects"
     );
-    // This portable export is also read by the SQLite cross-engine tests.
+    // この移植可能なエクスポートは、SQLite とのエンジン間テストでも読み込む。
     std::fs::create_dir_all("target/transfer-tests").unwrap();
     std::fs::write("target/transfer-tests/sqlite-v3.json", text).unwrap();
 }
@@ -548,7 +548,7 @@ async fn transfer_scopes_exports_and_keeps_v2_and_legacy_inputs() {
                 .contains("version 3")
         );
     }
-    // A stored old export must remain readable without a v2 exporter.
+    // 保存済みの旧エクスポートは、v2 のエクスポーターがなくても読み込める状態を維持する。
     let v2: Value = serde_json::from_str(include_str!("fixtures/transfer_v2.json")).unwrap();
     let markers_before = count(&pool, "marker_info_model", &user).await;
     let shapes_before = count(&pool, "shape_model", &user).await;
@@ -971,7 +971,7 @@ async fn corrected_answers_and_body_bindings_survive_transfer_with_fresh_ids() {
     .await
     .unwrap();
     let package = export(&sender, &master(&pool, &user).await, "").await;
-    // The PostgreSQL cross-engine test consumes the edited SQLite export too.
+    // PostgreSQL とのエンジン間テストでも、編集済みの SQLite のエクスポートを読み込む。
     std::fs::create_dir_all("target/transfer-tests").unwrap();
     std::fs::write(
         "target/transfer-tests/sqlite-cross-v3.json",

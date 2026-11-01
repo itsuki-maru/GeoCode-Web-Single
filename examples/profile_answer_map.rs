@@ -1,6 +1,6 @@
-//! Read-only answer-map HTML/API diagnostics against an explicit database copy.
-//! Private artifacts are restricted to this checkout's ignored target directory.
-//! No application startup, dotenv loading, migrations, SQL/bind output or writes to SQLite.
+//! 明示的に指定したデータベースのコピーを使う、読み取り専用の回答地図 HTML/API 診断。
+//! 非公開の成果物は、このチェックアウトの無視対象の target ディレクトリ内に限定する。
+//! アプリの起動、dotenv の読み込み、マイグレーション、SQL・バインド値の出力、SQLite への書き込みは行わない。
 use axum::{
     Form, Json, Router,
     body::to_bytes,
@@ -175,7 +175,7 @@ impl<S: Subscriber> Layer<S> for InitialTrace {
         if event.metadata().target() != "sqlx::query" || !self.0.lock().unwrap().active {
             return;
         }
-        // Classify statement text transiently. Never retain/output SQL or visit binds.
+        // SQL 文のテキストを一時的に分類する。SQL の保持・出力や、バインド値へのアクセスは行わない。
         let mut value = QueryEvent {
             kind: "other",
             elapsed: None,
@@ -289,8 +289,8 @@ async fn instrument_templates(templates: &Templates, trace: &InitialTrace) -> an
             Ok(Value::String(String::new()))
         },
     );
-    // Empty-output functions surround the same compiled production template.
-    // They exclude lock waiting/render setup before the first template node.
+    // 同じコンパイル済みの本番テンプレートの前後に、何も出力しない関数を配置する。
+    // 最初のテンプレートノードより前のロック待ちや描画準備を、計測から除外する。
     tera.add_raw_template(
         "form-answer-map.html",
         &format!("{{{{ profile_render_start() }}}}{source}{{{{ profile_render_end() }}}}"),
@@ -460,7 +460,7 @@ fn private_directory(requested: &Path) -> anyhow::Result<PathBuf> {
             .any(|part| part == Component::ParentDir),
         "Output must stay below target"
     );
-    // Resolve existing ancestors before creating anything, including Windows junctions.
+    // Windows のジャンクションも含め、既存の親ディレクトリを解決してから作成を始める。
     let mut ancestor = requested.as_path();
     let mut missing = vec![];
     while !ancestor.exists() {
@@ -496,8 +496,8 @@ fn private_directory(requested: &Path) -> anyhow::Result<PathBuf> {
 }
 
 fn isolated_config(output: &Path) {
-    // This runs on the initial single thread, before a Tokio runtime exists.
-    // Only this process's environment is changed; no existing config file is read.
+    // Tokio ランタイムが存在しない、起動直後の単一スレッド上で実行する。
+    // このプロセスの環境変数だけを変更し、既存の設定ファイルは読み込まない。
     let remove: Vec<_> = std::env::vars_os()
         .filter_map(|(key, _)| {
             let name = key.to_string_lossy();
@@ -565,8 +565,8 @@ fn main() -> anyhow::Result<()> {
 async fn run(options: Options, output: PathBuf) -> anyhow::Result<()> {
     let trace = options.initial_samples.map(|_| InitialTrace::default());
     if let Some(trace) = &trace {
-        // No formatting layer: SQLx events are reduced to static kinds/ms/rows,
-        // and are collected only during the sequential initial samples.
+        // ログの整形層は使わず、SQLx のイベントを固定の種別・ミリ秒・行数のみに集約し、
+        // 順次実行する初回サンプルの計測中だけ収集する。
         tracing_subscriber::registry()
             .with((*trace).clone())
             .try_init()?;
@@ -798,7 +798,7 @@ async fn run(options: Options, output: PathBuf) -> anyhow::Result<()> {
                 }),
             )
             .route("/form-answers/map", post(local_map_handler))
-            // Read-only editor shell for optional parent-map/cache coexistence diagnostics.
+            // 任意の親地図・キャッシュ共存診断に使う、読み取り専用の編集画面の枠組み。
             .route(
                 "/profile/parent-map",
                 get(geocode_web_single::handler::map::map_get_handler),
@@ -845,7 +845,7 @@ async fn run(options: Options, output: PathBuf) -> anyhow::Result<()> {
             })
             .await;
         pool.close().await;
-        // Only our known private artifacts are removed, never the input copy.
+        // ここで把握している非公開の成果物だけを削除し、入力のコピーは削除しない。
         for name in ["map.html", "filter-cases.json", "manifest.json"] {
             std::fs::remove_file(output.join(name))?;
         }
