@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import {
+  progressSpinnerTransform,
+  progressSpinnerCircle,
+} from "../../../../template-scripts/src/map/common/progress-spinner";
+import "../../../../template-scripts/src/map/common/progress-spinner.css";
 defineProps<{
   isOpen: boolean;
   inline?: boolean;
@@ -7,19 +12,14 @@ defineProps<{
 
 <template>
   <div :class="inline ? 'progress-inline' : 'overlay-progress-bar'" v-show="isOpen">
-    <svg class="spinner" width="50" height="50" view-box="0 0 50 50" aria-hidden="true">
-      <g transform="rotate(-90 25 25)">
-        <circle
-          cx="25"
-          cy="25"
-          r="20"
-          fill="none"
-          stroke="#76c7c0"
-          stroke-width="5"
-          stroke-linecap="round"
-          stroke-dasharray="31.4 31.4"
-        />
-      </g>
+    <svg
+      class="spinner shared-progress-spinner"
+      width="50"
+      height="50"
+      view-box="0 0 50 50"
+      aria-hidden="true"
+    >
+      <g :transform="progressSpinnerTransform"><circle v-bind="progressSpinnerCircle" /></g>
     </svg>
     <slot name="controls" />
   </div>
@@ -37,13 +37,6 @@ defineProps<{
   display: flex;
   justify-content: center;
   align-items: center;
-}
-
-.spinner {
-  transform-origin: 50% 50%;
-  transform-box: fill-box;
-  animation: spin 1s linear infinite;
-  will-change: transform;
 }
 
 .progress-inline {
@@ -65,17 +58,5 @@ defineProps<{
   color: white;
   font: inherit;
   cursor: pointer;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .spinner {
-    animation: none;
-  }
 }
 </style>

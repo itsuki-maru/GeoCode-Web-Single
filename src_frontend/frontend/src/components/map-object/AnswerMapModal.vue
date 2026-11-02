@@ -1,10 +1,15 @@
 <script setup lang="ts">
+import {
+  classifyMapTargets,
+  mapOperationMessages,
+} from "../../../../template-scripts/src/map/common/map-analysis";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import apiClient from "@/axiosClient";
 import { submitAuthenticatedForm } from "@/utils/authenticated-form";
 import { requestCurrentMapView } from "@/utils/map-view";
 import PrintMapModal from "../map/PrintMapModal.vue";
 import ProgressSpinner from "../common/ProgressSpinner.vue";
+import MessageModal from "../common/MessageModal.vue";
 import AnswerColoringPanel from "./AnswerColoringPanel.vue";
 import SaveMapPresetModal from "./SaveMapPresetModal.vue";
 import SavedMapPresetsModal from "./SavedMapPresetsModal.vue";
@@ -67,6 +72,19 @@ const frame = ref<HTMLIFrameElement | null>(null),
   form = ref<HTMLFormElement | null>(null);
 const frameName = `answer-map-${Math.random().toString(36).slice(2)}`;
 const filtersOpen = ref(true);
+const completionMessage = ref("");
+const completionModal = ref<InstanceType<typeof MessageModal> | null>(null);
+let completionFocus: HTMLElement | null = null;
+const closeCompletion = async () => {
+  completionMessage.value = "";
+  await nextTick();
+  if (completionFocus?.isConnected) completionFocus.focus();
+};
+watch(completionMessage, async (message) => {
+  if (!message) return;
+  await nextTick();
+  completionModal.value?.$el.querySelector("button")?.focus();
+});
 const filtersPanelId = `${frameName}-filters`;
 const parentOrigin = window.location.origin;
 const requestId = ref("");
@@ -114,6 +132,7 @@ let pending:
       summary: string;
       filter: AppliedMapFilter;
       colorSpecification: AnswerColorSpecification | null;
+      completion: keyof typeof mapOperationMessages | null;
     }
   | undefined;
 let appliedId = "";
@@ -135,6 +154,7 @@ const presetsOpen = ref(false),
   presetRestoreError = ref(""),
   presetNotice = ref("");
 const presetModalOpen = computed(() => presetDraft.value !== null || presetsOpen.value);
+const childModalOpen = computed(() => presetModalOpen.value || !!completionMessage.value);
 let presetSequence = 0,
   presetController: AbortController | undefined;
 const closePresets = () => {
@@ -235,6 +255,8 @@ const csvCheckAction = computed(() => endpoint.value.replace(/\/map-filter$/, "/
 const presetEndpoint = computed(() => endpoint.value.replace(/\/map-filter$/, "/map-presets"));
 const stop = () => {
   viewController?.abort();
+  completionMessage.value = "";
+  completionFocus = null;
   stopPresets();
   stopCsv();
   printSnapshot.value = null;
@@ -315,7 +337,7 @@ const canOpenPresets = () =>
   !preparingPrint.value &&
   !csvPreparing.value &&
   !printSnapshot.value &&
-  !presetModalOpen.value;
+  !childModalOpen.value;
 const saveFilter = () => {
   if (!canOpenPresets()) return;
   filterError.value = "";
@@ -425,7 +447,7 @@ const restorePreset = async (preset: SavedMapPreset) => {
     filtersOpen.value = true;
     filterError.value = "";
     presetNotice.value = "検索条件を呼び出しました。実行ボタンで地図に反映します。";
-    closePresets();
+    await nextTick();
   } catch (cause) {
     if (props.isOpen && presetsOpen.value && current === epoch && seq === presetSequence)
       presetRestoreError.value = messageError(
@@ -441,7 +463,7 @@ const fetchResult = async (
   reset = false,
   colorChange?: { specification: AnswerColorSpecification | null },
 ) => {
-  if (!scopeReady.value || !props.isOpen || presetModalOpen.value) return;
+  if (!scopeReady.value || !props.isOpen || childModalOpen.value) return;
   if (
     colorChange &&
     (busy.value || preparingPrint.value || csvPreparing.value || printSnapshot.value)
@@ -526,34 +548,25 @@ const fetchResult = async (
       throw Error("Invalid response");
     let coloring: AnswerColoring | null = null;
     if (requestedColors && colorRequests) {
-      coloring = {
-        version: 1,
-        rules: requestedColors.rules.map(({ id, label, color }) => ({ id, label, color })),
-        targets: {},
-      };
-      const allowed = new Set(data.targets);
-      // 対象件数が多い場合にデータベース負荷を増幅させないよう、リクエストを順次実行する。
-      for (let index = 0; index < colorRequests.length; index++) {
+      let index = 0;
+      coloring = await classifyMapTargets(requestedColors, new Set(data.targets), async () => {
         const classified = (
           await apiClient.post<Result>(
             endpoint.value,
             {
-              ...colorRequests[index],
+              ...colorRequests[index++],
               targets: initialTargets.value,
             },
-            { signal: controller.signal, timeout: 60000 },
+            { signal: controller!.signal, timeout: 60000 },
           )
         ).data;
         if (!props.isOpen || current !== epoch || seq !== sequence || id !== requestId.value)
-          return;
+          throw Error("色分けを中止しました。");
         validateColorTargets(classified.targets, new Set(initialTargets.value));
         if (classified.target_count !== classified.targets.length)
           throw Error("色分けの件数が不正です。");
-        for (const key of classified.targets) {
-          if (allowed.has(key) && coloring.targets[key] === undefined)
-            coloring.targets[key] = requestedColors.rules[index]!.id;
-        }
-      }
+        return classified.targets;
+      });
     }
     const formLabel = forms.value.find((f) => f.id === selectedForm.value)?.label || "";
     const conditionLabels = rows.value.map(
@@ -565,6 +578,12 @@ const fetchResult = async (
       result: data,
       filter: requestedFilter,
       colorSpecification: requestedColors,
+      completion:
+        optionsOnly || reset || colorChange?.specification === null
+          ? null
+          : colorChange
+            ? "coloring"
+            : "filter",
       summary: colorChange
         ? applied.value
         : reset || !selectedForm.value
@@ -738,6 +757,10 @@ const onMessage = (event: MessageEvent) => {
     appliedColorSpecification = pending.colorSpecification;
     coloringActive.value = appliedColorSpecification !== null;
     appliedId = data.updateId;
+    if (pending.completion) {
+      completionFocus = document.activeElement as HTMLElement | null;
+      completionMessage.value = mapOperationMessages[pending.completion];
+    }
     pending = undefined;
     busy.value = false;
   } else if (data.type === "answer-map-filter-error" && pending && pending.id === data.updateId) {
@@ -810,7 +833,7 @@ const exportCsv = () => {
     preparingPrint.value ||
     printSnapshot.value ||
     csvPreparing.value ||
-    presetModalOpen.value
+    childModalOpen.value
   )
     return;
   stopCsv();
@@ -851,7 +874,7 @@ const openPrint = () => {
     preparingPrint.value ||
     csvPreparing.value ||
     printSnapshot.value ||
-    presetModalOpen.value
+    childModalOpen.value
   )
     return;
   preparingPrint.value = true;
@@ -872,8 +895,12 @@ const openPrint = () => {
   }, 15000);
 };
 const onKey = (e: KeyboardEvent) => {
-  if (props.isOpen && presetModalOpen.value) {
+  if (props.isOpen && childModalOpen.value) {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") e.preventDefault();
+    if (completionMessage.value && e.key === "Escape") {
+      e.preventDefault();
+      void closeCompletion();
+    }
     return;
   }
   if (printSnapshot.value) return;
@@ -935,12 +962,12 @@ onBeforeUnmount(() => {
     <button
       type="button"
       class="fullscreen-close-btn"
-      :disabled="presetModalOpen"
+      :disabled="childModalOpen"
       @click="emit('close')"
     >
       閉じる
     </button>
-    <div class="content-fullscreen-map" :inert="presetModalOpen">
+    <div class="content-fullscreen-map" :inert="childModalOpen || undefined">
       <header>
         <strong>地図で分析・検索・出力</strong
         ><span v-if="!loading && !error">{{ summary }}（一致回答{{ answerCount }}件）</span>
@@ -1200,6 +1227,18 @@ onBeforeUnmount(() => {
       :layerIds="null"
       :answerPrint="{ action: printAction, snapshot: printSnapshot }"
       @close="printSnapshot = null"
+    />
+    <MessageModal
+      v-if="completionMessage"
+      ref="completionModal"
+      class="common-form-confirm"
+      role="dialog"
+      aria-modal="true"
+      aria-label="処理完了"
+      :isOpen="true"
+      :zIndex="120"
+      :message="completionMessage"
+      @close="closeCompletion"
     />
     <SaveMapPresetModal
       :isOpen="presetDraft !== null"

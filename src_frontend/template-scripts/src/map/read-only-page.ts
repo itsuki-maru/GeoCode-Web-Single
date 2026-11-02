@@ -1,4 +1,6 @@
 // @ts-nocheck -- この統合境界では Leaflet プラグイン間の型定義に互換性がないため、型チェックを省略する。
+import { evaluateMapAnalysis } from "./common/map-analysis";
+import { installAnswerColoring } from "./answer-coloring";
 import { createAdvancedMapSearchModal, attributeTransport } from "./common/advanced-map-search";
 import { createTileOverlayManager } from "./common/tile-overlays";
 import { createTileVisibilityStorage } from "./common/tile-visibility-storage";
@@ -45,6 +47,7 @@ import {
   filterMeasurementMarkersForBounds,
   getShapeRecords,
   matchesShapeSearch,
+  matchesMarkerSearch,
   normalizeMarkerSearchText,
 } from "./common/search";
 import {
@@ -359,7 +362,10 @@ export function initializeReadOnlyMapPage(
   const shapeLayers: DynamicRecord = {};
   let shapeRenderer: ReturnType<typeof createShapeRenderManager>;
   let shapeRenderStatus: HTMLElement | null = null;
-  let shapeSearchQuery = "";
+  let shapeSearchQuery = printState?.objectQuery || "";
+  let coloringController;
+  let colorSpecification = null;
+  let analysisRevision = 0;
   const shapeSearchMatches = new WeakMap<object, { query: string; result: boolean }>();
   const shapeCreatedListeners = new Set<(layer: any, record: any) => void>();
   const shapeEvictedListeners = new Set<(layer: any, record: any) => void>();
@@ -516,10 +522,12 @@ export function initializeReadOnlyMapPage(
             })
         : undefined,
       onMarkerCreated: isAnother
-        ? (marker) =>
+        ? (marker, record) => {
+            coloringController?.refreshTarget(`marker:${record.id}`, marker);
             marker.on("add", () => {
               if (isTooltipVisible) marker.openTooltip?.();
-            })
+            });
+          }
         : undefined,
       clusterGroups,
       createMarkerGroupForLayer: groups.createMarkerGroupForLayer,
@@ -584,6 +592,7 @@ export function initializeReadOnlyMapPage(
         ...options,
         isRecordAllowed: (record) =>
           (!printMarkerIds || printMarkerIds.has(String(record.id))) &&
+          matchesMarkerSearch(record, printState?.objectQuery || "") &&
           answerVisibility.allows(`marker:${record.id}`) &&
           (!attributeTargetMask || attributeTargetMask.has(`marker:${record.id}`)),
       }),
@@ -819,15 +828,44 @@ export function initializeReadOnlyMapPage(
     const button = document.createElement("button");
     button.type = "button";
     button.className = "custom-control-button";
-    button.textContent = "詳しい検索";
+    button.textContent = "詳しい検索と色分け";
     button.setAttribute("aria-pressed", "false");
     const modal = createAdvancedMapSearchModal({
       transport: attributeTransport,
       getApplied: () => appliedAttributeSearch,
       getLayerIds: () => null,
-      getContext: () => String(bootstrap.tileVisibilityAccountId || ""),
-      onApply: (request, result) => {
+      getContext: () => `${bootstrap.tileVisibilityAccountId || ""}:${analysisRevision}`,
+      analysis: {
+        getSpecification: () => colorSpecification,
+        getColoring: () => coloringController?.getState() || null,
+        apply: async (specification, coloring) => {
+          coloringController.apply(coloring);
+          colorSpecification = specification;
+          button.setAttribute("aria-pressed", String(!!specification || !!appliedAttributeSearch));
+          button.textContent = specification
+            ? "詳しい検索と色分け（色分け適用中）"
+            : appliedAttributeSearch
+              ? "詳しい検索と色分け（適用中）"
+              : "詳しい検索と色分け";
+          ++analysisRevision;
+        },
+      },
+      onApply: async (request, result, signal) => {
+        if (!result && colorSpecification) {
+          const current = analysisRevision;
+          const colors = await evaluateMapAnalysis(
+            attributeTransport,
+            null,
+            colorSpecification,
+            null,
+            signal || new AbortController().signal,
+          );
+          if (signal?.aborted || current !== analysisRevision) return;
+          coloringController.apply(colors.coloring);
+        }
+        if (result?.coloring !== undefined) coloringController.apply(result.coloring);
         appliedAttributeSearch = request;
+        ++analysisRevision;
         attributeTargetMask = result
           ? new Set([
               ...result.marker_ids.map((id) => `marker:${id}`),
@@ -835,9 +873,11 @@ export function initializeReadOnlyMapPage(
             ])
           : null;
         button.textContent = result
-          ? `詳しい検索（適用中・全レイヤー${result.target_count}件）`
-          : "詳しい検索";
-        button.setAttribute("aria-pressed", String(!!result));
+          ? `詳しい検索と色分け（適用中・全レイヤー${result.target_count}件）`
+          : colorSpecification
+            ? "詳しい検索と色分け（色分け適用中）"
+            : "詳しい検索と色分け";
+        button.setAttribute("aria-pressed", String(!!result || !!colorSpecification));
         layeredMarkerDisplay.rebuildVisibleMarkers();
         layeredShapeDisplay.rebuildVisibleShapes();
         groups.syncAllShapeGroupsVisibility();
@@ -990,7 +1030,10 @@ export function initializeReadOnlyMapPage(
   // 設定・グループ・イベントの初期化後に一度だけ生成を開始する。
   shapeRenderer.refresh();
 
-  return {
+  const runtime = {
+    setColoringController: (controller) => {
+      coloringController = controller;
+    },
     shapeRenderer,
     getShapeRecord: (id: string) => shapeRenderer.getRecord(id),
     getShapeGeometryInfo: (id: string) => shapeRenderer.getGeometryInfo(id),
@@ -1026,6 +1069,14 @@ export function initializeReadOnlyMapPage(
         view: { latitude: center.lat, longitude: center.lng, zoom: map.getZoom() },
         tileServerId: document.querySelector<HTMLInputElement>(".tile-radio:checked")?.value || "1",
         overlays: tileOverlayManager.getVisibility(),
+        coloring: coloringController?.getState() || undefined,
+        objectQuery: shapeSearchQuery,
+        markerIds: attributeTargetMask
+          ? [...attributeTargetMask].filter((k) => k.startsWith("marker:")).map((k) => k.slice(7))
+          : null,
+        shapeIds: attributeTargetMask
+          ? [...attributeTargetMask].filter((k) => k.startsWith("shape:")).map((k) => k.slice(6))
+          : null,
         clusteringEnabled: markerClustering?.getEnabled() ?? true,
         clusteringAllowed,
         markersVisible: map.hasLayer(visibleMarkerGroup),
@@ -1059,4 +1110,8 @@ export function initializeReadOnlyMapPage(
       ...tileOverlayManager.getLayers(),
     ],
   };
+  if (isAnother && !isAnswerPreview && !isPrint) {
+    coloringController = installAnswerColoring(runtime, L);
+  }
+  return runtime;
 }

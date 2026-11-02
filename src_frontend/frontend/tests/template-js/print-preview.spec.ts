@@ -240,6 +240,45 @@ describe("印刷プレビューと実際のLeaflet", () => {
     expect(document.querySelector(".answer-print-legend-settings")).toBeNull();
   });
 
+  it("通常印刷はstateの分類色と凡例を遅延取得後も引き継ぎ、凡例の連動解除で検索範囲を広げない", async () => {
+    preview = createPrintPreview(
+      {
+        ...state,
+        layerIds: null,
+        markerIds: ["a"],
+        shapeIds: [],
+        coloring: {
+          version: 1,
+          rules: [{ id: "r", label: "分類A", color: "#ff0000" }],
+          targets: { "marker:a": "r", "marker:b": "r", "shape:shape-a": "r" },
+        },
+      },
+      vi.fn(),
+    );
+    await finishObjectLoads();
+    const checkVisible = (count: number) => {
+      const markers: any[] = [],
+        shapes: any[] = [];
+      preview!.map.eachLayer((layer: any) => {
+        if (layer.options?.icon && layer.getTooltip?.()) markers.push(layer);
+        if (layer.shapeId) shapes.push(layer);
+      });
+      expect(markers).toHaveLength(count);
+      expect(shapes).toHaveLength(0);
+      if (count) expect(String(markers[0].getTooltip().getContent())).toContain("避難所A");
+    };
+    await vi.waitFor(() => {
+      checkVisible(1);
+      expect(document.querySelectorAll("#map .answer-value-marker")).toHaveLength(1);
+      expect(document.querySelector(".answer-print-legend li")?.textContent).toBe("分類A");
+    });
+    checkbox("地図と連動").click();
+    checkbox("分類A").click();
+    await vi.waitFor(() => checkVisible(0));
+    checkbox("地図と連動").click();
+    await vi.waitFor(() => checkVisible(1));
+  });
+
   it("回答地図の凡例を分類ごとにまとめ、同分類のマーカー・図形を一括切替しても非選択レイヤを復活させない", async () => {
     const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
     bootstrap.page = "form-answer-map";

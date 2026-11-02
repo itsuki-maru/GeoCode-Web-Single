@@ -1,3 +1,7 @@
+import {
+  installAnswerColoring,
+  isAnswerColoring,
+} from "../../../../template-scripts/src/map/answer-coloring";
 import { readFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,6 +59,7 @@ export function editorRuntimeSource(entryName: EditorEntryName): string {
 
 /** 本番と同じ共有スコープを維持し、変更していない各ファイルを個別に計測する。 */
 export function runEditorRuntime(context: Context, entryName: EditorEntryName) {
+  Object.assign(context, { installAnswerColoring, isAnswerColoring });
   const prelude = editorCommonPrelude.replace(
     /^import \{ ([^}]+) \} from "[^"]+";$/gm,
     "const { $1 } = globalThis;",

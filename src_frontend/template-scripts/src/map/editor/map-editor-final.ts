@@ -1,4 +1,17 @@
 // @ts-nocheck -- 編集地図と親画面の差分・初期データ同期境界。
+editorColoring = installAnswerColoring(
+  {
+    map,
+    markers,
+    shapeLayers: editorColorShapeLayers,
+    visibleMarkerGroup: markersClusterGroup,
+    setShapeColor: (target, style) => {
+      target.analysisColor = style?.color || null;
+      applyShapeStyle(target, activeDrawMode === "delete");
+    },
+  },
+  L,
+);
 const editorRuntimeId = "runtime-" + Date.now() + "-" + Math.random().toString(36).slice(2);
 let editorDataReady = window.__GEOCODE_MAP_BOOTSTRAP__?.dataSource !== "parent";
 let editorSnapshotGeneration = 0;
@@ -141,6 +154,7 @@ function applyMarkerUpdateFromParent(payload) {
   );
   const options = markerOptionsForLayer(nextRecord.layer_id, layersFromAxum);
   marker.setIcon(options.icon || new L.Icon.Default());
+  editorColoring.refreshTarget(`marker:${markerId}`, marker, true);
   const element = marker.getElement();
   if (element) element.id = markerKey;
   if (
@@ -163,6 +177,7 @@ function applyMarkerDeleteFromParent(markerIdValue) {
     marker.closePopup?.();
     marker.closeTooltip?.();
     markersClusterGroup.removeLayer(marker);
+    editorColoring?.releaseTarget(`marker:${markerId}`, marker);
     marker.off?.();
     popupContent?.release?.("marker", markerId);
   }
@@ -262,6 +277,7 @@ async function applyEditorMapSnapshot(snapshot) {
   closeShapeNameEditor();
   markersClusterGroup.clearLayers();
   for (const [key, marker] of Object.entries(markers)) {
+    editorColoring?.releaseTarget(`marker:${marker.id}`, marker);
     marker.off?.();
     popupContent?.release?.("marker", String(marker.id));
     delete markers[key];
@@ -334,7 +350,32 @@ window.addEventListener("message", function (event) {
     editorParentOrigin = event.origin;
     const messageData = event.data;
     if (!messageData || typeof messageData !== "object") return;
-    if (messageData.type === "mapRuntimeProbe") {
+    if (messageData.type === "mapColoringApply") {
+      if (messageData.runtimeId !== editorRuntimeId || !messageData.requestId || !editorDataReady)
+        return;
+      let success = false;
+      const allowed = new Set([
+        ...Object.keys(markersFromAxum).map((id) => `marker:${id}`),
+        ...Array.from(editorShapeRecords.keys(), (id) => `shape:${id}`),
+      ]);
+      try {
+        if (messageData.coloring !== null && !isAnswerColoring(messageData.coloring, allowed))
+          throw Error("Invalid coloring");
+        editorColoring.apply(messageData.coloring);
+        success = true;
+      } catch {
+        /* 直前に確定した色分けを維持する。 */
+      }
+      event.source.postMessage(
+        {
+          type: "mapColoringApplyResult",
+          requestId: messageData.requestId,
+          runtimeId: editorRuntimeId,
+          success,
+        },
+        event.origin,
+      );
+    } else if (messageData.type === "mapRuntimeProbe") {
       announceEditorRuntime(messageData.requestId);
     } else if (messageData.type === "mapObjectWriteResult") {
       if (messageData.runtimeId !== editorRuntimeId) return;
@@ -422,6 +463,8 @@ window.addEventListener("message", function (event) {
             view: { latitude: center.lat, longitude: center.lng, zoom: map.getZoom() },
             tileServerId: document.querySelector(".tile-radio:checked")?.value || "1",
             overlays: tileOverlayManager.getVisibility(),
+            layerIds: is_master ? null : [layer],
+            coloring: editorColoring.getState() || undefined,
             clusteringEnabled: markerClustering.getEnabled(),
             clusteringAllowed: markerClustering.isAllowed(),
             markersVisible: map.hasLayer(markersClusterGroup),
@@ -441,7 +484,25 @@ window.addEventListener("message", function (event) {
         messageData["lng"],
       );
     } else if (messageData["type"] === "mapObjectFilter") {
-      applyMapObjectFilter(messageData["markerIds"], messageData["shapeIds"]);
+      if (messageData.requestId && (messageData.runtimeId !== editorRuntimeId || !editorDataReady))
+        return;
+      let success = false;
+      try {
+        applyMapObjectFilter(messageData["markerIds"], messageData["shapeIds"]);
+        success = true;
+      } catch {
+        if (!messageData.requestId) throw Error("地図への絞り込みの反映に失敗しました。");
+      }
+      if (messageData.requestId)
+        event.source.postMessage(
+          {
+            type: "mapObjectFilterResult",
+            requestId: messageData.requestId,
+            runtimeId: editorRuntimeId,
+            success,
+          },
+          event.origin,
+        );
     } else if (messageData["type"] === "markerFilter") {
       applyMarkerFilter(messageData["ids"]);
     } else if (messageData["type"] === "tileOverlaysUpdate") {

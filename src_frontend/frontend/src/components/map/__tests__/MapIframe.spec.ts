@@ -8,6 +8,76 @@ afterEach(() => {
 });
 
 describe("MapIframe", () => {
+  it("絞り込みも対応する地図の完了通知まで待ち、古い通知では完了しない", async () => {
+    const wrapper = mount(MapIframe, {
+      attachTo: document.body,
+      props: { srcUrl: "/map", allowedOrigins: window.location.origin, height: 80 },
+    });
+    const frame = wrapper.get("iframe").element as HTMLIFrameElement;
+    const post = vi.spyOn(frame.contentWindow!, "postMessage").mockImplementation(() => {});
+    const pending = wrapper.vm.filterMapObjectsAndWait(["one"], []);
+    const request = post.mock.calls[0]![0];
+    expect(request).toMatchObject({ type: "mapObjectFilter", markerIds: ["one"], shapeIds: [] });
+    let completed = false;
+    void pending.then(() => {
+      completed = true;
+    });
+    const send = (runtimeId: unknown, requestId: string) =>
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin: window.location.origin,
+          source: frame.contentWindow!,
+          data: { type: "mapObjectFilterResult", requestId, runtimeId, success: true },
+        }),
+      );
+    send("old", request.requestId);
+    send(request.runtimeId, "old");
+    await Promise.resolve();
+    expect(completed).toBe(false);
+    send(request.runtimeId, request.requestId);
+    await expect(pending).resolves.toBe(true);
+    wrapper.unmount();
+  });
+  it("色分けは現在の地図の対応するACKだけで完了する", async () => {
+    const wrapper = mount(MapIframe, {
+      attachTo: document.body,
+      props: { srcUrl: "/map", allowedOrigins: window.location.origin, height: 80 },
+    });
+    const frame = wrapper.get("iframe").element as HTMLIFrameElement;
+    const post = vi.spyOn(frame.contentWindow!, "postMessage").mockImplementation(() => {});
+    const coloring = {
+      version: 1 as const,
+      rules: [{ id: "r", label: "分類", color: "#ff0000" }],
+      targets: { "shape:a": "r" },
+    };
+    const pending = wrapper.vm.setColoring(coloring);
+    const message = post.mock.calls[0]![0];
+    expect(message).toMatchObject({ type: "mapColoringApply", coloring });
+    let completed = false;
+    void pending.then(() => {
+      completed = true;
+    });
+    const send = (source: Window, requestId: string) =>
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source,
+          origin: window.location.origin,
+          data: {
+            type: "mapColoringApplyResult",
+            requestId,
+            runtimeId: message.runtimeId,
+            success: true,
+          },
+        }),
+      );
+    send(window, message.requestId);
+    send(frame.contentWindow!, "old");
+    await Promise.resolve();
+    expect(completed).toBe(false);
+    send(frame.contentWindow!, message.requestId);
+    await expect(pending).resolves.toBe(true);
+    wrapper.unmount();
+  });
   it("waits for a selected-layer URL before creating the frame and reports when it loads", async () => {
     const wrapper = mount(MapIframe, {
       props: { srcUrl: "", allowedOrigins: window.location.origin, height: 80 },

@@ -1,0 +1,104 @@
+.map-coloring-editor {
+  background: whitesmoke;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+.map-coloring-editor summary {
+  cursor: pointer;
+  font-weight: bold;
+}
+.map-coloring-editor fieldset {
+  border: 0;
+  margin: 0;
+  padding: 8px 0 0;
+  min-width: 0;
+}
+.map-coloring-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.map-coloring-editor select,
+.map-coloring-editor input {
+  font: inherit;
+  min-height: 34px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.map-coloring-editor select[multiple] {
+  min-height: 64px;
+}
+.map-coloring-editor .color-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+.map-coloring-editor .color-rule {
+  border-top: 1px solid #ccc;
+  padding-top: 8px;
+  margin-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+.map-coloring-editor .color-picker {
+  flex-direction: row;
+  align-items: center;
+}
+.map-coloring-editor .color-picker input {
+  width: 60px;
+  padding: 0;
+}
+.map-coloring-editor .color-condition {
+  display: grid;
+  gap: 8px;
+  border-top: 1px dashed #ccc;
+  padding-top: 8px;
+}
+.map-coloring-editor .color-condition-actions {
+  display: flex;
+  gap: 8px;
+}
+.map-coloring-editor .color-condition-actions button {
+  flex: 1;
+  min-width: 0;
+}
+.map-coloring-editor button {
+  background: #5f5f5f;
+  color: white;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 8px;
+  min-height: 40px;
+  cursor: pointer;
+  font: inherit;
+  overflow-wrap: anywhere;
+}
+.map-coloring-editor button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.map-coloring-editor .color-submit {
+  background: #2165bb;
+  width: 100%;
+  margin-top: 12px;
+}
+.map-coloring-editor .color-save {
+  width: 100%;
+  margin-top: 8px;
+}
+.map-coloring-editor .color-help,
+.map-coloring-editor .color-error {
+  font-size: 12px;
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+.map-coloring-editor .color-error {
+  color: #7c3f00;
+}
+
+.map-coloring-editor .color-condition-values {
+  display: contents;
+}

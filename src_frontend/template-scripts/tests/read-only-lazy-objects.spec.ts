@@ -123,6 +123,109 @@ const status = (id: string) =>
   document.querySelector(`[data-layer-load-id="${id}"] .layer-object-load-state`)!.textContent;
 
 describe("lazy groups in the actual read-only map runtime", () => {
+  it("遅延読み込みしたマーカーと図形にも色分けを適用し、未回答の対象を隠さずに印刷へ色分けを引き継ぐ", async () => {
+    Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+      configurable: true,
+      value() {
+        this.setAttribute("open", "");
+      },
+    });
+    Object.defineProperty(HTMLDialogElement.prototype, "close", {
+      configurable: true,
+      value() {
+        this.removeAttribute("open");
+      },
+    });
+    const originalFetch = fetchData.getMockImplementation()!;
+    fetchData.mockImplementation(async (url, init) => {
+      if (String(url) === "/common-forms")
+        return new Response(
+          JSON.stringify([
+            { id: "form", version: 1, form_title: "設備", form_schema: { fields: [] } },
+          ]),
+        );
+      if (String(url) === "/form-answers/map-filter") {
+        const body = JSON.parse(String(init?.body));
+        const targets = body.options_only ? [] : ["marker:m-b", "shape:s-b"];
+        return new Response(
+          JSON.stringify({
+            as_of: "2026-10-30T00:00:00Z",
+            forms: [{ id: "form", label: "設備" }],
+            fields: [{ id: "n", label: "年数", field_type: "number", choices: [] }],
+            targets,
+            target_count: targets.length,
+            answer_count: targets.length,
+          }),
+        );
+      }
+      return originalFetch(url, init);
+    });
+    runtime = initializeReadOnlyMapPage("map-anather");
+    checkbox("a").click();
+    await vi.waitFor(() => expect(runtime!.markers["marker-m-a"]).toBeDefined());
+    const open = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+      (b) => b.textContent === "詳しい検索と色分け",
+    )!;
+    expect(open).toBeDefined();
+    open.click();
+    await vi.waitFor(() =>
+      expect(
+        document
+          .querySelector('dialog[aria-label="詳しい検索と色分け"]')!
+          .getAttribute("aria-busy"),
+      ).toBe("false"),
+    );
+    const form = document.querySelector<HTMLSelectElement>('[aria-label="色分けの共通フォーム"]')!;
+    form.value = "form";
+    form.dispatchEvent(new Event("change"));
+    const button = (text: string) =>
+      [...document.querySelectorAll<HTMLButtonElement>("dialog button")].find(
+        (b) => b.textContent === text,
+      )!;
+    await vi.waitFor(() => expect(button("分類を追加").disabled).toBe(false));
+    button("分類を追加").click();
+    const input = document.querySelector<HTMLInputElement>('[aria-label="色分けの条件値"]')!;
+    input.value = "50";
+    input.dispatchEvent(new Event("input"));
+    button("色分け実行").click();
+    await vi.waitFor(() =>
+      expect((runtime as any).answerColoring.getState()?.targets["marker:m-b"]).toBeDefined(),
+    );
+    expect(runtime.map.hasLayer(runtime.markers["marker-m-a"])).toBe(true);
+    checkbox("b").click();
+    await vi.waitFor(() =>
+      expect(runtime!.markers["marker-m-b"]?.options.icon.options.className).toBe(
+        "answer-value-marker",
+      ),
+    );
+    await runtime.shapeRenderer.whenIdle();
+    expect(runtime.shapeLayers["shape-s-b"].options.color).toBe("#d73027");
+    expect(runtime.getPrintState()).toMatchObject({
+      markerIds: null,
+      shapeIds: null,
+      coloring: { targets: { "marker:m-b": "color-1", "shape:s-b": "color-1" } },
+    });
+    const filterForm = document.querySelector<HTMLSelectElement>(
+      'dialog[aria-label="詳しい検索と色分け"] select',
+    )!;
+    filterForm.value = "form";
+    filterForm.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(button("絞り込み実行").disabled).toBe(false));
+    button("絞り込み実行").click();
+    await vi.waitFor(() =>
+      expect(runtime!.map.hasLayer(runtime!.markers["marker-m-a"])).toBe(false),
+    );
+    button("属性条件を解除").click();
+    await vi.waitFor(() =>
+      expect(runtime!.map.hasLayer(runtime!.markers["marker-m-a"])).toBe(true),
+    );
+    expect(runtime.getPrintState().coloring?.targets["marker:m-b"]).toBeDefined();
+    button("色分け解除").click();
+    await vi.waitFor(() => expect((runtime as any).answerColoring.getState()).toBeNull());
+    expect(runtime.markers["marker-m-b"].options.icon.options.className).not.toBe(
+      "answer-value-marker",
+    );
+  });
   it("standalone attribute search masks later loaded layers and combines with text until explicitly cleared", async () => {
     Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
       configurable: true,
@@ -144,19 +247,18 @@ describe("lazy groups in the actual read-only map runtime", () => {
             { id: "form", version: 1, form_title: "記録", form_schema: { fields: [] } },
           ]),
         );
-      if (String(url) === "/map-objects/search/attributes") {
-        expect(JSON.parse(String(init?.body))).toMatchObject({
-          layer_ids: null,
-          common_form_id: "form",
-        });
+      if (String(url) === "/form-answers/map-filter") {
+        const body = JSON.parse(String(init?.body));
+        expect(body.scope).toEqual({ kind: "layers", layer_ids: null });
+        const targets = body.options_only ? [] : ["marker:m-b", "shape:s-b"];
         return new Response(
           JSON.stringify({
-            common_form_id: "form",
-            definition_version: 1,
             as_of: "2026-10-30T00:00:00Z",
-            marker_ids: ["m-b"],
-            shape_ids: ["s-b"],
-            target_count: 2,
+            forms: [{ id: "form", label: "記録" }],
+            fields: [],
+            targets,
+            target_count: targets.length,
+            answer_count: targets.length,
           }),
         );
       }
@@ -164,8 +266,9 @@ describe("lazy groups in the actual read-only map runtime", () => {
     });
     runtime = initializeReadOnlyMapPage("map-anather");
     const open = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
-      (b) => b.textContent === "詳しい検索",
+      (b) => b.textContent === "詳しい検索と色分け",
     )!;
+    expect(open).toBeDefined();
     const controlStyle = document.createElement("style");
     controlStyle.textContent = readFileSync(resolve("../frontend/public/map-controls.css"), "utf8");
     document.head.append(controlStyle);
@@ -188,8 +291,15 @@ describe("lazy groups in the actual read-only map runtime", () => {
     const form = document.querySelector<HTMLSelectElement>("dialog select")!;
     form.value = "form";
     form.dispatchEvent(new Event("change"));
+    await vi.waitFor(() =>
+      expect(
+        document
+          .querySelector('dialog[aria-label="詳しい検索と色分け"]')
+          ?.getAttribute("aria-busy"),
+      ).toBe("false"),
+    );
     [...document.querySelectorAll<HTMLButtonElement>("dialog button")]
-      .find((b) => b.textContent === "検索")!
+      .find((b) => b.textContent === "絞り込み実行")!
       .click();
     await vi.waitFor(() => expect(open.getAttribute("aria-pressed")).toBe("true"));
     checkbox("a").click();

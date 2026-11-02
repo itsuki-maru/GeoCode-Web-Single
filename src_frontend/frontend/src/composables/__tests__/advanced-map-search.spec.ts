@@ -167,7 +167,7 @@ it("keeps the modal open on apply and clear, allows another search, and closes o
   const click = (text: string) =>
     [...dialog.querySelectorAll("button")].find((b) => b.textContent === text)!.click();
   selectForm();
-  click("検索");
+  click("絞り込み実行");
   await flushPromises();
   expect(markers.attributeShapeIds).toEqual(new Set(["s1"]));
   expect(dialog.open).toBe(true);
@@ -178,7 +178,7 @@ it("keeps the modal open on apply and clear, allows another search, and closes o
   expect(dialog.open).toBe(true);
   expect(dialog.querySelector("select")?.value).toBe("");
   selectForm();
-  click("検索");
+  click("絞り込み実行");
   await flushPromises();
   expect(dialog.open).toBe(true);
   expect(api.post).toHaveBeenCalledTimes(2);

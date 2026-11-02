@@ -1,0 +1,37 @@
+.shared-progress-spinner {
+  transform-origin: 50% 50%;
+  transform-box: fill-box;
+  animation: shared-progress-spin 1s linear infinite;
+  will-change: transform;
+}
+@keyframes shared-progress-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shared-progress-spinner {
+    animation: none;
+  }
+}
+.map-progress-dialog {
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  background: transparent;
+  box-sizing: border-box;
+}
+.map-progress-dialog[open] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.map-progress-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}

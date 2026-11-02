@@ -15,6 +15,9 @@ const templateScriptsDirectory = fileURLToPath(new URL("./", import.meta.url));
 export const editorCommonPrelude = `
 import { createPopupContentRuntime } from "/src/map/common/popup-content.ts";
 let popupContent;
+import { installAnswerColoring, isAnswerColoring } from "/src/map/answer-coloring.ts";
+let editorColoring;
+const editorColorShapeLayers = {};
 import { makeSummaryDraggable } from "/src/map/common/draggable-summary.ts";
 import { bindFloatingMeasurementLabels } from "/src/map/common/floating-measurement-labels.ts";
 import { renderCameraImage, installMjpegCameras } from "/src/map/common/mjpeg-camera.ts";

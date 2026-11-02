@@ -212,8 +212,8 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
       <button
         type="button"
         class="btn-head-image-search advanced-search-button"
-        :title="attributeSearchActive ? '詳しい検索（適用中）' : '詳しい検索'"
-        aria-label="詳しい検索"
+        :title="attributeSearchActive ? '詳しい検索と色分け（適用中）' : '詳しい検索と色分け'"
+        aria-label="詳しい検索と色分け"
         :aria-pressed="!!attributeSearchActive"
         @click="emit('advancedSearch')"
       >

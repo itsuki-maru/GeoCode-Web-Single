@@ -1,11 +1,13 @@
 import type { AnswerColoring } from "../answer-coloring";
 import { makeSummaryDraggable } from "../common/draggable-summary";
-import type { FormAnswerMapBootstrap } from "../types";
+import type { FormAnswerMapBootstrap, AnotherMapBootstrap } from "../types";
 
 /** 凡例は独立した表示マスクを管理し、元のオブジェクトは変更しない。 */
 export function createAnswerPrintLegend(options: {
   coloring: AnswerColoring;
-  bootstrap: FormAnswerMapBootstrap;
+  bootstrap: FormAnswerMapBootstrap | AnotherMapBootstrap;
+  getAvailableTargetKeys?: () => ReadonlySet<string>;
+  subscribe?: (refresh: () => void) => () => void;
   mapElement: HTMLElement;
   settings: HTMLElement;
   setHiddenTargets: (keys: string[]) => void;
@@ -70,18 +72,26 @@ export function createAnswerPrintLegend(options: {
   panel.append(title, entries);
   mapElement.append(panel);
 
-  const available = new Set([
-    ...Object.values(bootstrap.markers).map((m) => `marker:${m.id}`),
-    ...bootstrap.shapes.map((s) => `shape:${s.id}`),
-  ]);
-  const rows: { keys: string[]; input: HTMLInputElement; entry: HTMLLIElement }[] = [];
+  const available =
+    options.getAvailableTargetKeys?.() ||
+    new Set([
+      ...Object.values(bootstrap.markers).map((m) => `marker:${m.id}`),
+      ...bootstrap.shapes.map((s) => `shape:${s.id}`),
+    ]);
+  const rows: {
+    keys: string[];
+    input: HTMLInputElement;
+    entry: HTMLLIElement;
+    label: HTMLLabelElement;
+    ruleId: string;
+  }[] = [];
   const entryFragment = document.createDocumentFragment();
   const choiceFragment = document.createDocumentFragment();
   for (const rule of coloring.rules) {
     const keys = Object.entries(coloring.targets)
       .filter(([key, ruleId]) => ruleId === rule.id && available.has(key))
       .map(([key]) => key);
-    if (!keys.length) continue;
+    if (!keys.length && !options.subscribe) continue;
     const entry = document.createElement("li");
     const swatch = document.createElement("span");
     swatch.className = "answer-print-legend-swatch";
@@ -91,7 +101,7 @@ export function createAnswerPrintLegend(options: {
     const choice = toggle(rule.label, true);
     choice.label.prepend(swatch.cloneNode());
     choiceFragment.append(choice.label);
-    rows.push({ keys, input: choice.input, entry });
+    rows.push({ keys, input: choice.input, entry, label: choice.label, ruleId: rule.id });
   }
   entries.append(entryFragment);
   choices.append(choiceFragment);
@@ -104,8 +114,9 @@ export function createAnswerPrintLegend(options: {
   const updatePanel = () => {
     let any = false;
     for (const row of rows) {
-      row.entry.hidden = !row.input.checked;
-      any ||= row.input.checked;
+      row.entry.hidden = !row.input.checked || !row.keys.length;
+      row.label.hidden = !row.keys.length;
+      any ||= row.input.checked && !!row.keys.length;
     }
     panel.hidden = !show.input.checked || !any;
   };
@@ -127,12 +138,33 @@ export function createAnswerPrintLegend(options: {
       : [];
     const signature = JSON.stringify(hidden);
     if (signature !== previousHidden) {
-      setHiddenTargets(hidden);
+      const previous = previousHidden;
       previousHidden = signature;
+      try {
+        setHiddenTargets(hidden);
+      } catch (error) {
+        previousHidden = previous;
+        throw error;
+      }
     }
     hasOverflow();
     onChange();
   };
+  const refresh = () => {
+    const keys = options.getAvailableTargetKeys?.() || available;
+    let changed = false;
+    for (const row of rows) {
+      const next = Object.entries(coloring.targets)
+        .filter(([key, rule]) => rule === row.ruleId && keys.has(key))
+        .map(([key]) => key);
+      if (next.length !== row.keys.length || next.some((key, i) => key !== row.keys[i])) {
+        row.keys = next;
+        changed = true;
+      }
+    }
+    if (changed) update();
+  };
+  const stopSubscription = options.subscribe?.(refresh);
   controls.addEventListener("change", update);
   // 凡例のドラッグで、その下の地図が移動やズームされることを防ぐ。
   const stop = (event: Event) => event.stopPropagation();
@@ -159,6 +191,7 @@ export function createAnswerPrintLegend(options: {
       disposed = true;
       stopDrag();
       resize.disconnect();
+      stopSubscription?.();
       controls.removeEventListener("change", update);
       for (const event of ["click", "dblclick", "wheel", "mousedown", "touchstart"])
         panel.removeEventListener(event, stop);

@@ -1,0 +1,190 @@
+.advanced-map-search.has-analysis {
+  width: min(1440px, 96vw);
+  max-width: 96vw;
+  height: 90dvh;
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  overflow: hidden;
+}
+.advanced-map-search.has-analysis[open] {
+  display: flex;
+  flex-direction: column;
+}
+.advanced-map-search.has-analysis .attribute-header {
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  padding: 18px 24px;
+  border-bottom: 1px solid #ccc;
+  gap: 12px;
+}
+.advanced-map-search.has-analysis .attribute-header h2 {
+  margin-right: auto;
+}
+.advanced-map-search.has-analysis .attribute-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.advanced-map-search.has-analysis .attribute-filter-pane,
+.advanced-map-search.has-analysis .attribute-color-pane {
+  padding: 20px 24px;
+  min-width: 0;
+  overflow: auto;
+}
+.advanced-map-search.has-analysis .attribute-filter-pane {
+  border-right: 1px solid #ccc;
+}
+.advanced-map-search.has-analysis h3,
+.advanced-map-search.has-analysis .map-coloring-editor > summary {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 16px;
+}
+.advanced-map-search.has-analysis .attribute-filter-pane > p {
+  font-size: 14px;
+}
+.advanced-map-search.has-analysis .attribute-conditions {
+  gap: 12px;
+}
+.advanced-map-search.has-analysis .attribute-row {
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  padding: 14px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background: #fff;
+  gap: 12px;
+}
+.advanced-map-search.has-analysis .attribute-values {
+  grid-column: 1/-1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.advanced-map-search.has-analysis .attribute-values:has(> label:only-child) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.advanced-map-search.has-analysis .attribute-row > button {
+  grid-column: 1/-1;
+  justify-self: end;
+}
+.advanced-map-search.has-analysis .attribute-filter-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.advanced-map-search.has-analysis .attribute-submit {
+  grid-column: 1/-1;
+  min-height: 40px;
+}
+.advanced-map-search.has-analysis .attribute-status {
+  padding: 12px;
+  background: white;
+  border-radius: 6px;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+.advanced-map-search.has-analysis .attribute-dialog-note {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 12px 24px;
+  border-top: 1px solid #ccc;
+  font-size: 13px;
+  color: #475569;
+}
+.advanced-map-search.has-analysis .map-coloring-editor {
+  padding: 0;
+  font-size: 16px;
+}
+.advanced-map-search.has-analysis .map-coloring-editor fieldset {
+  padding-top: 0;
+}
+.advanced-map-search.has-analysis .map-coloring-editor .color-rule {
+  padding: 16px;
+  margin-top: 16px;
+  grid-template-columns: minmax(0, 1fr) 90px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background: #fff;
+  gap: 12px;
+}
+.advanced-map-search.has-analysis .map-coloring-editor .color-picker {
+  flex-direction: column;
+  align-items: start;
+}
+.advanced-map-search.has-analysis .map-coloring-editor .color-picker input {
+  height: 38px;
+}
+.advanced-map-search.has-analysis .map-coloring-editor .color-actions,
+.advanced-map-search.has-analysis .map-coloring-editor .color-condition {
+  grid-column: 1/-1;
+}
+.advanced-map-search.has-analysis .map-coloring-editor .color-condition {
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 12px;
+}
+.advanced-map-search.has-analysis .map-coloring-editor .color-condition-values {
+  display: grid;
+  grid-column: 1/-1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-items: center;
+}
+.advanced-map-search.has-analysis .map-coloring-editor .color-condition-values:has(> :only-child) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.advanced-map-search.has-analysis .map-coloring-editor .color-condition-values:has(> span) {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+.advanced-map-search.has-analysis .map-coloring-editor .color-condition-actions {
+  grid-column: 1/-1;
+}
+.advanced-map-search.has-analysis .map-coloring-editor select,
+.advanced-map-search.has-analysis .map-coloring-editor input:not([type="color"]) {
+  padding: 8px;
+  border: 1px solid #767676;
+  border-radius: 6px;
+  background: white;
+  color: #222;
+  max-width: 100%;
+}
+.advanced-map-search.has-analysis .map-coloring-editor .color-help {
+  font-size: 13px;
+}
+@media (max-width: 1000px) {
+  .advanced-map-search.has-analysis .attribute-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: auto;
+  }
+  .advanced-map-search.has-analysis .attribute-filter-pane,
+  .advanced-map-search.has-analysis .attribute-color-pane {
+    overflow: visible;
+  }
+  .advanced-map-search.has-analysis .attribute-filter-pane {
+    border-right: 0;
+    border-bottom: 1px solid #ccc;
+  }
+}
+@media (max-width: 600px) {
+  .advanced-map-search.has-analysis {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+    height: 94dvh;
+    max-height: calc(100dvh - 16px);
+  }
+  .advanced-map-search.has-analysis .attribute-header {
+    padding: 12px;
+    flex-wrap: wrap;
+  }
+  .advanced-map-search.has-analysis .attribute-header h2 {
+    width: 100%;
+    font-size: 22px;
+  }
+  .advanced-map-search.has-analysis .attribute-filter-pane,
+  .advanced-map-search.has-analysis .attribute-color-pane {
+    padding: 16px 12px;
+  }
+  .advanced-map-search.has-analysis .attribute-dialog-note {
+    padding: 10px 12px;
+  }
+}

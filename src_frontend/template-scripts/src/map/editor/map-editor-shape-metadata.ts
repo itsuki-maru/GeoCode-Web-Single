@@ -110,6 +110,10 @@ function applyShapeRecord(layer, shapeRecord, syncRecord = true) {
   layer.shapeMemo = getShapeMemoFromGeoJson(shapeRecord.geojson);
   layer.shapeStyle = getShapeStyleFromGeoJson(shapeRecord.shape_type, shapeRecord.geojson);
   layer.feature = shapeRecord.geojson;
+  if (layer.shapeId) {
+    editorColorShapeLayers[`shape-${layer.shapeId}`] = layer;
+    editorColoring?.refreshTarget(`shape:${layer.shapeId}`, layer, true);
+  }
   bindShapeArrowStyle(layer);
   if (shapeRecord.id) {
     searchableShapeLayers.add(layer);
@@ -208,6 +212,9 @@ function initializeEditorShapeRendering() {
       shapeNameLabelManager?.invalidate(layer);
     },
     disposeLayer: (layer) => {
+      editorColoring?.releaseTarget(`shape:${layer.shapeId}`, layer);
+      if (editorColorShapeLayers[`shape-${layer.shapeId}`] === layer)
+        delete editorColorShapeLayers[`shape-${layer.shapeId}`];
       removeShapeMeasurementMarkers(layer);
       shapeNameLabelManager?.invalidate(layer);
       searchableShapeLayers.delete(layer);

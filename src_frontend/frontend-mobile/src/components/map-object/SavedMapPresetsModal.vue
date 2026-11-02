@@ -2,14 +2,14 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import BaseModal from "@/components/common/BaseModal.vue";
 import MessageModal from "@/components/common/MessageModal.vue";
+import ProgressSpinner from "@/components/common/ProgressSpinner.vue";
 import apiClient from "@/axiosClient";
 import "./form-modal-buttons.css";
+import MapPresetsTable from "./MapPresetsTable.vue";
 import {
   clonePresetDraft,
-  describeMapPreset,
   isSavedMapPreset,
   mapPresetError,
-  mapPresetKindLabel,
   type MapPresetPage,
   type SavedMapPreset,
 } from "@/utils/answer-map-presets";
@@ -27,15 +27,19 @@ const loading = ref(false),
   busy = ref(false),
   error = ref("");
 const deleting = ref<SavedMapPreset | null>(null);
+const restoreComplete = ref(false);
+let restoreRequested = false;
 const pages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)));
-const disabled = computed(() => loading.value || busy.value || props.restoring);
+const disabled = computed(
+  () => loading.value || busy.value || props.restoring || restoreComplete.value,
+);
 let epoch = 0,
   request = 0;
 let controller: AbortController | undefined;
 let previousFocus: HTMLElement | null = null;
 
 const close = () => {
-  if (!busy.value && !props.restoring && !deleting.value) emit("close");
+  if (!busy.value && !props.restoring && !deleting.value && !restoreComplete.value) emit("close");
 };
 const load = async (requestedPage: number) => {
   const currentEpoch = epoch,
@@ -86,6 +90,8 @@ watch(
     busy.value = false;
     loading.value = false;
     deleting.value = null;
+    restoreComplete.value = false;
+    restoreRequested = false;
     error.value = "";
     if (!open) {
       await nextTick();
@@ -104,8 +110,18 @@ watch(
 const restore = (preset: SavedMapPreset) => {
   if (disabled.value || deleting.value) return;
   // 編集画面には別のオブジェクトを渡し、復元した下書きの編集で一覧が変わらないようにする。
+  restoreRequested = true;
   emit("restore", { ...preset, ...clonePresetDraft(preset) });
 };
+watch(
+  () => props.restoring,
+  (value, previous) => {
+    if (!value && previous && restoreRequested) {
+      restoreRequested = false;
+      if (props.isOpen && !props.restoreError) restoreComplete.value = true;
+    }
+  },
+);
 const remove = async () => {
   if (!props.isOpen || !deleting.value || disabled.value) return;
   const currentEpoch = epoch;
@@ -130,10 +146,6 @@ const remove = async () => {
     if (currentEpoch === epoch) busy.value = false;
   }
 };
-const dateLabel = (value: string) => {
-  const date = new Date(/(?:Z|[+-]\d\d:\d\d)$/i.test(value) ? value : `${value}Z`);
-  return Number.isNaN(date.valueOf()) ? value : date.toLocaleString("ja-JP");
-};
 const key = (event: KeyboardEvent) => {
   if (!props.isOpen) return;
   if (
@@ -143,7 +155,8 @@ const key = (event: KeyboardEvent) => {
     event.preventDefault();
     event.stopImmediatePropagation();
     if (event.key === "Escape") {
-      if (deleting.value) {
+      if (restoreComplete.value) restoreComplete.value = false;
+      else if (deleting.value) {
         if (!busy.value) deleting.value = null;
       } else close();
     }
@@ -162,7 +175,7 @@ onBeforeUnmount(() => {
   <BaseModal
     :isOpen="isOpen"
     :zIndex="110"
-    :closeOnOverlayClick="!busy && !restoring && !deleting"
+    :closeOnOverlayClick="!busy && !restoring && !deleting && !restoreComplete"
     @close="close"
   >
     <section
@@ -189,49 +202,13 @@ onBeforeUnmount(() => {
         {{ error || restoreError }}
       </p>
       <p v-if="!loading && !error && !items.length">保存した検索条件はありません。</p>
-      <div v-if="items.length" class="table-scroll">
-        <table aria-label="保存した検索条件一覧">
-          <thead>
-            <tr>
-              <th>種別</th>
-              <th>名前</th>
-              <th>共通フォーム</th>
-              <th>条件概要</th>
-              <th>保存日時</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="preset in items" :key="preset.id">
-              <td>{{ mapPresetKindLabel(preset.kind) }}</td>
-              <td>{{ preset.name }}</td>
-              <td>{{ preset.display.form_label || "一覧と同じ範囲" }}</td>
-              <td class="preset-description">{{ describeMapPreset(preset) }}</td>
-              <td>{{ dateLabel(preset.create_at) }}</td>
-              <td>
-                <div class="row-actions">
-                  <button
-                    class="btn-close"
-                    type="button"
-                    :disabled="disabled || !!deleting"
-                    @click="restore(preset)"
-                  >
-                    呼び出し
-                  </button>
-                  <button
-                    class="btn-close"
-                    type="button"
-                    :disabled="disabled || !!deleting"
-                    @click="deleting = preset"
-                  >
-                    削除
-                  </button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <MapPresetsTable
+        v-if="items.length"
+        :items="items"
+        :disabled="!!disabled || !!deleting"
+        @restore="restore"
+        @remove="deleting = $event"
+      />
       <nav v-if="pages > 1" class="preset-pagination" aria-label="保存した検索条件のページ">
         <button
           class="btn-close"
@@ -255,7 +232,7 @@ onBeforeUnmount(() => {
         <button
           class="btn-close"
           type="button"
-          :disabled="busy || restoring || !!deleting"
+          :disabled="busy || restoring || !!deleting || restoreComplete"
           @click="close"
         >
           閉じる
@@ -273,6 +250,23 @@ onBeforeUnmount(() => {
     @close="!busy && (deleting = null)"
     @confirm="remove"
   />
+  <MessageModal
+    v-if="restoreComplete"
+    class="common-form-confirm"
+    :isOpen="true"
+    :zIndex="120"
+    message="呼び出しが完了しました。"
+    @close="restoreComplete = false"
+  />
+  <Teleport to="body">
+    <ProgressSpinner
+      v-if="restoring"
+      :isOpen="true"
+      :style="{ zIndex: 130 }"
+      role="status"
+      aria-label="検索条件を呼び出しています"
+    />
+  </Teleport>
 </template>
 
 <style scoped>
@@ -300,65 +294,6 @@ onBeforeUnmount(() => {
 .table-scroll {
   overflow: auto;
   min-height: 0;
-}
-table {
-  width: 100%;
-  min-width: 980px;
-  table-layout: fixed;
-  border-collapse: collapse;
-  font-size: 14px;
-}
-th,
-td {
-  border: 1px solid #ccc;
-  padding: 6px 13px;
-  text-align: center;
-  overflow-wrap: anywhere;
-}
-th {
-  background: rgb(44, 52, 78);
-  color: white;
-}
-th:nth-child(1) {
-  width: 11%;
-}
-th:nth-child(2) {
-  width: 15%;
-}
-th:nth-child(3) {
-  width: 13%;
-}
-th:nth-child(4) {
-  width: 28%;
-}
-th:nth-child(5) {
-  width: 14%;
-}
-th:nth-child(6) {
-  width: 19%;
-}
-tbody tr {
-  background: white;
-}
-tbody tr:nth-child(even) {
-  background: #eee;
-}
-tbody tr:hover {
-  background: #69a5b8;
-}
-.preset-description {
-  white-space: pre-line;
-  text-align: left;
-}
-.row-actions {
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.row-actions .btn-close {
-  padding: 6px 10px;
-  white-space: nowrap;
 }
 .preset-actions,
 .preset-pagination {

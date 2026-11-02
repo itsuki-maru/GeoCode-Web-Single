@@ -2,6 +2,7 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import apiClient from "@/axiosClient";
 import AnswerMapModal from "../AnswerMapModal.vue";
+import MessageModal from "@/components/common/MessageModal.vue";
 import AnswerColoringPanel from "../AnswerColoringPanel.vue";
 import SaveMapPresetModal from "../SaveMapPresetModal.vue";
 import SavedMapPresetsModal from "../SavedMapPresetsModal.vue";
@@ -81,7 +82,23 @@ const ready = async (w: ReturnType<typeof mount>) => {
   });
   await flushPromises();
 };
+const completion = (w: ReturnType<typeof mount>) =>
+  w
+    .findAllComponents(MessageModal)
+    .find(
+      (modal) =>
+        modal.props("isOpen") &&
+        ["絞り込みが完了しました。", "色分けが完了しました。"].includes(modal.props("message")),
+    );
+const dismissCompletion = async (w: ReturnType<typeof mount>) => {
+  const notice = completion(w);
+  if (notice) {
+    await notice.get("button").trigger("click");
+    await flushPromises();
+  }
+};
 const click = async (w: ReturnType<typeof mount>, text: string) => {
+  await dismissCompletion(w);
   await w
     .findAll("button")
     .find((b) => b.text() === text)!
@@ -102,6 +119,49 @@ const progressOverlay = () =>
     '[role="status"][aria-label="地図の表示を更新しています"]',
   );
 describe("回答地図の非同期絞り込み", () => {
+  it.each(["絞り込み", "色分け"])(
+    "%sは地図の反映完了後だけ通知し、Escapeでは通知だけを閉じる",
+    async (operation) => {
+      const w = await open();
+      await ready(w);
+      expect(completion(w)).toBeUndefined();
+      const message = vi
+        .spyOn((w.get("iframe").element as HTMLIFrameElement).contentWindow!, "postMessage")
+        .mockImplementation(() => {});
+      if (operation === "絞り込み") await click(w, "絞り込み実行");
+      else {
+        w.getComponent(AnswerColoringPanel).vm.$emit("apply", {
+          common_form_id: query.common_form_id,
+          rules: [{ id: "r", label: "分類", color: "#123456", conditions: [] }],
+        });
+        await flushPromises();
+      }
+      const command = message.mock.calls.at(-1)![0];
+      expect(progressOverlay()).not.toBeNull();
+      expect(completion(w)).toBeUndefined();
+      send(w, { type: "answer-map-filter-applied", updateId: "old", visible: 2, renderable: 2 });
+      await flushPromises();
+      expect(completion(w)).toBeUndefined();
+      send(w, {
+        type: "answer-map-filter-applied",
+        updateId: command.updateId,
+        visible: 2,
+        renderable: 2,
+      });
+      await flushPromises();
+      const notice = completion(w)!;
+      expect(notice.props("message")).toBe(`${operation}が完了しました。`);
+      expect(progressOverlay()).toBeNull();
+      expect(w.get(".content-fullscreen-map").attributes("inert")).toBeDefined();
+      expect(document.activeElement).toBe(notice.get("button").element);
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+      await flushPromises();
+      expect(completion(w)).toBeUndefined();
+      expect(w.emitted("close")).toBeUndefined();
+      expect(w.get(".content-fullscreen-map").attributes("inert")).toBeUndefined();
+      w.unmount();
+    },
+  );
   it("初期の候補取得は除外し、絞り込み・解除はAPI後も地図ACKまで回転表示を維持する", async () => {
     const w = await open();
     expect(w.find(".progress-inline").exists()).toBe(true);
@@ -184,6 +244,7 @@ describe("回答地図の非同期絞り込み", () => {
     await flushPromises();
     expect(progressOverlay()).toBeNull();
     expect(w.find('[role="alert"]').exists()).toBe(true);
+    expect(completion(w)).toBeUndefined();
     w.unmount();
   });
   it("色分けの逐次分類要求・地図ACK・色分け解除の間も回転表示を保つ", async () => {
@@ -196,6 +257,7 @@ describe("回答地図の非同期絞り込み", () => {
       second = deferredResult();
     const count = post.mock.calls.length;
     post.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    await dismissCompletion(w);
     w.getComponent(AnswerColoringPanel).vm.$emit("apply", {
       common_form_id: query.common_form_id,
       rules: ["first", "second"].map((id) => ({
@@ -226,6 +288,7 @@ describe("回答地図の非同期絞り込み", () => {
     });
     await flushPromises();
     expect(progressOverlay()).toBeNull();
+    await dismissCompletion(w);
     w.getComponent(AnswerColoringPanel).vm.$emit("apply", null);
     await flushPromises();
     expect(post).toHaveBeenCalledTimes(count + 2);
@@ -365,6 +428,7 @@ describe("回答地図の非同期絞り込み", () => {
       renderable: targets.length,
     });
     await flushPromises();
+    await dismissCompletion(w);
     w.getComponent(AnswerColoringPanel).vm.$emit("apply", {
       common_form_id: query.common_form_id,
       rules: [
@@ -493,7 +557,7 @@ describe("回答地図の非同期絞り込み", () => {
     const requests = post.mock.calls.length;
     list.vm.$emit("restore", filterPreset());
     await flushPromises();
-    expect(list.props("isOpen")).toBe(false);
+    expect(list.props("isOpen")).toBe(true);
     expect(w.get('[aria-label="共通フォーム"]').element.value).toBe(query.common_form_id);
     expect(w.get('[aria-label="入力項目"]').element.value).toBe("n:number");
     expect(w.get('[aria-label="条件の値"]').element.value).toBe("9007199254740993.1");
@@ -508,6 +572,8 @@ describe("回答地図の非同期絞り込み", () => {
     expect(w.getComponent(AnswerColoringPanel).props("active")).toBe(false);
     expect(w.get("iframe").element).toBe(iframe);
     expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1);
+    list.vm.$emit("close");
+    await flushPromises();
     await click(w, "絞り込み実行");
     expect(message.mock.calls.at(-1)![0]).toMatchObject({
       type: "answer-map-filter",
@@ -545,7 +611,7 @@ describe("回答地図の非同期絞り込み", () => {
     };
     list.vm.$emit("restore", preset);
     await flushPromises();
-    expect(list.props("isOpen")).toBe(false);
+    expect(list.props("isOpen")).toBe(true);
     expect(w.get('[aria-label="条件の値"]').element.value).toBe("25");
     expect(w.get('[aria-label="分類名"]').element.value).toBe("50年以上");
     expect(w.get('[aria-label="色分けの条件値"]').element.value).toBe("50");
@@ -635,6 +701,7 @@ describe("回答地図の非同期絞り込み", () => {
     post
       .mockResolvedValueOnce({ data: result([keys[0]]) })
       .mockResolvedValueOnce({ data: result(keys) });
+    await dismissCompletion(w);
     w.getComponent(AnswerColoringPanel).vm.$emit("apply", specification);
     await flushPromises();
     const command = message.mock.calls.at(-1)![0];
@@ -656,6 +723,7 @@ describe("回答地図の非同期絞り込み", () => {
     await flushPromises();
     expect(w.getComponent(AnswerColoringPanel).props("active")).toBe(true);
     const requests = post.mock.calls.length;
+    await dismissCompletion(w);
     w.getComponent(AnswerColoringPanel).vm.$emit("apply", null);
     await flushPromises();
     expect(post).toHaveBeenCalledTimes(requests);
@@ -693,6 +761,7 @@ describe("回答地図の非同期絞り込み", () => {
     });
     await flushPromises();
     await w.get('[aria-label="条件の値"]').setValue("999");
+    await dismissCompletion(w);
     w.getComponent(AnswerColoringPanel).vm.$emit("apply", {
       common_form_id: query.common_form_id,
       rules: [
@@ -726,6 +795,7 @@ describe("回答地図の非同期絞り込み", () => {
       color: "#2166ac",
       conditions: [{ field_id: "n", field_type: "number", op: "gte", value: "20", upper: null }],
     };
+    await dismissCompletion(w);
     w.getComponent(AnswerColoringPanel).vm.$emit("apply", {
       common_form_id: query.common_form_id,
       rules: [
@@ -759,6 +829,7 @@ describe("回答地図の非同期絞り込み", () => {
         },
       ],
     };
+    await dismissCompletion(w);
     w.getComponent(AnswerColoringPanel).vm.$emit("apply", specification);
     await flushPromises();
     send(w, {
@@ -792,6 +863,7 @@ describe("回答地図の非同期絞り込み", () => {
         }),
     );
     const count = message.mock.calls.length;
+    await dismissCompletion(w);
     w.getComponent(AnswerColoringPanel).vm.$emit("apply", specification);
     await flushPromises();
     await w.setProps({ isOpen: false });
@@ -1380,6 +1452,7 @@ describe("回答地図の認証失敗と不正集計の保護", () => {
     const iframe = w.get("iframe").element as HTMLIFrameElement;
     const message = vi.spyOn(iframe.contentWindow!, "postMessage").mockImplementation(() => {});
     post.mockResolvedValueOnce({ data: { ...result(keys), target_count: 1 } });
+    await dismissCompletion(w);
     w.getComponent(AnswerColoringPanel).vm.$emit("apply", {
       common_form_id: query.common_form_id,
       rules: [

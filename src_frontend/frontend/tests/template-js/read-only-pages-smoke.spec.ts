@@ -7,6 +7,7 @@ import { JSDOM } from "jsdom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createReadOnlyMapRuntime } from "../../../template-scripts/src/map/common/map-runtime";
+import { isPrintMapState } from "../../../template-scripts/src/map/common/print-state";
 import { createPopupContentRuntime } from "../../../template-scripts/src/map/common/popup-content";
 import * as baseModule from "../../../template-scripts/src/map/common/base";
 import * as contentActionsModule from "../../../template-scripts/src/map/common/content-actions";
@@ -693,6 +694,57 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
         );
     }
   });
+
+  it.each([true, false])(
+    "PC編集地図の印刷状態はレイヤ・検索範囲・分類結果を引き継ぐ（全レイヤ: %s）",
+    (isMaster) => {
+      const parentWindow = { postMessage: vi.fn() };
+      const page = pages.find((page) => page.templateName === "map.html")!;
+      const dom = smokeLoadPage(
+        {
+          ...page,
+          globals: { ...structuredClone(page.globals), is_master: isMaster, layer: "layer-1" },
+        },
+        { parentWindow },
+      );
+      const coloring = {
+        version: 1,
+        rules: [{ id: "r", label: "分類", color: "#123abc" }],
+        targets: { "marker:marker-1": "r" },
+      };
+      new Script(`editorColoring.apply(${JSON.stringify(coloring)})`).runInContext(
+        dom.getInternalVMContext(),
+      );
+      dom.window.dispatchEvent(
+        new dom.window.MessageEvent("message", {
+          source: parentWindow as any,
+          origin: "https://example.test",
+          data: { type: "mapObjectFilter", markerIds: ["marker-1"], shapeIds: [] },
+        }),
+      );
+      parentWindow.postMessage.mockClear();
+      dom.window.dispatchEvent(
+        new dom.window.MessageEvent("message", {
+          source: parentWindow as any,
+          origin: "https://example.test",
+          data: { type: "printStateRequest", requestId: "print-test" },
+        }),
+      );
+      const response = parentWindow.postMessage.mock.calls.at(-1)![0];
+      expect(isPrintMapState(response.state)).toBe(true);
+      expect(response).toMatchObject({
+        type: "printStateResult",
+        requestId: "print-test",
+        state: {
+          layerIds: isMaster ? null : ["layer-1"],
+          markersVisible: true,
+          coloring,
+          markerIds: ["marker-1"],
+          shapeIds: [],
+        },
+      });
+    },
+  );
   it("モバイル共有地図の計測合計を複数計測ボタンの下の右上に表示する", () => {
     const page = pages.find((page) => page.templateName === "temporary-map-mobile.html")!;
     const dom = smokeLoadPage({
@@ -1462,6 +1514,8 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
           view: { latitude: 35.6812, longitude: 139.7671, zoom: 8 },
           tileServerId: "1",
           overlays: {},
+          layerIds: null,
+          coloring: undefined,
           clusteringEnabled: true,
           clusteringAllowed: true,
           markersVisible: true,
@@ -1563,10 +1617,25 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
       expect(dom.window.document.querySelector(selector), selector).not.toBeNull();
     });
     // モバイルはVue側の一覧から開き、PC版の全画面地図だけ地図内の入口を持つ。
-    const advancedSearchButtons = [
-      ...dom.window.document.querySelectorAll(".leaflet-control button"),
-    ].filter((button) => button.textContent === "詳しい検索");
+    const controlButtons = [...dom.window.document.querySelectorAll(".leaflet-control button")];
+    const advancedSearchButtons = controlButtons.filter(
+      (button) => button.textContent === "詳しい検索と色分け",
+    );
     expect(advancedSearchButtons).toHaveLength(page.templateName === "map-anather.html" ? 1 : 0);
+    if (page.templateName === "map-anather.html") {
+      expect(
+        controlButtons.some((button) =>
+          ["詳しい検索", "リロード", "印刷"].includes(button.textContent || ""),
+        ),
+      ).toBe(false);
+      const printKey = new dom.window.KeyboardEvent("keydown", {
+        key: "p",
+        ctrlKey: true,
+        cancelable: true,
+      });
+      dom.window.dispatchEvent(printKey);
+      expect(printKey.defaultPrevented).toBe(false);
+    }
   });
 
   it.each(pages)("$fileNameの表示切替項目が所定の順序で並ぶ", (page) => {
@@ -1918,7 +1987,12 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
 
   it.each([pages[0], pages[1]])(
     "$fileNameが非表示中のフォーカス対象図形だけを表示してMarkdownメモを開く",
-    (page) => {
+    async (page) => {
+      // 計測の有無や実行速度に依存せず、複数フレームに分かれる描画を検証する。
+      const createManager = shapeRendererModule.createShapeRenderManager;
+      vi.spyOn(shapeRendererModule, "createShapeRenderManager").mockImplementation((options) =>
+        createManager({ ...options, maxBatchSize: 1 }),
+      );
       const dom = smokeLoadPage({
         ...page,
         globals: {
@@ -1926,11 +2000,13 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
           shapesFromAxum: [shapeRecord, shapeWithoutMemoRecord],
         },
       });
-      new Script(`
-        (() => {
+      await new Script(`
+        (async () => {
           map.removeLayer(drawnShapesGroup);
+          await shapeRenderManager.whenIdle();
 
           focusMapObject("shape", "shape-1", 35.685, 139.765);
+          await shapeRenderManager.whenIdle();
           const firstShape = shapeRenderManager.getLayer("shape-1");
           const firstFocus = {
             groupVisible: map.hasLayer(drawnShapesGroup),
@@ -1940,6 +2016,7 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
           };
 
           focusMapObject("shape", "shape-2", 35.705, 139.785);
+          await shapeRenderManager.whenIdle();
           const secondShape = shapeRenderManager.getLayer("shape-2");
           const secondFocus = {
             firstVisible: map.hasLayer(firstShape),
@@ -1950,9 +2027,11 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
           map.setView([35.695,139.775],14,{animate:false});
           drawnShapesGroup.addTo(map);
           shapeRenderManager.refresh();
+          await shapeRenderManager.whenIdle();
           const allVisibleWhenEnabled =
             map.hasLayer(firstShape) && map.hasLayer(secondShape);
           map.removeLayer(drawnShapesGroup);
+          await shapeRenderManager.whenIdle();
           const noneVisibleAfterDisable =
             !map.hasLayer(firstShape) && !map.hasLayer(secondShape);
 
@@ -2162,6 +2241,24 @@ describe.each(["map.html", "map-mobile.html"])("編集保存・削除・復元�
       expect(evaluate("map.dragging.enabled()")).toBe(true);
     },
   );
+
+  it("一時的な分類色を円の位置編集で保存せず、再描画後も分類色を維持する", async () => {
+    const { evaluate, transport } = geometryEditor("circle");
+    const baseColor = evaluate("__geometryShape.shapeStyle.color");
+    evaluate(
+      `editorColoring.apply({version:1,rules:[{id:'r',label:'分類',color:'#123abc'}],targets:{'shape:geometry':'r'}})`,
+    );
+    expect(evaluate("__geometryShape.options.color")).toBe("#123abc");
+    expect(evaluate("__geometryShape.shapeStyle.color")).toBe(baseColor);
+    await evaluate(
+      "persistShapeGeometryEdit(__geometryShape, captureShapeGeometry(__geometryShape))",
+    );
+    const body = JSON.parse(transport.mock.calls.at(-1)![1].body);
+    expect(body.geojson.properties.style.color).toBe(baseColor);
+    expect(evaluate("__geometryShape.options.color")).toBe("#123abc");
+    evaluate("editorColoring.apply(null)");
+    expect(evaluate("__geometryShape.options.color")).toBe(baseColor);
+  });
 
   it.each(["polyline", "polygon", "rectangle", "circle"])(
     "%sの保存失敗では未保存図形を原本に残さず操作を復帰する",
@@ -2968,6 +3065,24 @@ describe.each(["map.html", "map-mobile.html"])("親画面のACKと保存委譲: 
     parent.postMessage.mockClear();
     return { dom, parent, evaluate, send };
   };
+  it("絞り込み要求は現在の地図への反映後にだけ完了を返す", () => {
+    const { parent, evaluate, send } = open();
+    const runtimeId = evaluate("editorRuntimeId");
+    send({ type: "mapObjectFilter", requestId: "old", runtimeId: "old", markerIds: [], shapeIds: [] });
+    expect(parent.postMessage).not.toHaveBeenCalled();
+    send({ type: "mapObjectFilter", requestId: "filter", runtimeId, markerIds: [], shapeIds: [] });
+    expect(evaluate("externalMarkerFilterIds")).toEqual([]);
+    expect(parent.postMessage).toHaveBeenLastCalledWith(
+      { type: "mapObjectFilterResult", requestId: "filter", runtimeId, success: true },
+      expect.any(String),
+    );
+    evaluate('applyMapObjectFilter = () => { throw Error("failed"); }');
+    send({ type: "mapObjectFilter", requestId: "failed", runtimeId, markerIds: null, shapeIds: null });
+    expect(parent.postMessage).toHaveBeenLastCalledWith(
+      { type: "mapObjectFilterResult", requestId: "failed", runtimeId, success: false },
+      expect.any(String),
+    );
+  });
   it.each([true, false])(
     "差分のACKを受けたら再送待機を終了し、拒否時だけ同期失敗を知らせる: %s",
     (success) => {

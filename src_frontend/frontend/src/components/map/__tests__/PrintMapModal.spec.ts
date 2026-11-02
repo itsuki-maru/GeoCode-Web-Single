@@ -110,54 +110,73 @@ describe("印刷モーダルの地図連携", () => {
     window.dispatchEvent(after);
     expect(after.defaultPrevented).toBe(false);
   });
-  it("要求先の地図からの応答だけを採用し、プレビューの準備完了後に状態を送る", async () => {
-    const source = document.querySelector("iframe")!;
-    const sourcePost = vi.spyOn(source.contentWindow!, "postMessage");
-    wrapper = mount(PrintMapModal, { props: { layerIds: ["a"] }, attachTo: document.body });
-    const request = sourcePost.mock.calls[0]![0];
-    const frame = wrapper.get("iframe").element as HTMLIFrameElement;
-    const post = vi.spyOn(frame.contentWindow!, "postMessage");
-    const send = (
-      source: Window | null,
-      type: string,
-      extra = {},
-      origin = "http://localhost:3000",
-    ) => {
-      window.dispatchEvent(
-        new MessageEvent("message", { origin, source, data: { type, ...extra } }),
+  it.each([false, true])(
+    "要求先の地図からの応答だけを採用し、プレビューの準備完了後に状態を送る（色分け: %s）",
+    async (withColoring) => {
+      const source = document.querySelector("iframe")!;
+      const sourcePost = vi.spyOn(source.contentWindow!, "postMessage");
+      wrapper = mount(PrintMapModal, { props: { layerIds: ["a"] }, attachTo: document.body });
+      const request = sourcePost.mock.calls[0]![0];
+      const frame = wrapper.get("iframe").element as HTMLIFrameElement;
+      const post = vi.spyOn(frame.contentWindow!, "postMessage");
+      const send = (
+        source: Window | null,
+        type: string,
+        extra = {},
+        origin = "http://localhost:3000",
+      ) => {
+        window.dispatchEvent(
+          new MessageEvent("message", { origin, source, data: { type, ...extra } }),
+        );
+      };
+      send(frame.contentWindow, "printReady");
+      send(window, "printStateResult", { requestId: request.requestId, state: {} });
+      send(
+        source.contentWindow,
+        "printStateResult",
+        { requestId: request.requestId, state: {} },
+        "https://invalid.test",
       );
-    };
-    send(frame.contentWindow, "printReady");
-    send(window, "printStateResult", { requestId: request.requestId, state: {} });
-    send(
-      source.contentWindow,
-      "printStateResult",
-      { requestId: request.requestId, state: {} },
-      "https://invalid.test",
-    );
-    expect(post).not.toHaveBeenCalled();
-    send(source.contentWindow, "printStateResult", {
-      requestId: request.requestId,
-      state: { tileServerId: "2", markerIds: ["matching"], shapeIds: [] },
-    });
-    expect(post).toHaveBeenCalledWith(
-      {
-        type: "printInitialize",
-        state: {
-          tileServerId: "2",
-          layerIds: ["a"],
-          markerIds: ["matching"],
-          shapeIds: [],
+      expect(post).not.toHaveBeenCalled();
+      const state = {
+        view: { latitude: 35, longitude: 139, zoom: 12 },
+        overlays: {},
+        markersVisible: true,
+        shapesVisible: true,
+        shapeNamesVisible: false,
+        layerIds: null,
+        tileServerId: "2",
+        markerIds: ["matching"],
+        shapeIds: [],
+        ...(withColoring
+          ? {
+              coloring: {
+                version: 1,
+                rules: [{ id: "r", label: "分類", color: "#123abc" }],
+                targets: { "marker:matching": "r" },
+              },
+            }
+          : {}),
+      };
+      send(source.contentWindow, "printStateResult", { requestId: request.requestId, state });
+      await flushPromises();
+      expect(post).toHaveBeenCalledWith(
+        {
+          type: "printInitialize",
+          state: {
+            ...state,
+            layerIds: ["a"],
+          },
         },
-      },
-      "http://localhost:3000",
-    );
-    send(frame.contentWindow, "printInitialized");
-    await wrapper.vm.$nextTick();
-    expect(wrapper.find(".print-loading").exists()).toBe(false);
-    send(frame.contentWindow, "printClose");
-    expect(wrapper.emitted("close")).toHaveLength(1);
-  });
+        "http://localhost:3000",
+      );
+      send(frame.contentWindow, "printInitialized");
+      await wrapper.vm.$nextTick();
+      expect(wrapper.find(".print-loading").exists()).toBe(false);
+      send(frame.contentWindow, "printClose");
+      expect(wrapper.emitted("close")).toHaveLength(1);
+    },
+  );
   it("読み込みが停止した場合に再試行できる", async () => {
     wrapper = mount(PrintMapModal, { props: { layerIds: null }, attachTo: document.body });
     await vi.advanceTimersByTimeAsync(15000);

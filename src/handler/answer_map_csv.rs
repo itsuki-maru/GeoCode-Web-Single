@@ -29,7 +29,7 @@ async fn prepare(
     AppError,
 > {
     let at = answer_map_filter::validate_request(&request)?;
-    if request.options_only {
+    if request.options_only || request.scope.is_some() {
         return Err(AppError::Validation("CSV出力の要求情報が不正です。".into()));
     }
     let scope = answer_map_filter::scope(&request.targets)?;

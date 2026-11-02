@@ -63,6 +63,54 @@ function fixture(coloring?: AnswerColoring) {
 }
 
 describe("answer print legend", () => {
+  it("通常地図の対象を遅延読み込み後に追加しても凡例の設定を維持する", () => {
+    const mapElement = document.createElement("div"),
+      settings = document.createElement("aside");
+    document.body.append(mapElement, settings);
+    const available = new Set<string>(),
+      hidden = vi.fn(),
+      changed = vi.fn();
+    let refresh = () => {};
+    const stop = vi.fn();
+    legend = createAnswerPrintLegend({
+      coloring: {
+        version: 1,
+        rules: [{ id: "r", label: "分類", color: "#ff0000" }],
+        targets: { "marker:a": "r", "shape:b": "r" },
+      },
+      bootstrap: { markers: {}, shapes: [] } as any,
+      mapElement,
+      settings,
+      getAvailableTargetKeys: () => available,
+      subscribe: (callback) => {
+        refresh = callback;
+        return stop;
+      },
+      setHiddenTargets: hidden,
+      onChange: changed,
+    });
+    const inputs = settings.querySelectorAll<HTMLInputElement>("input");
+    expect(mapElement.querySelector<HTMLElement>(".answer-print-legend")!.hidden).toBe(true);
+    available.add("marker:a");
+    refresh();
+    expect(mapElement.querySelector<HTMLElement>(".answer-print-legend")!.hidden).toBe(false);
+    const font = settings.querySelector<HTMLSelectElement>("select")!;
+    font.value = "24";
+    font.dispatchEvent(new Event("change", { bubbles: true }));
+    inputs[1]!.checked = true;
+    inputs[2]!.checked = false;
+    inputs[2]!.dispatchEvent(new Event("change", { bubbles: true }));
+    available.add("shape:b");
+    refresh();
+    expect(inputs[2]!.checked).toBe(false);
+    expect(font.value).toBe("24");
+    expect(hidden).toHaveBeenLastCalledWith(["marker:a", "shape:b"]);
+    changed.mockClear();
+    refresh();
+    expect(changed).not.toHaveBeenCalled();
+    legend.dispose();
+    expect(stop).toHaveBeenCalledOnce();
+  });
   it("groups marker and shape targets into one safe classification entry and toggles the whole group", () => {
     const f = fixture();
     expect(f.inputs.map((input) => input.checked)).toEqual([true, false, true]);

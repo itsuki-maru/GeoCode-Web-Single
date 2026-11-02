@@ -469,7 +469,12 @@ function applyShapeStyle(layer, isDeleteMode = false) {
   const style = isDeleteMode
     ? DELETE_SHAPE_STYLE
     : layer.shapeStyle || getDefaultShapeStyle(layer.shapeType);
-  const nextStyle = { ...style };
+  const nextStyle = {
+    ...style,
+    ...(!isDeleteMode && layer.analysisColor
+      ? { color: layer.analysisColor, fillColor: layer.analysisColor }
+      : {}),
+  };
   if (layer.shapeType === "polyline" || isDeleteMode) {
     nextStyle.fill = false;
   }

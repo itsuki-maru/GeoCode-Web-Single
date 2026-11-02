@@ -369,7 +369,7 @@ async fn rejects_invalid_names_versions_types_operators_values_and_limits() {
         json!({"field_id":"text","field_type":"text","op":"contains","value":" \n\t "}),
         json!({"field_id":"missing","field_type":"text","op":"eq","value":"x"}),
         json!({"field_id":"n","field_type":"text","op":"eq","value":"x"}),
-        json!({"field_id":"photo","field_type":"image","op":"filled"}),
+        json!({"field_id":"photo","field_type":"image","op":"contains","value":"x"}),
         json!({"field_id":"n","field_type":"unknown","op":"empty"}),
         json!({"field_id":"n","field_type":"number","op":"contains","value":"1"}),
         json!({"field_id":"n","field_type":"number","op":"gte","value":"NaN"}),
@@ -435,6 +435,52 @@ async fn rejects_invalid_names_versions_types_operators_values_and_limits() {
             .total,
         0
     );
+}
+
+/// 画像の3条件を検索・色分けの既存形式で保存し、そのまま通常地図で再実行できる。
+#[tokio::test]
+async fn image_presence_presets_keep_the_portable_format_and_execute() {
+    use geocode_web_single::handler::answer_map_filter::{MapFilterRequest, filter_targets};
+    let pool = common::test_pool().await;
+    let f = fixture(&pool).await;
+    sqlx::query(
+        "INSERT OR IGNORE INTO common_form_revision_model (form_id,version,form_schema) \
+        SELECT id,version,form_schema FROM common_form_model WHERE id=$1",
+    )
+    .bind(f.form.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    for op in ["filled", "empty", "missing"] {
+        let condition = json!({"field_id":"photo","field_type":"image","op":op});
+        for kind in ["filter", "coloring"] {
+            let mut input = filter(Some(f.form), json!([condition.clone()]));
+            if kind == "coloring" {
+                input = coloring(f.form);
+                input["definition"]["rules"][0]["conditions"] = json!([condition.clone()]);
+            }
+            let saved = save(&pool, f.owner, input).await.unwrap();
+            assert_eq!(saved["schema_version"], 1);
+            assert_eq!(saved["kind"], kind);
+            assert_eq!(saved["display"]["fields"][0]["label"], "画像");
+            let conditions = if kind == "filter" {
+                &saved["definition"]["conditions"]
+            } else {
+                &saved["definition"]["rules"][0]["conditions"]
+            };
+            assert_eq!(conditions[0]["op"], op);
+            assert!(conditions[0]["value"].is_null() && conditions[0]["upper"].is_null());
+            let r: MapFilterRequest = serde_json::from_value(json!({
+                "query":{"mode":"latest"},"scope":{"kind":"layers","layer_ids":null},
+                "common_form_id":saved["definition"]["common_form_id"],"conditions":conditions
+            }))
+            .unwrap();
+            let result = filter_targets(&pool, &f.owner.to_string(), &r)
+                .await
+                .unwrap();
+            assert_eq!(result.target_count, usize::from(op == "missing"));
+        }
+    }
 }
 
 #[tokio::test]
