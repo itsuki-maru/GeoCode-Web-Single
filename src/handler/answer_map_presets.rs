@@ -125,7 +125,7 @@ fn invalid(message: &str) -> AppError {
 fn supported(kind: &str) -> bool {
     matches!(
         kind,
-        "text" | "textarea" | "number" | "date" | "select" | "radio" | "checkbox"
+        "text" | "textarea" | "number" | "date" | "select" | "radio" | "checkbox" | "image"
     )
 }
 

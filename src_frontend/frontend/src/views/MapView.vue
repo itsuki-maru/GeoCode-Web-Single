@@ -11,7 +11,7 @@ import type {
   ShapeData,
   MapObjectUpdatePayload,
 } from "@/interface";
-import { useAdvancedMapSearch } from "@/composables/useAdvancedMapSearch";
+import { useMapAnalysisSearch } from "@/composables/useMapAnalysisSearch";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useShapeStore } from "@/stores/shapes";
 import { useAuthStore } from "@/stores/auth";
@@ -241,6 +241,7 @@ const reloadMap = async (
   const previousDisplay = {
     accountId: authStore.accountId,
     search: displayedQuery.query1 || displayedQuery.query2 ? mapobjStore.search : null,
+    analysis: getAnalysisState(),
     attributeSearch: mapobjStore.attributeSearch,
     attributeMarkerIds: mapobjStore.attributeMarkerIds,
     attributeShapeIds: mapobjStore.attributeShapeIds,
@@ -276,6 +277,7 @@ const reloadMap = async (
     );
     mapObjectQueryFormData.value = previousDisplay.query;
     filterMapObjects();
+    restoreAnalysisState(previousDisplay.analysis);
     refreshAttributeSearch();
   };
   if (absolute) showProgressModal.value = true;
@@ -304,6 +306,7 @@ const reloadMap = async (
         isMapFrameLoading.value = false;
         return false;
       }
+      resetAnalysis();
       isReload.value = true;
       mapObjectQueryFormData.value = { query1: "", query2: "" };
       mapobjStore.refreshSearchResults();
@@ -594,11 +597,28 @@ const handleMapObjectSearch = async (query: QueryForm, reset: boolean = false): 
     showMessage("検索結果を取得できませんでした。再試行してください。");
   }
 };
-const { openAdvancedSearch, closeAdvancedSearch, refreshAttributeSearch } = useAdvancedMapSearch(
+const {
+  openAdvancedSearch,
+  closeAdvancedSearch,
+  refreshAttributeSearch,
+  resetAnalysis,
+  coloringActive,
+  getAnalysisState,
+  restoreAnalysisState,
+} = useMapAnalysisSearch(
   activeLayer,
   masterLayerId,
-  filterMapObjects,
+  async () => {
+    const active =
+      !!mapobjStore.search?.query1 || !!mapobjStore.search?.query2 || !!mapobjStore.attributeSearch;
+    const success = await mapIframeRef.value?.filterMapObjectsAndWait(
+      active ? [...mapobjStore.mapObjectList.keys()] : null,
+      active ? mapobjStore.filteredShapeIds : null,
+    );
+    if (!success) throw Error("地図への絞り込みの反映を確認できませんでした。再試行してください。");
+  },
   (text) => showMessage(text),
+  async (coloring) => (await mapIframeRef.value?.setColoring?.(coloring)) ?? false,
 );
 watch(activeLayer, () => closeAdvancedSearch());
 watch(() => mapobjStore.attributeRevision, filterMapObjects);
@@ -1188,7 +1208,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
     @reloadMap="(url, absolute) => reloadMap(url, absolute, false, true)"
     @layerList="openLayerList()"
     @advancedSearch="openAdvancedSearch"
-    :attributeSearchActive="!!mapobjStore.attributeSearch"
+    :attributeSearchActive="!!mapobjStore.attributeSearch || coloringActive"
     @mapObjectSearch="handleMapObjectSearch"
     @update:mapObjectQueryFormData="mapObjectQueryFormData = $event"
     @update:activeLayer="activeLayer = $event"

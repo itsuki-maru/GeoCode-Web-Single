@@ -277,3 +277,32 @@ describe("保存した検索条件の一覧", () => {
     expect(wrapper.get('[role="alert"]').text()).toContain("保存した項目が見つかりません");
   });
 });
+
+it("呼び出しはスピナーから完了メッセージへ移り、一覧を残して再び呼び出せる", async () => {
+  const wrapper = listModal();
+  await flushPromises();
+  await button(wrapper, "呼び出し").trigger("click");
+  await wrapper.setProps({ restoring: true });
+  expect(
+    document.querySelector('[aria-label="検索条件を呼び出しています"] svg.spinner'),
+  ).not.toBeNull();
+  await wrapper.setProps({ restoring: false });
+  const complete = wrapper
+    .findAllComponents(MessageModal)
+    .find((c) => c.props("message") === "呼び出しが完了しました。")!;
+  expect(complete.props("isOpen")).toBe(true);
+  expect(document.querySelector('[aria-label="検索条件を呼び出しています"]')).toBeNull();
+  expect(wrapper.emitted("close")).toBeUndefined();
+  await complete.vm.$emit("close");
+  await flushPromises();
+  expect(wrapper.get("tbody tr").text()).toContain("50年以上");
+  await button(wrapper, "呼び出し").trigger("click");
+  expect(wrapper.emitted("restore")).toHaveLength(2);
+  await wrapper.setProps({ restoring: true });
+  await wrapper.setProps({ restoring: false, restoreError: "呼び出せませんでした" });
+  expect(
+    wrapper
+      .findAllComponents(MessageModal)
+      .some((c) => c.props("message") === "呼び出しが完了しました。" && c.props("isOpen")),
+  ).toBe(false);
+});

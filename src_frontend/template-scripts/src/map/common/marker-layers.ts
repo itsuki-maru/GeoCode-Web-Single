@@ -53,7 +53,7 @@ interface LeafletNamespace {
 
 interface HydrateMarkerOptions {
   renderPopup?: (record: ReadOnlyMarkerRecord) => string;
-  onMarkerCreated?: (marker: MarkerLayer) => void;
+  onMarkerCreated?: (marker: MarkerLayer, record: ReadOnlyMarkerRecord) => void;
   clusterGroups: Record<string, LayerGroup>;
   createMarkerGroupForLayer: (layerId: string | null | undefined) => LayerGroup | null;
   documentRoot?: Document;
@@ -168,7 +168,7 @@ export function hydrateReadOnlyMarkers({
     const markerElement = marker.getElement();
     if (markerElement) markerElement.id = `marker-${markerData.id}`;
     markers[`marker-${markerData.id}`] = marker;
-    onMarkerCreated?.(marker);
+    onMarkerCreated?.(marker, markerData);
   });
 
   const normalizedShapeRecords = Array.isArray(shapeRecords)

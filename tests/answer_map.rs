@@ -1017,6 +1017,7 @@ async fn twenty_thousand_targets_support_map_and_filter_without_truncation() {
     );
     let mut request = geocode_web_single::handler::answer_map_filter::MapFilterRequest {
         query: q,
+        scope: None,
         targets: expected.iter().cloned().collect(),
         common_form_id: Some(form),
         conditions: vec![],

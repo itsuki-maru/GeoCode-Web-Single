@@ -1,3 +1,11 @@
+import analysisCss from "./advanced-map-analysis.css?inline";
+import { createProgressDialog, awaitWithAbort } from "./progress-spinner";
+import { createColoringEditor, action, node } from "./coloring-editor";
+import { createMapPresetDialogs } from "./map-preset-dialog";
+import { createMapMessageDialog } from "./map-message-dialog";
+import { evaluateMapAnalysis, mapFilterPath, mapOperationMessages } from "./map-analysis";
+import { validatePresetDraft, type SavedMapPreset } from "./answer-map-presets";
+import type { AnswerColorSpecification, AnswerColoring, AnswerField } from "./answer-coloring";
 /** Vue の地図ページと、単独で開く全画面の地図で共有する。 */
 export interface AttributeCondition {
   field_id: string;
@@ -11,6 +19,7 @@ export interface AttributeSearchRequest {
   definition_version: number;
   layer_ids: string[] | null;
   conditions: AttributeCondition[];
+  use_map_filter?: boolean;
   targets?: { target_type: "marker" | "shape"; id: string }[];
 }
 export interface AttributeSearchResult {
@@ -20,6 +29,7 @@ export interface AttributeSearchResult {
   marker_ids: string[];
   shape_ids: string[];
   target_count: number;
+  coloring?: AnswerColoring | null;
 }
 interface Field {
   id: string;
@@ -37,6 +47,7 @@ export type AttributeTransport = (
   path: string,
   body: unknown | undefined,
   signal: AbortSignal,
+  method?: "DELETE",
 ) => Promise<unknown>;
 export const attributeSearchPath = "/map-objects/search/attributes";
 const supported = new Set([
@@ -93,9 +104,9 @@ export function validateAttributeResult(
 }
 
 /** テンプレートページには Cookie 認証を使い、Vue 側からは既存の Axios アダプターを渡す。 */
-export const attributeTransport: AttributeTransport = async (path, body, signal) => {
+export const attributeTransport: AttributeTransport = async (path, body, signal, method) => {
   const init: RequestInit = {
-    method: body === undefined ? "GET" : "POST",
+    method: method || (body === undefined ? "GET" : "POST"),
     credentials: "same-origin",
     cache: "no-store",
     signal,
@@ -126,7 +137,7 @@ export const attributeTransport: AttributeTransport = async (path, body, signal)
       data?.error?.replace(/^validation error:\s*/, "") || "検索結果を取得できませんでした。",
     );
   }
-  return response.json();
+  return response.status === 204 ? null : response.json();
 };
 
 interface ModalOptions {
@@ -134,13 +145,26 @@ interface ModalOptions {
   getApplied(): AttributeSearchRequest | null;
   getLayerIds(): string[] | null;
   getContext(): string;
-  onApply(request: AttributeSearchRequest | null, result: AttributeSearchResult | null): void;
+  onApply(
+    request: AttributeSearchRequest | null,
+    result: AttributeSearchResult | null,
+    signal?: AbortSignal,
+  ): void | Promise<void>;
+  analysis?: {
+    getSpecification(): AnswerColorSpecification | null;
+    getColoring(): AnswerColoring | null;
+    apply(
+      specification: AnswerColorSpecification | null,
+      coloring: AnswerColoring | null,
+    ): Promise<void>;
+  };
 }
 
 export function createAdvancedMapSearchModal(options: ModalOptions) {
   const dialog = document.createElement("dialog");
-  dialog.className = "advanced-map-search";
-  dialog.setAttribute("aria-label", "詳しい検索");
+  const title = options.analysis ? "詳しい検索と色分け" : "詳しい検索";
+  dialog.className = options.analysis ? "advanced-map-search has-analysis" : "advanced-map-search";
+  dialog.setAttribute("aria-label", title);
   const styleId = "advanced-map-search-style";
   if (!document.getElementById(styleId)) {
     const style = document.createElement("style");
@@ -231,9 +255,13 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
         border-bottom: 1px solid #ccc;
         align-items: start;
       }
-      .advanced-map-search .attribute-row select,
+      .advanced-map-search .attribute-row select:not([multiple]),
       .advanced-map-search .attribute-row input:not([type="checkbox"]) {
         height: calc(1.4em + 18px);
+        line-height: 1.4;
+      }
+      .advanced-map-search .attribute-row select[multiple] {
+        min-height: 64px;
         line-height: 1.4;
       }
       .advanced-map-search .attribute-row > button {
@@ -242,7 +270,6 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
         box-shadow: none;
       }
       .advanced-map-search .attribute-values { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-      .advanced-map-search .attribute-choice { flex-direction: row; align-items: center; overflow-wrap: anywhere; }
       .advanced-map-search footer { margin-top: 18px; }
       .advanced-map-search .attribute-error { color: #b42318; white-space: pre-wrap; }
       .advanced-map-search .attribute-submit { background: #2165bb; border-color: #2165bb; }
@@ -252,9 +279,12 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
         .advanced-map-search .attribute-values { grid-column: 1 / -1; }
       }
     `;
+    style.textContent += analysisCss;
     document.head.append(style);
   }
   document.body.append(dialog);
+  const progress = createProgressDialog();
+  const completion = createMapMessageDialog();
   let forms: CommonForm[] = [],
     formId = "",
     conditions: AttributeCondition[] = [];
@@ -277,6 +307,133 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
     b.addEventListener("click", click);
     return b;
   };
+  const analysisHost = node("section");
+  analysisHost.className = "attribute-color-pane";
+  const loadFields = async (id: string, signal: AbortSignal): Promise<AnswerField[]> => {
+    const data = (await options.transport(
+      mapFilterPath,
+      {
+        query: { mode: "latest" },
+        scope: { kind: "layers", layer_ids: options.getLayerIds() },
+        common_form_id: id,
+        conditions: [],
+        options_only: true,
+      },
+      signal,
+    )) as { fields: AnswerField[] };
+    if (!Array.isArray(data.fields)) throw Error("入力項目を取得できませんでした。");
+    return data.fields;
+  };
+  const presets = options.analysis
+    ? createMapPresetDialogs(options.transport, async (preset: SavedMapPreset, signal) => {
+        validatePresetDraft(preset);
+        const id = preset.definition.common_form_id;
+        const fields = id ? await loadFields(id, signal) : [];
+        if (signal.aborted || !dialog.open) return;
+        for (const c of preset.kind === "filter"
+          ? preset.definition.conditions
+          : preset.definition.rules.flatMap((r) => r.conditions)) {
+          const f = fields.find((f) => f.id === c.field_id && f.field_type === c.field_type);
+          if (!f || (Array.isArray(c.value) && c.value.some((v) => !f.choices.includes(v))))
+            throw Error("保存した項目または選択肢が見つかりません。");
+        }
+        if (id) {
+          let form = forms.find((f) => f.id === id);
+          if (!form) {
+            form = {
+              id,
+              version: 0,
+              form_title: preset.display.form_label || "過去のフォーム",
+              form_schema: { fields: [] },
+            };
+            forms.push(form);
+          }
+          form.form_schema.fields = fields.map((f) => ({
+            id: f.id,
+            label: f.label,
+            type: f.field_type,
+            choices: f.choices,
+          }));
+        }
+        if (preset.kind === "coloring") coloringEditor!.restore(preset.definition, fields);
+        else {
+          const colors = options.analysis!.getSpecification();
+          if (colors && id && colors.common_form_id !== id)
+            throw Error("現在の色分けと共通フォームが異なります。");
+          formId = id || "";
+          conditions = clone(preset.definition.conditions) as unknown as AttributeCondition[];
+          render();
+        }
+        status.textContent = "検索条件を呼び出しました。実行ボタンで地図に反映します。";
+      })
+    : undefined;
+  const coloringEditor = options.analysis
+    ? createColoringEditor(analysisHost, {
+        collapsible: false,
+        forms: () => forms.map((f) => ({ id: f.id, label: f.form_title })),
+        requiredForm: () => options.getApplied()?.common_form_id || "",
+        loadFields,
+        active: () => !!options.analysis!.getColoring(),
+        disabled: () => busy || !dialog.open,
+        save: (value) => {
+          presets!.save({ kind: "coloring", definition: value });
+        },
+        apply: async (specification) => {
+          const current = sequence,
+            context = options.getContext();
+          const job = new AbortController();
+          controller?.abort();
+          controller = job;
+          const timeout = setTimeout(() => job.abort(), 60000);
+          const finishProgress = progress.show("色分けを反映しています");
+          try {
+            const applied = options.getApplied();
+            const result = specification
+              ? await awaitWithAbort(
+                  evaluateMapAnalysis(
+                    options.transport,
+                    applied
+                      ? {
+                          common_form_id: applied.common_form_id,
+                          conditions: applied.conditions as unknown as Record<string, unknown>[],
+                        }
+                      : null,
+                    specification,
+                    options.getLayerIds(),
+                    job.signal,
+                  ),
+                  job.signal,
+                )
+              : { coloring: null };
+            if (
+              disposed ||
+              job.signal.aborted ||
+              current !== sequence ||
+              !dialog.open ||
+              context !== options.getContext()
+            )
+              throw Error("地図データが更新されました。もう一度実行してください。");
+            await awaitWithAbort(
+              options.analysis!.apply(specification, result.coloring),
+              job.signal,
+            );
+          } finally {
+            clearTimeout(timeout);
+            finishProgress();
+          }
+          if (
+            !disposed &&
+            !job.signal.aborted &&
+            current === sequence &&
+            dialog.open &&
+            specification
+          )
+            completion.show(mapOperationMessages.coloring, "色分け完了", () =>
+              dialog.querySelector<HTMLElement>(".color-submit")?.focus(),
+            );
+        },
+      })
+    : undefined;
   const fieldList = () =>
     forms.find((f) => f.id === formId)?.form_schema.fields.filter((f) => supported.has(f.type)) ||
     [];
@@ -286,9 +443,12 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
     searchTimer = undefined;
     controller?.abort();
     busy = false;
+    progress.clear();
   };
   const close = () => {
     cancel();
+    completion.close(false);
+    presets?.close();
     if (dialog.open) {
       dialog.close();
       trigger?.focus();
@@ -336,9 +496,62 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
           : "";
     delete c.upper;
   };
+  const clearFilter = (notify = false) => {
+    if (busy) return;
+    const current = ++sequence;
+    controller?.abort();
+    controller = new AbortController();
+    const requestController = controller;
+    const timer = setTimeout(() => requestController.abort(), 60000);
+    searchTimer = timer;
+    const finishProgress = progress.show("検索結果を反映しています");
+    const finish = () => {
+      clearTimeout(timer);
+      finishProgress();
+      if (searchTimer === timer) searchTimer = undefined;
+    };
+    const clear = () => {
+      finish();
+      if (current !== sequence || !dialog.open) return;
+      busy = false;
+      formId = "";
+      conditions = [];
+      render("属性条件を解除");
+      status.textContent = "属性条件を解除しました。";
+      if (notify)
+        completion.show(mapOperationMessages.filter, "絞り込み完了", () =>
+          dialog.querySelector<HTMLElement>(".attribute-submit")?.focus(),
+        );
+    };
+    try {
+      const applied = options.analysis
+        ? options.onApply(null, null, controller.signal)
+        : options.onApply(null, null);
+      if (applied && typeof applied.then === "function") {
+        busy = true;
+        render();
+        void awaitWithAbort(applied, requestController.signal)
+          .then(clear)
+          .catch((e) => {
+            finish();
+            if (current !== sequence || !dialog.open) return;
+            busy = false;
+            render();
+            error((e as Error).message);
+          });
+      } else clear();
+    } catch (e) {
+      finish();
+      error((e as Error).message);
+    }
+  };
   const search = async () => {
     if (busy) return;
     const form = forms.find((f) => f.id === formId);
+    if (!form && options.analysis && !conditions.length) {
+      clearFilter(true);
+      return;
+    }
     if (!form) {
       error("共通フォームを選択してください。");
       return;
@@ -354,7 +567,7 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
         (!Array.isArray(c.value) ||
           c.value.some((value) => typeof value !== "string" || !f.choices?.includes(value)))
       ) {
-        error("現在の選択肢にない値があります。該当するチェックを外して選び直してください。");
+        error("現在の選択肢にない値があります。該当する値の選択を解除して選び直してください。");
         return;
       }
       if (
@@ -373,6 +586,7 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
       definition_version: form.version,
       layer_ids: options.getLayerIds(),
       conditions: clone(conditions),
+      ...(options.analysis ? { use_map_filter: true } : {}),
     };
     const seq = ++sequence,
       context = options.getContext();
@@ -385,9 +599,20 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
     status.textContent = "検索中…";
     const timer = setTimeout(() => requestController.abort(), 60000);
     searchTimer = timer;
+    const finishProgress = progress.show("検索結果を反映しています");
     try {
       const result = validateAttributeResult(
-        await options.transport(attributeSearchPath, request, requestController.signal),
+        await awaitWithAbort(
+          options.analysis
+            ? searchMapAttributes(
+                options.transport,
+                request,
+                options.analysis.getSpecification(),
+                requestController.signal,
+              )
+            : options.transport(attributeSearchPath, request, requestController.signal),
+          requestController.signal,
+        ),
         request,
       );
       if (disposed || seq !== sequence || !dialog.open) return;
@@ -395,16 +620,30 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
         error("地図データが更新されました。もう一度検索してください。");
         return;
       }
-      options.onApply(request, result);
+      await awaitWithAbort(
+        Promise.resolve(
+          options.analysis
+            ? options.onApply(request, result, requestController.signal)
+            : options.onApply(request, result),
+        ),
+        requestController.signal,
+      );
+      if (disposed || seq !== sequence || !dialog.open) return;
       status.textContent = `属性条件のみの一致件数：${result.target_count}件`;
+      finishProgress();
+      completion.show(mapOperationMessages.filter, "絞り込み完了", () =>
+        dialog.querySelector<HTMLElement>(".attribute-submit")?.focus(),
+      );
     } catch (e) {
       if (!disposed && seq === sequence && dialog.open)
         error(e instanceof Error ? e.message : "検索に失敗しました。");
     } finally {
       clearTimeout(timer);
+      finishProgress();
       if (searchTimer === timer) searchTimer = undefined;
       if (seq === sequence) {
         busy = false;
+        coloringEditor?.refresh();
         dialog.setAttribute("aria-busy", "false");
         dialog
           .querySelectorAll<HTMLButtonElement | HTMLSelectElement | HTMLInputElement>("[data-busy]")
@@ -419,9 +658,24 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
     dialog.setAttribute("aria-busy", String(busy));
     dialog.replaceChildren();
     const header = element("header");
-    header.append(element("h2", "詳しい検索"), button("閉じる", close));
+    header.append(element("h2", title), button("閉じる", close));
+    header.className = "attribute-header";
+    if (presets)
+      header.insertBefore(
+        action("保存した検索条件", () => presets.list()),
+        header.lastElementChild,
+      );
     dialog.append(header);
-    dialog.append(
+    const filterPane = options.analysis ? element("section") : dialog;
+    if (options.analysis) {
+      filterPane.className = "attribute-filter-pane";
+      const workspace = element("div");
+      workspace.className = "attribute-workspace";
+      workspace.append(filterPane, analysisHost);
+      dialog.append(workspace);
+      filterPane.append(element("h3", "地図上で絞り込み"));
+    }
+    filterPane.append(
       element(
         "p",
         "対象・共通フォームごとの最新回答を検索します。複数条件はすべて一致する回答が対象です。",
@@ -434,11 +688,39 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
         formId = value;
         conditions = [];
         render();
+        if (options.analysis && value) {
+          const current = ++sequence;
+          controller?.abort();
+          controller = new AbortController();
+          busy = true;
+          render();
+          void loadFields(value, controller.signal)
+            .then((fields) => {
+              if (current !== sequence || !dialog.open) return;
+              const form = forms.find((f) => f.id === value);
+              if (form)
+                form.form_schema.fields = fields.map((f) => ({
+                  id: f.id,
+                  label: f.label,
+                  type: f.field_type,
+                  choices: f.choices,
+                }));
+              busy = false;
+              render();
+            })
+            .catch((e) => {
+              if (current === sequence && dialog.open) {
+                busy = false;
+                render();
+                error((e as Error).message);
+              }
+            });
+        }
       },
       "form",
     );
-    dialog.append(label("共通フォーム", formSelect));
-    if (!forms.length && !busy) dialog.append(element("p", "共通フォームはありません。"));
+    filterPane.append(label("共通フォーム", formSelect));
+    if (!forms.length && !busy) filterPane.append(element("p", "共通フォームはありません。"));
     const conditionList = element("div");
     conditionList.className = "attribute-conditions";
     conditions.forEach((c, index) => {
@@ -483,27 +765,30 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
           const savedChoices = Array.isArray(c.value)
             ? c.value.filter((value): value is string => typeof value === "string")
             : [];
-          for (const [choiceIndex, choice] of [
-            ...new Set([...currentChoices, ...savedChoices]),
-          ].entries()) {
+          const choices = element("select");
+          choices.multiple = true;
+          choices.dataset.focusKey = `choices-${index}`;
+          const validateChoices = () =>
+            choices.setAttribute(
+              "aria-invalid",
+              String([...choices.selectedOptions].some((o) => !currentChoices.includes(o.value))),
+            );
+          for (const choice of new Set([...currentChoices, ...savedChoices])) {
             const retired = !currentChoices.includes(choice);
-            const input = element("input");
-            input.type = "checkbox";
-            input.value = choice;
-            input.dataset.focusKey = `choice-${index}-${choiceIndex}`;
-            input.checked = Array.isArray(c.value) && c.value.includes(choice);
-            input.setAttribute("aria-invalid", String(retired && input.checked));
-            input.addEventListener("change", () => {
-              const selected = new Set(Array.isArray(c.value) ? c.value : []);
-              if (input.checked) selected.add(choice);
-              else selected.delete(choice);
-              c.value = [...selected];
-              input.setAttribute("aria-invalid", String(retired && input.checked));
-            });
-            const l = label(retired ? `${choice}（現在の選択肢にありません）` : choice, input);
-            l.className = retired ? "attribute-choice attribute-error" : "attribute-choice";
-            values.append(l);
+            const option = element(
+              "option",
+              retired ? `${choice}（現在の選択肢にありません）` : choice,
+            );
+            option.value = choice;
+            option.selected = savedChoices.includes(choice);
+            choices.append(option);
           }
+          choices.addEventListener("change", () => {
+            c.value = [...choices.selectedOptions].map((o) => o.value);
+            validateChoices();
+          });
+          validateChoices();
+          values.append(label("値（複数選択可）", choices));
         } else if (c.field_type === "checkbox")
           values.append(
             label(
@@ -561,24 +846,46 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
     });
     add.disabled = !fieldList().length || conditions.length >= 10;
     conditionList.append(add);
-    dialog.append(conditionList);
+    filterPane.append(conditionList);
     status = element("p");
     status.setAttribute("role", "status");
-    dialog.append(status);
+    status.className = "attribute-status";
+    if (options.analysis)
+      status.textContent = options.getApplied()
+        ? "検索条件を適用中です。編集後は「絞り込み実行」で反映します。"
+        : "検索条件は未適用です。";
+    filterPane.append(status);
     const footer = element("footer"),
-      submit = button("検索", () => void search());
+      submit = button("絞り込み実行", () => void search());
     submit.className = "attribute-submit";
-    footer.append(
-      button("属性条件を解除", () => {
-        options.onApply(null, null);
-        formId = "";
-        conditions = [];
-        render("属性条件を解除");
-        status.textContent = "属性条件を解除しました。";
-      }),
-      submit,
-    );
-    dialog.append(footer);
+    const clear = button("属性条件を解除", () => clearFilter());
+    footer.className = "attribute-filter-actions";
+    if (options.analysis) footer.append(submit, clear);
+    else footer.append(clear, submit);
+    if (presets) {
+      footer.append(
+        action("検索条件を保存", () => {
+          try {
+            presets.save({
+              kind: "filter",
+              definition: {
+                common_form_id: formId || null,
+                conditions: clone(conditions) as unknown as Record<string, unknown>[],
+              },
+            });
+          } catch (e) {
+            error((e as Error).message);
+          }
+        }),
+      );
+    }
+    filterPane.append(footer);
+    if (coloringEditor) {
+      coloringEditor.refresh();
+      const note = element("p", "入力した条件は、それぞれの実行ボタンで地図に反映します。");
+      note.className = "attribute-dialog-note";
+      dialog.append(note);
+    }
     dialog
       .querySelectorAll<
         HTMLButtonElement | HTMLSelectElement | HTMLInputElement
@@ -616,10 +923,51 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
         if (disposed || seq !== sequence || !dialog.open) return;
         if (!Array.isArray(data)) throw Error("共通フォームを取得できませんでした。");
         forms = data as CommonForm[];
+        if (options.analysis) {
+          const meta = (await options.transport(
+            mapFilterPath,
+            {
+              query: { mode: "latest" },
+              scope: { kind: "layers", layer_ids: options.getLayerIds() },
+              common_form_id: null,
+              conditions: [],
+              options_only: true,
+            },
+            controller!.signal,
+          )) as { forms: { id: string; label: string }[] };
+          if (disposed || seq !== sequence || !dialog.open) return;
+          for (const f of meta.forms || [])
+            if (!forms.some((form) => form.id === f.id))
+              forms.push({
+                id: f.id,
+                version: 0,
+                form_title: f.label,
+                form_schema: { fields: [] },
+              });
+          if (formId) {
+            const fields = await loadFields(formId, controller!.signal);
+            if (disposed || seq !== sequence || !dialog.open) return;
+            const form = forms.find((f) => f.id === formId);
+            if (form)
+              form.form_schema.fields = fields.map((f) => ({
+                id: f.id,
+                label: f.label,
+                type: f.field_type,
+                choices: f.choices,
+              }));
+          }
+        }
+        if (options.analysis?.getSpecification()) {
+          const specification = options.analysis.getSpecification()!;
+          const candidates = await loadFields(specification.common_form_id, controller!.signal);
+          if (disposed || seq !== sequence || !dialog.open) return;
+          coloringEditor!.restore(specification, candidates);
+        }
         busy = false;
         render();
         if (
           applied &&
+          !options.analysis &&
           !forms.some((f) => f.id === formId && f.version === applied.definition_version)
         )
           error("共通フォームが変更・削除されています。条件を確認してください。");
@@ -635,7 +983,43 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
     dispose() {
       close();
       disposed = true;
+      coloringEditor?.dispose();
+      presets?.dispose();
+      completion.dispose();
+      progress.dispose();
       dialog.remove();
     },
+  };
+}
+
+export async function searchMapAttributes(
+  transport: AttributeTransport,
+  request: AttributeSearchRequest,
+  colors: AnswerColorSpecification | null,
+  signal: AbortSignal,
+): Promise<AttributeSearchResult> {
+  const data = await evaluateMapAnalysis(
+    transport,
+    {
+      common_form_id: request.common_form_id,
+      conditions: request.conditions as unknown as Record<string, unknown>[],
+    },
+    colors,
+    request.layer_ids,
+    signal,
+    request.targets?.map((t) => `${t.target_type}:${t.id}`),
+  );
+  return {
+    common_form_id: request.common_form_id,
+    definition_version: request.definition_version,
+    as_of: data.as_of,
+    marker_ids: data.targets
+      .filter((k: string) => k.startsWith("marker:"))
+      .map((k: string) => k.slice(7)),
+    shape_ids: data.targets
+      .filter((k: string) => k.startsWith("shape:"))
+      .map((k: string) => k.slice(6)),
+    target_count: data.target_count,
+    coloring: data.coloring,
   };
 }

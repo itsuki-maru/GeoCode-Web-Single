@@ -34,6 +34,10 @@ function setup(referrer = "https://example.test/app") {
     shapeRenderManager: { replaceRecords: vi.fn() },
     renderVisibleShapes: vi.fn(),
     editorEntryProfile: { isMobile: false },
+    map: {},
+    L: {},
+    editorColorShapeLayers: {},
+    installAnswerColoring: () => ({ refreshTarget: vi.fn(), releaseTarget: vi.fn() }),
   });
   runInContext(source, context);
   return { context, postMessage, records };

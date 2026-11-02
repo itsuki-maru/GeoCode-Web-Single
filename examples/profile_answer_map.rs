@@ -718,6 +718,7 @@ async fn run(options: Options, output: PathBuf) -> anyhow::Result<()> {
 
     let mut request = MapFilterRequest {
         query: query.clone(),
+        scope: None,
         targets,
         common_form_id: None,
         conditions: vec![],

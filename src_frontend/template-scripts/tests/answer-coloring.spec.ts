@@ -65,6 +65,28 @@ function setup() {
 }
 
 describe("answer map coloring", () => {
+  it("編集地図では保存済みスタイルと分類色を分離し、解除時に最新の元スタイルへ戻す", () => {
+    const s = setup();
+    const saved = { ...s.shape.shapeStyle };
+    const runtime = {
+      ...s.runtime,
+      setShapeColor: (layer: any, style: any) =>
+        layer.setStyle({
+          ...layer.shapeStyle,
+          ...(style ? { color: style.color, fillColor: style.color } : { fillColor: null }),
+        }),
+    };
+    const controller = installAnswerColoring(runtime, s.leaflet);
+    controller.apply(s.state);
+    expect(s.shape.shapeStyle).toEqual(saved);
+    expect(s.shape.options.color).toBe("#0072b2");
+    s.shape.shapeStyle.color = "#654321";
+    controller.refreshTarget("shape:same", s.shape, true);
+    expect(s.shape.options.color).toBe("#0072b2");
+    controller.apply(null);
+    expect(s.shape.options.color).toBe("#654321");
+    expect(s.shape.shapeStyle.color).toBe("#654321");
+  });
   it("2万対象でも分類と所属を検証する", () => {
     const s = setup();
     const keys = Array.from({ length: 20_000 }, (_, n) => `shape:target-${n}`);

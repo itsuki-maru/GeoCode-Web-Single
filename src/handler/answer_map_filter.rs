@@ -1,4 +1,4 @@
-//! 初期対象集合の中で、同一回答に追加条件を適用する。位置・形状は再送しない。
+//! 回答地図の初期対象集合または通常地図のレイヤー範囲で、同一回答に追加条件を適用する。
 use super::form_answers::{
     AnswerCondition, AnswerQuery, FieldOption, append_conditions, build_query, merge_field,
     validate,
@@ -23,12 +23,20 @@ use uuid::Uuid;
 #[derive(Deserialize, Serialize)]
 pub struct MapFilterRequest {
     pub query: AnswerQuery,
+    #[serde(default)]
     pub targets: Vec<String>,
+    #[serde(default)]
+    pub scope: Option<MapLayerScope>,
     pub common_form_id: Option<String>,
     #[serde(default)]
     pub conditions: Vec<AnswerCondition>,
     #[serde(default)]
     pub options_only: bool,
+}
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
+pub enum MapLayerScope {
+    Layers { layer_ids: Option<Vec<Uuid>> },
 }
 #[derive(Serialize)]
 pub struct MapFormOption {
@@ -37,6 +45,7 @@ pub struct MapFormOption {
 }
 #[derive(Serialize)]
 pub struct MapFilterResult {
+    pub as_of: DateTime<Utc>,
     pub forms: Vec<MapFormOption>,
     pub forms_overflow: bool,
     pub fields: Vec<FieldOption>,
@@ -50,11 +59,13 @@ fn invalid(s: &str) -> AppError {
 pub(super) struct Scope {
     markers: Vec<String>,
     shapes: Vec<String>,
+    layers: Option<Option<Vec<String>>>,
 }
 pub(super) fn scope(keys: &[String]) -> Result<Scope, AppError> {
     let mut result = Scope {
         markers: vec![],
         shapes: vec![],
+        layers: None,
     };
     let mut unique = BTreeSet::new();
     for key in keys {
@@ -87,21 +98,35 @@ fn base(
         , map_scope AS (
             SELECT *
             FROM filtered
-            WHERE (target_type = 'marker' AND target_id IN (
+            WHERE TRUE
+        "#,
+    );
+    if let Some(Some(layers)) = &scope.layers {
+        b.push(" AND layer_id IN (SELECT value FROM json_each(")
+            .push_bind(serde_json::to_string(layers).unwrap())
+            .push("))");
+    }
+    // 従来の対象ID方式では空集合も絞り込む。通常地図ではID指定時だけ部分再判定する。
+    if scope.layers.is_none() || !scope.markers.is_empty() || !scope.shapes.is_empty() {
+        b.push(
+            r#"
+            AND ((target_type = 'marker' AND target_id IN (
                 SELECT value
                 FROM json_each(
         "#,
-    )
-    .push_bind(serde_json::to_string(&scope.markers).unwrap())
-    .push(
-        r#"
+        )
+        .push_bind(serde_json::to_string(&scope.markers).unwrap())
+        .push(
+            r#"
         ))) OR (target_type = 'shape' AND target_id IN (
             SELECT value
             FROM json_each(
         "#,
-    )
-    .push_bind(serde_json::to_string(&scope.shapes).unwrap())
-    .push("))))");
+        )
+        .push_bind(serde_json::to_string(&scope.shapes).unwrap())
+        .push("))))");
+    }
+    b.push(")");
     b
 }
 pub(super) fn matched(
@@ -161,7 +186,22 @@ async fn fields(
             }
         }
     }
-    let mut query = base(user, &r.query, at, scope);
+    // 部分的な再判定では検索対象のみを絞り込み、項目候補はレイヤー範囲全体から解決する。
+    let field_scope = Scope {
+        markers: vec![],
+        shapes: vec![],
+        layers: scope.layers.clone(),
+    };
+    let mut query = base(
+        user,
+        &r.query,
+        at,
+        if scope.layers.is_some() {
+            &field_scope
+        } else {
+            scope
+        },
+    );
     append_map_field_definitions(&mut query, form);
     let definitions: Vec<Value> = query.build_query_scalar().fetch_all(&mut **tx).await?;
     if definitions.len() > 10_000 {
@@ -185,7 +225,7 @@ async fn fields(
         .filter(|f| {
             matches!(
                 f.field_type.as_str(),
-                "text" | "textarea" | "number" | "date" | "select" | "radio" | "checkbox"
+                "text" | "textarea" | "number" | "date" | "select" | "radio" | "checkbox" | "image"
             )
         })
         .collect())
@@ -264,7 +304,13 @@ pub(super) fn validate_request(r: &MapFilterRequest) -> Result<DateTime<Utc>, Ap
     let at = r
         .query
         .as_of
+        .or_else(|| r.scope.as_ref().map(|_| Utc::now()))
         .ok_or_else(|| invalid("検索基準日時がありません。地図を開き直してください。"))?;
+    if r.scope.is_some() && (r.query.mode != "latest" || r.targets.len() > 512) {
+        return Err(invalid(
+            "通常地図は最新回答を検索し、再判定対象は512件以内にしてください。",
+        ));
+    }
     let extra = AnswerQuery {
         common_form_id: r.common_form_id.clone(),
         conditions: r.conditions.clone(),
@@ -294,7 +340,7 @@ pub(super) async fn validate_conditions(
             && condition.op == "missing"
             && matches!(
                 condition.field_type.as_str(),
-                "text" | "textarea" | "number" | "date" | "select" | "radio" | "checkbox"
+                "text" | "textarea" | "number" | "date" | "select" | "radio" | "checkbox" | "image"
             )
         {
             known = build_query(user, &r.query, at)
@@ -366,8 +412,24 @@ pub async fn filter_targets(
     r: &MapFilterRequest,
 ) -> Result<MapFilterResult, AppError> {
     let at = validate_request(r)?;
-    let scope = scope(&r.targets)?;
+    let mut scope = scope(&r.targets)?;
     let mut tx = super::answer_sqlite::begin_read(pool).await?;
+    if let Some(MapLayerScope::Layers { layer_ids }) = &r.scope {
+        let layers = layer_ids
+            .as_ref()
+            .map(|ids| ids.iter().map(Uuid::to_string).collect::<Vec<_>>());
+        if let Some(ids) = &layers {
+            let owned: Vec<String> =
+                sqlx::query_scalar("SELECT id FROM layer_model WHERE user_id=$1")
+                    .bind(user)
+                    .fetch_all(&mut *tx)
+                    .await?;
+            if ids.iter().any(|id| !owned.contains(id)) {
+                return Err(AppError::NotFound);
+            }
+        }
+        scope.layers = Some(layers);
+    }
     let forms: Vec<(String, String)> = base(user, &r.query, at, &scope)
         .push(
             r#"
@@ -424,6 +486,7 @@ pub async fn filter_targets(
     }
     tx.commit().await?;
     Ok(MapFilterResult {
+        as_of: at,
         forms: forms
             .into_iter()
             .take(200)

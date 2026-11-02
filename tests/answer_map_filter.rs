@@ -5,6 +5,9 @@ use serde_json::{Value, json};
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
+#[path = "answer_map_filter/ordinary_map.rs"]
+mod ordinary_map;
+
 async fn map_csv(pool: &SqlitePool, user: Uuid, r: &MapFilterRequest) -> String {
     use axum::{Form, Json, body::to_bytes, extract::Extension};
     use geocode_web_single::handler::{answer_map_csv, form_answers::CsvDownload};

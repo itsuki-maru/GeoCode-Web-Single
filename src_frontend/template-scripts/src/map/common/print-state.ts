@@ -1,6 +1,9 @@
 import type { StoredMapView } from "./map-view-persistence";
+import { isAnswerColoring, type AnswerColoring } from "../answer-coloring";
 
 export interface PrintMapState {
+  coloring?: AnswerColoring;
+  objectQuery?: string;
   view: StoredMapView;
   tileServerId: string;
   overlays: Record<string, boolean>;
@@ -20,7 +23,10 @@ export function isPrintMapState(value: unknown): value is PrintMapState {
   const state = value as PrintMapState;
   const view = state.view;
   return Boolean(
-    view &&
+    (state.coloring === undefined || isAnswerColoring(state.coloring)) &&
+      (state.objectQuery === undefined ||
+        (typeof state.objectQuery === "string" && state.objectQuery.length <= 10000)) &&
+      view &&
       Number.isFinite(view.latitude) &&
       Math.abs(view.latitude) <= 90 &&
       Number.isFinite(view.longitude) &&

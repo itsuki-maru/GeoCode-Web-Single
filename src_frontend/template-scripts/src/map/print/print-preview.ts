@@ -108,16 +108,31 @@ export function createPrintPreview(
     markChanged();
   };
   const colorController =
-    page === "form-answer-map" && coloring
-      ? installAnswerColoring(runtime, (window as any).L)
-      : undefined;
-  colorController?.apply(coloring!);
+    coloring || state.coloring ? installAnswerColoring(runtime, (window as any).L) : undefined;
+  const printColoring = coloring || state.coloring;
+  runtime.setColoringController?.(colorController);
+  colorController?.apply(printColoring!);
   const bootstrap = colorController ? readMapBootstrap() : undefined;
   const legend =
-    colorController && coloring && bootstrap?.page === "form-answer-map"
+    colorController &&
+    printColoring &&
+    bootstrap &&
+    (bootstrap.page === "map-anather" || bootstrap.page === "form-answer-map")
       ? createAnswerPrintLegend({
-          coloring,
+          coloring: printColoring,
           bootstrap,
+          getAvailableTargetKeys: () =>
+            new Set([
+              ...Object.values(bootstrap.markers).map((m) => `marker:${m.id}`),
+              ...bootstrap.shapes.map((s) => `shape:${s.id}`),
+            ]),
+          subscribe:
+            bootstrap.page === "map-anather"
+              ? (refresh) => {
+                  map.on("objectloadingchange", refresh);
+                  return () => map.off("objectloadingchange", refresh);
+                }
+              : undefined,
           mapElement,
           settings: element("print-settings"),
           setHiddenTargets: (keys) => runtime.setLegendHiddenTargets(keys),

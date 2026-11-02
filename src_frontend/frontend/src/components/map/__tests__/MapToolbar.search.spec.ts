@@ -15,7 +15,7 @@ it("places the advanced-search icon between search word 2 and reload, using the 
     global: { stubs: { CommonFormsModal: true } },
   });
   try {
-    const search = wrapper.get('[aria-label="詳しい検索"]');
+    const search = wrapper.get('[aria-label="詳しい検索と色分け"]');
     expect(search.element.previousElementSibling?.id).toBe("search-textbox2");
     const reload = search.element.nextElementSibling!;
     expect(reload.querySelector("img")?.getAttribute("src")).toContain("update_fill24.png");

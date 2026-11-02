@@ -1,0 +1,87 @@
+.map-presets-table {
+  overflow: auto;
+  min-height: 0;
+}
+
+.map-presets-table table {
+  width: 100%;
+  min-width: 980px;
+  table-layout: fixed;
+  border-collapse: collapse;
+  margin: 0;
+  font: 14px/1.4 sans-serif;
+}
+.map-presets-table th,
+.map-presets-table td {
+  border: 1px solid #ccc;
+  padding: 6px 13px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.map-presets-table th {
+  background: rgb(44, 52, 78);
+  color: white;
+}
+.map-presets-table th:nth-child(1) {
+  width: 11%;
+}
+.map-presets-table th:nth-child(2) {
+  width: 15%;
+}
+.map-presets-table th:nth-child(3) {
+  width: 13%;
+}
+.map-presets-table th:nth-child(4) {
+  width: 28%;
+}
+.map-presets-table th:nth-child(5) {
+  width: 14%;
+}
+.map-presets-table th:nth-child(6) {
+  width: 19%;
+}
+.map-presets-table tbody tr {
+  background: white;
+}
+.map-presets-table tbody tr:nth-child(even) {
+  background: #eee;
+}
+.map-presets-table tbody tr:hover {
+  background: #69a5b8;
+}
+.map-presets-table .preset-description {
+  white-space: pre-line;
+  text-align: left;
+}
+.map-presets-table .row-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.map-presets-table .row-actions .btn-close {
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+.map-presets-table .btn-close {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font: inherit;
+  font-weight: 500;
+  transition: border-color 0.25s;
+  background: #5f5f5f;
+  color: #fff;
+  box-shadow: 0 2px 2px #0003;
+  cursor: pointer;
+}
+.map-presets-table .btn-close:hover {
+  border-color: #396cd8;
+}
+.map-presets-table .btn-close:active {
+  border-color: #396cd8;
+  background: #e8e8e8;
+}
+.map-presets-table .btn-close:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

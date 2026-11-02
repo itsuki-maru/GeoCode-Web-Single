@@ -29,33 +29,33 @@ template-scripts/
 
 ### 共通地図処理の探し方
 
-| ファイル群（map/common） | 責務 |
-| --- | --- |
-| `map-runtime`、`base`、`page-controls` | 初期地図、基本操作、コントロール |
-| `layer-groups`、`marker-layers`、`overlay-events` | レイヤ構築、表示同期 |
-| `marker`、`map-object-focus` | マーカー表示、位置情報、対象への移動 |
-| `marker-clustering` | 通常・別画面・回答地図のクラスタ切替、ズーム制約、固定OFF設定 |
-| `search` | 検索、対象絞り込み、表示再構築 |
-| `shape-*` | 図形スタイル、矢印、復元、メモ、計測、表示範囲 |
-| `shape-renderer` | 原本と描画キャッシュの分離、範囲・縮尺による遅延生成、分割更新・取消、キャッシュ上限 |
-| `content*`、`markdown-*` | Markdown・埋め込み、サニタイズ、ファイル操作 |
-| `storage`、`map-view-persistence` | 背景・表示設定、中心とズームの保存 |
-| `tile-*`、`nowcast-*` | 重ね合わせタイル、出典、雨雲時刻・更新 |
-| `map-ui-visibility`、`visibility-controls` | UI・表示切り替え |
-| `print-state` | 印刷状態と用紙等の共有定義 |
+| ファイル群（map/common）                          | 責務                                                                                 |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `map-runtime`、`base`、`page-controls`            | 初期地図、基本操作、コントロール                                                     |
+| `layer-groups`、`marker-layers`、`overlay-events` | レイヤ構築、表示同期                                                                 |
+| `marker`、`map-object-focus`                      | マーカー表示、位置情報、対象への移動                                                 |
+| `marker-clustering`                               | 通常・別画面・回答地図のクラスタ切替、ズーム制約、固定OFF設定                        |
+| `search`                                          | 検索、対象絞り込み、表示再構築                                                       |
+| `shape-*`                                         | 図形スタイル、矢印、復元、メモ、計測、表示範囲                                       |
+| `shape-renderer`                                  | 原本と描画キャッシュの分離、範囲・縮尺による遅延生成、分割更新・取消、キャッシュ上限 |
+| `content*`、`markdown-*`                          | Markdown・埋め込み、サニタイズ、ファイル操作                                         |
+| `storage`、`map-view-persistence`                 | 背景・表示設定、中心とズームの保存                                                   |
+| `tile-*`、`nowcast-*`                             | 重ね合わせタイル、出典、雨雲時刻・更新                                               |
+| `map-ui-visibility`、`visibility-controls`        | UI・表示切り替え                                                                     |
+| `print-state`                                     | 印刷状態と用紙等の共有定義                                                           |
 
 ## 3. エントリーとビルド
 
-| entry | 実装入口 | 公開JS |
-| --- | --- | --- |
-| `map` | 仮想entry、PC編集ソース | `/assets/template-map.js` |
-| `map-mobile` | 仮想entry、モバイル編集ソース | `/assets/template-map-mobile.js` |
-| `map-anather` | `entries/map-anather.ts` | `/assets/template-map-anather.js` |
-| `temporary-map` | `entries/temporary-map.ts` | `/assets/template-temporary-map.js` |
+| entry                  | 実装入口                          | 公開JS                                     |
+| ---------------------- | --------------------------------- | ------------------------------------------ |
+| `map`                  | 仮想entry、PC編集ソース           | `/assets/template-map.js`                  |
+| `map-mobile`           | 仮想entry、モバイル編集ソース     | `/assets/template-map-mobile.js`           |
+| `map-anather`          | `entries/map-anather.ts`          | `/assets/template-map-anather.js`          |
+| `temporary-map`        | `entries/temporary-map.ts`        | `/assets/template-temporary-map.js`        |
 | `temporary-map-mobile` | `entries/temporary-map-mobile.ts` | `/assets/template-temporary-map-mobile.js` |
-| `live-map` | `entries/live-map.ts` | `/assets/template-live-map.js` |
-| `marker-form` | `entries/marker-form.ts` | `/assets/template-marker-form.js` |
-| `image-preview` | `entries/image-preview.ts` | `/assets/template-image-preview.js` |
+| `live-map`             | `entries/live-map.ts`             | `/assets/template-live-map.js`             |
+| `marker-form`          | `entries/marker-form.ts`          | `/assets/template-marker-form.js`          |
+| `image-preview`        | `entries/image-preview.ts`        | `/assets/template-image-preview.js`        |
 
 Vite出力はES2022、`dist/`、manifestは `template-manifest.json`。entry名は固定、共有chunkは `template-[name]-[hash].js`、資材は `template-[name]-[hash][extname]`。entry以外の生成物も必要なため、配布時はdist全体をコピーする。
 
@@ -73,12 +73,12 @@ Leafletの `L`、marked、filterXSS等はTera HTMLが先に読み込む。npm管
 
 ## 4. 初期データ
 
-| データ | 利用画面 | 主な項目 |
-| --- | --- | --- |
-| `window.__GEOCODE_MAP_BOOTSTRAP__` | 編集・別画面・一時共有 | page、tileServers、layers、markers、shapes、initialView等 |
-| `window.__GEOCODE_LIVE_MAP_BOOTSTRAP__` | 位置共有 | publicId、tileServers、tileOverlays、isCheckOverlay、publishedLayers |
-| `window.__GEOCODE_MARKER_FORM__` | マーカー・図形公開フォーム | schema、submissionPath、isPasswordProtected。詳細は [フォームbootstrap](src/marker-form/bootstrap.ts) |
-| HTMLのDOM・属性 | 画像プレビュー | Teraで設定された画像URL等 |
+| データ                                  | 利用画面                   | 主な項目                                                                                              |
+| --------------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `window.__GEOCODE_MAP_BOOTSTRAP__`      | 編集・別画面・一時共有     | page、tileServers、layers、markers、shapes、initialView等                                             |
+| `window.__GEOCODE_LIVE_MAP_BOOTSTRAP__` | 位置共有                   | publicId、tileServers、tileOverlays、isCheckOverlay、publishedLayers                                  |
+| `window.__GEOCODE_MARKER_FORM__`        | マーカー・図形公開フォーム | schema、submissionPath、isPasswordProtected。詳細は [フォームbootstrap](src/marker-form/bootstrap.ts) |
+| HTMLのDOM・属性                         | 画像プレビュー             | Teraで設定された画像URL等                                                                             |
 
 [types.ts](src/map/types.ts) では、編集画面の `shapes` と別画面の `shapes` は配列、一時共有はIDをキーにしたオブジェクトである。各画面のpage値、selectedLayer、isMaster、markerId、isCluster、isChecked、isMapUiHiddenなども異なる。
 
@@ -103,37 +103,37 @@ Tera変数の正本とJSON埋め込み処理は [テンプレート仕様](../..
 
 ### 6.1 親画面から地図
 
-| type | データ | 応答・用途 |
-| --- | --- | --- |
-| `focus` | objectType、id、lat、lng | 対象へ移動・表示。応答なし |
-| `mapViewRequest` | requestId | `mapViewResult`。編集地図の現在の中心とズームを取得 |
-| `mapObjectFilter` | markerIds、shapeIds（配列またはnull） | 一覧に対応する絞り込み。応答なし |
-| `markerFilter` | ids | 地図側に残るマーカー用受信処理 |
-| `mapObjectUpdate` | requestId、payload（既存の更新値またはobjectType＋完全object） | `mapObjectUpdateResult`。未生成対象も追加・更新 |
-| `mapObjectDelete` | requestId、id、objectType（省略時marker） | `mapObjectDeleteResult`。図形・マーカーを冪等に除去 |
-| `tileOverlaysUpdate` | requestId、tiles | `tileOverlaysUpdateResult` |
-| `mapRuntimeProbe` | requestId | 同じnonceの`mapRuntimeReady`でruntimeIdを確認 |
-| `mapObjectsInitialize` | requestId、runtimeId、snapshot | `mapObjectsInitializeResult`。初期原本の登録 |
-| `mapObjectChangedResult` | mutationId、runtimeId、success | 保存済み差分の受領確認 |
-| `mapObjectWriteResult` | requestId、runtimeId、status、data | 親が所有する保存HTTPの結果 |
+| type                     | データ                                                         | 応答・用途                                          |
+| ------------------------ | -------------------------------------------------------------- | --------------------------------------------------- |
+| `focus`                  | objectType、id、lat、lng                                       | 対象へ移動・表示。応答なし                          |
+| `mapViewRequest`         | requestId                                                      | `mapViewResult`。編集地図の現在の中心とズームを取得 |
+| `mapObjectFilter`        | markerIds、shapeIds（配列またはnull）                          | 一覧に対応する絞り込み。応答なし                    |
+| `markerFilter`           | ids                                                            | 地図側に残るマーカー用受信処理                      |
+| `mapObjectUpdate`        | requestId、payload（既存の更新値またはobjectType＋完全object） | `mapObjectUpdateResult`。未生成対象も追加・更新     |
+| `mapObjectDelete`        | requestId、id、objectType（省略時marker）                      | `mapObjectDeleteResult`。図形・マーカーを冪等に除去 |
+| `tileOverlaysUpdate`     | requestId、tiles                                               | `tileOverlaysUpdateResult`                          |
+| `mapRuntimeProbe`        | requestId                                                      | 同じnonceの`mapRuntimeReady`でruntimeIdを確認       |
+| `mapObjectsInitialize`   | requestId、runtimeId、snapshot                                 | `mapObjectsInitializeResult`。初期原本の登録        |
+| `mapObjectChangedResult` | mutationId、runtimeId、success                                 | 保存済み差分の受領確認                              |
+| `mapObjectWriteResult`   | requestId、runtimeId、status、data                             | 親が所有する保存HTTPの結果                          |
 
 結果メッセージはrequestIdとsuccessを返す。更新payloadは各Vueの [MapObjectUpdatePayload](../frontend/src/interface.ts) を参照し、マーカー／図形の識別と更新値を渡す。Vue側は通常の表示差分は2秒、初期化は30秒で未応答をfalseとし、画面破棄時も待機を解除する。保存要求は固定タイムアウトで自動再送せず、親で完了まで管理する。要求送信自体はDB更新ではなく、親で更新したデータを地図表示へ反映するために使用する。
 
 ### 6.2 地図から親画面
 
-| type | データ・用途 |
-| --- | --- |
-| `mapRuntimeReady` | requestId、runtimeId。probe応答で現runtimeを確認。再生成時は親の最新原本を要求 |
-| `mapObjectChanged` | operation、objectType、object／id、mutationId。保存済み差分 |
-| `mapObjectWriteRequested` | requestId、runtimeId、url、method、body。親へ保存通信を委譲 |
-| `callParentReload` | layerId（省略・null可）、message。互換・復旧用の再取得要求。通常の保存では使用しない |
-| `callParentLoginRedirect` | message。ログイン画面への遷移要求 |
-| `callParentFunction` | messageに画像URL等。PC用画像表示 |
-| `callParentImagePreview` | messageに画像URL等。モバイル用画像表示 |
-| `userLocationUpdate` | position。現在位置共有への連携 |
-| `userLocationError` | code。位置情報取得失敗 |
-| `printOpen` | PCの印刷開始 |
-| `mapViewResult` | requestId、view（latitude、longitude、zoom）。PC・モバイルの回答地図へ初期位置を引き継ぐ |
+| type                      | データ・用途                                                                             |
+| ------------------------- | ---------------------------------------------------------------------------------------- |
+| `mapRuntimeReady`         | requestId、runtimeId。probe応答で現runtimeを確認。再生成時は親の最新原本を要求           |
+| `mapObjectChanged`        | operation、objectType、object／id、mutationId。保存済み差分                              |
+| `mapObjectWriteRequested` | requestId、runtimeId、url、method、body。親へ保存通信を委譲                              |
+| `callParentReload`        | layerId（省略・null可）、message。互換・復旧用の再取得要求。通常の保存では使用しない     |
+| `callParentLoginRedirect` | message。ログイン画面への遷移要求                                                        |
+| `callParentFunction`      | messageに画像URL等。PC用画像表示                                                         |
+| `callParentImagePreview`  | messageに画像URL等。モバイル用画像表示                                                   |
+| `userLocationUpdate`      | position。現在位置共有への連携                                                           |
+| `userLocationError`       | code。位置情報取得失敗                                                                   |
+| `printOpen`               | PCの印刷開始                                                                             |
+| `mapViewResult`           | requestId、view（latitude、longitude、zoom）。PC・モバイルの回答地図へ初期位置を引き継ぐ |
 
 親側は許可originとiframeのcontentWindowを確認する。編集地図側は送信元がwindow.parentで、同一originまたは `http://localhost:5173` / `http://localhost:3000` の場合に受け付ける。この許可値はapp-initの動的設定とは異なる。
 
@@ -186,15 +186,15 @@ PCの [PrintMapModal.vue](../frontend/src/components/map/PrintMapModal.vue) が�
 
 印刷スナップショットには有効時だけcoloringを追加し、印刷対象外のキーを除外して深く複製する。専用印刷entryから描画へ明示的に渡す。凡例は印刷内の地図上に置き、分類IDごとの表示と、分類に属する全対象の地図連動を管理する。`answer-visibility.ts`が回答対象と凡例の非表示集合を独立に管理し、検索・レイヤ制限と組み合わせる。文字サイズ変更、見出しのドラッグによる移動、右下のドラッグによる枠サイズ変更に対応し、表示内容・文字・サイズ・位置の変更でPDFを無効化する。
 
-| 保存キー | 内容 |
-| --- | --- |
-| `geocode-web:last-map-view` | 地図の中心・ズーム |
-| `geocode-web:selected-tile-server-id` | 背景地図 |
-| `geocode-web:map-mobile-ui-hidden` | モバイル地図UIの非表示 |
-| `geocode-web:marker-visible` | マーカー表示 |
-| `geocode-web:shape-layer-visible` | 図形表示 |
-| `geocode-web:shape-name-visible` | 図形名表示 |
-| `geocode-web:user-location-visible` | 現在位置表示 |
+| 保存キー                                          | 内容                               |
+| ------------------------------------------------- | ---------------------------------- |
+| `geocode-web:last-map-view`                       | 地図の中心・ズーム                 |
+| `geocode-web:selected-tile-server-id`             | 背景地図                           |
+| `geocode-web:map-mobile-ui-hidden`                | モバイル地図UIの非表示             |
+| `geocode-web:marker-visible`                      | マーカー表示                       |
+| `geocode-web:shape-layer-visible`                 | 図形表示                           |
+| `geocode-web:shape-name-visible`                  | 図形名表示                         |
+| `geocode-web:user-location-visible`               | 現在位置表示                       |
 | `geocode-web:tile-overlay-visibility:{accountId}` | アカウント別の重ね合わせタイル表示 |
 
 localStorageを使う。どのページが保存・復元を利用するかはentryとread-only-pageで切り替える。共有地図に通常編集画面の保存値を一律適用しない。
@@ -216,19 +216,18 @@ npm run build
 
 `test` はwatchではなく `vitest run`。`build` は型チェック後にViteを実行する。dev/previewスクリプトはない。distは生成物なので直接編集せず、[統合ビルド](../SPECIFICATION.md) で全ファイルを `/assets/` 用の配置へコピーする。
 
-| 検証場所 | 対象 |
-| --- | --- |
-| `tests/` | bootstrap、共通地図、図形・検索・保存・タイル・ライブ地図・フォーム等 |
-| `tests/editor-entry-contract.spec.ts` | 編集entry構成 |
-| `tests/read-only-entry-contract.spec.ts` | 閲覧専用entry構成 |
-| `../frontend/tests/template-js/` | Tera参照、entry結合、実vendorとのスモーク、印刷等 |
+| 検証場所                                 | 対象                                                                  |
+| ---------------------------------------- | --------------------------------------------------------------------- |
+| `tests/`                                 | bootstrap、共通地図、図形・検索・保存・タイル・ライブ地図・フォーム等 |
+| `tests/editor-entry-contract.spec.ts`    | 編集entry構成                                                         |
+| `tests/read-only-entry-contract.spec.ts` | 閲覧専用entry構成                                                     |
+| `../frontend/tests/template-js/`         | Tera参照、entry結合、実vendorとのスモーク、印刷等                     |
 
 接続テストはPCディレクトリで `npm run test:template-js` を実行する。型チェック抑止箇所を変更した際は、単体テストだけでなくentryとvendorを組み合わせるテストを確認する。ブラウザAPIや実印刷の実機確認とは区別する。
 
 ## MJPEGカメラ
 
 `src/map/common/mjpeg-camera.ts` は `![camera](HTTP/HTTPS URL)` の遅延受信・接続解除・手動再接続を担当する。Markdownレンダラー、PC・モバイル編集画面、閲覧専用画面、公開レイヤで共通利用する。`vite.config.ts`の編集画面用共通importにも登録する。接続のライフサイクルと印刷時の扱いはPostgreSQL版と同一。HTTP配信元の許可はSQLite版のJSON設定で行う（[本体仕様](../../SPECIFICATION.md)）。
-
 
 ### 公開フォームの設定変更競合
 
@@ -245,6 +244,7 @@ npm run build
 - 失敗時は直前の地図を維持し、古い応答・閉じた画面の応答を破棄する。解除は元の一覧条件へ戻す。範囲変更は「表示対象に合わせる」で明示的に行う。閉じるボタンは左下。一覧状態・通常地図設定は保存変更しない。
 - answer-preview.tsは継承した初期位置の維持・件数・query/targetsのready通知を担当する。継承位置がないか不正な場合だけ対象全体へ合わせる。手動の「表示範囲の移動」は引き続き利用できる。失敗はform-answer-map-error.htmlで通知する。HTMLのJSON値はjson_encode_for_html経由とし、成功・失敗ともno-store。
 - 色分けUI・凡例は追加絞り込みへ置き換える。answer-analysis.tsと任意analysis入力は旧呼び出しの互換性維持に限って残す。
+
 ## 回答地図の印刷（PostgreSQL版・PC先行）
 
 - 回答地図の「地図を印刷」またはCtrl+P / Command+Pから既存の印刷プレビューを開く。モバイル版は印刷UIを表示しない。用紙・タイトル・印刷・PDF出力・画像読み込み待機は共通処理を使用する。
@@ -273,3 +273,17 @@ npm run build
 - `form-answer-map`は呼び出し元の表示用パラメータ`map_ui=mobile`がある場合のみ、共通のコントロール表示切替を使用する。画面幅だけでは判定せず、PC版・印刷には表示しない。
 - モバイルの切替は「機能を非表示／機能を表示」とし、住所・緯度経度検索、タイル、レイヤ・一括切替、名称表示、計測、重ね合わせ表示を隠す。名称検索・ズーム・切替ボタン自体は残す。非表示時も対象・レイヤの選択状態は維持する。
 - 既存の共有用モバイル地図の文言・配置・初期状態は維持する。回答地図は表示状態から開始する。
+
+## 通常地図の分析・保存条件・印刷
+
+`map/common/answer-coloring.ts` と `answer-map-presets.ts` をPC・モバイルVueから再エクスポートし、条件型・検証を共用する。`map-analysis.ts` は通常地図と回答地図の分類優先処理を共用し、通常地図のレイヤースコープを既存map-filterへ接続する。`coloring-editor.ts` はDOM部品で、VueのAnswerColoringPanelは薄いラッパーとなる。詳しい検索は同部品と保存条件ダイアログを組み込む。
+
+「詳しい検索と色分け」は最大1440px・高さ90dvhとし、幅1000px超では左に絞り込み、右に色分けを配置する。それ以下では1列に並べる。色分けはh3の見出しで常時表示し、回答分析のサイドパネルは従来のdetails・矢印・全幅実行ボタンと書式を維持する。専用CSSは `.advanced-map-search.has-analysis` 内に限定する。保存条件の一覧は `map-presets-table.ts` とCSSをVue・テンプレート双方から使用し、同じ6列の表を表示する。呼び出しは下書きの復元だけを行い、一覧を残して完了メッセージを表示する。全画面の別画面地図には印刷ボタン・印刷ショートカット・リロードボタンを設けない。
+
+既存ProgressSpinnerのSVG定義とアニメーションを `progress-spinner.ts` / CSSへ共通化する。テンプレートではnative dialogの最前面にスピナーを表示し、検索・色分け・条件呼び出しの完了、失敗、中断、タイムアウトで解除する。PCトップの検索は `mapObjectFilter` のrequestIdとruntimeIdが一致する完了通知を待ち、別画面地図は同画面内の適用処理を待つ。
+
+絞り込みボタンは回答地図と同じ「絞り込み実行」とし、select/radioの「いずれか」は複数選択のselectで入力する。保存した廃止済みの値も選択肢に表示し、選択を解除するまで実行を止める。絞り込み・色分けは地図への反映完了後にスピナーを解除し、「絞り込みが完了しました。」「色分けが完了しました。」を通知する。文言は `map-analysis.ts` で共用し、テンプレートの完了通知と保存条件の呼び出し完了通知は `map-message-dialog.ts`、Vueの回答地図は既存MessageModalを使用する。失敗・中断・閉鎖後の古い応答では完了通知を出さない。通知表示中は親画面の操作を止め、Escapeでは通知だけを閉じる。
+
+編集地図は `mapColoringApply` と対応する `mapColoringApplyResult` を使用し、runtimeId/requestIdと送信元を照合する。分類色は保存用shapeStyleから分離したanalysisColorで合成する。マーカー更新・図形生成・破棄時には着色コントローラーを更新する。
+
+`map-print-host.ts` は通常・回答地図の印刷ダイアログを共有する。通常印刷はPrintMapStateのcoloring/objectQuery/対象IDを使用し、回答印刷は既存AnswerPrintSnapshotを使用する。凡例は通常地図の遅延読み込みにも追従する。詳しくは [検索仕様](../../docs/SEARCH_AND_GEOCODING.md) と [印刷仕様](../../docs/MAP_PRINTING.md) を参照。

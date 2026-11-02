@@ -7,6 +7,8 @@ export interface AnswerColoring {
 export interface AnswerColoringController {
   apply(state: AnswerColoring | null): void;
   getState(): AnswerColoring | null;
+  refreshTarget(key: string, layer: any, baseChanged?: boolean): void;
+  releaseTarget(key: string, layer: any): void;
   dispose(): void;
 }
 
@@ -73,6 +75,10 @@ export function installAnswerColoring(runtime: any, leaflet: any): AnswerColorin
     return kind === "marker" ? runtime.markers[`marker-${id}`] : runtime.shapeLayers[`shape-${id}`];
   };
   const updateShape = (layer: any, style: Record<string, unknown>) => {
+    if (runtime.setShapeColor) {
+      runtime.setShapeColor(layer, style);
+      return;
+    }
     layer.shapeStyle = style;
     layer.setStyle?.(style);
     runtime.applyShapeArrowStyle?.(layer);
@@ -82,6 +88,10 @@ export function installAnswerColoring(runtime: any, leaflet: any): AnswerColorin
     for (const [key, original] of originals) {
       if (key.startsWith("marker:")) original.layer.setIcon(original.icon);
       else {
+        if (runtime.setShapeColor) {
+          runtime.setShapeColor(original.layer, null);
+          continue;
+        }
         // Leaflet はスタイルをマージするため、元のスタイルに fillColor がなくてもリセットする。
         original.layer.setStyle?.(original.options);
         updateShape(original.layer, { ...original.style });
@@ -94,7 +104,7 @@ export function installAnswerColoring(runtime: any, leaflet: any): AnswerColorin
     rule: AnswerColoring["rules"][number],
     icons: Map<string, unknown>,
   ) => {
-    if (!originals.has(key)) {
+    if (originals.get(key)?.layer !== layer) {
       originals.set(
         key,
         key.startsWith("marker:")
@@ -156,6 +166,16 @@ export function installAnswerColoring(runtime: any, leaflet: any): AnswerColorin
     if (originals.get(key)?.layer === layer) originals.delete(key);
   });
   const controller: AnswerColoringController = {
+    refreshTarget(key, layer, baseChanged = false) {
+      if (disposed) return;
+      if (baseChanged) originals.delete(key);
+      const id = current?.targets[key];
+      const rule = current?.rules.find((rule) => rule.id === id);
+      if (rule) applyToLayer(key, layer, rule, new Map());
+    },
+    releaseTarget(key, layer) {
+      if (originals.get(key)?.layer === layer) originals.delete(key);
+    },
     apply(state: AnswerColoring | null) {
       if (disposed) throw new Error("色分け画面は終了しています。");
       // 回答の対象範囲には無効な図形が残る場合がある。メッセージの検証ではその範囲を確認し、

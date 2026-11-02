@@ -76,7 +76,7 @@ describe("advanced map search", () => {
     const input = document.querySelector("input")!;
     input.value = "9007199254740993.0001";
     input.dispatchEvent(new Event("input"));
-    click("検索");
+    click("絞り込み実行");
     await vi.waitFor(() => expect(apply).toHaveBeenCalledOnce());
     expect(transport.mock.calls[1]![1]).toMatchObject({
       layer_ids: ["layer"],
@@ -117,7 +117,7 @@ describe("advanced map search", () => {
       onApply: apply,
     });
     await modal.open();
-    click("検索");
+    click("絞り込み実行");
     click("閉じる");
     resolve(result);
     await Promise.resolve();
@@ -128,7 +128,7 @@ describe("advanced map search", () => {
       throw Error("network failed");
     });
     await modal.open();
-    click("検索");
+    click("絞り込み実行");
     await vi.waitFor(() => expect(document.body.textContent).toContain("network failed"));
     expect(apply).not.toHaveBeenCalled();
   });
@@ -148,7 +148,7 @@ describe("advanced map search", () => {
       onApply: apply,
     });
     await modal.open();
-    click("検索");
+    click("絞り込み実行");
     await vi.waitFor(() => expect(document.body.textContent).toContain("地図データが更新"));
     expect(apply).not.toHaveBeenCalled();
     modal.dispose();
@@ -163,7 +163,7 @@ describe("advanced map search", () => {
       onApply: apply,
     });
     await modal.open();
-    click("検索");
+    click("絞り込み実行");
     expect(document.body.textContent).toContain("条件を選び直してください");
     expect(apply).not.toHaveBeenCalled();
   });
@@ -276,7 +276,7 @@ describe("advanced map search", () => {
   });
 
   it.each(["select", "radio"])(
-    "shows retired %s choices and requires explicitly removing them",
+    "廃止済みの%sの選択肢を表示し、明示的に選択を解除するまで実行を止める",
     async (type) => {
       const transport = vi.fn(async (_path: string, body: unknown) =>
         body === undefined
@@ -286,7 +286,7 @@ describe("advanced map search", () => {
                 version: 2,
                 form_title: "設備",
                 form_schema: {
-                  fields: [{ id: "status", label: "区分", type, choices: ["新しい値"] }],
+                  fields: [{ id: "status", label: "区分", type, choices: ["新しい値", "別の値"] }],
                 },
               },
             ]
@@ -305,28 +305,29 @@ describe("advanced map search", () => {
         onApply: apply,
       });
       await modal.open();
-      const retiredLabel = [...document.querySelectorAll<HTMLLabelElement>("dialog label")].find(
-        (label) => label.textContent?.includes("古い値（現在の選択肢にありません）"),
-      );
-      expect(retiredLabel).toBeDefined();
-      const retired = retiredLabel!.querySelector<HTMLInputElement>("input")!;
-      expect(retired.checked).toBe(true);
-      const current = [...document.querySelectorAll<HTMLLabelElement>("dialog label")]
-        .find((label) => label.textContent === "新しい値")!
-        .querySelector<HTMLInputElement>("input")!;
-      current.checked = true;
-      current.dispatchEvent(new Event("change"));
-      click("検索");
+      const choices = document.querySelector<HTMLSelectElement>(
+        ".attribute-values select[multiple]",
+      )!;
+      expect(document.querySelector('.attribute-values input[type="checkbox"]')).toBeNull();
+      const retired = [...choices.options].find((option) => option.value === "古い値")!;
+      expect(retired.textContent).toBe("古い値（現在の選択肢にありません）");
+      expect(retired.selected).toBe(true);
+      expect(choices.getAttribute("aria-invalid")).toBe("true");
+      choices.options[0]!.selected = true;
+      choices.options[1]!.selected = true;
+      choices.dispatchEvent(new Event("change"));
+      click("絞り込み実行");
       expect(transport).toHaveBeenCalledTimes(1);
       expect(apply).not.toHaveBeenCalled();
       expect(document.querySelector('[role="status"]')?.textContent).toContain("選択肢にない値");
-      retired.checked = false;
-      retired.dispatchEvent(new Event("change"));
-      click("検索");
+      retired.selected = false;
+      choices.dispatchEvent(new Event("change"));
+      expect(choices.getAttribute("aria-invalid")).toBe("false");
+      click("絞り込み実行");
       await vi.waitFor(() => expect(apply).toHaveBeenCalledOnce());
       expect(transport.mock.calls[1]![1]).toMatchObject({
         definition_version: 2,
-        conditions: [{ value: ["新しい値"] }],
+        conditions: [{ value: ["新しい値", "別の値"] }],
       });
     },
   );
@@ -399,10 +400,11 @@ describe("advanced map search", () => {
       onApply: apply,
     });
     await modal.open();
-    expect(document.querySelector<HTMLInputElement>('dialog input[type="checkbox"]')?.checked).toBe(
-      true,
-    );
-    click("検索");
+    const choices = document.querySelector<HTMLSelectElement>(
+      ".attribute-values select[multiple]",
+    )!;
+    expect([...choices.selectedOptions].map((option) => option.value)).toEqual(["継続"]);
+    click("絞り込み実行");
     await vi.waitFor(() => expect(apply).toHaveBeenCalledOnce());
     expect(transport.mock.calls[1]![1]).toMatchObject({
       definition_version: 2,
@@ -428,13 +430,13 @@ describe("advanced map search", () => {
       onApply: vi.fn(),
     });
     await modal.open();
-    click("検索");
+    click("絞り込み実行");
     await vi.advanceTimersByTimeAsync(30000);
     click("閉じる");
     expect(searches[0]!.signal.aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
     await modal.open();
-    click("検索");
+    click("絞り込み実行");
     await vi.advanceTimersByTimeAsync(30000);
     expect(searches[1]!.signal.aborted).toBe(false);
     searches[0]!.complete(result);
@@ -466,7 +468,7 @@ describe("advanced map search", () => {
       onApply: vi.fn(),
     });
     await modal.open();
-    click("検索");
+    click("絞り込み実行");
     click("閉じる");
     void modal.open();
     await vi.advanceTimersByTimeAsync(60000);
@@ -489,7 +491,7 @@ describe("advanced map search", () => {
       onApply: apply,
     });
     await modal.open();
-    click("検索");
+    click("絞り込み実行");
     expect(vi.getTimerCount()).toBe(1);
     modal.dispose();
     expect(vi.getTimerCount()).toBe(0);
