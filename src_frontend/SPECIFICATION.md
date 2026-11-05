@@ -59,6 +59,10 @@ Vueは一覧、入力モーダル、アップロード、共有設定などを�
 
 Teraからの地図初期データとiframe間メッセージは [スクリプト仕様](template-scripts/SPECIFICATION.md) を参照する。管理UIが作成する公開URLはVueアプリを経由せずTera画面として閲覧できる。
 
+### 3.3 全画面地図と一時共有地図の印刷・PDF出力
+
+PCの全画面地図と一時共有地図は、地図内で `/assets/read-only-map-print.html` をiframeとして開く。地図の表示状態と、プレビューを開く時点の表示条件を満たす地物をブラウザ内で渡す。一時共有地図では、共有時に保存されて配信済みの地物が対象の上限となる。両画面とも共通の印刷プレビューで印刷・PDF出力する。画面間通信は [地図スクリプト仕様](template-scripts/SPECIFICATION.md#63-印刷通信)、利用・検証手順は [地図印刷・PDF出力](../docs/MAP_PRINTING.md) を参照する。
+
 ## 4. 開発環境
 
 VueアプリはVue 3、TypeScript、Vite、Vue Router、Pinia、Axiosを使用する。テストはVitestとjsdomを使用する。正確な依存バージョンは各package.jsonとlockfileを正とする。
@@ -141,7 +145,7 @@ Rustは `dist/`、`dist/assets/`、`dist/templates/` をrust-embedで参照す�
 | Vue画面・ストア・認証 | 対象プロジェクトの `src/**/__tests__/` |
 | 地図の共通処理 | `template-scripts/tests/` |
 | Tera・entry・vendorの接続 | `frontend/tests/template-js/` |
-| 印刷 | PCのmapコンポーネントテスト、template-js、任意のPDF確認スクリプト |
+| 印刷 | PCのmapコンポーネントテスト、`read-only-pages-smoke.spec.ts`、template-scriptsの `read-only-print-*.spec.ts` と `map-print-snapshot-host.spec.ts`、PDF確認スクリプト |
 
 新しい画面や資材を追加した際は、ソースだけでなく、HTML読み込み、Vite出力、統合コピー、Rust配信、関連テスト、対応する仕様書を確認する。機能差を意図せず生まないよう、PCとモバイルの両実装を確認する。
 

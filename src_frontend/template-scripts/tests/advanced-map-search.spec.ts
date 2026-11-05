@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import type { SavedMapPreset } from "../src/map/common/answer-map-presets";
 import {
   attributeOperations,
   createAdvancedMapSearchModal,
@@ -56,6 +57,232 @@ afterEach(() => {
 });
 
 describe("advanced map search", () => {
+  const savedFilter: SavedMapPreset = {
+    id: "saved",
+    kind: "filter",
+    schema_version: 1,
+    name: "年数50年以上",
+    definition: {
+      common_form_id: "form",
+      conditions: [{ field_id: "n", field_type: "number", op: "gte", value: "50" }],
+    },
+    display: { form_label: "設備", fields: [{ id: "n", field_type: "number", label: "年数" }] },
+    create_at: "2026-11-05T00:00:00Z",
+  };
+  const savedList = () =>
+    document.querySelector<HTMLDialogElement>(".map-preset-dialog.form-settings")!;
+  const openSavedFilter = async () => {
+    click("保存した検索条件");
+    await vi.waitFor(() => expect(savedList().querySelector("tbody tr")).not.toBeNull());
+    savedList().querySelector<HTMLButtonElement>("tbody button")!.click();
+  };
+  const closeSavedFilter = () => {
+    document.querySelector<HTMLButtonElement>('[aria-label="呼び出し完了"] button')!.click();
+    [...savedList().querySelectorAll<HTMLButtonElement>("button")]
+      .find((b) => b.textContent === "閉じる")!
+      .click();
+  };
+
+  it("通常検索で保存条件を最新定義の下書きに復元し、実行時に現在のレイヤだけに適用する", async () => {
+    const apply = vi.fn();
+    let reads = 0;
+    const transport = vi.fn(async (path: string) => {
+      if (path === "/common-forms") return [{ ...forms[0], version: ++reads === 1 ? 2 : 3 }];
+      if (path.startsWith("/form-answers/map-presets")) return { items: [savedFilter], total: 1 };
+      return { ...result, definition_version: 3 };
+    });
+    modal = createAdvancedMapSearchModal({
+      transport,
+      savedFilters: true,
+      getApplied: () => null,
+      getLayerIds: () => ["selected"],
+      getContext: () => "account",
+      onApply: apply,
+    });
+    await modal.open();
+    expect(document.body.textContent).not.toContain("検索条件を保存");
+    await openSavedFilter();
+    await vi.waitFor(() =>
+      expect(document.querySelector<HTMLDialogElement>('[aria-label="呼び出し完了"]')?.open).toBe(
+        true,
+      ),
+    );
+    expect(apply).not.toHaveBeenCalled();
+    closeSavedFilter();
+    const input = document.querySelector<HTMLInputElement>(".advanced-map-search input")!;
+    expect(input.value).toBe("50");
+    input.value = "60";
+    input.dispatchEvent(new Event("input"));
+    click("絞り込み実行");
+    await vi.waitFor(() => expect(apply).toHaveBeenCalledOnce());
+    expect(apply.mock.calls[0]![0]).toMatchObject({
+      common_form_id: "form",
+      definition_version: 3,
+      layer_ids: ["selected"],
+      conditions: [{ field_id: "n", op: "gte", value: "60" }],
+    });
+    expect(transport).toHaveBeenLastCalledWith(
+      "/map-objects/search/attributes",
+      expect.any(Object),
+      expect.any(AbortSignal),
+    );
+    click("属性条件を解除");
+    expect(apply).toHaveBeenLastCalledWith(null, null);
+  });
+
+  it.each([
+    [[], "共通フォームが削除"],
+    [[{ ...forms[0], form_schema: { fields: [] } }], "項目が現在の共通フォームに見つかりません"],
+    [
+      [{ ...forms[0], form_schema: { fields: [{ id: "n", type: "text", label: "年数" }] } }],
+      "項目が現在の共通フォームに見つかりません",
+    ],
+    [Error("network failed"), "network failed"],
+  ])(
+    "保存条件の復元失敗時に編集中・適用済みの条件を保持し再試行できる: %s",
+    async (nextForms, error) => {
+      const apply = vi.fn();
+      let reads = 0;
+      const transport = vi.fn(async (path: string) => {
+        if (path.startsWith("/form-answers/map-presets")) return { items: [savedFilter], total: 1 };
+        if (++reads === 2) {
+          if (nextForms instanceof Error) throw nextForms;
+          return nextForms;
+        }
+        return forms;
+      });
+      modal = createAdvancedMapSearchModal({
+        transport,
+        savedFilters: true,
+        getApplied: () => ({
+          ...request,
+          conditions: [{ field_id: "n", field_type: "number", op: "eq", value: "7" }],
+        }),
+        getLayerIds: () => null,
+        getContext: () => "account",
+        onApply: apply,
+      });
+      await modal.open();
+      await openSavedFilter();
+      await vi.waitFor(() =>
+        expect(savedList().querySelector('[role="alert"]')?.textContent).toContain(error),
+      );
+      expect(document.querySelector<HTMLInputElement>(".advanced-map-search input")!.value).toBe(
+        "7",
+      );
+      expect(apply).not.toHaveBeenCalled();
+      savedList().querySelector<HTMLButtonElement>("tbody button")!.click();
+      await vi.waitFor(() =>
+        expect(document.querySelector<HTMLInputElement>(".advanced-map-search input")!.value).toBe(
+          "50",
+        ),
+      );
+    },
+  );
+
+  it("廃止された選択肢は呼び出せず、元の下書きを保持する", async () => {
+    const preset = {
+      ...savedFilter,
+      definition: {
+        common_form_id: "form",
+        conditions: [{ field_id: "s", field_type: "select", op: "in", value: ["廃止"] }],
+      },
+    };
+    const transport = vi.fn(async (path: string) =>
+      path === "/common-forms"
+        ? [
+            {
+              ...forms[0],
+              form_schema: {
+                fields: [{ id: "s", type: "select", label: "区分", choices: ["継続"] }],
+              },
+            },
+          ]
+        : { items: [preset], total: 1 },
+    );
+    modal = createAdvancedMapSearchModal({
+      transport,
+      savedFilters: true,
+      getApplied: () => null,
+      getLayerIds: () => null,
+      getContext: () => "account",
+      onApply: vi.fn(),
+    });
+    await modal.open();
+    await openSavedFilter();
+    await vi.waitFor(() =>
+      expect(savedList().querySelector('[role="alert"]')?.textContent).toContain("選択肢が変更"),
+    );
+    expect(document.querySelector<HTMLSelectElement>(".advanced-map-search select")!.value).toBe(
+      "",
+    );
+  });
+
+  it("条件なしの保存条件は実行時に現在の絞り込みを解除する", async () => {
+    const apply = vi.fn();
+    const transport = vi.fn(async (path: string) =>
+      path === "/common-forms"
+        ? forms
+        : {
+            items: [{ ...savedFilter, definition: { common_form_id: null, conditions: [] } }],
+            total: 1,
+          },
+    );
+    modal = createAdvancedMapSearchModal({
+      transport,
+      savedFilters: true,
+      getApplied: () => request,
+      getLayerIds: () => null,
+      getContext: () => "account",
+      onApply: apply,
+    });
+    await modal.open();
+    await openSavedFilter();
+    await vi.waitFor(() =>
+      expect(document.querySelector<HTMLDialogElement>('[aria-label="呼び出し完了"]')?.open).toBe(
+        true,
+      ),
+    );
+    expect(apply).not.toHaveBeenCalled();
+    closeSavedFilter();
+    click("絞り込み実行");
+    expect(apply).toHaveBeenCalledWith(null, null);
+  });
+
+  it("復元中に閉じた古い応答を開き直したモーダルに反映しない", async () => {
+    let complete!: (value: unknown) => void;
+    let reads = 0;
+    const transport = vi.fn(async (path: string) => {
+      if (path !== "/common-forms") return { items: [savedFilter], total: 1 };
+      if (++reads === 2)
+        return new Promise((done) => {
+          complete = done;
+        });
+      return forms;
+    });
+    modal = createAdvancedMapSearchModal({
+      transport,
+      savedFilters: true,
+      getApplied: () => null,
+      getLayerIds: () => null,
+      getContext: () => "account",
+      onApply: vi.fn(),
+    });
+    await modal.open();
+    await openSavedFilter();
+    modal.close();
+    await modal.open();
+    complete(forms);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(document.querySelector<HTMLSelectElement>(".advanced-map-search select")!.value).toBe(
+      "",
+    );
+    expect(
+      document.querySelector<HTMLDialogElement>('[aria-label="呼び出し完了"]')?.open,
+    ).toBeFalsy();
+  });
+
   it("keeps exact decimal values, applies zero matches, and clears explicitly", async () => {
     const apply = vi.fn(),
       transport = vi.fn(async (_path: string, body: unknown) =>

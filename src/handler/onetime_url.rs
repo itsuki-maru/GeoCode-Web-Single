@@ -13,8 +13,7 @@ use axum::{
 };
 use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::{NaiveDateTime, Utc};
-use sqlx::query_as;
-use sqlx::{query, sqlite::SqlitePool};
+use sqlx::sqlite::SqlitePool;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,239 +21,259 @@ use tera::{Context, Tera};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-// 一時URLの発行
+mod snapshot;
+
+// 通常共有と全画面地図共有を、同じ1枠へ原子的に保存する。
 pub async fn generate_url_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
     Json(payload): Json<GenarateUrlPayload>,
 ) -> Result<Json<CreateUpdatedTemporaryUrlResponse>, AppError> {
-    // 共有レイヤが空の場合
-    if payload.layers.is_empty() {
+    if payload.layers.is_empty() && payload.snapshot.is_none() {
         return Err(AppError::BadRequest);
     }
-
-    // payloadからレイヤーIDを取得
-    let layer_ids: Vec<String> = payload.layers.clone();
-    let markers_hash_map: HashMap<String, MarkerObjectFromRow> =
-        get_markers_hash_map(&pool, user_id.clone(), layer_ids.clone()).await?;
-    let layers_hash_map: HashMap<String, LayerObjectFromRow> =
-        get_layer_hash_map(&pool, user_id.clone(), layer_ids.clone()).await?;
-    let shapes_hash_map: HashMap<String, ShapeObject> = if payload.include_shapes {
-        get_shapes_hash_map(&pool, user_id.clone(), layer_ids.clone()).await?
-    } else {
-        HashMap::new()
-    };
-
-    // 既に一時URLを発行しているユーザーか確認
-    let record = query!(
-        r#"
-        SELECT COUNT(*) as count
-        FROM temporary_urls
-        WHERE user_id = $1
-        "#,
-        user_id,
-    )
-    .fetch_one(&pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
-
-    // 既に発行済みのURLがあるか確認するフラグ
-    let is_issued = record.count > 0;
-
-    // 新規データ作成
-    let uuid = Uuid::now_v7().to_string();
-    let url = format!("/onetime/{}", uuid);
-    // パスワードをハッシュ化（設定されている場合）
+    let seconds = payload
+        .minutes
+        .checked_mul(60)
+        .ok_or(AppError::BadRequest)?;
     let password_hash = build_share_password_hash(payload.share_password.as_deref())?;
-    let temp_url = TemporaryUrl::new(
-        uuid,
-        user_id.clone(),
+    let captured = payload
+        .snapshot
+        .map(|value| snapshot::parse(value, &user_id))
+        .transpose()?;
+    let mut tx = super::answer_sqlite::begin_write(&pool).await?;
+    let owner_exists: bool = sqlx::query_scalar(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM user_model
+            WHERE id = $1
+        )
+        "#,
+    )
+    .bind(&user_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if !owner_exists {
+        return Err(AppError::NotFound);
+    }
+    let (layers, markers, shapes, map_snapshot) = if let Some(captured) = captured {
+        snapshot::authorize(&mut tx, &user_id, &captured).await?;
+        let requested: std::collections::HashSet<_> = payload.layers.iter().cloned().collect();
+        if requested != captured.layers.keys().cloned().collect() {
+            return Err(AppError::Validation(
+                "共有するレイヤグループが一致しません。地図を開き直してください。".into(),
+            ));
+        }
+        (
+            captured.layers,
+            captured.markers,
+            captured.shapes,
+            Some(captured.metadata),
+        )
+    } else {
+        let layer_ids = payload.layers;
+        let markers = get_markers_hash_map(&mut tx, &user_id, &layer_ids).await?;
+        let layers = get_layer_hash_map(&mut tx, &user_id, &layer_ids).await?;
+        let shapes = if payload.include_shapes {
+            get_shapes_hash_map(&mut tx, &user_id, &layer_ids).await?
+        } else {
+            HashMap::new()
+        };
+        (layers, markers, shapes, None)
+    };
+    let id = Uuid::now_v7().to_string();
+    let url = format!("/onetime/{id}");
+    let mut temporary_url = TemporaryUrl::new(
+        id,
+        user_id,
         url,
-        Duration::from_secs(payload.minutes * 60),
+        Duration::from_secs(seconds),
         password_hash,
-        layers_hash_map,
-        markers_hash_map,
-        shapes_hash_map,
+        layers,
+        markers,
+        shapes,
         payload.include_tile_overlays,
     )
-    .map_err(|_e| {
-        return AppError::InternalServerError;
-    })?;
-
-    // 発行済みの共有URLを更新処理
-    if payload.update_url && is_issued {
-        let update_url_response = update_temporary_url(&pool, temp_url).await?;
-        Ok(Json(update_url_response))
-    // 新規共有URL発行
-    } else {
-        // 既存データがあれば削除
-        if is_issued {
-            delete_temporary_url(&pool, user_id).await?;
-        }
-
-        let created_url_response = create_temporary_url(&pool, temp_url).await?;
-        Ok(Json(created_url_response))
-    }
+    .map_err(|_| AppError::BadRequest)?;
+    temporary_url.map_snapshot = map_snapshot;
+    let response = save_temporary_url(&mut tx, temporary_url, payload.update_url).await?;
+    tx.commit().await?;
+    Ok(Json(response))
 }
 
-//　現在の共有URLを取得するハンドラ
 pub async fn current_url_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
 ) -> Result<Json<CurrentTemporaryUrlResponse>, AppError> {
-    let current_url = query_as!(
-        CurrentTemporaryUrlResponse,
+    let mut tx = super::answer_sqlite::begin_write(&pool).await?;
+    let current = sqlx::query_as::<_, CurrentTemporaryUrlResponse>(
         r#"
-        SELECT id, url, expiration, password_hash IS NOT NULL as "is_password_protected!: bool"
+        SELECT
+            id,
+            url,
+            expiration,
+            password_hash IS NOT NULL AS is_password_protected
         FROM temporary_urls
         WHERE user_id = $1
-        ORDER BY create_at DESC
+        ORDER BY create_at DESC, id DESC
         LIMIT 1
         "#,
-        user_id
     )
-    .fetch_optional(&pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
-
-    let Some(current_url) = current_url else {
+    .bind(&user_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(current) = current else {
         return Err(AppError::NotFound);
     };
-
-    if is_expired(&current_url.expiration.as_str()) {
-        delete_temporary_url(&pool, user_id).await?;
+    if is_expired(&current.expiration) {
+        sqlx::query(
+            r#"
+            DELETE FROM temporary_urls
+            WHERE user_id = $1
+            "#,
+        )
+        .bind(&user_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
         return Err(AppError::NotFound);
     }
-
-    Ok(Json(current_url))
+    tx.commit().await?;
+    Ok(Json(current))
 }
 
 pub fn is_expired(expiration: &str) -> bool {
-    // SQLite での文字列から日付型に戻す
-    let expiration = NaiveDateTime::parse_from_str(expiration, "%Y-%m-%d %H:%M:%S%.f");
-    match expiration {
-        Ok(exp) => exp < Utc::now().naive_utc(),
-        Err(_e) => false,
+    // SQLiteの既存日時形式と小数秒の精度を維持する。
+    NaiveDateTime::parse_from_str(expiration, "%Y-%m-%d %H:%M:%S%.f")
+        .map(|expiration| expiration < Utc::now().naive_utc())
+        .unwrap_or(false)
+}
+
+async fn save_temporary_url(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    temporary_url: TemporaryUrl,
+    update_url: bool,
+) -> Result<CreateUpdatedTemporaryUrlResponse, AppError> {
+    let existing: Option<String> = sqlx::query_scalar(
+        r#"
+        SELECT id
+        FROM temporary_urls
+        WHERE user_id = $1
+        ORDER BY create_at DESC, id DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(&temporary_url.user_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let layers =
+        serde_json::to_string(&temporary_url.layers).map_err(|_| AppError::InternalServerError)?;
+    let markers =
+        serde_json::to_string(&temporary_url.markers).map_err(|_| AppError::InternalServerError)?;
+    let shapes =
+        serde_json::to_string(&temporary_url.shapes).map_err(|_| AppError::InternalServerError)?;
+    let map_snapshot = temporary_url
+        .map_snapshot
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|_| AppError::InternalServerError)?;
+    if let Some(id) = existing.filter(|_| update_url) {
+        // 過去の並行発行で複数残っていた場合も、この操作で1枠へ戻す。
+        sqlx::query(
+            r#"
+            DELETE FROM temporary_urls
+            WHERE user_id = $1
+                AND id <> $2
+            "#,
+        )
+        .bind(&temporary_url.user_id)
+        .bind(&id)
+        .execute(&mut **tx)
+        .await?;
+        Ok(sqlx::query_as::<_, CreateUpdatedTemporaryUrlResponse>(
+            r#"
+            UPDATE temporary_urls
+            SET
+                expiration = $1,
+                password_hash = $2,
+                layers = $3,
+                markers = $4,
+                shapes = $5,
+                include_tile_overlays = $6,
+                map_snapshot = $7
+            WHERE id = $8
+            RETURNING
+                id,
+                url,
+                expiration
+            "#,
+        )
+        .bind(temporary_url.expiration)
+        .bind(temporary_url.password_hash)
+        .bind(layers)
+        .bind(markers)
+        .bind(shapes)
+        .bind(temporary_url.include_tile_overlays)
+        .bind(map_snapshot)
+        .bind(id)
+        .fetch_one(&mut **tx)
+        .await?)
+    } else {
+        // DELETEとINSERTは同じトランザクション内。INSERT失敗時は旧URLも復元する。
+        sqlx::query(
+            r#"
+            DELETE FROM temporary_urls
+            WHERE user_id = $1
+            "#,
+        )
+        .bind(&temporary_url.user_id)
+        .execute(&mut **tx)
+        .await?;
+        Ok(sqlx::query_as::<_, CreateUpdatedTemporaryUrlResponse>(
+            r#"
+            INSERT INTO temporary_urls (
+                id,
+                user_id,
+                url,
+                expiration,
+                password_hash,
+                layers,
+                markers,
+                shapes,
+                include_tile_overlays,
+                map_snapshot,
+                create_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            RETURNING
+                id,
+                url,
+                expiration
+            "#,
+        )
+        .bind(temporary_url.id)
+        .bind(temporary_url.user_id)
+        .bind(temporary_url.url)
+        .bind(temporary_url.expiration)
+        .bind(temporary_url.password_hash)
+        .bind(layers)
+        .bind(markers)
+        .bind(shapes)
+        .bind(temporary_url.include_tile_overlays)
+        .bind(map_snapshot)
+        .bind(Utc::now().naive_utc())
+        .fetch_one(&mut **tx)
+        .await?)
     }
 }
 
-// 新規共有URL作成ヘルパー関数
-async fn create_temporary_url(
-    pool: &SqlitePool,
-    temporary_url: TemporaryUrl,
-) -> Result<CreateUpdatedTemporaryUrlResponse, AppError> {
-    let now = chrono::Utc::now().naive_utc();
-    let json_layers_data =
-        serde_json::to_value(temporary_url.layers).map_err(|_| AppError::InternalServerError)?;
-    let json_markers_data =
-        serde_json::to_value(temporary_url.markers).map_err(|_| AppError::InternalServerError)?;
-    let json_shapes_data =
-        serde_json::to_value(temporary_url.shapes).map_err(|_| AppError::InternalServerError)?;
-    let created_url_response = query_as!(
-        CreateUpdatedTemporaryUrlResponse,
-        r#"
-        INSERT INTO temporary_urls (
-            id,
-            user_id,
-            url,
-            expiration,
-            password_hash,
-            layers,
-            markers,
-            shapes,
-            include_tile_overlays,
-            create_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        RETURNING id, url, expiration
-        "#,
-        temporary_url.id,
-        temporary_url.user_id,
-        temporary_url.url,
-        temporary_url.expiration,
-        temporary_url.password_hash,
-        json_layers_data,
-        json_markers_data,
-        json_shapes_data,
-        temporary_url.include_tile_overlays,
-        now,
-    )
-    .fetch_one(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
-    Ok(created_url_response)
-}
-
-// 既存共有URL更新ヘルパー関数
-async fn update_temporary_url(
-    pool: &SqlitePool,
-    temporary_url: TemporaryUrl,
-) -> Result<CreateUpdatedTemporaryUrlResponse, AppError> {
-    let json_layers_data =
-        serde_json::to_value(temporary_url.layers).map_err(|_| AppError::InternalServerError)?;
-    let json_markers_data =
-        serde_json::to_value(temporary_url.markers).map_err(|_| AppError::InternalServerError)?;
-    let json_shapes_data =
-        serde_json::to_value(temporary_url.shapes).map_err(|_| AppError::InternalServerError)?;
-    let updated_url_response = query_as!(
-        CreateUpdatedTemporaryUrlResponse,
-        r#"
-        UPDATE temporary_urls
-        SET
-            expiration = $1,
-            password_hash = $2,
-            layers = $3,
-            markers = $4,
-            shapes = $5,
-            include_tile_overlays = $6
-        WHERE user_id = $7
-        RETURNING id,
-        url,
-        expiration
-        "#,
-        temporary_url.expiration,
-        temporary_url.password_hash,
-        json_layers_data,
-        json_markers_data,
-        json_shapes_data,
-        temporary_url.include_tile_overlays,
-        temporary_url.user_id,
-    )
-    .fetch_one(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
-    Ok(updated_url_response)
-}
-
-// 図形のハッシュマップを取得するヘルパー関数
 async fn get_shapes_hash_map(
-    pool: &SqlitePool,
-    user_id: String,
-    layer_ids: Vec<String>,
+    connection: &mut sqlx::SqliteConnection,
+    user_id: &str,
+    layer_ids: &[String],
 ) -> Result<HashMap<String, ShapeObject>, AppError> {
-    if layer_ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let placeholders = layer_ids
-        .iter()
-        .enumerate()
-        .map(|(i, _)| format!("${}", i + 2))
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let shapes_sql = format!(
+    let shapes = sqlx::query_as::<_, ShapeObject>(
         r#"
         SELECT
             id,
@@ -267,41 +286,23 @@ async fn get_shapes_hash_map(
             updated_at
         FROM shape_model
         WHERE user_id = $1
-            AND layer_id IN ({})
+            AND layer_id IN (SELECT value FROM json_each($2))
         ORDER BY created_at ASC
         "#,
-        placeholders
-    );
-
-    let shapes = sqlx::query_as::<_, ShapeObject>(&shapes_sql).bind(&user_id);
-
-    let mut shapes_query = shapes;
-    for id in &layer_ids {
-        shapes_query = shapes_query.bind(id);
-    }
-
-    let shapes = shapes_query.fetch_all(pool).await.map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
-
-    Ok(vec_to_hashmap(shapes, |s| s.id.clone()))
+    )
+    .bind(user_id)
+    .bind(serde_json::to_string(layer_ids).map_err(|_| AppError::InternalServerError)?)
+    .fetch_all(connection)
+    .await?;
+    Ok(vec_to_hashmap(shapes, |shape| shape.id.clone()))
 }
 
-// マーカーのハッシュマップを取得するヘルパー関数
 async fn get_markers_hash_map(
-    pool: &SqlitePool,
-    user_id: String,
-    layer_ids: Vec<String>,
+    connection: &mut sqlx::SqliteConnection,
+    user_id: &str,
+    layer_ids: &[String],
 ) -> Result<HashMap<String, MarkerObjectFromRow>, AppError> {
-    let placeholders = layer_ids
-        .iter()
-        .enumerate()
-        .map(|(i, _)| format!("${}", i + 2))
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let markers_sql = format!(
+    let markers = sqlx::query_as::<_, MarkerObjectFromRow>(
         r#"
         SELECT
             id,
@@ -312,89 +313,78 @@ async fn get_markers_hash_map(
             detail
         FROM marker_info_model
         WHERE user_id = $1
-            AND layer_id IN ({})
+            AND layer_id IN (SELECT value FROM json_each($2))
         "#,
-        placeholders
-    );
-    let mut markers_query = sqlx::query_as::<_, MarkerObjectFromRow>(&markers_sql).bind(&user_id);
-    for id in &layer_ids {
-        markers_query = markers_query.bind(id);
-    }
-    let markers: Vec<MarkerObjectFromRow> = markers_query.fetch_all(pool).await.map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
-
-    let markers_hash_map = vec_to_hashmap(markers, |m| m.id.clone());
-    Ok(markers_hash_map)
+    )
+    .bind(user_id)
+    .bind(serde_json::to_string(layer_ids).map_err(|_| AppError::InternalServerError)?)
+    .fetch_all(connection)
+    .await?;
+    Ok(vec_to_hashmap(markers, |marker| marker.id.clone()))
 }
 
-// レイヤのハッシュマップを取得するヘルパー関数
 async fn get_layer_hash_map(
-    pool: &SqlitePool,
-    user_id: String,
-    layer_ids: Vec<String>,
+    connection: &mut sqlx::SqliteConnection,
+    user_id: &str,
+    layer_ids: &[String],
 ) -> Result<HashMap<String, LayerObjectFromRow>, AppError> {
-    if layer_ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let placeholders = layer_ids
-        .iter()
-        .enumerate()
-        .map(|(i, _)| format!("${}", i + 2))
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    // レイヤ取得（パラメータバインド使用）
-    // SQLite では　ANY が使えないため IN を使用
-    let layers_sql = format!(
+    let layers = sqlx::query_as::<_, LayerObjectFromRow>(
         r#"
         SELECT
-                    layer_model.id,
-                    layer_model.user_id,
-                    layer_model.layer_name,
-                    layer_model.is_master,
-            layer_model.restrict_free_text,
-                    layer_model.marker_icon_id,
-                    marker_icon_model.uuid_filename AS marker_icon_filename
-                FROM layer_model
-                LEFT JOIN marker_icon_model
-                    ON marker_icon_model.id = layer_model.marker_icon_id
-                WHERE layer_model.user_id = $1
-                    AND layer_model.id IN ({})
+            l.id,
+            l.user_id,
+            l.layer_name,
+            l.is_master,
+            l.restrict_free_text,
+            l.marker_icon_id,
+            m.uuid_filename AS marker_icon_filename
+        FROM layer_model l
+        LEFT JOIN marker_icon_model m ON m.id = l.marker_icon_id
+        WHERE l.user_id = $1
+            AND l.id IN (SELECT value FROM json_each($2))
         "#,
-        placeholders
-    );
-    let mut layers_query = sqlx::query_as::<_, LayerObjectFromRow>(&layers_sql).bind(&user_id);
-    for id in &layer_ids {
-        layers_query = layers_query.bind(id);
-    }
-    let layers: Vec<LayerObjectFromRow> = layers_query.fetch_all(pool).await.map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
-
-    let layers_hash_map = vec_to_hashmap(layers, |l| l.id.clone());
-    Ok(layers_hash_map)
+    )
+    .bind(user_id)
+    .bind(serde_json::to_string(layer_ids).map_err(|_| AppError::InternalServerError)?)
+    .fetch_all(connection)
+    .await?;
+    Ok(vec_to_hashmap(layers, |layer| layer.id.clone()))
 }
 
-// 既存共有URLを削除するヘルパー関数（ユーザーは一つの共有URLしか持っていないため、user_idだけで削除）
 async fn delete_temporary_url(pool: &SqlitePool, user_id: String) -> Result<(), AppError> {
-    let _result = query!(
+    let mut tx = super::answer_sqlite::begin_write(pool).await?;
+    sqlx::query(
         r#"
         DELETE FROM temporary_urls
         WHERE user_id = $1
         "#,
-        user_id
     )
-    .execute(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
 
+// 閲覧開始後に延長されたURLを、古い期限切れ判定で削除しない。
+async fn delete_expired_temporary_url(
+    pool: &SqlitePool,
+    id: &str,
+    expiration: &str,
+) -> Result<(), AppError> {
+    let mut tx = super::answer_sqlite::begin_write(pool).await?;
+    sqlx::query(
+        r#"
+        DELETE FROM temporary_urls
+        WHERE id = $1
+            AND expiration = $2
+        "#,
+    )
+    .bind(id)
+    .bind(expiration)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -432,8 +422,7 @@ pub async fn temporary_map_get_handler(
                 "temporary-map.html"
             };
 
-            let temp_url = sqlx::query_as!(
-                TemporaryUrlFromDB,
+            let temp_url = sqlx::query_as::<_, TemporaryUrlFromDB>(
                 r#"
                 SELECT
                     id,
@@ -445,12 +434,13 @@ pub async fn temporary_map_get_handler(
                     markers,
                     shapes,
                     create_at,
-                    include_tile_overlays as "include_tile_overlays!: bool"
+                    include_tile_overlays,
+                    map_snapshot
                 FROM temporary_urls
                 WHERE id = $1
                 "#,
-                url_id
             )
+            .bind(&url_id)
             .fetch_one(&pool)
             .await;
 
@@ -459,16 +449,8 @@ pub async fn temporary_map_get_handler(
                 Ok(temp_url) => {
                     // 共有URLが期限切れの場合
                     if temp_url.is_expired() {
-                        query!(
-                            r#"
-                            DELETE FROM temporary_urls
-                            WHERE id = $1
-                            "#,
-                            url_id
-                        )
-                        .execute(&pool)
-                        .await
-                        .map_err(|_| AppError::InternalServerError)?;
+                        delete_expired_temporary_url(&pool, &temp_url.id, &temp_url.expiration)
+                            .await?;
                         return render_not_found_page(&tera, viewport_content).await;
                     } else if temp_url.password_hash.is_some() {
                         return render_password_required_page(
@@ -533,8 +515,7 @@ pub async fn temporary_map_auth_handler(
     let map_state_query =
         build_map_state_query(is_checked, initial_view, is_map_ui_hidden, is_overlay_tile);
 
-    let temp_url = query_as!(
-        TemporaryUrlFromDB,
+    let temp_url = sqlx::query_as::<_, TemporaryUrlFromDB>(
         r#"
         SELECT
             id,
@@ -546,12 +527,13 @@ pub async fn temporary_map_auth_handler(
             markers,
             shapes,
             create_at,
-            include_tile_overlays as "include_tile_overlays!: bool"
+            include_tile_overlays,
+            map_snapshot
         FROM temporary_urls
         WHERE id = $1
         "#,
-        url_id
     )
+    .bind(&url_id)
     .fetch_optional(&pool)
     .await
     .map_err(|e| {
@@ -566,16 +548,7 @@ pub async fn temporary_map_auth_handler(
 
     // 期限切れの場合、削除して NotFound を返す
     if temp_url.is_expired() {
-        query!(
-            r#"
-            DELETE FROM temporary_urls
-            WHERE id = $1
-            "#,
-            url_id
-        )
-        .execute(&pool)
-        .await
-        .map_err(|_| AppError::InternalServerError)?;
+        delete_expired_temporary_url(&pool, &temp_url.id, &temp_url.expiration).await?;
         return render_not_found_page(&tera, viewport_content).await;
     }
 
@@ -726,51 +699,56 @@ async fn render_temporary_map_page(
     is_map_ui_hidden: bool,
     is_overlay_tile: bool,
 ) -> Result<axum::response::Response, AppError> {
-    let tile_servers = query_as!(
-        TileServers,
-        r#"
-        SELECT
-                    id,
-                    layer_name,
-                    label,
-                    url,
-                    attribution,
-                    include_foreign_tiles,
-                    min_zoom,
-                    max_zoom,
-                    create_at,
-                    updated_at
-                FROM tileserver_model
-        "#
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
-
+    let shared_snapshot = temp_url
+        .map_snapshot
+        .as_deref()
+        .map(parse_json)
+        .transpose()?;
+    let mut context = Context::new();
+    if let Some(snapshot) = &shared_snapshot {
+        // スナップショット共有では、保存後のタイル設定を追加取得しない。
+        context.insert("tileServers", &snapshot["tileServers"]);
+        context.insert("tileOverlays", &snapshot["tileOverlays"]);
+    } else {
+        let tile_servers = sqlx::query_as::<_, TileServers>(
+            r#"
+            SELECT
+                id,
+                layer_name,
+                label,
+                url,
+                attribution,
+                include_foreign_tiles,
+                min_zoom,
+                max_zoom,
+                create_at,
+                updated_at
+            FROM tileserver_model
+            "#,
+        )
+        .fetch_all(pool)
+        .await?;
+        let tile_servers = vec_to_hashmap(tile_servers, |server| server.id);
+        context.insert("tileServers", &tile_servers);
+        let tile_overlays = if temp_url.include_tile_overlays {
+            crate::handler::tile_overlays::selected_tiles(pool, &temp_url.user_id).await?
+        } else {
+            Vec::new()
+        };
+        context.insert("tileOverlays", &tile_overlays);
+    }
     let layers = parse_json(&temp_url.layers)?;
     let markers = parse_json(&temp_url.markers)?;
     let shapes = parse_json(&temp_url.shapes)?;
-    let tile_servers_hash_map = vec_to_hashmap(tile_servers, |t| t.id);
-
-    let mut context = Context::new();
     context.insert("layers", &layers);
     context.insert("markersObj", &markers);
     context.insert("shapesObj", &shapes);
-    context.insert("tileServers", &tile_servers_hash_map);
+    context.insert("shareSnapshot", &shared_snapshot);
     context.insert("geocoderCsis", &crate::config::CONFIG.geocoder.uses_csis());
     context.insert(
         "geocoderShareToken",
         &crate::handler::geocoding::share_token(&temp_url)?,
     );
-    let tile_overlays = if temp_url.include_tile_overlays {
-        crate::handler::tile_overlays::selected_tiles(pool, &temp_url.user_id).await?
-    } else {
-        Vec::new()
-    };
-    context.insert("tileOverlays", &tile_overlays);
     context.insert("isOverlayTile", &is_overlay_tile);
     context.insert("isChecked", &is_checked);
     context.insert("latitude", &initial_view.latitude);
@@ -780,7 +758,11 @@ async fn render_temporary_map_page(
 
     let tera = tera.lock().await;
     match tera.render(render_html, &context) {
-        Ok(rendered) => Ok(Html(rendered).into_response()),
+        Ok(rendered) => Ok((
+            [(axum::http::header::CACHE_CONTROL, "no-store")],
+            Html(rendered),
+        )
+            .into_response()),
         Err(e) => {
             tracing::error!("{}", e);
             Err(AppError::InternalServerError)
@@ -808,7 +790,11 @@ async fn render_not_found_page(
 
     let tera = tera.lock().await;
     match tera.render("notfound.html", &context) {
-        Ok(rendered) => Ok(Html(rendered).into_response()),
+        Ok(rendered) => Ok((
+            [(axum::http::header::CACHE_CONTROL, "no-store")],
+            Html(rendered),
+        )
+            .into_response()),
         Err(e) => {
             tracing::error!("{}", e);
             Err(AppError::InternalServerError)
@@ -834,7 +820,11 @@ async fn render_password_required_page(
 
     let tera = tera.lock().await;
     match tera.render("temporary-password.html", &context) {
-        Ok(rendered) => Ok(Html(rendered).into_response()),
+        Ok(rendered) => Ok((
+            [(axum::http::header::CACHE_CONTROL, "no-store")],
+            Html(rendered),
+        )
+            .into_response()),
         Err(e) => {
             tracing::error!("{}", e);
             Err(AppError::InternalServerError)

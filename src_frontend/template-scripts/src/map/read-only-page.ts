@@ -1,12 +1,18 @@
 // @ts-nocheck -- この統合境界では Leaflet プラグイン間の型定義に互換性がないため、型チェックを省略する。
 import { evaluateMapAnalysis } from "./common/map-analysis";
-import { installAnswerColoring } from "./answer-coloring";
+import { installAnswerColoring, type AnswerColoring } from "./answer-coloring";
 import { createAdvancedMapSearchModal, attributeTransport } from "./common/advanced-map-search";
 import { createTileOverlayManager } from "./common/tile-overlays";
 import { createTileVisibilityStorage } from "./common/tile-visibility-storage";
 import { createPopupContentRuntime } from "./common/popup-content";
 import { createLazyLayerObjects } from "./common/lazy-layer-objects";
+import { createShareMapSnapshot, resolveShareParentOrigin } from "./common/share-snapshot";
+import { createMapMessageDialog } from "./common/map-message-dialog";
+import { createColorLegend } from "./common/color-legend";
+import { openMapPrintPreview, READ_ONLY_MAP_PRINT_PATH } from "./common/map-print-host";
 import type { PrintMapState } from "./common/print-state";
+import { createReadOnlyPrintSnapshot } from "./print/read-only-print-snapshot";
+import type { AnotherMapBootstrap, TemporaryMapBootstrap } from "./types";
 import { readMapBootstrap } from "./bootstrap";
 import { createAnswerVisibility } from "./answer-visibility";
 import { createLayerBulkToggleControl, extractYouTubeId } from "./common/base";
@@ -160,8 +166,9 @@ function initializeCollapsibleLayerControl({
 export function initializeReadOnlyMapPage(
   expectedPage: ReadOnlyPageName,
   printState?: PrintMapState,
+  snapshotBootstrap?: AnotherMapBootstrap | TemporaryMapBootstrap,
 ) {
-  const bootstrap = readMapBootstrap();
+  const bootstrap = snapshotBootstrap ?? readMapBootstrap();
   if (bootstrap.page !== expectedPage) {
     throw new Error(`Unexpected map bootstrap page: ${bootstrap.page}`);
   }
@@ -171,20 +178,24 @@ export function initializeReadOnlyMapPage(
 
   const { L, filterXSS, marked } = getBrowserLibraries();
   const isAnother = expectedPage === "map-anather" || expectedPage === "form-answer-map";
-  const isPrint = isAnother && Boolean(printState);
+  const isSnapshotPrint = Boolean(snapshotBootstrap);
+  const isPrint = (isAnother || isSnapshotPrint) && Boolean(printState);
   const isAnswerPreview =
     expectedPage === "form-answer-map" || (isAnother && Boolean(bootstrap.answerPreview));
-  // トップページの検索は、共通フォームの回答フィルターや凡例フィルターとは独立している。
-  const topPagePrint = isPrint && !isAnswerPreview;
+  // 印刷元の絞り込みは、共通フォームの回答フィルターや凡例フィルターとは独立している。
+  const usesPrintTargetIds = isPrint && !isAnswerPreview;
   const printMarkerIds =
-    topPagePrint && Array.isArray(printState?.markerIds) ? new Set(printState.markerIds) : null;
+    usesPrintTargetIds && Array.isArray(printState?.markerIds)
+      ? new Set(printState.markerIds)
+      : null;
   const printShapeIds =
-    topPagePrint && Array.isArray(printState?.shapeIds) ? new Set(printState.shapeIds) : null;
+    usesPrintTargetIds && Array.isArray(printState?.shapeIds) ? new Set(printState.shapeIds) : null;
   const answerVisibility = createAnswerVisibility(() => {
     layeredMarkerDisplay.rebuildVisibleMarkers();
     layeredShapeDisplay.rebuildVisibleShapes();
     groups.syncAllShapeGroupsVisibility();
     map.fire("answerfilterchange");
+    refreshColorLegend?.();
   });
   const persistSettings = isAnother && !isPrint && !isAnswerPreview;
   const isMobileAnswerMap =
@@ -197,6 +208,9 @@ export function initializeReadOnlyMapPage(
   const temporaryBootstrap = isTemporary
     ? (bootstrap as Extract<typeof bootstrap, { page: "temporary-map" | "temporary-map-mobile" }>)
     : null;
+  const sharedSnapshot = temporaryBootstrap?.shareSnapshot || null;
+  const hasCapturedView = Boolean(sharedSnapshot || isSnapshotPrint);
+  const initialState = printState ?? sharedSnapshot?.state;
   const tileServers = bootstrap.tileServers;
   const layers = bootstrap.layers;
   const markerRecords = bootstrap.markers;
@@ -204,7 +218,7 @@ export function initializeReadOnlyMapPage(
 
   const storage = createMapStorage(
     tileServers,
-    isAnswerPreview
+    isAnswerPreview || hasCapturedView
       ? {
           getStorage: () => ({ getItem: () => null, setItem: () => {} }) as Storage,
         }
@@ -234,7 +248,7 @@ export function initializeReadOnlyMapPage(
   });
   const xssOptions = installMapMarkdownRenderer({
     printing: isPrint,
-    enablePwaDownloads: isAnother,
+    enablePwaDownloads: isAnother && !isSnapshotPrint,
     imageMode: isMobile ? "html-preview" : "direct-preview",
     isLocalhost,
     isPdf: isPDF,
@@ -276,16 +290,17 @@ export function initializeReadOnlyMapPage(
     MapUiVisibilityToggleControl = mobileUi.MapUiVisibilityToggleControl;
   }
 
-  const lastMapView = isAnother && !isAnswerPreview ? loadLastMapView() : null;
+  const lastMapView = isAnother && !isAnswerPreview && !isSnapshotPrint ? loadLastMapView() : null;
   const answerMapView =
     isAnswerPreview && isValidMapView(bootstrap.answerPreview?.initialView)
       ? bootstrap.answerPreview.initialView
       : null;
   const initialView =
-    printState?.view ??
+    initialState?.view ??
     answerMapView ??
     (isAnother ? (lastMapView ?? bootstrap.initialView) : temporaryBootstrap!.initialView);
   const mapRuntime = createReadOnlyMapRuntime({
+    ...(hasCapturedView ? { initialTileServerId: initialState.tileServerId } : {}),
     center: [initialView.latitude, initialView.longitude],
     escapeHtml,
     handleTileChange,
@@ -295,49 +310,50 @@ export function initializeReadOnlyMapPage(
     zoom: initialView.zoom,
   });
   map = mapRuntime.map as DynamicRecord;
-  const popupContent = isAnother
-    ? createPopupContentRuntime({
-        map,
-        sanitizeHtml: (html) => filterXSS(html, xssOptions),
-        analysis: bootstrap.popupAnalysis,
-        renderMarkdown: renderContentMarkdown,
-        setupImages: setupDetailsLazyImages,
-        snapshot: isAnswerPreview ? bootstrap.popupBodies || {} : undefined,
-        answerMap: isAnswerPreview,
-        loadBody: async (kind, id) => {
-          let response = await fetch(`/${kind}/${id}/form/body`, {
-            credentials: "same-origin",
-            cache: "no-store",
-          });
-          if (response.status === 401) {
-            const renewed = await fetch("/account/refresh", {
-              method: "POST",
+  const popupContent =
+    isAnother && !isSnapshotPrint
+      ? createPopupContentRuntime({
+          map,
+          sanitizeHtml: (html) => filterXSS(html, xssOptions),
+          analysis: bootstrap.popupAnalysis,
+          renderMarkdown: renderContentMarkdown,
+          setupImages: setupDetailsLazyImages,
+          snapshot: isAnswerPreview ? bootstrap.popupBodies || {} : undefined,
+          answerMap: isAnswerPreview,
+          loadBody: async (kind, id) => {
+            let response = await fetch(`/${kind}/${id}/form/body`, {
               credentials: "same-origin",
-              headers: { "Content-Type": "application/json" },
-              body: "{}",
+              cache: "no-store",
             });
-            if (renewed.ok)
-              response = await fetch(`/${kind}/${id}/form/body`, {
+            if (response.status === 401) {
+              const renewed = await fetch("/account/refresh", {
+                method: "POST",
                 credentials: "same-origin",
-                cache: "no-store",
+                headers: { "Content-Type": "application/json" },
+                body: "{}",
               });
-          }
-          if (!response.ok) throw Error("Popup request failed");
-          return response.json();
-        },
-      })
-    : undefined;
+              if (renewed.ok)
+                response = await fetch(`/${kind}/${id}/form/body`, {
+                  credentials: "same-origin",
+                  cache: "no-store",
+                });
+            }
+            if (!response.ok) throw Error("Popup request failed");
+            return response.json();
+          },
+        })
+      : undefined;
   if (isMobileAnswerMap) map.addControl(new MapUiVisibilityToggleControl!());
   if (!isPrint) installMjpegCameras(map);
   if (persistSettings) observeMapView(map);
   bounds = mapRuntime.bounds;
   tileLayer = mapRuntime.tileLayer as DynamicRecord;
-  const initialTileServerId = isPrint
-    ? printState.tileServerId
+  const initialTileServerId = initialState
+    ? initialState.tileServerId
     : isAnother
       ? loadSelectedTileServerId(tileServers)
       : undefined;
-  if (initialTileServerId && tileServers[initialTileServerId]) {
+  if (!hasCapturedView && initialTileServerId && tileServers[initialTileServerId]) {
     const radio = Array.from(document.querySelectorAll<HTMLInputElement>(".tile-radio")).find(
       (input) => input.value === initialTileServerId,
     );
@@ -362,27 +378,30 @@ export function initializeReadOnlyMapPage(
   const shapeLayers: DynamicRecord = {};
   let shapeRenderer: ReturnType<typeof createShapeRenderManager>;
   let shapeRenderStatus: HTMLElement | null = null;
-  let shapeSearchQuery = printState?.objectQuery || "";
+  let shapeSearchQuery = initialState?.objectQuery || "";
   let coloringController;
+  let refreshColorLegend: (() => void) | undefined;
   let colorSpecification = null;
   let analysisRevision = 0;
+  let advancedSearch;
   const shapeSearchMatches = new WeakMap<object, { query: string; result: boolean }>();
   const shapeCreatedListeners = new Set<(layer: any, record: any) => void>();
   const shapeEvictedListeners = new Set<(layer: any, record: any) => void>();
   const markers: DynamicRecord = {};
   const layerNames: Record<string, string> = {};
-  const clusteringAllowed =
-    !isAnother || (bootstrap.isCluster !== false && printState?.clusteringAllowed !== false);
+  const clusteringAllowed = hasCapturedView
+    ? initialState.clusteringAllowed !== false
+    : !isAnother || (bootstrap.isCluster !== false && printState?.clusteringAllowed !== false);
   const visibleMarkerGroup = clusteringAllowed ? L.markerClusterGroup() : L.featureGroup();
-  if (isTemporary || (printState?.markersVisible ?? storage.getInitialMarkerVisibility()))
+  if (initialState?.markersVisible ?? (isTemporary || storage.getInitialMarkerVisibility()))
     visibleMarkerGroup.addTo(map);
   const drawnShapesGroup = isAnother ? L.featureGroup() : undefined;
   const shapeVisibilityLayer = L.layerGroup();
-  if (isTemporary || (printState?.shapesVisible ?? storage.getInitialShapeLayerVisibility())) {
+  if (initialState?.shapesVisible ?? (isTemporary || storage.getInitialShapeLayerVisibility())) {
     shapeVisibilityLayer.addTo(map);
   }
   const shapeNameVisibilityLayer = L.layerGroup();
-  if (isAnother && (printState?.shapeNamesVisible ?? storage.getInitialShapeNameVisibility())) {
+  if (initialState?.shapeNamesVisible ?? (isAnother && storage.getInitialShapeNameVisibility())) {
     shapeNameVisibilityLayer.addTo(map);
   }
 
@@ -424,11 +443,13 @@ export function initializeReadOnlyMapPage(
     sanitizeHtml: (html) => filterXSS(html, xssOptions),
     setupDetailsLazyImages: (root) => setupDetailsLazyImages(root, renderContentMarkdown),
   });
-  installMapContentActions({
-    downloadFile: isAnother ? downloadMapContentFile : undefined,
-    previewImage: (path) =>
-      window.parent.postMessage({ message: path, type: "callParentFunction" }, "*"),
-  });
+  if (!isSnapshotPrint) {
+    installMapContentActions({
+      downloadFile: isAnother ? downloadMapContentFile : undefined,
+      previewImage: (path) =>
+        window.parent.postMessage({ message: path, type: "callParentFunction" }, "*"),
+    });
+  }
 
   const groups = createReadOnlyLayerGroupRuntime({
     clusterGroups,
@@ -493,7 +514,7 @@ export function initializeReadOnlyMapPage(
     getShapeNameLabelManager: () => shapeNameLabelManager,
     getShapeRecords,
     getShapeStyleFromGeoJson: shapeStyle.getShapeStyleFromGeoJson,
-    labelAppearance: isAnother ? "pill" : "plain",
+    labelAppearance: isAnother || sharedSnapshot ? "pill" : "plain",
     normalizeShapeColor: shapeStyle.normalizeShapeColor,
     normalizeShapeName,
   });
@@ -509,7 +530,7 @@ export function initializeReadOnlyMapPage(
   });
 
   // 地図オブジェクトの取得を待たず、メタデータから選択欄を作成する。
-  if (isAnother) Object.keys(layers).forEach(groups.createMarkerGroupForLayer);
+  if (isAnother || hasCapturedView) Object.keys(layers).forEach(groups.createMarkerGroupForLayer);
   const hydrateMarkers = (records) =>
     hydrateReadOnlyMarkers({
       renderPopup: popupContent
@@ -521,19 +542,20 @@ export function initializeReadOnlyMapPage(
               body: record.detail || "",
             })
         : undefined,
-      onMarkerCreated: isAnother
-        ? (marker, record) => {
-            coloringController?.refreshTarget(`marker:${record.id}`, marker);
-            marker.on("add", () => {
-              if (isTooltipVisible) marker.openTooltip?.();
-            });
-          }
-        : undefined,
+      onMarkerCreated:
+        isAnother || hasCapturedView
+          ? (marker, record) => {
+              coloringController?.refreshTarget(`marker:${record.id}`, marker);
+              marker.on("add", () => {
+                if (isTooltipVisible) marker.openTooltip?.();
+              });
+            }
+          : undefined,
       clusterGroups,
       createMarkerGroupForLayer: groups.createMarkerGroupForLayer,
       enableMarkerIconFallback: isTemporary ? enableMarkerIconFallback : undefined,
       escapeHtml,
-      initialLayersVisible: isAnswerPreview || temporaryBootstrap?.isChecked,
+      initialLayersVisible: isAnswerPreview || (!hasCapturedView && temporaryBootstrap?.isChecked),
       layerNames,
       layerRecords: layers,
       layerVisibilityGroups,
@@ -550,9 +572,9 @@ export function initializeReadOnlyMapPage(
     });
   hydrateMarkers(markerRecords);
 
-  if (isPrint) {
+  if (initialState) {
     for (const [id, group] of Object.entries(layerVisibilityGroups)) {
-      if (printState.layerIds === null || printState.layerIds.includes(id)) group.addTo(map);
+      if (initialState.layerIds === null || initialState.layerIds.includes(id)) group.addTo(map);
     }
   }
 
@@ -580,6 +602,38 @@ export function initializeReadOnlyMapPage(
   const hasSharedShapes = getShapeRecords(shapeRecords).some((record) =>
     Boolean(getRecordGeometryInfo(record)),
   );
+  const isMarkerRecordAllowed = (record) =>
+    (!printMarkerIds || printMarkerIds.has(String(record.id))) &&
+    matchesMarkerSearch(record, printState?.objectQuery || "") &&
+    answerVisibility.allows(`marker:${record.id}`) &&
+    (!attributeTargetMask || attributeTargetMask.has(`marker:${record.id}`));
+
+  // 共有・印刷・凡例は、画面内の描画結果ではなく同じレコードの表示条件を使う。
+  const getVisibleObjectKeys = (assignments?: AnswerColoring["targets"]): Set<string> => {
+    const targets = new Set<string>();
+    if (map.hasLayer(visibleMarkerGroup)) {
+      for (const record of Object.values(markerRecords)) {
+        const key = `marker:${record.id}`;
+        if (
+          (!assignments || Object.hasOwn(assignments, key)) &&
+          layeredMarkerDisplay.isLayerVisible(record.layer_id) &&
+          isMarkerRecordAllowed(record) &&
+          matchesMarkerSearch(record, shapeSearchQuery)
+        )
+          targets.add(key);
+      }
+    }
+    for (const record of getShapeRecords(shapeRecords)) {
+      const key = `shape:${record.id}`;
+      if (
+        (!assignments || Object.hasOwn(assignments, key)) &&
+        isShapeRecordVisible(record) &&
+        shapeRenderer.getGeometryInfo(record.id)
+      )
+        targets.add(key);
+    }
+    return targets;
+  };
 
   const markerLayerControl = createReadOnlyMarkerLayerControl({
     formatLayerName: isAnother
@@ -590,11 +644,7 @@ export function initializeReadOnlyMapPage(
     createLayeredMarkerDisplayManager: (options) =>
       createLayeredMarkerDisplayManager({
         ...options,
-        isRecordAllowed: (record) =>
-          (!printMarkerIds || printMarkerIds.has(String(record.id))) &&
-          matchesMarkerSearch(record, printState?.objectQuery || "") &&
-          answerVisibility.allows(`marker:${record.id}`) &&
-          (!attributeTargetMask || attributeTargetMask.has(`marker:${record.id}`)),
+        isRecordAllowed: isMarkerRecordAllowed,
       }),
     escapeHtml,
     layerNames,
@@ -608,7 +658,7 @@ export function initializeReadOnlyMapPage(
   });
   layeredMarkerDisplay = markerLayerControl.layeredMarkerDisplay;
   if (isMobile) registerHideableMapControl!(markerLayerControl.layersControl);
-  if (isTemporary && hasSharedShapes) shapeNameVisibilityLayer.addTo(map);
+  if (isTemporary && !hasCapturedView && hasSharedShapes) shapeNameVisibilityLayer.addTo(map);
 
   shapeNameLabelManager = viewport.createViewportShapeLabelManager({
     bindLabel: restoration.bindShapeNameLabelTooltip,
@@ -645,9 +695,9 @@ export function initializeReadOnlyMapPage(
       Boolean(layer && (selection.includes(layer) || memo.isShapePopupOpen(layer))),
     createLayer: (record) =>
       restoration.restoreShape(record, {
-        applyShapeStyle: isAnother,
+        applyShapeStyle: isAnother || Boolean(sharedSnapshot),
         bindPolylineHover: !isMobile,
-        restoreShapeStyleOnHover: isAnother,
+        restoreShapeStyleOnHover: isAnother || Boolean(sharedSnapshot),
         shapeLayers,
       }),
     addLayer: (layer, record) => {
@@ -710,7 +760,10 @@ export function initializeReadOnlyMapPage(
   const searchCoordinator = createMapObjectSearchCoordinator({
     markerDisplay: layeredMarkerDisplay,
     shapeDisplay: layeredShapeDisplay,
-    syncShapeVisibility: groups.syncAllShapeGroupsVisibility,
+    syncShapeVisibility: () => {
+      groups.syncAllShapeGroupsVisibility();
+      refreshColorLegend?.();
+    },
   });
 
   const addBulkControl = (): object => {
@@ -799,7 +852,7 @@ export function initializeReadOnlyMapPage(
     map.addControl(control);
     if (isMobile) registerHideableMapControl!(control);
     map.addControl(summaryControl);
-    if (isAnother) {
+    if (isAnother || isSnapshotPrint) {
       map.on(
         "unload",
         makeSummaryDraggable(summaryControl.getContainer(), map.getContainer(), () =>
@@ -883,8 +936,10 @@ export function initializeReadOnlyMapPage(
         groups.syncAllShapeGroupsVisibility();
         shapeNameLabelManager?.scheduleRefresh();
         shapeMeasurementManager?.scheduleRefresh();
+        refreshColorLegend?.();
       },
     });
+    advancedSearch = modal;
     button.addEventListener("click", () => void modal.open(button));
     control.onAdd = () => {
       const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
@@ -920,16 +975,17 @@ export function initializeReadOnlyMapPage(
     visibleMarkerGroup,
   });
 
-  const markerClustering = isAnother
-    ? installMarkerClustering({
-        leaflet: L,
-        map,
-        markerGroup: visibleMarkerGroup,
-        control: visibilityControl,
-        allowed: clusteringAllowed,
-        initialEnabled: printState?.clusteringEnabled ?? true,
-      })
-    : undefined;
+  const markerClustering =
+    isAnother || hasCapturedView
+      ? installMarkerClustering({
+          leaflet: L,
+          map,
+          markerGroup: visibleMarkerGroup,
+          control: visibilityControl,
+          allowed: clusteringAllowed,
+          initialEnabled: initialState?.clusteringEnabled ?? true,
+        })
+      : undefined;
 
   const tileOverlayManager = createTileOverlayManager(
     L,
@@ -941,16 +997,17 @@ export function initializeReadOnlyMapPage(
   );
   const tileOverlays = bootstrap.tileOverlays || [];
   const initialTileVisibility =
-    isAnswerPreview && !isPrint && bootstrap.tileVisibilityAccountId
+    initialState?.overlays ??
+    (isAnswerPreview && !isPrint && bootstrap.tileVisibilityAccountId
       ? createTileVisibilityStorage(bootstrap.tileVisibilityAccountId).load(
           tileOverlays.map((tile) => tile.id),
         )
-      : undefined;
+      : undefined);
   tileOverlayManager.sync(tileOverlays, initialTileVisibility);
-  if (isPrint) tileOverlayManager.setVisibility(printState.overlays);
+  if (initialState) tileOverlayManager.setVisibility(initialState.overlays);
 
   let objectLoader: ReturnType<typeof createLazyLayerObjects> | undefined;
-  if (isAnother && !isAnswerPreview) {
+  if (isAnother && !isAnswerPreview && !isSnapshotPrint) {
     const getSelectedLayerIds = () =>
       Object.keys(layerVisibilityGroups).filter((id) => map.hasLayer(layerVisibilityGroups[id]));
     const updateLoadStatus = () => {
@@ -993,6 +1050,7 @@ export function initializeReadOnlyMapPage(
         groups.syncAllShapeGroupsVisibility();
         shapeNameLabelManager?.scheduleRefresh();
         shapeMeasurementManager?.scheduleRefresh();
+        refreshColorLegend?.();
       },
     });
     map.on("overlayadd", ({ layer }) => {
@@ -1030,6 +1088,13 @@ export function initializeReadOnlyMapPage(
   // 設定・グループ・イベントの初期化後に一度だけ生成を開始する。
   shapeRenderer.refresh();
 
+  const requireCaptureReady = (action: "共有" | "印刷") => {
+    const load = objectLoader?.getStatus();
+    if (load?.loading || load?.failed || advancedSearch?.isBusy())
+      throw Error(
+        `地図データの取得と絞り込み・色分けの完了後に${action}してください。取得に失敗したグループは再チェックしてください。`,
+      );
+  };
   const runtime = {
     setColoringController: (controller) => {
       coloringController = controller;
@@ -1087,6 +1152,20 @@ export function initializeReadOnlyMapPage(
         ),
       };
     },
+    getShareSnapshot: () => {
+      requireCaptureReady("共有");
+      return createShareMapSnapshot(
+        {
+          layers,
+          markers: markerRecords,
+          shapes: getShapeRecords(shapeRecords),
+          tileServers,
+          tileOverlays,
+        },
+        runtime.getPrintState(),
+        getVisibleObjectKeys(),
+      );
+    },
     setAnswerTargets: answerVisibility.setAnswerTargets,
     setLegendHiddenTargets: answerVisibility.setLegendHiddenTargets,
     applyShapeArrowStyle: shapeArrow.applyShapeArrowStyle,
@@ -1110,8 +1189,173 @@ export function initializeReadOnlyMapPage(
       ...tileOverlayManager.getLayers(),
     ],
   };
-  if (isAnother && !isAnswerPreview && !isPrint) {
-    coloringController = installAnswerColoring(runtime, L);
+  if (!isPrint && ((isAnother && !isAnswerPreview) || sharedSnapshot)) {
+    let legend: ReturnType<typeof createColorLegend> | undefined;
+    let coloring: AnswerColoring | null = null;
+    refreshColorLegend = () => {
+      let entries: AnswerColoring["rules"] = [];
+      if (coloring) {
+        const used = new Set(
+          [...getVisibleObjectKeys(coloring.targets)].map((key) => coloring.targets[key]),
+        );
+        entries = coloring.rules.filter((rule) => used.has(rule.id));
+      }
+      if (!legend && !entries.length) return;
+      legend ??= createColorLegend({ mapElement: map.getContainer() });
+      legend.setEntries(entries);
+    };
+    coloringController = installAnswerColoring(runtime, L, (state) => {
+      coloring = state;
+      refreshColorLegend?.();
+    });
+    if (sharedSnapshot) coloringController.apply(initialState.coloring || null);
+    const onVisibilityChange = ({ layer }) => {
+      if (
+        layer === visibleMarkerGroup ||
+        layer === shapeVisibilityLayer ||
+        groups.findLayerIdByMarkerGroup(layer)
+      )
+        refreshColorLegend?.();
+    };
+    map.on("overlayadd overlayremove", onVisibilityChange);
+    map.on("unload", () => {
+      map.off("overlayadd overlayremove", onVisibilityChange);
+      refreshColorLegend = undefined;
+      legend?.dispose();
+    });
+  }
+  if (!isPrint && sharedSnapshot && initialState.objectQuery) {
+    searchCoordinator.setMapObjectSearchQuery(initialState.objectQuery);
+    const input = document.querySelector<HTMLInputElement>(".marker-search-input");
+    if (input) input.value = initialState.objectQuery;
+  }
+  if (expectedPage === "map-anather" && !isAnswerPreview && !isPrint) {
+    const messages = createMapMessageDialog();
+    const control = L.control({ position: "topleft" });
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "custom-control-button";
+    button.textContent = "現在の地図を共有する";
+    button.addEventListener("click", () => {
+      try {
+        const targetOrigin = resolveShareParentOrigin(
+          document.referrer,
+          location.origin,
+          bootstrap.shareParentOrigins || [],
+        );
+        if (!targetOrigin) throw Error("許可されたアプリの全画面地図から共有してください。");
+        const snapshot = runtime.getShareSnapshot();
+        window.parent.postMessage({ type: "shareMapSnapshot", snapshot }, targetOrigin);
+      } catch (error) {
+        messages.show(
+          error instanceof Error ? error.message : "地図を取得できませんでした。",
+          "共有エラー",
+        );
+      }
+    });
+    control.onAdd = () => {
+      const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
+      container.append(button);
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.disableScrollPropagation(container);
+      return container;
+    };
+    control.addTo(map);
+    map.on("unload", () => messages.dispose());
+  }
+  if (
+    !isPrint &&
+    !isAnswerPreview &&
+    (expectedPage === "map-anather" || expectedPage === "temporary-map")
+  ) {
+    let printHost: ReturnType<typeof openMapPrintPreview> | undefined;
+    let printMessages: ReturnType<typeof createMapMessageDialog> | undefined;
+    const openPrint = () => {
+      if (printHost || document.querySelector("dialog[open]")) return;
+      try {
+        requireCaptureReady("印刷");
+        const snapshot = createReadOnlyPrintSnapshot(
+          {
+            sourcePage: expectedPage,
+            snapshotShare: Boolean(sharedSnapshot),
+            layers,
+            markers: markerRecords,
+            shapes: getShapeRecords(shapeRecords),
+            tileServers,
+            tileOverlays,
+          },
+          runtime.getPrintState(),
+          getVisibleObjectKeys(),
+        );
+        printHost = openMapPrintPreview({
+          url: READ_ONLY_MAP_PRINT_PATH,
+          snapshot: true,
+          getState: async () => snapshot,
+          close: () => {
+            printHost = undefined;
+          },
+        });
+      } catch (error) {
+        printMessages ??= createMapMessageDialog();
+        printMessages.show(
+          error instanceof Error ? error.message : "印刷用の地図を作成できませんでした。",
+          "印刷エラー",
+        );
+      }
+    };
+    const control = L.control({ position: "topleft" });
+    control.onAdd = () => {
+      const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "custom-control-button";
+      button.textContent = "地図を印刷";
+      button.addEventListener("click", openPrint);
+      container.append(button);
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.disableScrollPropagation(container);
+      return container;
+    };
+    control.addTo(map);
+    const onPrintShortcut = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        !(event.ctrlKey || event.metaKey) ||
+        event.altKey ||
+        event.shiftKey ||
+        event.isComposing ||
+        event.key.toLowerCase() !== "p"
+      )
+        return;
+      event.preventDefault();
+      if (!event.repeat) openPrint();
+    };
+    const onParentPrint = (event: MessageEvent) => {
+      if (
+        event.data?.type !== "readOnlyPrintOpen" ||
+        event.source !== window.parent ||
+        window.parent === window
+      )
+        return;
+      const origin = resolveShareParentOrigin(
+        document.referrer,
+        location.origin,
+        bootstrap.shareParentOrigins || [],
+      );
+      if (origin && event.origin === origin) openPrint();
+    };
+    const disposePrint = () => {
+      window.removeEventListener("keydown", onPrintShortcut);
+      window.removeEventListener("message", onParentPrint);
+      window.removeEventListener("pagehide", disposePrint);
+      map.off("unload", disposePrint);
+      printHost?.dispose();
+      printMessages?.dispose();
+    };
+    window.addEventListener("keydown", onPrintShortcut);
+    if (expectedPage === "map-anather") window.addEventListener("message", onParentPrint);
+    window.addEventListener("pagehide", disposePrint, { once: true });
+    map.once("unload", disposePrint);
   }
   return runtime;
 }

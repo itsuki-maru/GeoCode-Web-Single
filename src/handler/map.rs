@@ -394,6 +394,15 @@ pub async fn map_another_get_handler(
         &crate::handler::tile_overlays::selected_tiles(&pool, &user_id).await?,
     );
     context.insert("is_cluster", &is_cluster);
+    // 開発用Viteの親だけを明示的に許可し、リリース版は同一originに限定する。
+    context.insert(
+        "shareParentOrigins",
+        &if cfg!(debug_assertions) {
+            vec!["http://localhost:5173"]
+        } else {
+            vec![]
+        },
+    );
     context.insert("layersFromAxum", &layers_hash_map);
     // マーカーと図形は、画面でグループが選択された時点で取得する。
     context.insert("markersFromAxum", &serde_json::json!({}));

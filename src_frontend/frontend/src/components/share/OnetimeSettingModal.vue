@@ -1,14 +1,20 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, shallowRef, computed, watch, onBeforeUnmount } from "vue";
 import type { Ref } from "vue";
 import BaseModal from "@/components/common/BaseModal.vue";
 import type { LayersData, ShareLayerCheckList } from "@/interface";
 import { generateOnetimeMapUrl, getCurrentOnetimeMapUrl } from "@/router/urls";
 import apiClient from "@/axiosClient";
+import {
+  isShareMapSnapshot,
+  type ShareMapSnapshot,
+} from "../../../../template-scripts/src/map/common/share-snapshot";
 
 const props = defineProps<{
   isOpen: boolean;
   layerList: Map<string, LayersData>;
+  snapshot?: ShareMapSnapshot | null;
+  zIndex?: number;
 }>();
 
 const emit = defineEmits<{
@@ -27,8 +33,53 @@ const existingSharedProtected = ref(false);
 const sharePassword = ref("");
 const includeShapes = ref(false);
 const includeTileOverlays = ref(false);
-
+const submitting = ref(false);
+const snapshotMode = ref(false);
+const frozenSnapshot = shallowRef<ShareMapSnapshot | null>(null);
+const snapshotError = ref("");
 const isDropdownOpen = ref(false);
+let session = 0;
+let currentFetchId = 0;
+
+watch(
+  () => props.isOpen,
+  (open) => {
+    ++session;
+    isDropdownOpen.value = false;
+    frozenSnapshot.value = null;
+    snapshotMode.value = open && props.snapshot != null;
+    snapshotError.value = "";
+    if (!snapshotMode.value) return;
+    try {
+      if (!isShareMapSnapshot(props.snapshot)) throw Error("Invalid snapshot");
+      frozenSnapshot.value = JSON.parse(JSON.stringify(props.snapshot));
+    } catch {
+      snapshotError.value =
+        "共有する地図を取得できませんでした。地図からもう一度共有してください。";
+    }
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => {
+  ++session;
+  ++currentFetchId;
+});
+
+const snapshotSummary = computed(() => {
+  const snapshot = frozenSnapshot.value;
+  if (!snapshot) return null;
+  return {
+    layers: Object.values(snapshot.layers).map((layer) => layer.layer_name),
+    markers: Object.keys(snapshot.markers).length,
+    shapes: snapshot.shapes.length,
+    coloring: Boolean(snapshot.state.coloring),
+    background: snapshot.tileServers[snapshot.state.tileServerId]?.label || "選択中の背景地図",
+    tiles: snapshot.tileOverlays
+      .filter((tile) => snapshot.state.overlays[tile.id])
+      .map((tile) => tile.name),
+    view: snapshot.state.view,
+  };
+});
 
 type OnetimeAction = { label: string; updateUrl: boolean };
 const actions: OnetimeAction[] = [
@@ -88,12 +139,14 @@ const buildAbsoluteUrl = (path: string): string => {
 };
 
 const fetchCurrentSharedUrl = async (): Promise<void> => {
+  const fetchId = ++currentFetchId;
   existingSharedUrl.value = "";
   existingSharedUuid.value = "";
   existingSharedExpiration.value = "";
   existingSharedProtected.value = false;
   try {
     const response = await apiClient.get(getCurrentOnetimeMapUrl);
+    if (fetchId !== currentFetchId) return;
     existingSharedUrl.value = buildAbsoluteUrl(response.data["url"]);
     existingSharedUuid.value = response.data["id"];
     existingSharedExpiration.value = formatExpiration(response.data["expiration"]);
@@ -110,6 +163,8 @@ const getCheckedLayersIds = () => {
 };
 
 const genOnetimeMapUrl = async (updateUrl: boolean = true): Promise<void> => {
+  if (!props.isOpen || submitting.value) return;
+  const requestSession = session;
   try {
     if (Number.isInteger(onetimeDurationMinits.value) === false) {
       emit("message", "数値を入力してください。");
@@ -120,9 +175,14 @@ const genOnetimeMapUrl = async (updateUrl: boolean = true): Promise<void> => {
       return;
     }
 
-    const checkedLayers = getCheckedLayersIds();
+    const snapshot = frozenSnapshot.value;
+    if (snapshotMode.value && !snapshot) {
+      emit("message", snapshotError.value);
+      return;
+    }
+    const checkedLayers = snapshot ? Object.keys(snapshot.layers) : getCheckedLayersIds();
 
-    if (checkedLayers.length === 0) {
+    if (!snapshot && checkedLayers.length === 0) {
       emit("message", "レイヤが選択されていません。");
       return;
     }
@@ -132,11 +192,16 @@ const genOnetimeMapUrl = async (updateUrl: boolean = true): Promise<void> => {
       layers: checkedLayers,
       update_url: updateUrl,
       share_password: sharePassword.value,
-      include_shapes: includeShapes.value,
-      include_tile_overlays: includeTileOverlays.value,
+      include_shapes: snapshot ? snapshot.shapes.length > 0 : includeShapes.value,
+      include_tile_overlays: snapshot
+        ? snapshot.tileOverlays.length > 0
+        : includeTileOverlays.value,
+      ...(snapshot ? { snapshot } : {}),
     };
 
+    submitting.value = true;
     const response = await apiClient.post(generateOnetimeMapUrl, payload);
+    if (requestSession !== session || !props.isOpen) return;
 
     emit(
       "generated",
@@ -147,7 +212,20 @@ const genOnetimeMapUrl = async (updateUrl: boolean = true): Promise<void> => {
     );
     await fetchCurrentSharedUrl();
   } catch (error) {
-    console.error("Error");
+    if (requestSession !== session || !props.isOpen) return;
+    const response = (error as { response?: { status?: number; data?: { error?: unknown } } })
+      ?.response;
+    const detail = response?.data?.error;
+    emit(
+      "message",
+      typeof detail === "string" && detail.length > 0 && detail.length <= 500
+        ? detail
+        : response?.status === 413
+          ? "共有するデータが大きすぎます。地図の対象を絞ってからもう一度実行してください。"
+          : "共有リンクを作成できませんでした。通信状態を確認してもう一度実行してください。",
+    );
+  } finally {
+    submitting.value = false;
   }
 };
 
@@ -169,9 +247,16 @@ defineExpose({ initRows, fetchCurrentSharedUrl });
 </script>
 
 <template>
-  <BaseModal :isOpen="isOpen" :zIndex="3" :close-on-overlay-click="false" @close="emit('close')">
+  <BaseModal
+    :isOpen="isOpen"
+    :zIndex="zIndex ?? 3"
+    :close-on-overlay-click="false"
+    @close="!submitting && emit('close')"
+  >
     <div class="onetime-setting-content">
-      <h2 class="modal-h2">マップの共有リンク作成</h2>
+      <h2 class="modal-h2">
+        {{ snapshotMode ? "現在の地図を共有する" : "マップの共有リンク作成" }}
+      </h2>
       <div class="setting-layout">
         <div class="setting-side-panel">
           <div class="input-area-duration">
@@ -182,6 +267,7 @@ defineExpose({ initRows, fetchCurrentSharedUrl });
               step="10"
               class="input-minits"
               id="minits"
+              :disabled="submitting"
             />
           </div>
           <div class="input-area-duration password-area">
@@ -195,17 +281,28 @@ defineExpose({ initRows, fetchCurrentSharedUrl });
               class="input-minits"
               id="share-password"
               placeholder="未入力で保護なし"
+              :disabled="submitting"
             />
           </div>
-          <div class="share-option-row">
+          <div v-if="!snapshotMode" class="share-option-row">
             <label for="include-shapes" class="field-label">図形も共有する</label>
-            <input v-model="includeShapes" type="checkbox" id="include-shapes" />
+            <input
+              v-model="includeShapes"
+              type="checkbox"
+              id="include-shapes"
+              :disabled="submitting"
+            />
           </div>
-          <div class="share-option-row">
+          <div v-if="!snapshotMode" class="share-option-row">
             <label for="include-tile-overlays" class="field-label"
               >重ねるタイルレイヤも共有する</label
             >
-            <input v-model="includeTileOverlays" type="checkbox" id="include-tile-overlays" />
+            <input
+              v-model="includeTileOverlays"
+              type="checkbox"
+              id="include-tile-overlays"
+              :disabled="submitting"
+            />
           </div>
           <div v-if="existingSharedUrl" class="existing-share-box">
             <div class="existing-share-title">現在有効な共有リンクがあります</div>
@@ -213,12 +310,46 @@ defineExpose({ initRows, fetchCurrentSharedUrl });
             <div class="existing-share-expiration">
               パスワード保護: {{ existingSharedProtected ? "あり" : "なし" }}
             </div>
-            <button class="existing-share-btn" @click="openExistingSharedUrl()">
+            <button
+              class="existing-share-btn"
+              :disabled="submitting"
+              @click="openExistingSharedUrl()"
+            >
               現在のリンクを確認
             </button>
           </div>
         </div>
-        <div class="setting-layer-panel">
+        <div v-if="snapshotMode" class="setting-layer-panel snapshot-summary">
+          <div class="layer-table-title">共有する地図の内容</div>
+          <p v-if="snapshotError" role="alert">{{ snapshotError }}</p>
+          <template v-if="snapshotSummary">
+            <p>
+              共有ボタンを押した時点の地図を保存します。絞り込みや検索で除外されたデータは含まれません。
+            </p>
+            <dl>
+              <dt>共有対象</dt>
+              <dd>マーカー {{ snapshotSummary.markers }}件・図形 {{ snapshotSummary.shapes }}件</dd>
+              <dt>色分け</dt>
+              <dd>{{ snapshotSummary.coloring ? "あり" : "なし" }}</dd>
+              <dt>背景地図</dt>
+              <dd>{{ snapshotSummary.background }}</dd>
+              <dt>地図の中心</dt>
+              <dd>
+                {{ snapshotSummary.view.latitude.toFixed(6) }},
+                {{ snapshotSummary.view.longitude.toFixed(6) }}
+              </dd>
+              <dt>ズーム</dt>
+              <dd>{{ snapshotSummary.view.zoom }}</dd>
+              <dt>表示中の重ねるタイルレイヤ</dt>
+              <dd>{{ snapshotSummary.tiles.join("、") || "なし" }}</dd>
+              <dt>選択中のレイヤグループ</dt>
+              <dd>{{ snapshotSummary.layers.join("、") || "なし" }}</dd>
+            </dl>
+            <p>地図画面の外にある対象も含めます。背景地図やタイル画像は閲覧時に読み込みます。</p>
+            <p>共有リンクは通常の共有と共通です。新規発行すると以前のリンクは使えなくなります。</p>
+          </template>
+        </div>
+        <div v-else class="setting-layer-panel">
           <div class="layer-table-title">共有するレイヤ</div>
           <div class="table-sticky-layerlist">
             <table>
@@ -237,6 +368,7 @@ defineExpose({ initRows, fetchCurrentSharedUrl });
                       :name="layer.layerName"
                       v-model="layer.checked"
                       :id="`checkedLayer-${layer.id}`"
+                      :disabled="submitting"
                     />
                   </td>
                 </tr>
@@ -246,13 +378,19 @@ defineExpose({ initRows, fetchCurrentSharedUrl });
         </div>
       </div>
       <div class="btn-zone">
-        <button @click="emit('close')">閉じる</button>
+        <button :disabled="submitting" @click="emit('close')">閉じる</button>
         <div class="dropdown-btn">
-          <button @click="genOnetimeMapUrl(selectedAction.updateUrl)">
-            {{ selectedAction.label }}
+          <button
+            :disabled="submitting || !!snapshotError"
+            @click="genOnetimeMapUrl(selectedAction.updateUrl)"
+          >
+            {{ submitting ? "共有リンクを作成しています…" : selectedAction.label }}
           </button>
           <button
             :class="['dropdown-toggle', { 'is-open': isDropdownOpen }]"
+            :disabled="submitting || !!snapshotError"
+            aria-label="共有リンクの作成方法"
+            :aria-expanded="isDropdownOpen"
             @click="isDropdownOpen = !isDropdownOpen"
           ></button>
           <div v-if="isDropdownOpen" class="dropdown-menu">
@@ -274,6 +412,8 @@ defineExpose({ initRows, fetchCurrentSharedUrl });
 <style scoped>
 .onetime-setting-content {
   width: min(78vw, 980px);
+  max-height: calc(100dvh - 64px);
+  overflow-y: auto;
 }
 
 .modal-h2 {
@@ -297,6 +437,38 @@ defineExpose({ initRows, fetchCurrentSharedUrl });
 
 .setting-layer-panel {
   min-width: 0;
+}
+
+.snapshot-summary {
+  padding: 12px 16px;
+  border: 1px solid #c9d8ea;
+  border-radius: 10px;
+  background: #f4f8fc;
+  overflow-wrap: anywhere;
+}
+
+.snapshot-summary p {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.snapshot-summary dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 14px;
+  font-size: 14px;
+}
+
+.snapshot-summary dt {
+  font-weight: 600;
+}
+
+.snapshot-summary dd {
+  margin: 0;
+}
+
+.snapshot-summary [role="alert"] {
+  color: #b91c1c;
 }
 
 .layer-table-title {

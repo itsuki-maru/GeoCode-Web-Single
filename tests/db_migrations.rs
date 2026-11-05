@@ -54,7 +54,7 @@ async fn migrations_create_schema_and_record_versions() {
     .fetch_one(&pool)
     .await
     .expect("migration count should be returned");
-    assert_eq!(migration_count, 22);
+    assert_eq!(migration_count, 23);
 
     let live_location_table_count: i64 = sqlx::query_scalar(
         r#"
@@ -185,7 +185,7 @@ async fn migrations_are_idempotent() {
     .fetch_one(&pool)
     .await
     .expect("migration count should be returned");
-    assert_eq!(migration_count, 22);
+    assert_eq!(migration_count, 23);
 }
 
 #[tokio::test]
@@ -267,7 +267,7 @@ async fn migrations_record_versions_for_existing_schema() {
     .await
     .expect("migration rows should be returned");
 
-    assert_eq!(rows.len(), 22);
+    assert_eq!(rows.len(), 23);
     assert_eq!(rows[0].get::<i64, _>("version"), 1);
     assert_eq!(rows[0].get::<String, _>("name"), "create_initial_schema");
     assert_eq!(rows[1].get::<i64, _>("version"), 2);
@@ -863,7 +863,7 @@ async fn common_form_upgrade_preserves_legacy_config_answers_and_markdown() {
         .fetch_one(&pool)
         .await
         .unwrap(),
-        22
+        23
     );
 }
 
@@ -1216,7 +1216,7 @@ async fn receipt_upgrade_from_version_twenty_preserves_data_and_is_repeatable() 
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(after.len(), 22);
+    assert_eq!(after.len(), 23);
     assert_eq!(&after[..20], before);
     let detail: String = sqlx::query_scalar(
         r#"
@@ -1359,7 +1359,7 @@ async fn receipt_upgrade_preserves_receipts_when_sql_was_applied_before_runtime_
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(total, 22);
+    assert_eq!(total, 23);
     let detail: String = sqlx::query_scalar(
         r#"
         SELECT
@@ -1870,9 +1870,10 @@ async fn saved_condition_upgrade_from_twenty_one_preserves_all_existing_data_and
     sqlx::raw_sql(
         r#"
         DROP TABLE answer_map_saved_condition_model;
+        ALTER TABLE temporary_urls DROP COLUMN map_snapshot;
 
         DELETE FROM schema_migrations
-        WHERE version = 22;
+        WHERE version >= 22;
         "#,
     )
     .execute(&pool)
@@ -1948,7 +1949,7 @@ async fn saved_condition_upgrade_from_twenty_one_preserves_all_existing_data_and
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(migrations_after.len(), 22);
+    assert_eq!(migrations_after.len(), 23);
     assert_eq!(&migrations_after[..21], migrations_before);
     assert_eq!(migrations_after[21].0, 22);
     assert_eq!(existing_data_snapshot(&pool).await, before);
@@ -1964,9 +1965,10 @@ async fn saved_condition_upgrade_keeps_rows_when_sql_was_applied_before_runtime_
     sqlx::raw_sql(
         r#"
         DROP TABLE answer_map_saved_condition_model;
+        ALTER TABLE temporary_urls DROP COLUMN map_snapshot;
 
         DELETE FROM schema_migrations
-        WHERE version = 22;
+        WHERE version >= 22;
         "#,
     )
     .execute(&pool)
@@ -2023,5 +2025,137 @@ async fn saved_condition_upgrade_keeps_rows_when_sql_was_applied_before_runtime_
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(versions, (1..=22).collect::<Vec<_>>());
+    assert_eq!(versions, (1..=23).collect::<Vec<_>>());
+}
+
+#[tokio::test]
+async fn 共有スナップショット列の追加で既存共有を保持する() {
+    let pool = memory_pool().await;
+    run_migrations(&pool).await.unwrap();
+    sqlx::raw_sql(
+        r#"
+        ALTER TABLE temporary_urls DROP COLUMN map_snapshot;
+        DELETE FROM schema_migrations WHERE version = 23;
+        INSERT INTO temporary_urls (
+            id,
+            user_id,
+            url,
+            expiration,
+            layers,
+            markers,
+            shapes,
+            include_tile_overlays,
+            create_at
+        ) VALUES (
+            'legacy',
+            'owner',
+            '/onetime/legacy',
+            '2099-01-01 00:00:00',
+            '{}',
+            '{"kept":{"detail":"既存の共有内容"}}',
+            '{}',
+            1,
+            '2026-11-06 00:00:00'
+        );
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    run_migrations(&pool).await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    let (markers, snapshot): (String, Option<String>) = sqlx::query_as(
+        r#"
+        SELECT
+            markers,
+            map_snapshot
+        FROM temporary_urls
+        WHERE id = 'legacy'
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(markers, r#"{"kept":{"detail":"既存の共有内容"}}"#);
+    assert!(snapshot.is_none());
+    let count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            COUNT(*)
+        FROM schema_migrations
+        WHERE version = 23
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 1);
+}
+
+#[tokio::test]
+async fn sqlxで共有列を追加済みでも実行時移行を再実行できる() {
+    let pool = memory_pool().await;
+    run_migrations(&pool).await.unwrap();
+    sqlx::raw_sql(
+        r#"
+        ALTER TABLE temporary_urls DROP COLUMN map_snapshot;
+        DELETE FROM schema_migrations WHERE version = 23;
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(include_str!(
+        "../migrations/20261105120000_add_map_snapshot_to_temporary_urls.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    run_migrations(&pool).await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    let schema: (String, bool, Option<String>) = sqlx::query_as(
+        r#"
+        SELECT
+            type,
+            "notnull",
+            dflt_value
+        FROM pragma_table_info('temporary_urls')
+        WHERE name = 'map_snapshot'
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(schema, ("TEXT".into(), false, None));
+}
+
+#[tokio::test]
+async fn 実行時とsqlxの共有スナップショット列定義が一致する() {
+    let runtime = memory_pool().await;
+    run_migrations(&runtime).await.unwrap();
+    let prepared = memory_pool().await;
+    sqlx::migrate::Migrator::new(std::path::Path::new("./migrations"))
+        .await
+        .unwrap()
+        .run(&prepared)
+        .await
+        .unwrap();
+    let schema_sql = r#"
+        SELECT
+            name,
+            type,
+            "notnull",
+            dflt_value
+        FROM pragma_table_info('temporary_urls')
+        WHERE name = 'map_snapshot'
+        "#;
+    let runtime_schema: (String, String, bool, Option<String>) = sqlx::query_as(schema_sql)
+        .fetch_one(&runtime)
+        .await
+        .unwrap();
+    let prepared_schema: (String, String, bool, Option<String>) = sqlx::query_as(schema_sql)
+        .fetch_one(&prepared)
+        .await
+        .unwrap();
+    assert_eq!(runtime_schema, prepared_schema);
 }

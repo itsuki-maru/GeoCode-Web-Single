@@ -6,7 +6,11 @@ import { Marked } from "marked";
 import { initializeReadOnlyMapPage } from "../src/map/read-only-page";
 import { finishAnswerPreview } from "../src/map/answer-preview";
 import type { AnotherMapBootstrap } from "../src/map/types";
-import { createPrintPreview } from "../src/map/print/print-preview";
+import {
+  createPrintPreview,
+  createReadOnlySnapshotPrintPreview,
+} from "../src/map/print/print-preview";
+import type { ReadOnlyPrintSnapshot } from "../src/map/print/read-only-print-snapshot";
 import { createAnswerPrintSnapshot } from "../src/map/print/answer-print-state";
 import { installAnswerFilter } from "../src/map/answer-filter";
 import { readMapBootstrap } from "../src/map/bootstrap";
@@ -121,8 +125,298 @@ const checkbox = (id: string) =>
     .querySelector<HTMLInputElement>("input")!;
 const status = (id: string) =>
   document.querySelector(`[data-layer-load-id="${id}"] .layer-object-load-state`)!.textContent;
+const mapLegend = () => document.querySelector<HTMLElement>(".map-color-legend-live");
+const legendLabels = () =>
+  [...document.querySelectorAll(".map-color-legend-live li")].map((item) => item.textContent);
+const printMapButton = () =>
+  [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent === "地図を印刷",
+  );
 
 describe("lazy groups in the actual read-only map runtime", () => {
+  it("共有では論理表示対象だけを複製し、画面外の未描画図形と空グループも保持する", async () => {
+    const original = fetchData.getMockImplementation()!;
+    fetchData.mockImplementation(async (url, init) => {
+      if (String(url).startsWith("/shapes") && String(url).includes("layer_id=b")) {
+        const distant = shape("b");
+        distant.geojson.geometry.coordinates = [130, 32];
+        return new Response(JSON.stringify([distant]));
+      }
+      if (String(url).includes("=empty"))
+        return new Response(JSON.stringify(String(url).startsWith("/shapes") ? [] : {}));
+      return original(url, init);
+    });
+    runtime = initializeReadOnlyMapPage("map-anather");
+    for (const id of ["a", "b", "empty"]) checkbox(id).click();
+    await vi.waitFor(() => expect(Object.keys(runtime!.markers)).toHaveLength(2));
+    expect(mapLegend()?.hidden ?? true).toBe(true);
+    runtime.setAnswerTargets(["marker:m-a", "shape:s-b"]);
+    (runtime as any).answerColoring.apply({
+      version: 1,
+      rules: [
+        { id: "marker", label: "マーカーの分類", color: "#123456" },
+        { id: "excluded", label: "除外した分類", color: "#234567" },
+        { id: "shape", label: "画面外の図形の分類", color: "#345678" },
+      ],
+      targets: { "marker:m-a": "marker", "marker:m-b": "excluded", "shape:s-b": "shape" },
+    });
+    const legend = mapLegend()!;
+    expect(legendLabels()).toEqual(["マーカーの分類", "画面外の図形の分類"]);
+    expect(legend.hidden).toBe(false);
+    legend.style.width = "220px";
+    const snapshot = runtime.getShareSnapshot();
+    expect(Object.keys(snapshot.layers)).toEqual(["a", "b", "empty"]);
+    expect(Object.keys(snapshot.markers)).toEqual(["m-a"]);
+    expect(snapshot.shapes.map((s) => s.id)).toEqual(["s-b"]);
+    expect(runtime.shapeLayers["shape-s-b"]).toBeUndefined();
+    expect(JSON.stringify(snapshot)).not.toContain("m-b");
+    expect(JSON.stringify(snapshot)).not.toContain("s-a");
+    const query = document.querySelector<HTMLInputElement>(".marker-search-input")!;
+    query.value = "matches nothing";
+    query.dispatchEvent(new Event("input"));
+    expect(runtime.getShareSnapshot().markers).toEqual({});
+    expect(runtime.getShareSnapshot().shapes).toEqual([]);
+    expect(legend.hidden).toBe(true);
+    query.value = "";
+    query.dispatchEvent(new Event("input"));
+    expect(mapLegend()).toBe(legend);
+    expect(legend.hidden).toBe(false);
+    expect(legend.style.width).toBe("220px");
+    (runtime as any).answerColoring.apply(null);
+    expect(legend.hidden).toBe(true);
+  });
+
+  it.each(["temporary-map", "temporary-map-mobile"] as const)(
+    "共有地図（%s）は保存した地図と色分けの凡例を復元し、追加データを取得しない",
+    async (page) => {
+      const base = window.__GEOCODE_MAP_BOOTSTRAP__ as AnotherMapBootstrap;
+      const otherTile = {
+        ...base.tileServers["1"]!,
+        id: 2,
+        layer_name: "saved",
+        label: "保存背景",
+        url: "https://example.test/saved/{z}/{x}/{y}.png",
+      };
+      const state = {
+        view: { latitude: 36, longitude: 140, zoom: 8 },
+        tileServerId: "2",
+        overlays: { flood: false, hazard: true },
+        layerIds: ["a", "empty"],
+        markerIds: ["m-a"],
+        shapeIds: ["s-a"],
+        markersVisible: true,
+        shapesVisible: true,
+        shapeNamesVisible: false,
+        clusteringAllowed: false,
+        clusteringEnabled: false,
+        coloring: {
+          version: 1 as const,
+          rules: [
+            { id: "r", label: "<img src=x>保存分類", color: "#123456" },
+            { id: "s", label: "図形の分類", color: "#234567" },
+            { id: "unused", label: "共有に含まれない分類", color: "#345678" },
+          ],
+          targets: { "marker:m-a": "r", "shape:s-a": "s" },
+        },
+      };
+      const tile = {
+        id: "flood",
+        name: "洪水",
+        url: "https://example.test/{z}/{x}/{y}.png",
+        attribution: "test",
+        min_zoom: 0,
+        max_zoom: 22,
+        opacity: 0.4,
+        sort_order: 1,
+      };
+      const saved = {
+        version: 1,
+        state,
+        tileServers: { ...base.tileServers, "2": otherTile },
+        tileOverlays: [
+          tile,
+          {
+            ...tile,
+            id: "hazard",
+            name: "ハザード",
+            sort_order: 2,
+            url: "https://example.test/hazard/{z}/{x}/{y}.png",
+          },
+        ],
+      };
+      localStorage.setItem("geocode-web:marker-visible", "false");
+      localStorage.setItem("geocode-web:shape-name-visible", "true");
+      window.__GEOCODE_MAP_BOOTSTRAP__ = {
+        ...base,
+        page,
+        isMaster: false,
+        isChecked: false,
+        isMapUiHidden: page === "temporary-map-mobile",
+        markers: { "m-a": marker("a") },
+        shapes: { "s-a": shape("a") },
+        tileServers: saved.tileServers,
+        tileOverlays: saved.tileOverlays,
+        shareSnapshot: saved,
+      };
+      const addTile = vi.spyOn(leaflet.TileLayer.prototype, "onAdd");
+      runtime = initializeReadOnlyMapPage(page);
+      expect(Boolean(printMapButton())).toBe(page === "temporary-map");
+      await runtime.shapeRenderer.whenIdle();
+      expect(runtime.map.getCenter().lat).toBe(36);
+      expect(runtime.map.getCenter().lng).toBe(140);
+      expect(runtime.map.getZoom()).toBe(8);
+      expect(runtime.getPrintState()).toMatchObject({
+        tileServerId: "2",
+        layerIds: ["a", "empty"],
+        markersVisible: true,
+        shapesVisible: true,
+        shapeNamesVisible: false,
+        clusteringAllowed: false,
+        overlays: { flood: false, hazard: true },
+      });
+      expect(runtime.markers["marker-m-a"].options.icon.options.className).toBe(
+        "answer-value-marker",
+      );
+      const legend = mapLegend()!;
+      expect(legend.hidden).toBe(false);
+      expect(legend.classList.contains("is-hidden")).toBe(false);
+      expect(legendLabels()).toEqual(["<img src=x>保存分類", "図形の分類"]);
+      expect(legend.querySelector("img")).toBeNull();
+      expect(fetchData).not.toHaveBeenCalled();
+      expect(addTile.mock.contexts.map((layer: any) => layer._url)).toEqual([
+        otherTile.url,
+        saved.tileOverlays[1]!.url,
+      ]);
+      runtime.map.setView([35.68, 139.76], 16, { animate: false });
+      await runtime.shapeRenderer.whenIdle();
+      expect(runtime.shapeLayers["shape-s-a"].options.color).toBe("#234567");
+      const markers = [
+        ...document.querySelectorAll<HTMLLabelElement>(".leaflet-control-layers label"),
+      ]
+        .find((label) => label.textContent.trim() === "マーカー")
+        ?.querySelector<HTMLInputElement>("input");
+      expect(markers?.checked).toBe(true);
+      markers!.click();
+      expect(legendLabels()).toEqual(["図形の分類"]);
+      markers!.click();
+      expect(legendLabels()).toEqual(["<img src=x>保存分類", "図形の分類"]);
+      expect(document.querySelector('[data-layer-load-id="b"]')).toBeNull();
+    },
+  );
+
+  it.each([false, true])(
+    "共有地図の印刷（スナップショット共有 %s）には表示条件を満たす配信済みの地物だけを使う",
+    async (snapshotShare) => {
+      Object.defineProperties(HTMLDialogElement.prototype, {
+        showModal: {
+          configurable: true,
+          value(this: HTMLDialogElement) {
+            this.setAttribute("open", "");
+          },
+        },
+        close: {
+          configurable: true,
+          value(this: HTMLDialogElement) {
+            this.removeAttribute("open");
+          },
+        },
+      });
+      const base = window.__GEOCODE_MAP_BOOTSTRAP__ as AnotherMapBootstrap;
+      const tileServers = { "1": { ...base.tileServers["1"]!, min_zoom: 0, max_zoom: 18 } };
+      const state = {
+        view: base.initialView,
+        tileServerId: "1",
+        overlays: {},
+        layerIds: ["a", "b"],
+        markersVisible: true,
+        shapesVisible: true,
+        shapeNamesVisible: true,
+        clusteringAllowed: false,
+        coloring: {
+          version: 1,
+          rules: [
+            { id: "included", label: "印刷対象", color: "#123456" },
+            { id: "excluded", label: "除外分類", color: "#234567" },
+          ],
+          targets: { "marker:m-a": "included", "shape:s-b": "excluded" },
+        },
+      };
+      window.__GEOCODE_MAP_BOOTSTRAP__ = {
+        ...base,
+        page: "temporary-map",
+        isMaster: false,
+        isChecked: true,
+        isMapUiHidden: false,
+        tileServers,
+        markers: { "m-a": { ...marker("a"), marker_name: "残す地点" }, "m-b": marker("b") },
+        shapes: { "s-a": { ...shape("a"), name: "残す図形" }, "s-b": shape("b") },
+        shareSnapshot: snapshotShare ? { version: 1, state, tileServers, tileOverlays: [] } : null,
+      };
+      runtime = initializeReadOnlyMapPage("temporary-map");
+      const search = document.querySelector<HTMLInputElement>(".marker-search-input")!;
+      search.value = "残す";
+      search.dispatchEvent(new Event("input"));
+      printMapButton()!.click();
+
+      const frame = document.querySelector<HTMLIFrameElement>(".map-print-host iframe")!;
+      expect(frame, document.querySelector("dialog[open]")?.textContent ?? "").not.toBeNull();
+      expect(new URL(frame.src).pathname).toBe("/assets/read-only-map-print.html");
+      const sent = vi.spyOn(frame.contentWindow!, "postMessage");
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source: frame.contentWindow,
+          origin: location.origin,
+          data: { type: "printReady", requestId: frame.name },
+        }),
+      );
+      await vi.waitFor(() => expect(sent).toHaveBeenCalledOnce());
+      const snapshot: ReadOnlyPrintSnapshot = sent.mock.calls[0]![0].snapshot;
+      expect(snapshot.snapshotShare).toBe(snapshotShare);
+      expect(Object.keys(snapshot.markers)).toEqual(["m-a"]);
+      expect(snapshot.shapes.map(({ id }) => id)).toEqual(["s-a"]);
+      expect(snapshot.state.coloring?.rules.map(({ label }) => label) ?? []).toEqual(
+        snapshotShare ? ["印刷対象"] : [],
+      );
+      expect(JSON.stringify(snapshot)).not.toMatch(/m-b|s-b|除外分類/);
+
+      // 元画面のbootstrapに除外地物が残っていても、印刷側は転送済みの集合だけを描画する。
+      runtime.map.remove();
+      runtime = undefined;
+      preview = createReadOnlySnapshotPrintPreview(snapshot, () => {}, {
+        requestId: "test-print",
+        parentOrigin: location.origin,
+      });
+      const bulk = document.querySelector<HTMLButtonElement>(
+        "#print-layers .layer-bulk-toggle-control button",
+      )!;
+      bulk.click();
+      bulk.click();
+      const markerLabels: string[] = [];
+      preview.map.eachLayer((layer: any) => {
+        if (layer instanceof leaflet.Marker)
+          markerLabels.push(layer.getTooltip()?.getContent() || "");
+      });
+      expect(markerLabels.join(" ")).toContain("残す地点");
+      expect(markerLabels.join(" ")).not.toContain("marker b");
+      expect(document.querySelector(".map-color-legend-live")).toBeNull();
+      expect(document.querySelector(".answer-print-legend")?.textContent ?? "").toBe(
+        snapshotShare ? "凡例印刷対象" : "",
+      );
+      expect(fetchData).not.toHaveBeenCalled();
+    },
+  );
+
+  it("データ取得中や取得失敗時に共有スナップショットを作成しない", async () => {
+    const pending = deferred<Response>();
+    fetchData.mockReturnValueOnce(pending.promise);
+    runtime = initializeReadOnlyMapPage("map-anather");
+    checkbox("a").click();
+    expect(() => runtime!.getShareSnapshot()).toThrow("完了後");
+    pending.resolve(new Response("failure", { status: 500 }));
+    await vi.waitFor(() => expect(runtime!.getObjectLoadStatus().failed).toBe(true));
+    expect(() => runtime!.getShareSnapshot()).toThrow("再チェック");
+  });
+
   it("遅延読み込みしたマーカーと図形にも色分けを適用し、未回答の対象を隠さずに印刷へ色分けを引き継ぐ", async () => {
     Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
       configurable: true,
@@ -191,6 +485,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
     await vi.waitFor(() =>
       expect((runtime as any).answerColoring.getState()?.targets["marker:m-b"]).toBeDefined(),
     );
+    expect(mapLegend()?.hidden ?? true).toBe(true);
     expect(runtime.map.hasLayer(runtime.markers["marker-m-a"])).toBe(true);
     checkbox("b").click();
     await vi.waitFor(() =>
@@ -200,6 +495,8 @@ describe("lazy groups in the actual read-only map runtime", () => {
     );
     await runtime.shapeRenderer.whenIdle();
     expect(runtime.shapeLayers["shape-s-b"].options.color).toBe("#d73027");
+    expect(mapLegend()?.hidden).toBe(false);
+    expect(legendLabels()).toHaveLength(1);
     expect(runtime.getPrintState()).toMatchObject({
       markerIds: null,
       shapeIds: null,
@@ -222,6 +519,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
     expect(runtime.getPrintState().coloring?.targets["marker:m-b"]).toBeDefined();
     button("色分け解除").click();
     await vi.waitFor(() => expect((runtime as any).answerColoring.getState()).toBeNull());
+    expect(mapLegend()?.hidden ?? true).toBe(true);
     expect(runtime.markers["marker-m-b"].options.icon.options.className).not.toBe(
       "answer-value-marker",
     );

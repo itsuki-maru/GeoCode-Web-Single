@@ -1,0 +1,91 @@
+.map-color-legend {
+  box-sizing: border-box;
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  min-width: min(160px, max(0px, calc(100% - 20px)));
+  min-height: min(70px, max(0px, calc(100% - 20px)));
+  max-width: max(0px, calc(100% - 20px));
+  max-height: max(0px, calc(100% - 20px));
+  overflow: hidden;
+  padding: 10px 12px 16px;
+  border: 1px solid #64748b;
+  border-radius: 6px;
+  background: #fff;
+  color: #172b4d;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 2px 8px rgb(15 23 42 / 15%);
+}
+.map-color-legend-live {
+  width: min(240px, 72%);
+}
+.map-color-legend-live:not(.map-color-legend-user-size) {
+  max-height: min(240px, 40%, max(0px, calc(100% - 20px)));
+}
+.map-color-legend-handle {
+  display: block;
+  flex: none;
+  user-select: none;
+}
+.map-color-legend ul,
+.map-color-legend li {
+  font-size: inherit;
+  line-height: inherit;
+}
+.map-color-legend ul {
+  min-height: 0;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  overflow: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+.map-color-legend li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.map-color-legend li + li {
+  margin-top: 3px;
+}
+.map-color-legend-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.map-color-legend .map-color-legend-swatch {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 1em;
+  height: 1em;
+  flex: 0 0 1em;
+  border: 1px solid #475569;
+}
+.map-color-legend-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+.map-color-legend-resize::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid #64748b;
+  border-bottom: 2px solid #64748b;
+}
+.map-color-legend[hidden],
+.map-color-legend [hidden] {
+  display: none !important;
+}

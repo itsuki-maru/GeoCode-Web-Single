@@ -2,6 +2,8 @@
 
 以降、 CHANGELOG.md に Version 1.0.0 として記録する。
 
+現行SQLite版のPC全画面地図のスナップショット共有と、全画面地図・一時共有地図の印刷／PDF出力は[CHANGELOG.md の Version 1.12.0](CHANGELOG.md#version-1120)に記載する。以下は旧SingleBin版の履歴。
+
 ## Version 2.3.0
 
 - OSS として公開準備完了

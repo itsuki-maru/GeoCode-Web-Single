@@ -1,18 +1,50 @@
 <script setup lang="ts">
+import { onMounted, onUnmounted, ref } from "vue";
 import { mapAnatherLayerUrl } from "@/router/urls";
+import {
+  isShareMapSnapshot,
+  type ShareMapSnapshot,
+} from "../../../../template-scripts/src/map/common/share-snapshot";
 
-defineProps<{
+const props = defineProps<{
   isOpen: boolean;
 }>();
 
 const emit = defineEmits<{
   close: [];
+  share: [snapshot: ShareMapSnapshot];
 }>();
+
+const mapIframe = ref<HTMLIFrameElement | null>(null);
+const openPrint = (): void => {
+  const iframe = mapIframe.value;
+  if (!props.isOpen || !iframe?.contentWindow) return;
+  const origin = new URL(iframe.src, window.location.href).origin;
+  iframe.contentWindow.postMessage({ type: "readOnlyPrintOpen" }, origin);
+};
+defineExpose({ openPrint });
+
+const handleMessage = (event: MessageEvent): void => {
+  const iframe = mapIframe.value;
+  if (!props.isOpen || !iframe?.contentWindow || event.source !== iframe.contentWindow) return;
+  if (event.origin !== new URL(iframe.src, window.location.href).origin) return;
+  if (event.data?.type !== "shareMapSnapshot" || !isShareMapSnapshot(event.data.snapshot)) return;
+  emit("share", event.data.snapshot);
+};
+
+onMounted(() => window.addEventListener("message", handleMessage));
+onUnmounted(() => window.removeEventListener("message", handleMessage));
 </script>
 
 <template>
   <div class="overlay-fullscreen-map" v-if="isOpen">
-    <iframe class="content-fullscreen-map" :src="mapAnatherLayerUrl" frameborder="0"></iframe>
+    <iframe
+      ref="mapIframe"
+      class="content-fullscreen-map"
+      :src="mapAnatherLayerUrl"
+      title="全画面地図"
+      frameborder="0"
+    ></iframe>
     <button class="fullscreen-close-btn" @click="emit('close')">閉じる</button>
   </div>
 </template>

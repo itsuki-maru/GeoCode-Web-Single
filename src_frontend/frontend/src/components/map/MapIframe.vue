@@ -282,15 +282,20 @@ const handleIframeLoad = (event: Event): void => {
 
 const setColoring = async (coloring: AnswerColoring | null): Promise<boolean> => {
   const sequence = ++coloringSequence;
-  if (coloring === null) appliedColoring = null;
   const success = await requestMapObjectMutation(
     "mapColoringApply",
     { coloring: plainMessageValue(coloring) },
     10000,
   );
-  if (success && sequence === coloringSequence)
-    appliedColoring = coloring ? JSON.parse(JSON.stringify(coloring)) : null;
+  if (sequence !== coloringSequence) return false;
+  if (success) appliedColoring = coloring ? JSON.parse(JSON.stringify(coloring)) : null;
   return success;
+};
+
+// レイヤ・アカウント変更時は、通信結果にかかわらず旧範囲の色を復元対象から外す。
+const discardColoring = (): Promise<boolean> => {
+  appliedColoring = null;
+  return setColoring(null);
 };
 const completeMapLoad = (): void => {
   if (appliedColoring) void setColoring(appliedColoring);
@@ -445,6 +450,7 @@ const updateTileOverlays = (tiles: unknown[]): Promise<boolean> =>
 
 defineExpose({
   setColoring,
+  discardColoring,
   initializeMapObjects,
   upsertMapObject,
   updateTileOverlays,

@@ -321,6 +321,7 @@
     <script>
         window.__GEOCODE_MAP_BOOTSTRAP__ = {
             page: "temporary-map-mobile",
+            shareSnapshot: {{ shareSnapshot | default(value=false) | json_encode_for_html | safe }},
             isMaster: false,
             isOverlayTile: {{ isOverlayTile | json_encode_for_html | safe }},
             isChecked: {{ isChecked | json_encode_for_html | safe }},

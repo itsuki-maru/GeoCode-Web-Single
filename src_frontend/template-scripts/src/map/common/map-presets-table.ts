@@ -7,6 +7,7 @@ export function renderMapPresetsTable(
   options: {
     items: SavedMapPreset[];
     disabled: boolean;
+    restoreDisabledReason?(preset: SavedMapPreset): string | undefined;
     restore(preset: SavedMapPreset): void;
     remove(preset: SavedMapPreset): void;
   },
@@ -52,7 +53,12 @@ export function renderMapPresetsTable(
     ] as const) {
       const button = action(label, () => handler(preset));
       button.className = "btn-close";
-      button.disabled = options.disabled;
+      const reason = label === "呼び出し" ? options.restoreDisabledReason?.(preset) : undefined;
+      button.disabled = options.disabled || !!reason;
+      if (reason) {
+        button.title = reason;
+        button.setAttribute("aria-label", `${label}（${reason}）`);
+      }
       controls.append(button);
     }
     cell.append(controls);

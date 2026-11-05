@@ -145,6 +145,7 @@ interface ModalOptions {
   getApplied(): AttributeSearchRequest | null;
   getLayerIds(): string[] | null;
   getContext(): string;
+  savedFilters?: boolean;
   onApply(
     request: AttributeSearchRequest | null,
     result: AttributeSearchResult | null,
@@ -295,6 +296,7 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
     busy = false,
     disposed = false;
   let status: HTMLParagraphElement;
+  let coloringBusy = false;
   const element = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) => {
     const node = document.createElement(tag);
     if (text !== undefined) node.textContent = text;
@@ -324,49 +326,86 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
     if (!Array.isArray(data.fields)) throw Error("入力項目を取得できませんでした。");
     return data.fields;
   };
-  const presets = options.analysis
-    ? createMapPresetDialogs(options.transport, async (preset: SavedMapPreset, signal) => {
-        validatePresetDraft(preset);
-        const id = preset.definition.common_form_id;
-        const fields = id ? await loadFields(id, signal) : [];
-        if (signal.aborted || !dialog.open) return;
-        for (const c of preset.kind === "filter"
-          ? preset.definition.conditions
-          : preset.definition.rules.flatMap((r) => r.conditions)) {
-          const f = fields.find((f) => f.id === c.field_id && f.field_type === c.field_type);
-          if (!f || (Array.isArray(c.value) && c.value.some((v) => !f.choices.includes(v))))
-            throw Error("保存した項目または選択肢が見つかりません。");
-        }
-        if (id) {
-          let form = forms.find((f) => f.id === id);
-          if (!form) {
-            form = {
-              id,
-              version: 0,
-              form_title: preset.display.form_label || "過去のフォーム",
-              form_schema: { fields: [] },
-            };
-            forms.push(form);
-          }
-          form.form_schema.fields = fields.map((f) => ({
-            id: f.id,
-            label: f.label,
-            type: f.field_type,
-            choices: f.choices,
-          }));
-        }
-        if (preset.kind === "coloring") coloringEditor!.restore(preset.definition, fields);
-        else {
-          const colors = options.analysis!.getSpecification();
-          if (colors && id && colors.common_form_id !== id)
-            throw Error("現在の色分けと共通フォームが異なります。");
-          formId = id || "";
-          conditions = clone(preset.definition.conditions) as unknown as AttributeCondition[];
-          render();
-        }
-        status.textContent = "検索条件を呼び出しました。実行ボタンで地図に反映します。";
-      })
-    : undefined;
+  const presets =
+    options.analysis || options.savedFilters
+      ? createMapPresetDialogs(
+          options.transport,
+          async (preset: SavedMapPreset, signal) => {
+            validatePresetDraft(preset);
+            if (!options.analysis) {
+              if (preset.kind !== "filter") throw Error("この画面では色分け条件を呼び出せません。");
+              const current = sequence,
+                context = options.getContext();
+              const data = await options.transport("/common-forms", undefined, signal);
+              if (signal.aborted || disposed || !dialog.open || current !== sequence) return;
+              if (context !== options.getContext())
+                throw Error("地図データが更新されました。もう一度呼び出してください。");
+              if (!Array.isArray(data)) throw Error("共通フォームを取得できませんでした。");
+              const nextForms = data as CommonForm[];
+              const id = preset.definition.common_form_id;
+              const form = nextForms.find((f) => f.id === id);
+              if (id && !form)
+                throw Error("保存した共通フォームが削除されているため呼び出せません。");
+              for (const c of preset.definition.conditions) {
+                const field = form?.form_schema.fields.find(
+                  (f) => f.id === c.field_id && f.type === c.field_type,
+                );
+                if (!field) throw Error("保存した条件の項目が現在の共通フォームに見つかりません。");
+                if (Array.isArray(c.value) && c.value.some((v) => !field.choices?.includes(v)))
+                  throw Error(
+                    "保存した条件の選択肢が変更されています。検索条件を確認してください。",
+                  );
+              }
+              // 現在の定義で全条件を確認してから、編集中の条件を置き換える。
+              forms = nextForms;
+              formId = id || "";
+              conditions = clone(preset.definition.conditions) as unknown as AttributeCondition[];
+              render();
+              status.textContent = "検索条件を呼び出しました。「絞り込み実行」で地図に反映します。";
+              return;
+            }
+            const id = preset.definition.common_form_id;
+            const fields = id ? await loadFields(id, signal) : [];
+            if (signal.aborted || !dialog.open) return;
+            for (const c of preset.kind === "filter"
+              ? preset.definition.conditions
+              : preset.definition.rules.flatMap((r) => r.conditions)) {
+              const f = fields.find((f) => f.id === c.field_id && f.field_type === c.field_type);
+              if (!f || (Array.isArray(c.value) && c.value.some((v) => !f.choices.includes(v))))
+                throw Error("保存した項目または選択肢が見つかりません。");
+            }
+            if (id) {
+              let form = forms.find((f) => f.id === id);
+              if (!form) {
+                form = {
+                  id,
+                  version: 0,
+                  form_title: preset.display.form_label || "過去のフォーム",
+                  form_schema: { fields: [] },
+                };
+                forms.push(form);
+              }
+              form.form_schema.fields = fields.map((f) => ({
+                id: f.id,
+                label: f.label,
+                type: f.field_type,
+                choices: f.choices,
+              }));
+            }
+            if (preset.kind === "coloring") coloringEditor!.restore(preset.definition, fields);
+            else {
+              const colors = options.analysis!.getSpecification();
+              if (colors && id && colors.common_form_id !== id)
+                throw Error("現在の色分けと共通フォームが異なります。");
+              formId = id || "";
+              conditions = clone(preset.definition.conditions) as unknown as AttributeCondition[];
+              render();
+            }
+            status.textContent = "検索条件を呼び出しました。実行ボタンで地図に反映します。";
+          },
+          { filterOnly: !options.analysis },
+        )
+      : undefined;
   const coloringEditor = options.analysis
     ? createColoringEditor(analysisHost, {
         collapsible: false,
@@ -379,6 +418,7 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
           presets!.save({ kind: "coloring", definition: value });
         },
         apply: async (specification) => {
+          coloringBusy = true;
           const current = sequence,
             context = options.getContext();
           const job = new AbortController();
@@ -418,6 +458,7 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
               job.signal,
             );
           } finally {
+            coloringBusy = false;
             clearTimeout(timeout);
             finishProgress();
           }
@@ -548,7 +589,7 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
   const search = async () => {
     if (busy) return;
     const form = forms.find((f) => f.id === formId);
-    if (!form && options.analysis && !conditions.length) {
+    if (!form && !conditions.length && (options.analysis || (options.savedFilters && !formId))) {
       clearFilter(true);
       return;
     }
@@ -862,7 +903,7 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
     footer.className = "attribute-filter-actions";
     if (options.analysis) footer.append(submit, clear);
     else footer.append(clear, submit);
-    if (presets) {
+    if (presets && options.analysis) {
       footer.append(
         action("検索条件を保存", () => {
           try {
@@ -905,6 +946,7 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
     }
   }
   return {
+    isBusy: () => busy || coloringBusy,
     async open(from?: HTMLElement) {
       if (disposed) return;
       cancel();

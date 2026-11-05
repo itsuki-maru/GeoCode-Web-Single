@@ -1,5 +1,6 @@
 use chrono::{NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sqlx::FromRow;
 use std::{collections::HashMap, time::Duration};
 use thiserror::Error;
@@ -29,6 +30,7 @@ pub struct TemporaryUrl {
     pub markers: HashMap<String, MarkerObjectFromRow>,
     pub shapes: HashMap<String, ShapeObject>,
     pub include_tile_overlays: bool,
+    pub map_snapshot: Option<Value>,
 }
 
 impl TemporaryUrl {
@@ -59,6 +61,7 @@ impl TemporaryUrl {
             markers,
             shapes,
             include_tile_overlays,
+            map_snapshot: None,
         })
     }
 }
@@ -74,6 +77,7 @@ pub struct TemporaryUrlFromDB {
     pub markers: String,
     pub shapes: String,
     pub include_tile_overlays: bool,
+    pub map_snapshot: Option<String>,
     pub create_at: String,
 }
 
@@ -98,6 +102,8 @@ pub struct GenarateUrlPayload {
     pub include_shapes: bool,
     #[serde(default)]
     pub include_tile_overlays: bool,
+    #[serde(default)]
+    pub snapshot: Option<Value>,
 }
 
 // 一時URL作成・更新後のレスポンス構造体

@@ -37,8 +37,8 @@ URL表記は **map-another**、ファイル・entry表記は **map-anather**。�
 | 画面 | Tera変数 |
 | --- | --- |
 | 編集地図 | `layer`、`is_master`、`markerId`、`latitude`、`longitude`、`zoom`、`tileServers`、`tileVisibilityAccountId`、`tileOverlays`、`layersFromAxum`、`markersFromAxum`、`shapesFromAxum` |
-| 別画面 | `is_cluster`、`latitude`、`longitude`、`zoom`、`tileServers`、`tileVisibilityAccountId`、`tileOverlays`、`layersFromAxum`、`markersFromAxum`、`shapesFromAxum` |
-| 一時共有 | `layers`、`markersObj`、`shapesObj`、`tileServers`、`tileOverlays`、`isOverlayTile`、`isChecked`、`latitude`、`longitude`、`zoom`、`isMapUiHidden` |
+| 別画面 | `is_cluster`、`latitude`、`longitude`、`zoom`、`tileServers`、`tileVisibilityAccountId`、`tileOverlays`、`shareParentOrigins`、`layersFromAxum`、`markersFromAxum`、`shapesFromAxum` |
+| 一時共有 | `layers`、`markersObj`、`shapesObj`、`tileServers`、`tileOverlays`、`shareSnapshot`、`isOverlayTile`、`isChecked`、`latitude`、`longitude`、`zoom`、`isMapUiHidden` |
 | 一時共有パスワード | `viewport_content`、`error_message`、`url_id`、`isChecked`、`mapStateQuery` |
 | 位置共有 | `publicId`、`isCheckOverlay`、`tileServers`、`tileOverlays`、`publishedLayers` |
 | 位置共有パスワード | `publicId`、`isCheckOverlay`、`errorMessage` |
@@ -55,6 +55,18 @@ URL表記は **map-another**、ファイル・entry表記は **map-anather**。�
 [lib.rs](../lib.rs) が `json_encode_for_html` フィルターを登録する。HTMLのscript内にJSONを安全に置くためのエスケープを行い、テンプレートでは `json_encode_for_html | safe` を使用する。`safe` 単独で任意の入力を安全にするものではない。
 
 新しい項目はRustのcontext、Tera変数、bootstrapの型・検証、利用するスクリプトの全箇所を合わせて変更する。
+
+### 共有スナップショットの受け渡し
+
+PCの全画面地図を表示する `map-anather.html` は `shareParentOrigins` をbootstrapへ渡す。共有ボタン・データの固定・`shareMapSnapshot` 通信は [read-only-page.ts](../../src_frontend/template-scripts/src/map/read-only-page.ts) が担当し、Vueが既存の共有設定・URL表示・停止へ接続する。送信先は同一originを基本とし、[map.rs](../handler/map.rs) がRust開発ビルド（`debug_assertions`）でのみ `http://localhost:5173` を追加する。リリース版では追加しない。URLパラメーターから許可originを受け取らない。
+
+共有対象は、ボタン押下時の選択グループと適用済みの絞り込み・検索・マーカー／図形表示を満たす保持済みレコードに限定する。画面外や描画を省略した有効な図形も含め、0件も保存する。データと色分け対象IDを共に削減し、除外データをHTMLへ渡さない。取得中／取得失敗・検索や色分けの反映中は共有作成を開始しない。対象確定と通信の詳細は [スクリプト仕様](../../src_frontend/template-scripts/SPECIFICATION.md#全画面地図の共有スナップショット) を参照する。
+
+[onetime_url.rs](../handler/onetime_url.rs) はレイヤ・マーカー・図形を既存の共有JSONB欄に、バージョン1の表示状態・背景地図定義・タイル定義を `temporary_urls.map_snapshot` に保存する。後者を `shareSnapshot` として `temporary-map.html`／`temporary-map-mobile.html` のbootstrapへ埋め込む。転送時の図形配列は、保存・共有HTMLでは従来どおりIDをキーとするオブジェクトになる。保存用の型と検証は [share-snapshot.ts](../../src_frontend/template-scripts/src/map/common/share-snapshot.ts) の `StoredShareMapSnapshot`／`isStoredShareMapSnapshot` を使う。
+
+スナップショットがある場合は、保存済みの中心・ズーム・背景地図・タイルとグループの表示・色分けを復元し、現在のDBタイル設定や閲覧端末のlocalStorageで上書きしない。共有画面から通常地図の保存設定へも書き戻さない。元データの追加取得や属性条件の再評価は行わず、検索解除や全選択でも保存対象外のデータは追加されない。背景地図・タイルの定義と表示状態を固定し、画像自体は閲覧時に配信元から読み込む。
+
+通常共有とURL枠・パスワード・期限・更新／新規発行・停止を共用する。スナップショットがない既存共有は、従来の初期表示とURL指定、現在のDBからのタイル取得経路を維持する。一時共有の地図・パスワード・NotFound HTMLは `Cache-Control: no-store` とする。
 
 ## 4. DOMとスクリプト・資材
 
@@ -73,7 +85,7 @@ URL表記は **map-another**、ファイル・entry表記は **map-anather**。�
 
 地図の `map`、位置共有の `vehicle-list`・`error`、公開フォームの `marker-form` などのDOM IDはスクリプトの接続点。DOM ID・class・data属性を変更する場合は対応するentryとDOM取得処理を確認する。CSSはHTML内、PC public、template-scriptsの印刷CSS等に分散している。
 
-印刷は `map-anather.html` を使い、entryが `print=1` で印刷初期化へ分岐する。Vueとの通信は [スクリプト仕様](../../src_frontend/template-scripts/SPECIFICATION.md) を参照。
+通常地図の印刷は `map-anather.html` を使い、entryが `print=1` で印刷初期化へ分岐する。PCの全画面地図と一時共有地図では、`map-anather.html` と `temporary-map.html` の地図から、template-scriptsが配布する同一オリジンの静的HTML `/assets/read-only-map-print.html` を開く。保持済み地物はブラウザ内で印刷iframeへ渡し、一時共有地図は共有時に保存された地物の範囲内で印刷・PDF出力する。通信の詳細は [スクリプト仕様](../../src_frontend/template-scripts/SPECIFICATION.md#63-印刷通信) を参照する。
 
 ## 5. ビルドとサーバー読み込み
 
@@ -93,6 +105,10 @@ URL表記は **map-another**、ファイル・entry表記は **map-anather**。�
 - 公開URLのアクセス制御をHTMLだけの条件分岐で代替しない。
 
 地図の参照・entry接続テストはPCディレクトリで `npm run test:template-js`、初期データやフォームの単体テストはtemplate-scriptsディレクトリで `npm test`。共有期限・パスワード・認可・Teraレンダリングを含む動作はバックエンドと組み合わせて確認する。
+
+共有変更では [read-only-pages-smoke.spec.ts](../../src_frontend/frontend/tests/template-js/read-only-pages-smoke.spec.ts)、[share-snapshot.spec.ts](../../src_frontend/template-scripts/tests/share-snapshot.spec.ts)、[read-only-lazy-objects.spec.ts](../../src_frontend/template-scripts/tests/read-only-lazy-objects.spec.ts) を確認する。バックエンドは [一時共有の検証手順](../../docs/TEMPORARY_SHARING.md#検証手順) に従い、隔離PostgreSQL runnerで実行する。[onetime_snapshot.rs](../../tests/onetime_snapshot.rs) は対象削減、PC／モバイル共有HTMLへの保存済みデータ・定義の受け渡し、不正な対象・タイルの拒否、更新失敗時の旧共有保持、通常共有との同時操作でも1枠であることを検証する。
+
+HTMLと地図スクリプトを変更した場合は、個別テスト後に [統合ビルド](../../src_frontend/SPECIFICATION.md#5-ビルド配布) でtemplate-scriptsの全chunkとHTMLを配置し、Rustバイナリを再ビルドする。既存バイナリのままではテンプレート・共有表示の変更は配信されない。
 
 ## 回答地図の追加絞り込み
 

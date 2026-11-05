@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch, toRaw } from "vue";
+import type { AnswerColoring } from "../../../../template-scripts/src/map/answer-coloring";
 import type { MapObjectUpdatePayload, MapObjectData, ShapeData } from "@/interface";
 
 type MapObjectChange = {
@@ -43,6 +44,8 @@ const filteredObjectIds = ref<{ markerIds: string[] | null; shapeIds: string[] |
   shapeIds: null,
 });
 let mapObjectRequestSequence = 0;
+let appliedColoring: AnswerColoring | null = null;
+let coloringSequence = 0;
 let runtimeId: string | null = null;
 let transportLoaded = false;
 let runtimeProbeId: string | null = null;
@@ -55,6 +58,7 @@ const receivedMutations = new Set<string>();
 const usesParentData = () =>
   new URL(props.srcUrl, window.location.origin).searchParams.get("data_source") === "parent";
 const cancelPending = () => {
+  ++coloringSequence;
   runtimeId = null;
   runtimeProbeId = null;
   transportLoaded = false;
@@ -127,7 +131,13 @@ const reloadMapFrame = (): boolean => {
 };
 
 const requestMapObjectMutation = (
-  type: "mapObjectUpdate" | "mapObjectDelete" | "tileOverlaysUpdate" | "mapObjectsInitialize",
+  type:
+    | "mapObjectUpdate"
+    | "mapObjectDelete"
+    | "tileOverlaysUpdate"
+    | "mapObjectsInitialize"
+    | "mapColoringApply"
+    | "mapObjectFilter",
   messageData: Record<string, unknown>,
   timeoutMs = 2000,
 ): Promise<boolean> => {
@@ -242,6 +252,36 @@ const filterMapObjects = (markerIds: string[] | null, shapeIds: string[] | null)
   });
 };
 
+const filterMapObjectsAndWait = (
+  markerIds: string[] | null,
+  shapeIds: string[] | null,
+): Promise<boolean> => {
+  const state = {
+    markerIds: markerIds ? [...markerIds] : null,
+    shapeIds: shapeIds ? [...shapeIds] : null,
+  };
+  filteredObjectIds.value = state;
+  return requestMapObjectMutation("mapObjectFilter", state, 10000);
+};
+
+const setColoring = async (coloring: AnswerColoring | null): Promise<boolean> => {
+  const sequence = ++coloringSequence;
+  const success = await requestMapObjectMutation(
+    "mapColoringApply",
+    { coloring: plainMessageValue(coloring) },
+    10000,
+  );
+  if (sequence !== coloringSequence) return false;
+  if (success) appliedColoring = coloring ? JSON.parse(JSON.stringify(coloring)) : null;
+  return success;
+};
+
+// レイヤ・アカウント変更時は、通信結果にかかわらず旧範囲の色を復元対象から外す。
+const discardColoring = (): Promise<boolean> => {
+  appliedColoring = null;
+  return setColoring(null);
+};
+
 const handleIframeLoad = (event: Event): void => {
   if (
     !(event.target instanceof HTMLIFrameElement) ||
@@ -257,6 +297,7 @@ const handleIframeLoad = (event: Event): void => {
 };
 
 const completeMapLoad = (): void => {
+  if (appliedColoring) void setColoring(appliedColoring);
   emit("mapLoaded", props.srcUrl);
   syncInputPolicies();
   if (filteredObjectIds.value.markerIds !== null || filteredObjectIds.value.shapeIds !== null) {
@@ -308,6 +349,11 @@ const handleMessage = (event: MessageEvent): void => {
     return;
   }
   if (event.data.runtimeId && event.data.runtimeId !== runtimeId) return;
+  if (
+    ["mapColoringApplyResult", "mapObjectFilterResult"].includes(event.data.type) &&
+    event.data.runtimeId !== runtimeId
+  )
+    return;
   if (event.data.type === "mapObjectWriteRequested") {
     if (!runtimeId || event.data.runtimeId !== runtimeId) return;
     const request = event.data.request;
@@ -367,6 +413,8 @@ const handleMessage = (event: MessageEvent): void => {
   } else if (event.data.type === "callParentImagePreview") {
     emit("previewImage", event.data.message);
   } else if (
+    event.data.type === "mapColoringApplyResult" ||
+    event.data.type === "mapObjectFilterResult" ||
     event.data.type === "mapObjectsInitializeResult" ||
     event.data.type === "tileOverlaysUpdateResult" ||
     event.data.type === "mapObjectUpdateResult" ||
@@ -398,12 +446,15 @@ const updateTileOverlays = (tiles: unknown[]): Promise<boolean> =>
   requestMapObjectMutation("tileOverlaysUpdate", { tiles: JSON.parse(JSON.stringify(tiles)) });
 
 defineExpose({
+  setColoring,
+  discardColoring,
   initializeMapObjects,
   upsertMapObject,
   updateTileOverlays,
   deleteMapObject,
   focusObject,
   filterMapObjects,
+  filterMapObjectsAndWait,
   reloadMapFrame,
   updateMapObject,
 });

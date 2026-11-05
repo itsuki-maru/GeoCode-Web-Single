@@ -20,6 +20,7 @@ import * as jsonTransfer from "@/utils/json-transfer";
 import { disableTokenUrl, exportJsonUrl } from "@/router/urls";
 import { LAST_ACTIVE_LAYER_STORAGE_KEY } from "@/composables/useLastActiveLayer";
 import { getLayersUrl, getMasterLayerIdUrl, getMapObjectsUrl, shapesUrl } from "@/router/urls";
+import { shareSnapshotFixture } from "../../components/share/__tests__/share-snapshot-fixture";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -70,6 +71,8 @@ const upsertFrame = vi.fn();
 const deleteFrame = vi.fn();
 const focusFrame = vi.fn();
 const filterFrame = vi.fn();
+const filterFrameAndWait = vi.fn();
+const colorFrame = vi.fn();
 const tileFrame = vi.fn();
 const reloadFrame = vi.fn();
 const frame = defineComponent({
@@ -77,6 +80,7 @@ const frame = defineComponent({
   props: ["srcUrl", "height", "allowedOrigins", "inputPolicies"],
   emits: [
     "mapLoaded",
+    "printMap",
     "mapObjectChanged",
     "mapReloadRequested",
     "mapDataRequested",
@@ -90,6 +94,9 @@ const frame = defineComponent({
       focusObject: focusFrame,
       updateTileOverlays: tileFrame,
       filterMapObjects: filterFrame,
+      filterMapObjectsAndWait: filterFrameAndWait,
+      setColoring: colorFrame,
+      discardColoring: () => colorFrame(null),
       reloadMapFrame: reloadFrame,
       updateMapObject: updateFrame,
     });
@@ -113,6 +120,87 @@ const changeLayer = async (id: string) => {
   await flushPromises();
 };
 
+const clickIn = async (root: Element, text: string) => {
+  [...root.querySelectorAll<HTMLButtonElement>("button")]
+    .find((b) => b.textContent === text)!
+    .click();
+  await flushPromises();
+};
+async function restoreSavedColoring() {
+  Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+    configurable: true,
+    value() {
+      this.open = true;
+    },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, "close", {
+    configurable: true,
+    value() {
+      this.open = false;
+    },
+  });
+  const fields = [{ id: "n", label: "年数", field_type: "number", choices: [] }];
+  const preset = {
+    id: "saved-colors",
+    kind: "coloring",
+    schema_version: 1,
+    name: "年数の分類",
+    definition: {
+      common_form_id: "form",
+      rules: [
+        {
+          id: "r",
+          label: "50年以上",
+          color: "#ff0000",
+          conditions: [{ field_id: "n", field_type: "number", op: "gte", value: "50" }],
+        },
+      ],
+    },
+    display: { form_label: "設備", fields },
+    create_at: "2026-11-05T00:00:00Z",
+  };
+  const get = api.get.getMockImplementation()!;
+  api.get.mockImplementation((url: string) =>
+    url === "/common-forms"
+      ? Promise.resolve({
+          data: [
+            {
+              id: "form",
+              version: 1,
+              form_title: "設備",
+              form_schema: { fields: [{ id: "n", type: "number", label: "年数" }] },
+            },
+          ],
+        })
+      : url.startsWith("/form-answers/map-presets")
+        ? Promise.resolve({ data: { items: [preset], total: 1 } })
+        : get(url),
+  );
+  api.post.mockResolvedValue({
+    data: {
+      fields,
+      forms: [{ id: "form", label: "設備" }],
+      targets: ["shape:a"],
+      target_count: 1,
+      answer_count: 1,
+      as_of: "2026-11-05T00:00:00Z",
+    },
+  });
+  localStorage.setItem(LAST_ACTIVE_LAYER_STORAGE_KEY, "a");
+  mountView();
+  await flushPromises();
+  wrapper!.getComponent({ name: "MapToolbar" }).vm.$emit("advancedSearch");
+  await flushPromises();
+  const dialog = document.querySelector<HTMLDialogElement>(".advanced-map-search")!;
+  await clickIn(dialog, "保存した検索条件");
+  const list = document.querySelector(".map-preset-dialog.form-settings")!;
+  expect(list.textContent).not.toContain("絞り込み条件のみ");
+  await clickIn(list, "呼び出し");
+  await clickIn(document.querySelector('[aria-label="呼び出し完了"]')!, "閉じる");
+  await clickIn(list, "閉じる");
+  return { dialog, preset };
+}
+
 beforeEach(() => {
   initializeFrame.mockReset().mockResolvedValue(true);
   upsertFrame.mockReset().mockResolvedValue(true);
@@ -121,6 +209,8 @@ beforeEach(() => {
   deleteFrame.mockReset().mockResolvedValue(true);
   focusFrame.mockReset();
   filterFrame.mockReset();
+  filterFrameAndWait.mockReset().mockResolvedValue(true);
+  colorFrame.mockReset().mockResolvedValue(true);
   tileFrame.mockReset().mockResolvedValue(true);
   reloadFrame.mockReset().mockReturnValue(true);
   setActivePinia(createPinia());
@@ -823,11 +913,15 @@ async function operationsReady(extraStubs: Record<string, unknown> = {}, attache
           initSearch: initializeLayerList,
           handleOpen: initializeLayerList,
         }),
-        OnetimeSettingModal: operationStub("OnetimeSettingModal", ["isOpen", "layerList"], {
-          initRows: initializeShared,
-          copiedLayer: initializeShared,
-          fetchCurrentSharedUrl: refreshShared,
-        }),
+        OnetimeSettingModal: operationStub(
+          "OnetimeSettingModal",
+          ["isOpen", "layerList", "snapshot", "zIndex"],
+          {
+            initRows: initializeShared,
+            copiedLayer: initializeShared,
+            fetchCurrentSharedUrl: refreshShared,
+          },
+        ),
         MapObjectEditModal: operationStub(
           "MapObjectEditModal",
           ["isOpen", "targetType", "targetId", "layerList", "isHttpsProtocol"],
@@ -1053,6 +1147,59 @@ describe("地図画面のレイヤ・編集・共有操作", () => {
     expect(refreshShared).toHaveBeenCalledTimes(1);
   });
 
+  it("全画面地図の共有結果を前面に表示し、共有枠を同期して元の地図を維持する", async () => {
+    await operationsReady();
+    const fullScreen = operationComponent("FullScreenMapModal");
+    fullScreen.vm.$emit("share", shareSnapshotFixture());
+    await flushPromises();
+    expect(operationComponent("OnetimeSettingModal").props("isOpen")).toBe(false);
+    operationComponent("MapToolbar").vm.$emit("fullScreenMap");
+    await flushPromises();
+    const fullScreenVm = fullScreen.vm;
+    const snapshot = shareSnapshotFixture();
+    fullScreen.vm.$emit("share", snapshot);
+    await flushPromises();
+    const settings = operationComponent("OnetimeSettingModal");
+    expect(settings.props()).toMatchObject({ isOpen: true, snapshot, zIndex: 20 });
+    expect(refreshShared).toHaveBeenCalledTimes(1);
+    const replacement = shareSnapshotFixture();
+    replacement.state.view.latitude = 40;
+    fullScreen.vm.$emit("share", replacement);
+    await flushPromises();
+    expect(settings.props("snapshot")).toEqual(snapshot);
+    expect(refreshShared).toHaveBeenCalledTimes(1);
+    settings.vm.$emit(
+      "generated",
+      "https://example.test/onetime/id",
+      "share-id",
+      false,
+      "2026-12-01T00:00:00",
+    );
+    await flushPromises();
+    const result = operationComponent("OnetimeUrlModal");
+    expect(result.props()).toMatchObject({ isOpen: true, zIndex: 21, uuid: "share-id" });
+    settings.vm.$emit("message", "共有リンクを作成できませんでした。");
+    await flushPromises();
+    expect(operationComponent("MessageModal").props()).toMatchObject({ isOpen: true, zIndex: 30 });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "6", ctrlKey: true }));
+    await flushPromises();
+    expect(fullScreen.props("isOpen")).toBe(true);
+    result.vm.$emit("invalidated");
+    await flushPromises();
+    expect(result.props()).toMatchObject({ isOpen: false, url: "", uuid: "" });
+    expect(refreshShared).toHaveBeenCalledTimes(2);
+    settings.vm.$emit("close");
+    await flushPromises();
+    expect(settings.props()).toMatchObject({ isOpen: false, snapshot: null });
+    expect(fullScreen.vm).toBe(fullScreenVm);
+    expect(fullScreen.props("isOpen")).toBe(true);
+    operationComponent("MessageModal").vm.$emit("close");
+    operationComponent("MapToolbar").vm.$emit("onetimeSetting");
+    await flushPromises();
+    expect(settings.props()).toMatchObject({ isOpen: true, snapshot: null, zIndex: 3 });
+    expect(initializeShared).toHaveBeenCalledTimes(1);
+  });
+
   it("子画面のメッセージを表示し、閉じると内容を消す", async () => {
     await operationsReady();
     operationComponent("LayerRenameModal").vm.$emit("message", "名前を更新しました。");
@@ -1227,6 +1374,87 @@ describe("削除後の描画復旧", () => {
     }
     await flushPromises();
   };
+  const clickIn = async (root: Element, text: string) => {
+    [...root.querySelectorAll<HTMLButtonElement>("button")]
+      .find((b) => b.textContent === text)!
+      .click();
+    await flushPromises();
+  };
+  async function restoreSavedColoring() {
+    Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+      configurable: true,
+      value() {
+        this.open = true;
+      },
+    });
+    Object.defineProperty(HTMLDialogElement.prototype, "close", {
+      configurable: true,
+      value() {
+        this.open = false;
+      },
+    });
+    const fields = [{ id: "n", label: "年数", field_type: "number", choices: [] }];
+    const preset = {
+      id: "saved-colors",
+      kind: "coloring",
+      schema_version: 1,
+      name: "年数の分類",
+      definition: {
+        common_form_id: "form",
+        rules: [
+          {
+            id: "r",
+            label: "50年以上",
+            color: "#ff0000",
+            conditions: [{ field_id: "n", field_type: "number", op: "gte", value: "50" }],
+          },
+        ],
+      },
+      display: { form_label: "設備", fields },
+      create_at: "2026-11-05T00:00:00Z",
+    };
+    const get = api.get.getMockImplementation()!;
+    api.get.mockImplementation((url: string) =>
+      url === "/common-forms"
+        ? Promise.resolve({
+            data: [
+              {
+                id: "form",
+                version: 1,
+                form_title: "設備",
+                form_schema: { fields: [{ id: "n", type: "number", label: "年数" }] },
+              },
+            ],
+          })
+        : url.startsWith("/form-answers/map-presets")
+          ? Promise.resolve({ data: { items: [preset], total: 1 } })
+          : get(url),
+    );
+    api.post.mockResolvedValue({
+      data: {
+        fields,
+        forms: [{ id: "form", label: "設備" }],
+        targets: ["shape:a"],
+        target_count: 1,
+        answer_count: 1,
+        as_of: "2026-11-05T00:00:00Z",
+      },
+    });
+    localStorage.setItem(LAST_ACTIVE_LAYER_STORAGE_KEY, "a");
+    mountView();
+    await flushPromises();
+    wrapper!.getComponent({ name: "MapToolbar" }).vm.$emit("advancedSearch");
+    await flushPromises();
+    const dialog = document.querySelector<HTMLDialogElement>(".advanced-map-search")!;
+    await clickIn(dialog, "保存した検索条件");
+    const list = document.querySelector(".map-preset-dialog.form-settings")!;
+    expect(list.textContent).not.toContain("絞り込み条件のみ");
+    await clickIn(list, "呼び出し");
+    await clickIn(document.querySelector('[aria-label="呼び出し完了"]')!, "閉じる");
+    await clickIn(list, "閉じる");
+    return { dialog, preset };
+  }
+
   beforeEach(() => {
     if (OPERATIONS_MOBILE) api.delete.mockResolvedValue({});
   });
@@ -1274,6 +1502,87 @@ describe("JSON出力のダウンロードと失敗後の再試行", () => {
   const createUrl = vi.fn();
   const revokeUrl = vi.fn();
   const downloads: { href: string; name: string; connected: boolean }[] = [];
+  const clickIn = async (root: Element, text: string) => {
+    [...root.querySelectorAll<HTMLButtonElement>("button")]
+      .find((b) => b.textContent === text)!
+      .click();
+    await flushPromises();
+  };
+  async function restoreSavedColoring() {
+    Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+      configurable: true,
+      value() {
+        this.open = true;
+      },
+    });
+    Object.defineProperty(HTMLDialogElement.prototype, "close", {
+      configurable: true,
+      value() {
+        this.open = false;
+      },
+    });
+    const fields = [{ id: "n", label: "年数", field_type: "number", choices: [] }];
+    const preset = {
+      id: "saved-colors",
+      kind: "coloring",
+      schema_version: 1,
+      name: "年数の分類",
+      definition: {
+        common_form_id: "form",
+        rules: [
+          {
+            id: "r",
+            label: "50年以上",
+            color: "#ff0000",
+            conditions: [{ field_id: "n", field_type: "number", op: "gte", value: "50" }],
+          },
+        ],
+      },
+      display: { form_label: "設備", fields },
+      create_at: "2026-11-05T00:00:00Z",
+    };
+    const get = api.get.getMockImplementation()!;
+    api.get.mockImplementation((url: string) =>
+      url === "/common-forms"
+        ? Promise.resolve({
+            data: [
+              {
+                id: "form",
+                version: 1,
+                form_title: "設備",
+                form_schema: { fields: [{ id: "n", type: "number", label: "年数" }] },
+              },
+            ],
+          })
+        : url.startsWith("/form-answers/map-presets")
+          ? Promise.resolve({ data: { items: [preset], total: 1 } })
+          : get(url),
+    );
+    api.post.mockResolvedValue({
+      data: {
+        fields,
+        forms: [{ id: "form", label: "設備" }],
+        targets: ["shape:a"],
+        target_count: 1,
+        answer_count: 1,
+        as_of: "2026-11-05T00:00:00Z",
+      },
+    });
+    localStorage.setItem(LAST_ACTIVE_LAYER_STORAGE_KEY, "a");
+    mountView();
+    await flushPromises();
+    wrapper!.getComponent({ name: "MapToolbar" }).vm.$emit("advancedSearch");
+    await flushPromises();
+    const dialog = document.querySelector<HTMLDialogElement>(".advanced-map-search")!;
+    await clickIn(dialog, "保存した検索条件");
+    const list = document.querySelector(".map-preset-dialog.form-settings")!;
+    expect(list.textContent).not.toContain("絞り込み条件のみ");
+    await clickIn(list, "呼び出し");
+    await clickIn(document.querySelector('[aria-label="呼び出し完了"]')!, "閉じる");
+    await clickIn(list, "閉じる");
+    return { dialog, preset };
+  }
+
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
@@ -1512,6 +1821,27 @@ describe("ショートカットとツールバーの操作", () => {
     window.dispatchEvent(event);
     return event;
   };
+  it("全画面地図を開いている間は印刷ショートカットを全画面へ渡す", async () => {
+    const openPrint = vi.fn();
+    await operationsReady({
+      FullScreenMapModal: operationStub("FullScreenMapModal", ["isOpen"], { openPrint }),
+    });
+    operationComponent("MapToolbar").vm.$emit("fullScreenMap");
+    await flushPromises();
+    expect(press("p", { ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(press("p", { metaKey: true, repeat: true }).defaultPrevented).toBe(true);
+    await flushPromises();
+    expect(openPrint).toHaveBeenCalledTimes(1);
+    expect(wrapper!.findComponent({ name: "PrintMapModal" }).exists()).toBe(false);
+    frameComponent().vm.$emit("printMap");
+    expect(openPrint).toHaveBeenCalledTimes(2);
+    operationComponent("FullScreenMapModal").vm.$emit("close");
+    await flushPromises();
+    expect(press("p", { metaKey: true }).defaultPrevented).toBe(true);
+    await flushPromises();
+    expect(openPrint).toHaveBeenCalledTimes(2);
+    expect(wrapper!.findComponent({ name: "PrintMapModal" }).exists()).toBe(true);
+  });
   it.each([
     ["1", "LayerCreateModal"],
     ["2", "ImageUploadModal"],
@@ -1795,4 +2125,64 @@ describe("地図再生成中の保存と失敗時の再同期", () => {
     expect(api.request).toHaveBeenCalledTimes(1);
     expect(frameComponent().props("srcUrl")).toBe("");
   });
+});
+
+it("レイヤ切替の認証確認で通信失敗しても元の色分けを維持する", async () => {
+  const { dialog } = await restoreSavedColoring();
+  await clickIn(dialog, "色分け実行");
+  await clickIn(document.querySelector('[aria-label="色分け完了"]')!, "閉じる");
+  const get = api.get.getMockImplementation()!;
+  api.get.mockImplementation((url: string, ...args: unknown[]) =>
+    url.endsWith("/account/auth") ? Promise.reject(Error("offline auth check")) : get(url, ...args),
+  );
+  await changeLayer("b");
+  expect(wrapper!.getComponent({ name: "MapToolbar" }).props("activeLayer")).toBe("a");
+  expect(wrapper!.getComponent({ name: "MapToolbar" }).props("attributeSearchActive")).toBe(true);
+});
+
+it("検索の地図反映中にアカウントが変わっても旧アカウントの条件を復元しない", async () => {
+  await restoreSavedColoring();
+  const markers = useMapObjectStore();
+  const criteria = {
+    common_form_id: "form",
+    definition_version: 1,
+    layer_ids: ["a"],
+    conditions: [],
+    use_map_filter: true,
+  };
+  markers.setAttributeSearch(criteria, {
+    common_form_id: "form",
+    definition_version: 1,
+    as_of: "2026-11-05T00:00:00Z",
+    marker_ids: [],
+    shape_ids: ["a"],
+    target_count: 1,
+  });
+  wrapper!.getComponent({ name: "MapToolbar" }).vm.$emit("advancedSearch");
+  await flushPromises();
+  const ack = deferred<boolean>();
+  filterFrameAndWait.mockReturnValueOnce(ack.promise).mockResolvedValue(true);
+  await clickIn(document.querySelector(".advanced-map-search")!, "絞り込み実行");
+  expect(filterFrameAndWait).toHaveBeenCalled();
+  useAuthStore().setAccount("other-account");
+  await flushPromises();
+  expect(markers.attributeSearch).toBeNull();
+  ack.reject(Error("frame removed"));
+  await flushPromises();
+  expect(useAuthStore().accountId).toBe("other-account");
+  expect(markers.attributeSearch).toBeNull();
+});
+
+it("切替先の地図初期化に失敗しても元の地図と色分けを復元する", async () => {
+  const { dialog } = await restoreSavedColoring();
+  await clickIn(dialog, "色分け実行");
+  await clickIn(document.querySelector('[aria-label="色分け完了"]')!, "閉じる");
+  initializeFrame.mockImplementation(async (snapshot) => snapshot.scopeKey !== "b");
+  colorFrame.mockImplementation(
+    async (value) => value === null || !frameComponent().props("srcUrl").includes("layer=b"),
+  );
+  await changeLayer("b");
+  expect(wrapper!.getComponent({ name: "MapToolbar" }).props("activeLayer")).toBe("a");
+  expect(frameComponent().props("srcUrl")).toContain("layer=a");
+  expect(wrapper!.getComponent({ name: "MapToolbar" }).props("attributeSearchActive")).toBe(true);
 });

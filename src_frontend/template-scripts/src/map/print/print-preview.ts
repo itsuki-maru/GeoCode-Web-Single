@@ -6,6 +6,8 @@ import { createLayerBulkToggleControl } from "../common/base";
 import { installAnswerColoring, type AnswerColoring } from "../answer-coloring";
 import { createAnswerPrintLegend } from "./answer-print-legend";
 import { readMapBootstrap } from "../bootstrap";
+import type { AnotherMapBootstrap, TemporaryMapBootstrap } from "../types";
+import type { ReadOnlyPrintSnapshot } from "./read-only-print-snapshot";
 import {
   isPrintMapState,
   PRINT_PAPERS,
@@ -30,9 +32,10 @@ export function movePrintMapControls(mapElement: HTMLElement, settings: HTMLElem
 export function createPrintPreview(
   state: PrintMapState,
   close: () => void,
-  page: "map-anather" | "form-answer-map" = "map-anather",
+  page: "map-anather" | "form-answer-map" | "temporary-map" = "map-anather",
   session?: { parentOrigin: string; requestId: string },
   coloring?: AnswerColoring,
+  snapshotBootstrap?: AnotherMapBootstrap | TemporaryMapBootstrap,
 ) {
   const style = document.createElement("style");
   style.textContent = css;
@@ -63,7 +66,7 @@ export function createPrintPreview(
   const paper = element<HTMLElement>("print-paper");
   const mapElement = element<HTMLElement>("map");
   paper.append(mapElement);
-  const runtime = initializeReadOnlyMapPage(page, state);
+  const runtime = initializeReadOnlyMapPage(page, state, snapshotBootstrap);
   const map = runtime.map;
   const moveControl = (control: any, destination: string) => {
     const container = control.getContainer();
@@ -112,22 +115,29 @@ export function createPrintPreview(
   const printColoring = coloring || state.coloring;
   runtime.setColoringController?.(colorController);
   colorController?.apply(printColoring!);
-  const bootstrap = colorController ? readMapBootstrap() : undefined;
-  const legend =
-    colorController &&
-    printColoring &&
+  const bootstrap = colorController ? (snapshotBootstrap ?? readMapBootstrap()) : undefined;
+  const legendRecords =
     bootstrap &&
-    (bootstrap.page === "map-anather" || bootstrap.page === "form-answer-map")
+    (snapshotBootstrap || bootstrap.page === "map-anather" || bootstrap.page === "form-answer-map")
+      ? {
+          markers: bootstrap.markers,
+          shapes: Array.isArray(bootstrap.shapes)
+            ? bootstrap.shapes
+            : Object.values(bootstrap.shapes),
+        }
+      : undefined;
+  const legend =
+    colorController && printColoring && legendRecords
       ? createAnswerPrintLegend({
           coloring: printColoring,
-          bootstrap,
+          bootstrap: legendRecords,
           getAvailableTargetKeys: () =>
             new Set([
-              ...Object.values(bootstrap.markers).map((m) => `marker:${m.id}`),
-              ...bootstrap.shapes.map((s) => `shape:${s.id}`),
+              ...Object.values(legendRecords.markers).map((m) => `marker:${m.id}`),
+              ...legendRecords.shapes.map((s) => `shape:${s.id}`),
             ]),
           subscribe:
-            bootstrap.page === "map-anather"
+            !snapshotBootstrap && bootstrap?.page === "map-anather"
               ? (refresh) => {
                   map.on("objectloadingchange", refresh);
                   return () => map.off("objectloadingchange", refresh);
@@ -416,6 +426,31 @@ export function createPrintPreview(
   };
   window.addEventListener("pagehide", dispose, { once: true });
   return { map, dispose };
+}
+
+/** 全画面・共有地図の印刷は、受信済みの対象だけから別の地図を組み立てる。 */
+export function createReadOnlySnapshotPrintPreview(
+  snapshot: ReadOnlyPrintSnapshot,
+  close: () => void,
+  session: { parentOrigin: string; requestId: string },
+) {
+  const { state, layers, markers, shapes, tileServers, tileOverlays } = snapshot;
+  const base = { initialView: state.view, layers, markers, tileServers, tileOverlays };
+  const bootstrap: AnotherMapBootstrap | TemporaryMapBootstrap =
+    snapshot.sourcePage === "map-anather"
+      ? { ...base, page: "map-anather", shapes, isCluster: state.clusteringAllowed !== false }
+      : {
+          ...base,
+          page: "temporary-map",
+          shapes: Object.fromEntries(shapes.map((shape) => [shape.id, shape])),
+          isMaster: false,
+          isChecked: false,
+          isMapUiHidden: false,
+          shareSnapshot: snapshot.snapshotShare
+            ? { version: 1, state, tileServers, tileOverlays }
+            : null,
+        };
+  return createPrintPreview(state, close, snapshot.sourcePage, session, undefined, bootstrap);
 }
 
 export function initializePrintPreview() {

@@ -88,7 +88,7 @@ describe("virtual map object table", () => {
   });
   it("places the advanced-search icon after both search inputs and exposes the active state", async () => {
     await table();
-    const search = wrapper!.get("#map-object-search-row").get('[aria-label="詳しい検索"]');
+    const search = wrapper!.get("#map-object-search-row").get('[aria-label="詳しい検索と色分け"]');
     expect(search.element.previousElementSibling?.id).toBe("search-textbox2");
     expect(search.get("img").attributes("src")).toContain("search_fill24.png");
     expect(search.text()).toBe("");

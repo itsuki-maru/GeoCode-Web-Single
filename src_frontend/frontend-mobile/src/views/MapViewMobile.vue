@@ -4,7 +4,7 @@ import type { Ref } from "vue";
 import { AxiosError } from "axios";
 import { useRouter } from "vue-router";
 import type { MapObjectUpdatePayload, QueryForm, UploadProgressState } from "@/interface";
-import { useAdvancedMapSearch } from "@/composables/useAdvancedMapSearch";
+import { useMapAnalysisSearch } from "@/composables/useMapAnalysisSearch";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useShapeStore } from "@/stores/shapes";
 import { useAuthStore } from "@/stores/auth";
@@ -229,6 +229,9 @@ const reloadMap = async (
   const previousDisplay = {
     accountId: authStore.accountId,
     search: displayedQuery.query1 || displayedQuery.query2 ? mapobjStore.search : null,
+    analysis: getAnalysisState(),
+    markerGeneration: mapobjStore.recordCache.generation,
+    shapeGeneration: shapeStore.recordCache.generation,
     attributeSearch: mapobjStore.attributeSearch,
     attributeMarkerIds: mapobjStore.attributeMarkerIds,
     attributeShapeIds: mapobjStore.attributeShapeIds,
@@ -250,8 +253,14 @@ const reloadMap = async (
     previousDisplay.shapeLayer,
     previousDisplay.shapeMaster,
   );
-  const restoreDisplay = () => {
-    if (previousDisplay.accountId !== authStore.accountId) return;
+  const restoreDisplay = async () => {
+    if (
+      !isCurrent() ||
+      previousDisplay.accountId !== authStore.accountId ||
+      previousDisplay.markerGeneration !== mapobjStore.recordCache.generation ||
+      previousDisplay.shapeGeneration !== shapeStore.recordCache.generation
+    )
+      return;
     mapobjStore.attributeSearch = previousDisplay.attributeSearch;
     mapobjStore.attributeMarkerIds = previousDisplay.attributeMarkerIds;
     mapobjStore.attributeShapeIds = previousDisplay.attributeShapeIds;
@@ -264,6 +273,8 @@ const reloadMap = async (
     );
     mapObjectQueryFormData.value = previousDisplay.query;
     filterMapObjects();
+    await restoreAnalysisState(previousDisplay.analysis);
+    if (!isCurrent()) return;
     refreshAttributeSearch();
   };
   if (absolute) showProgressModal.value = true;
@@ -288,10 +299,11 @@ const reloadMap = async (
       ]);
       if (!isCurrent()) return false;
       if (!markersLoaded || !shapesLoaded) {
-        restoreDisplay();
+        await restoreDisplay();
         isMapFrameLoading.value = false;
         return false;
       }
+      resetAnalysis();
       mapObjectQueryFormData.value = { query1: "", query2: "" };
       mapobjStore.refreshSearchResults();
       mapIframeRef.value?.filterMapObjects(null, null);
@@ -328,7 +340,7 @@ const reloadMap = async (
       if (!synchronized || revision === mapDataRevision) break;
     } while (isCurrent());
     if (!synchronized) {
-      restoreDisplay();
+      await restoreDisplay();
       isMapFrameLoading.value = false;
     } else {
       initializedAccountId = String(accountId);
@@ -342,6 +354,7 @@ const reloadMap = async (
     isMapFrameLoading.value = false;
     if (apiClient.isAxiosError(error) && (error as AxiosError).response?.status === 401)
       authStore.logout();
+    else await restoreDisplay();
     throw error;
   } finally {
     releaseMarkers();
@@ -467,11 +480,29 @@ const handleMapObjectSearch = async (query: QueryForm, reset: boolean = false): 
     showMessage("検索結果を取得できませんでした。再試行してください。");
   }
 };
-const { openAdvancedSearch, closeAdvancedSearch, refreshAttributeSearch } = useAdvancedMapSearch(
+const {
+  openAdvancedSearch,
+  closeAdvancedSearch,
+  refreshAttributeSearch,
+  resetAnalysis,
+  coloringActive,
+  getAnalysisState,
+  restoreAnalysisState,
+} = useMapAnalysisSearch(
   activeLayer,
   masterLayerId,
-  filterMapObjects,
+  async () => {
+    const active =
+      !!mapobjStore.search?.query1 || !!mapobjStore.search?.query2 || !!mapobjStore.attributeSearch;
+    const success = await mapIframeRef.value?.filterMapObjectsAndWait(
+      active ? [...mapobjStore.mapObjectList.keys()] : null,
+      active ? mapobjStore.filteredShapeIds : null,
+    );
+    if (!success) throw Error("地図への絞り込みの反映を確認できませんでした。再試行してください。");
+  },
   (text) => showMessage(text),
+  async (coloring) => (await mapIframeRef.value?.setColoring(coloring)) ?? false,
+  async () => (await mapIframeRef.value?.discardColoring()) ?? false,
 );
 watch(activeLayer, () => closeAdvancedSearch());
 watch(() => mapobjStore.attributeRevision, filterMapObjects);
@@ -1048,9 +1079,11 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
     :layerList="layerList"
     :isMasterLayer="isMasterLayer"
     :isHttpsProtocol="isHttpsProtocol"
+    :attributeSearchActive="!!mapobjStore.attributeSearch || coloringActive"
     @update:activeLayer="activeLayer = $event"
     @openFunction="onOpenCloseFunctionModal"
     @openToolbar="isOpenToolbar = !isOpenToolbar"
+    @advancedSearch="openAdvancedSearch"
   />
   <LiveLocationSharing ref="liveLocationSharingRef" />
   <CommonFormsModal :isOpen="commonFormsOpen" @close="commonFormsOpen = false" />
@@ -1190,7 +1223,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
             @deleteMarker="handleDeleteMarker"
             @message="showMessage"
             @advancedSearch="openAdvancedSearch"
-            :attributeSearchActive="!!mapobjStore.attributeSearch"
+            :attributeSearchActive="!!mapobjStore.attributeSearch || coloringActive"
             @mapObjectSearch="handleMapObjectSearch"
             @update:mapObjectQueryFormData="mapObjectQueryFormData = $event"
           />

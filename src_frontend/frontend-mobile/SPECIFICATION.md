@@ -50,7 +50,7 @@ Service Workerを登録するが、fetchの特別なキャッシュ処理はな�
 
 | 配置 | 役割 |
 | --- | --- |
-| `components/map/` | ツールバー、100vhの地図iframe、全画面地図、画像表示関連 |
+| `components/map/` | ツールバー、100vhの地図iframe、画像表示関連 |
 | `components/map-object/` | マーカー・図形の一覧、編集、公開フォーム設定 |
 | `components/layer/` | レイヤの作成・選択・改名、アイコン、タイル選択 |
 | `components/image/` | アップロード、一覧、プレビュー |
@@ -62,6 +62,8 @@ Service Workerを登録するが、fetchの特別なキャッシュ処理はな�
 PC版の印刷モーダル、JSONインポート専用モーダル、外部サイト設定コンポーネントはこのプロジェクトにはない。PC固有機能を追加・変更する際は、モバイルにも実装があると仮定しない。
 
 地図描画・編集は `/map` が返す `map-mobile.html` と `template-map-mobile.js` が担当する。編集profileによりタップ向け文言・判定・更新差を切り替える。Vue側のMapIframeとTera側のモバイル地図UIは別の責務である。
+
+現在の地図をスナップショットとして共有する作成導線はPCの全画面地図だけに設ける。モバイルの `FullScreenMapModal` は画像プレビュー用であり、地図の共有作成画面ではない。PCで発行したURLはモバイル用の `temporary-map-mobile.html` でも保存済みデータ・中心・ズーム・背景・色分け・グループ・タイル表示を復元する。既存共有モーダルでは共通の1URL枠の確認・停止を利用できる。詳細は [PC UI仕様](../frontend/SPECIFICATION.md#全画面地図のスナップショット共有) と [地図スクリプト仕様](../template-scripts/SPECIFICATION.md#全画面地図の共有スナップショット) を参照する。
 
 ## 5. 状態・API
 

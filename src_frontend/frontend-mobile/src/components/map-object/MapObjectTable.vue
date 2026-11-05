@@ -172,8 +172,8 @@ onScopeDispose(clearSwipe);
     <button
       class="btn-head-image-search advanced-search-button"
       type="button"
-      :title="attributeSearchActive ? '詳しい検索（適用中）' : '詳しい検索'"
-      aria-label="詳しい検索"
+      :title="attributeSearchActive ? '詳しい検索と色分け（適用中）' : '詳しい検索と色分け'"
+      aria-label="詳しい検索と色分け"
       @click="emit('advancedSearch')"
       :aria-pressed="!!attributeSearchActive"
     >

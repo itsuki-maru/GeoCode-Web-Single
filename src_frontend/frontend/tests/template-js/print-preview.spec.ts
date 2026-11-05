@@ -28,7 +28,11 @@ beforeEach(() => {
   document.body.innerHTML = '<div id="map"></div>';
   // 実際の CSS を明示的に読み込む。Vitest は既定で ?inline のインポートをスタブ化するが、
   // 配布される Markdown スタイルでは凡例の ul/li が 16px に固定される。
-  for (const file of ["public/github.css", "../template-scripts/src/map/print/print-preview.css"]) {
+  for (const file of [
+    "public/github.css",
+    "../template-scripts/src/map/print/print-preview.css",
+    "../template-scripts/src/map/common/color-legend.css",
+  ]) {
     const style = document.createElement("style");
     style.textContent = readFrontendFile(file, "utf8");
     document.head.append(style);

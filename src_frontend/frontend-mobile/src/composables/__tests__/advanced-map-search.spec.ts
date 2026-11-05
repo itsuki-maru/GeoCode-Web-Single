@@ -2,7 +2,12 @@ import { createPinia, setActivePinia } from "pinia";
 import { defineComponent, ref } from "vue";
 import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), isAxiosError: vi.fn(() => false) }));
+const api = vi.hoisted(() => ({
+  get: vi.fn(),
+  post: vi.fn(),
+  delete: vi.fn(),
+  isAxiosError: vi.fn(() => false),
+}));
 vi.mock("@/axiosClient", () => ({ default: api }));
 import { useAdvancedMapSearch } from "../useAdvancedMapSearch";
 import { useMapObjectStore } from "@/stores/mapobjects";
@@ -127,6 +132,48 @@ function pendingResult() {
   const promise = new Promise<{ data: ReturnType<typeof result> }>((yes) => (resolve = yes));
   return { promise, resolve };
 }
+
+it("保存条件一覧から削除するとDELETEで送信し、一覧を更新する", async () => {
+  const { search } = mountSearch();
+  const preset = {
+    id: "saved",
+    kind: "filter",
+    schema_version: 1,
+    name: "設備",
+    definition: { common_form_id: "form", conditions: [] },
+    display: { form_label: "設備", fields: [] },
+    create_at: "2026-11-05T00:00:00Z",
+  };
+  let removed = false;
+  api.get.mockImplementation(async (path: string) => ({
+    data:
+      path === "/common-forms"
+        ? [{ id: "form", version: 1, form_title: "設備", form_schema: { fields: [] } }]
+        : { items: removed ? [] : [preset], total: removed ? 0 : 1 },
+  }));
+  api.delete.mockImplementation(async () => {
+    removed = true;
+    return { data: null };
+  });
+  search.openAdvancedSearch();
+  await flushPromises();
+  const clickIn = (root: Element, text: string) =>
+    [...root.querySelectorAll<HTMLButtonElement>("button")]
+      .find((b) => b.textContent === text)!
+      .click();
+  clickIn(document.querySelector(".advanced-map-search")!, "保存した検索条件");
+  await flushPromises();
+  const list = document.querySelector(".map-preset-dialog.form-settings")!;
+  clickIn(list, "削除");
+  clickIn(document.querySelector('[aria-label="検索条件の削除確認"]')!, "削除");
+  await flushPromises();
+  expect(api.delete).toHaveBeenCalledWith("/form-answers/map-presets/saved", {
+    signal: expect.any(AbortSignal),
+    timeout: 60000,
+  });
+  expect(api.post).not.toHaveBeenCalled();
+  expect(list.textContent).toContain("保存した検索条件はありません。");
+});
 
 it("labels the attribute-only count when the existing text search reduces the visible results", async () => {
   const { markers, shapes, search } = mountSearch();
