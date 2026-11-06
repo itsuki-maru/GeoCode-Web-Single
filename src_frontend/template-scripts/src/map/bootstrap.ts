@@ -1,6 +1,7 @@
 import type { MapBootstrap } from "./types";
 import { restoreNormalBodyReferences } from "./normal-body-references";
 import { isStoredShareMapSnapshot } from "./common/share-snapshot";
+import { isClusteringMinZoom } from "./common/marker-clustering";
 
 const MAP_PAGES = new Set<MapBootstrap["page"]>([
   "map",
@@ -42,6 +43,7 @@ export function readMapBootstrap(): MapBootstrap {
     !isRecord(value) ||
     typeof value.page !== "string" ||
     !MAP_PAGES.has(value.page as MapBootstrap["page"]) ||
+    (value.clusteringMinZoom !== undefined && !isClusteringMinZoom(value.clusteringMinZoom)) ||
     !isRecord(value.tileServers) ||
     !isRecord(value.layers) ||
     !isRecord(value.markers)

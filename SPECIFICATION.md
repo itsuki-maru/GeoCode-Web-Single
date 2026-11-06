@@ -571,6 +571,8 @@ JSON として不正な場合、または必須項目が欠落している場合
 
 ### 9.7 管理者機能
 
+- 管理画面の「地図表示設定」でクラスタ解除の最小ズームを0〜22の整数で指定できる。管理者専用の `GET /admin/map-display-settings` と `PUT /admin/map-display-settings` は `{ "clusteringMinZoom": 15 }` の形式で取得・更新する。
+- 保存先は `application_settings` の `clustering_min_zoom`。未登録時は15を使い、地図を読み込むときに設定を取得する。
 - 管理画面 HTML 配信
 - ユーザー一覧取得
 - 一般ユーザー作成

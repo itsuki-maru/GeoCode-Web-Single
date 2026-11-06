@@ -187,6 +187,7 @@ const markerClustering = installMarkerClustering({
   markerGroup: markersClusterGroup,
   control: shapeLayersControl,
   allowed: window.__GEOCODE_MAP_BOOTSTRAP__.isCluster !== false,
+  minZoom: window.__GEOCODE_MAP_BOOTSTRAP__.clusteringMinZoom,
 });
 const tileOverlayManager = createTileOverlayManager(
   L,

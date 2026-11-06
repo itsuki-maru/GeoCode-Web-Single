@@ -208,6 +208,8 @@ export function createShareMapSnapshot(
   state: PrintMapState,
   targets: ReadonlySet<string>,
 ): ShareMapSnapshot {
+  // 共有先は閲覧時にサーバーから管理者設定を受け取る。
+  const { clusteringMinZoom: _clusteringMinZoom, ...shareState } = state;
   const selected = new Set(state.layerIds ?? Object.keys(data.layers));
   const layers = Object.fromEntries(Object.entries(data.layers).filter(([id]) => selected.has(id)));
   const markers = Object.fromEntries(
@@ -238,7 +240,7 @@ export function createShareMapSnapshot(
     tileServers: data.tileServers,
     tileOverlays: data.tileOverlays,
     state: {
-      ...state,
+      ...shareState,
       coloring,
       layerIds: Object.keys(layers),
       markerIds: Object.keys(markers),

@@ -1,3 +1,4 @@
+use super::admin::load_clustering_min_zoom;
 use crate::error::AppError;
 use crate::model::{
     LayerObject, MapAnotherWindowQueryParams, MapObjectQueryResponse, MapObjectQuerySearchParams,
@@ -7,7 +8,7 @@ use crate::utils::{check_ismaster_handler, vec_to_hashmap};
 use axum::{
     Json,
     extract::{Extension, Query},
-    http::HeaderMap,
+    http::{HeaderMap, header::CACHE_CONTROL},
     response::{Html, IntoResponse},
 };
 use sqlx::query_as;
@@ -291,6 +292,7 @@ pub async fn map_get_handler(
     context.insert("latitude", &latitude);
     context.insert("longitude", &longitude);
     context.insert("zoom", &zoom);
+    context.insert("clusteringMinZoom", &load_clustering_min_zoom(&pool).await?);
     context.insert("tileServers", &tile_servers_hash_map);
     context.insert("geocoderCsis", &crate::config::CONFIG.geocoder.uses_csis());
     context.insert("tileVisibilityAccountId", &user_id);
@@ -308,7 +310,7 @@ pub async fn map_get_handler(
 
     let tera = tera.lock().await;
     match tera.render(render_html, &context) {
-        Ok(rendered) => Ok(Html(rendered).into_response()),
+        Ok(rendered) => Ok(([(CACHE_CONTROL, "no-store")], Html(rendered)).into_response()),
         Err(e) => {
             tracing::error!("{}", e);
             Err(AppError::InternalServerError)
@@ -394,6 +396,7 @@ pub async fn map_another_get_handler(
         &crate::handler::tile_overlays::selected_tiles(&pool, &user_id).await?,
     );
     context.insert("is_cluster", &is_cluster);
+    context.insert("clusteringMinZoom", &load_clustering_min_zoom(&pool).await?);
     // 開発用Viteの親だけを明示的に許可し、リリース版は同一originに限定する。
     context.insert(
         "shareParentOrigins",
@@ -410,7 +413,7 @@ pub async fn map_another_get_handler(
 
     let tera = tera.lock().await;
     match tera.render("map-anather.html", &context) {
-        Ok(rendered) => Ok(Html(rendered).into_response()),
+        Ok(rendered) => Ok(([(CACHE_CONTROL, "no-store")], Html(rendered)).into_response()),
         Err(e) => {
             tracing::error!("{}", e);
             Err(AppError::InternalServerError)

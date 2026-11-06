@@ -67,6 +67,19 @@ const routeSettings: RouteRecordRaw[] = [
     },
   },
   {
+    path: "/map-display-settings",
+    name: "MapDisplaySettings",
+    component: () => import("@/views/MapDisplaySettings.vue"),
+    beforeEnter: async (_to, _from, next) => {
+      try {
+        await apiClient.get(getUserUrl);
+        next();
+      } catch {
+        next({ name: "login" });
+      }
+    },
+  },
+  {
     path: "/:pathMatch(.*)*",
     name: "NotFound",
     component: () => import("@/views/NotFoundAdmin.vue"),

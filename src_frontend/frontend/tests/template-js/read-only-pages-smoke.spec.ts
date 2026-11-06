@@ -385,6 +385,7 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
             shapes: page.globals.shapesFromAxum,
           };
   Object.assign(bootstrap, {
+    clusteringMinZoom: page.globals.clusteringMinZoom,
     tileOverlays: page.globals.tileOverlays || [],
     tileVisibilityAccountId: "smoke-test-account",
   });
@@ -516,9 +517,10 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
     globals: {
       ...page.globals,
       isCluster,
+      clusteringMinZoom: 10,
       latitude: 35.6812,
       longitude: 139.7671,
-      zoom: 14,
+      zoom: 9,
       markersFromAxum: {
         ...markerRecords,
         "marker-2": { ...markerRecords["marker-1"], id: "marker-2", marker_name: "Second marker" },
@@ -538,7 +540,7 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
   });
 
   it.each(clusteringPages)(
-    "$templateNameは15以上で解除でき、縮小後は再クラスタ化する",
+    "$templateNameは10以上で解除でき、縮小後は再クラスタ化する",
     async (page) => {
       vi.stubGlobal(
         "fetch",
@@ -559,7 +561,7 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
       const input = document.querySelector<HTMLInputElement>(".marker-clustering-control input")!;
       // 回答用エントリーは初期化後に対象に合わせて表示範囲を調整するため、この確認は
       // 初期の範囲調整に依存させず、ズームの境界から開始する。
-      map.setZoom(14, { animate: false });
+      map.setZoom(9, { animate: false });
       const layerLabel = [...document.querySelectorAll("label")].find(
         (label) => label.textContent?.trim() === "Test Layer",
       );
@@ -569,23 +571,23 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
       expect(markers).toHaveLength(2);
       expect(input.checked).toBe(true);
       expect(input.disabled).toBe(true);
-      map.setZoom(15, { animate: false });
+      map.setZoom(10, { animate: false });
       expect(input.disabled).toBe(false);
       input.click();
-      await vi.waitFor(() => expect(group.options.disableClusteringAtZoom).toBe(15));
+      await vi.waitFor(() => expect(group.options.disableClusteringAtZoom).toBe(10));
       expect(group.getLayers()).toEqual(expect.arrayContaining(markers));
       for (const marker of markers) expect(group.getVisibleParent(marker)).toBe(marker);
-      map.setZoom(14, { animate: false });
+      map.setZoom(9, { animate: false });
       expect(input.checked).toBe(true);
       expect(input.disabled).toBe(true);
       await vi.waitFor(() => expect(group.options.disableClusteringAtZoom).toBeNull());
       expect(group.getVisibleParent(markers[0]).getChildCount()).toBe(2);
-      map.setZoom(15, { animate: false });
+      map.setZoom(10, { animate: false });
       expect(input.checked).toBe(true);
       expect(input.disabled).toBe(false);
       map.removeLayer(group);
       input.click();
-      await vi.waitFor(() => expect(group.options.disableClusteringAtZoom).toBe(15));
+      await vi.waitFor(() => expect(group.options.disableClusteringAtZoom).toBe(10));
       expect(map.hasLayer(group)).toBe(false);
       expect(group.getLayers()).toEqual(expect.arrayContaining(markers));
     },
@@ -601,7 +603,7 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
       ".marker-clustering-control input",
     )!;
     const runtime = (dom.window as any).__templateSmokeRuntime;
-    for (const zoom of [15, 14, 16, 13]) {
+    for (const zoom of [10, 9, 16, 8]) {
       runtime.map.setZoom(zoom, { animate: false });
       expect(input.checked).toBe(false);
       expect(input.disabled).toBe(true);
@@ -1523,6 +1525,7 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
           coloring: undefined,
           clusteringEnabled: true,
           clusteringAllowed: true,
+          clusteringMinZoom: 15,
           markersVisible: true,
           shapesVisible: true,
           shapeNamesVisible: true,

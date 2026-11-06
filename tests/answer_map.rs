@@ -271,6 +271,7 @@ async fn answer_map_transport_restores_stored_and_ambiguous_bodies_and_keeps_fal
     assert!(!raw.contains('<') && !raw.contains('&'));
     assert!(!raw.contains('\u{2028}') && !raw.contains('\u{2029}'));
     let mut restored: Value = serde_json::from_str(raw).unwrap();
+    assert_eq!(restored["clusteringMinZoom"], 15);
     let refs = restored
         .as_object_mut()
         .unwrap()

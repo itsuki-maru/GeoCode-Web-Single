@@ -46,6 +46,7 @@ export interface InitialMapView {
 }
 
 interface MapBootstrapBase {
+  clusteringMinZoom?: number;
   popupBodies?: import("./common/popup-content").PopupBodies;
   popupAnalysis?: Record<string, string>;
   tileOverlays?: import("./common/tile-overlays").TileOverlayRecord[];

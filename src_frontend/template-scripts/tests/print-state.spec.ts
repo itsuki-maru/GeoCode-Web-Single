@@ -32,6 +32,13 @@ describe("print clustering state validation", () => {
     );
   });
 
+  it("validates the optional clustering zoom captured from the source map", () => {
+    for (const zoom of [0, 12, 22])
+      expect(isPrintMapState({ ...state, clusteringMinZoom: zoom })).toBe(true);
+    for (const zoom of [-1, 1.5, 23, "15", null])
+      expect(isPrintMapState({ ...state, clusteringMinZoom: zoom })).toBe(false);
+  });
+
   it.each(["clusteringEnabled", "clusteringAllowed"])(
     "rejects non-boolean %s in messages from another frame",
     (key) => {

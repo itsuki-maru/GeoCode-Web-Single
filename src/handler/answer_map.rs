@@ -1,4 +1,5 @@
 //! 回答検索と同じ条件で、所有する対象だけを読み取り専用地図へ渡す。
+use super::admin::load_clustering_min_zoom;
 use super::form_answers::{AnswerQuery, build_query, validate};
 use crate::{
     error::AppError,
@@ -277,6 +278,7 @@ pub async fn answer_map_handler(
         context.insert("tileVisibilityAccountId", &user);
         context.insert("geocoderCsis", &crate::config::CONFIG.geocoder.uses_csis());
         context.insert("is_cluster", &true);
+        context.insert("clusteringMinZoom", &load_clustering_min_zoom(&pool).await?);
         context.insert("latitude", &37.65);
         context.insert("longitude", &138.0);
         context.insert("zoom", &6);

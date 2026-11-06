@@ -13,3 +13,4 @@ export const adminLiveLocationsUrl = baseUrl + "/admin/live-locations";
 export const adminLiveMapsUrl = baseUrl + "/admin/live-maps";
 
 export const adminLiveMapLayersUrl = baseUrl + "/admin/live-map-layers";
+export const adminMapDisplaySettingsUrl = baseUrl + "/admin/map-display-settings";

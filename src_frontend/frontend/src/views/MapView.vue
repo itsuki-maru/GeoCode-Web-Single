@@ -1051,7 +1051,9 @@ const handleKeyDown = (event: KeyboardEvent) => {
     openOnetimeSetting();
   } else if (event.ctrlKey && event.key == "6") {
     event.preventDefault();
-    isOpenFullScreenMapModal.value = !isOpenFullScreenMapModal.value;
+    if (event.repeat) return;
+    if (isOpenFullScreenMapModal.value) fullScreenMapRef.value?.requestClose();
+    else isOpenFullScreenMapModal.value = true;
   } else if (event.ctrlKey && event.key == "m") {
     event.preventDefault();
     if (isOpenEditModal.value) {
@@ -1418,6 +1420,9 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
   <FullScreenMapModal
     ref="fullScreenMapRef"
     :isOpen="isOpenFullScreenMapModal"
+    :close-blocked="
+      isMessageModal || (!!shareSnapshot && (isOnetimeSettingModal || isOnetimeUrlModal))
+    "
     @close="isOpenFullScreenMapModal = false"
     @share="openCurrentMapSharing"
   />

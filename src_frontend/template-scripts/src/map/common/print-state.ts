@@ -1,5 +1,6 @@
 import type { StoredMapView } from "./map-view-persistence";
 import { isAnswerColoring, type AnswerColoring } from "../answer-coloring";
+import { isClusteringMinZoom } from "./marker-clustering";
 
 export interface PrintMapState {
   coloring?: AnswerColoring;
@@ -9,6 +10,7 @@ export interface PrintMapState {
   overlays: Record<string, boolean>;
   clusteringEnabled?: boolean;
   clusteringAllowed?: boolean;
+  clusteringMinZoom?: number;
   markersVisible: boolean;
   shapesVisible: boolean;
   shapeNamesVisible: boolean;
@@ -41,6 +43,7 @@ export function isPrintMapState(value: unknown): value is PrintMapState {
       Object.values(state.overlays).every((visible) => typeof visible === "boolean") &&
       (state.clusteringEnabled === undefined || typeof state.clusteringEnabled === "boolean") &&
       (state.clusteringAllowed === undefined || typeof state.clusteringAllowed === "boolean") &&
+      (state.clusteringMinZoom === undefined || isClusteringMinZoom(state.clusteringMinZoom)) &&
       typeof state.markersVisible === "boolean" &&
       typeof state.shapesVisible === "boolean" &&
       typeof state.shapeNamesVisible === "boolean" &&

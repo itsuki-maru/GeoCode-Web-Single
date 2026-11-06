@@ -77,6 +77,7 @@ function fixture(count: number) {
   window.__GEOCODE_MAP_BOOTSTRAP__ = {
     page: "form-answer-map",
     isCluster: true,
+    clusteringMinZoom: 10,
     initialView: state.view,
     tileServers: {
       "1": {
@@ -131,18 +132,18 @@ describe("実Leafletで色分け後も通常のクラスタースタイルを維
     const runtime = initializeReadOnlyMapPage("form-answer-map");
     dispose = () => runtime.map.remove();
     const group = runtime.visibleMarkerGroup;
-    runtime.map.setZoom(15, { animate: false });
+    runtime.map.setZoom(10, { animate: false });
     vi.advanceTimersByTime(400);
     const input = document.querySelector<HTMLInputElement>(".marker-clustering-control input")!;
     input.click();
     const markers = group.getLayers();
-    for (const zoom of [14, 16, 14, 15]) runtime.map.setZoom(zoom, { animate: false });
+    for (const zoom of [9, 11, 9, 10]) runtime.map.setZoom(zoom, { animate: false });
     expect(input.checked).toBe(true);
     input.click();
     vi.advanceTimersByTime(1000);
     expect(input.checked).toBe(false);
     expect(group.getLayers()).toHaveLength(9);
-    expect(group.options.disableClusteringAtZoom).toBe(15);
+    expect(group.options.disableClusteringAtZoom).toBe(10);
     for (const marker of markers) {
       expect(group.getVisibleParent(marker)).toBe(marker);
       expect(marker.getElement()).not.toBeNull();
@@ -161,7 +162,7 @@ describe("実Leafletで色分け後も通常のクラスタースタイルを維
     runtime.setLegendHiddenTargets([f.keys[0]]);
     const markers = group.getLayers();
     expect(markers).toHaveLength(9);
-    runtime.map.setZoom(15, { animate: false });
+    runtime.map.setZoom(10, { animate: false });
     vi.advanceTimersByTime(400);
     const input = document.querySelector<HTMLInputElement>(".marker-clustering-control input")!;
     input.click();
@@ -171,7 +172,7 @@ describe("実Leafletで色分け後も通常のクラスタースタイルを維
     expect(runtime.markers["marker-m1"].options.icon.options.html).toContain("#d73027");
     runtime.setLegendHiddenTargets([f.keys[0], f.keys[1]]);
     expect(group.getLayers()).toHaveLength(8);
-    runtime.map.setZoom(14, { animate: false });
+    runtime.map.setZoom(9, { animate: false });
     vi.advanceTimersByTime(400);
     expect(input.checked).toBe(true);
     expect(input.disabled).toBe(true);
@@ -187,9 +188,10 @@ describe("実Leafletで色分け後も通常のクラスタースタイルを維
     const preview = createPrintPreview(
       {
         ...f.state,
-        view: { ...f.state.view, zoom: 15 },
+        view: { ...f.state.view, zoom: 12 },
         clusteringEnabled: false,
         clusteringAllowed: true,
+        clusteringMinZoom: 12,
       },
       vi.fn(),
       "form-answer-map",
@@ -202,14 +204,14 @@ describe("実Leafletで色分け後も通常のクラスタースタイルを維
     const input = document.querySelector<HTMLInputElement>(".marker-clustering-control input")!;
     expect(input.checked).toBe(false);
     expect(input.disabled).toBe(false);
-    expect(group.options.disableClusteringAtZoom).toBe(15);
+    expect(group.options.disableClusteringAtZoom).toBe(12);
     for (const marker of group.getLayers()) expect(group.getVisibleParent(marker)).toBe(marker);
-    preview.map.setZoom(14, { animate: false });
+    preview.map.setZoom(11, { animate: false });
     vi.advanceTimersByTime(400);
     expect(input.checked).toBe(true);
     expect(input.disabled).toBe(true);
     assertCluster(group, 9);
-    preview.map.setZoom(15, { animate: false });
+    preview.map.setZoom(12, { animate: false });
     vi.advanceTimersByTime(400);
     expect(input.checked).toBe(true);
     expect(input.disabled).toBe(false);
@@ -228,7 +230,7 @@ describe("実Leafletで色分け後も通常のクラスタースタイルを維
     );
     dispose = preview.dispose;
     const input = document.querySelector<HTMLInputElement>(".marker-clustering-control input")!;
-    for (const zoom of [15, 14, 16]) {
+    for (const zoom of [10, 9, 16]) {
       preview.map.setZoom(zoom, { animate: false });
       vi.advanceTimersByTime(400);
       expect(input.checked).toBe(false);

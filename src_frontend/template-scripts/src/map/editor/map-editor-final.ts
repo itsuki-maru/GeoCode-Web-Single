@@ -527,6 +527,7 @@ window.addEventListener("message", function (event) {
             coloring: editorColoring.getState() || undefined,
             clusteringEnabled: markerClustering.getEnabled(),
             clusteringAllowed: markerClustering.isAllowed(),
+            clusteringMinZoom: markerClustering.minZoom,
             markersVisible: map.hasLayer(markersClusterGroup),
             shapesVisible: map.hasLayer(drawnShapesGroup),
             shapeNamesVisible: map.hasLayer(shapeNameVisibilityLayer),

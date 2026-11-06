@@ -1842,12 +1842,31 @@ describe("ショートカットとツールバーの操作", () => {
     expect(openPrint).toHaveBeenCalledTimes(2);
     expect(wrapper!.findComponent({ name: "PrintMapModal" }).exists()).toBe(true);
   });
+  it("Ctrl+6による全画面地図の終了は地図側へ要求し、応答後に閉じる", async () => {
+    const requestClose = vi.fn();
+    await operationsReady({
+      FullScreenMapModal: operationStub("FullScreenMapModal", ["isOpen"], { requestClose }),
+    });
+    const modal = operationComponent("FullScreenMapModal");
+    expect(modal.props("isOpen")).toBe(false);
+    expect(press("6", { ctrlKey: true }).defaultPrevented).toBe(true);
+    await flushPromises();
+    expect(modal.props("isOpen")).toBe(true);
+    expect(requestClose).not.toHaveBeenCalled();
+    expect(press("6", { ctrlKey: true, repeat: true }).defaultPrevented).toBe(true);
+    expect(requestClose).not.toHaveBeenCalled();
+    press("6", { ctrlKey: true });
+    expect(requestClose).toHaveBeenCalledTimes(1);
+    expect(modal.props("isOpen")).toBe(true);
+    modal.vm.$emit("close");
+    await flushPromises();
+    expect(modal.props("isOpen")).toBe(false);
+  });
   it.each([
     ["1", "LayerCreateModal"],
     ["2", "ImageUploadModal"],
     ["3", "ImageListModal"],
     ["4", "QRCodeGeneratorModal"],
-    ["6", "FullScreenMapModal"],
   ])("Ctrl+%sで%sを開閉し、閉じた後にも再度操作できる", async (key, name) => {
     await operationsReady();
     expect(operationComponent(name).props("isOpen")).toBe(false);

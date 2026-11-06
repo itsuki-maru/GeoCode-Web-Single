@@ -2,7 +2,7 @@
 
 ## 1. 概要
 
-ユーザー管理、現在位置共有マップ、重ね合わせタイルを設定する独立したVueアプリ。関連: [全体構成](../SPECIFICATION.md)、[全体の権限・API仕様](../../SPECIFICATION.md)、[公開地図テンプレート](../../src/templates/SPECIFICATION.md)。
+ユーザー管理、現在位置共有マップ、重ね合わせタイル、地図表示を設定する独立したVueアプリ。関連は [全体構成](../SPECIFICATION.md)、[全体の権限・API仕様](../../SPECIFICATION.md)、[公開地図テンプレート](../../src/templates/SPECIFICATION.md)。
 
 ## 2. ディレクトリ構成
 
