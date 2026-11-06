@@ -370,6 +370,7 @@
     <script>
         window.__GEOCODE_MAP_BOOTSTRAP__ = {
             page: "map-anather",
+            shareParentOrigins: {{ shareParentOrigins | default(value=false) | json_encode_for_html | safe }},
             isCluster: {{ is_cluster }},
             initialView: {
                 latitude: {{ latitude }},

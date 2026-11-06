@@ -38,6 +38,41 @@ const click = (text: string) =>
   [...document.querySelectorAll<HTMLButtonElement>("button")]
     .find((b) => b.textContent === text)!
     .click();
+it("絞り込み専用画面では色分けの呼び出しを無効にし、再読み込み後も維持する", async () => {
+  const coloring = {
+    ...preset,
+    id: "colors",
+    kind: "coloring",
+    name: "写真による色分け",
+    definition: {
+      common_form_id: "form",
+      rules: [
+        { id: "r", label: "写真あり", color: "#2166ac", conditions: preset.definition.conditions },
+      ],
+    },
+  };
+  const restore = vi.fn();
+  dialogs = createMapPresetDialogs(
+    vi.fn().mockResolvedValue({ items: [preset, coloring], total: 21 }),
+    restore,
+    { filterOnly: true },
+  );
+  dialogs.list();
+  await vi.waitFor(() => expect(document.querySelectorAll("tbody tr")).toHaveLength(2));
+  const buttons = () => [
+    ...document.querySelectorAll<HTMLButtonElement>("tbody tr button:first-child"),
+  ];
+  expect(buttons()[0]!.disabled).toBe(false);
+  expect(buttons()[1]!.disabled).toBe(true);
+  expect(buttons()[1]!.title).toContain("色分け条件を呼び出せません");
+  buttons()[1]!.click();
+  expect(restore).not.toHaveBeenCalled();
+  click("次へ");
+  await vi.waitFor(() => expect(document.querySelector("nav")?.textContent).toContain("2 / 2"));
+  expect(buttons()[0]!.disabled).toBe(false);
+  expect(buttons()[1]!.disabled).toBe(true);
+});
+
 it("既存の再利用可能な定義を保存し、地図に適用せずに呼び出す", async () => {
   const transport = vi
       .fn()

@@ -527,6 +527,13 @@ const MIGRATIONS: &[Migration] = &[
             "../../migrations/20261025120000_answer_map_saved_conditions.sql"
         )],
     },
+    Migration {
+        version: 23,
+        name: "add_map_snapshot_to_temporary_urls",
+        statements: &[include_str!(
+            "../../migrations/20261105120000_add_map_snapshot_to_temporary_urls.sql"
+        )],
+    },
 ];
 
 // データベース接続の確立
@@ -683,6 +690,22 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), Error> {
         }
 
         for statement in migration.statements {
+            // SQLx用マイグレーションを先に適用したDBと、既存DBの再実行を両立する。
+            if migration.version == 23 {
+                let exists: i64 = sqlx::query_scalar(
+                    r#"
+                    SELECT
+                        COUNT(*)
+                    FROM pragma_table_info('temporary_urls')
+                    WHERE name = 'map_snapshot'
+                    "#,
+                )
+                .fetch_one(&mut *tx)
+                .await?;
+                if exists > 0 {
+                    continue;
+                }
+            }
             sqlx::query(statement).execute(&mut *tx).await?;
         }
 

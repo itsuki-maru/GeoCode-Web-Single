@@ -1,5 +1,6 @@
 import type { MapBootstrap } from "./types";
 import { restoreNormalBodyReferences } from "./normal-body-references";
+import { isStoredShareMapSnapshot } from "./common/share-snapshot";
 
 const MAP_PAGES = new Set<MapBootstrap["page"]>([
   "map",
@@ -83,6 +84,13 @@ export function readMapBootstrap(): MapBootstrap {
       !Array.isArray(value.answerPreview.targets))
   ) {
     throw new Error("Answer-map bootstrap data is invalid");
+  }
+  if (
+    (value.page === "temporary-map" || value.page === "temporary-map-mobile") &&
+    value.shareSnapshot &&
+    !isStoredShareMapSnapshot(value.shareSnapshot)
+  ) {
+    throw new Error("Shared-map snapshot data is invalid");
   }
   if (jsonNode) {
     // 印刷の準備を含む後続の読み取りでは、検証済みのスナップショットを再利用する。

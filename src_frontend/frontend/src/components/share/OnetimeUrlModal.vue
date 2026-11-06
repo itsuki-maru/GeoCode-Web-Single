@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import BaseModal from "@/components/common/BaseModal.vue";
 import { invalidateOntimeMapUrl } from "@/router/urls";
 import apiClient from "@/axiosClient";
@@ -9,6 +10,7 @@ const props = defineProps<{
   uuid: string;
   isHttps: boolean;
   expiration?: string;
+  zIndex?: number;
 }>();
 
 const emit = defineEmits<{
@@ -16,6 +18,7 @@ const emit = defineEmits<{
   invalidated: [];
   message: [text: string];
 }>();
+const invalidating = ref(false);
 
 const formatExpiration = (value?: string): string => {
   if (!value) {
@@ -65,20 +68,29 @@ function selectTextOrClipboardCopy(elementId: string) {
 }
 
 const invalidateOneTimeMap = async (): Promise<void> => {
+  if (invalidating.value) return;
+  invalidating.value = true;
   try {
     const deleteUrl = invalidateOntimeMapUrl + `${props.uuid}`;
     await apiClient.delete(deleteUrl);
     emit("close");
     emit("message", "共有を停止しました。");
     emit("invalidated");
-  } catch (error) {
-    console.error("Error");
+  } catch (_error) {
+    emit("message", "共有を停止できませんでした。通信状態を確認してもう一度実行してください。");
+  } finally {
+    invalidating.value = false;
   }
 };
 </script>
 
 <template>
-  <BaseModal :isOpen="isOpen" :zIndex="3" :close-on-overlay-click="false" @close="emit('close')">
+  <BaseModal
+    :isOpen="isOpen"
+    :zIndex="zIndex ?? 3"
+    :close-on-overlay-click="false"
+    @close="emit('close')"
+  >
     <div class="onetime-url-content">
       <h2 class="modal-h2">メッセージ</h2>
       <div class="input-text-zone" v-if="isHttps">
@@ -97,8 +109,8 @@ const invalidateOneTimeMap = async (): Promise<void> => {
         <pre><code :id="uuid" @click="selectTextOrClipboardCopy(uuid)">{{ url }}</code></pre>
       </div>
       <div class="btn-zone">
-        <button @click="emit('close')">閉じる</button>
-        <button @click="invalidateOneTimeMap()">共有停止</button>
+        <button :disabled="invalidating" @click="emit('close')">閉じる</button>
+        <button :disabled="invalidating" @click="invalidateOneTimeMap()">共有停止</button>
       </div>
     </div>
   </BaseModal>

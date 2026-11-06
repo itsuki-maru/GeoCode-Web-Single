@@ -1,11 +1,11 @@
 import type { AnswerColoring } from "../answer-coloring";
-import { makeSummaryDraggable } from "../common/draggable-summary";
-import type { FormAnswerMapBootstrap, AnotherMapBootstrap } from "../types";
+import { createColorLegend } from "../common/color-legend";
+import type { AnotherMapBootstrap } from "../types";
 
 /** 凡例は独立した表示マスクを管理し、元のオブジェクトは変更しない。 */
 export function createAnswerPrintLegend(options: {
   coloring: AnswerColoring;
-  bootstrap: FormAnswerMapBootstrap | AnotherMapBootstrap;
+  bootstrap: Pick<AnotherMapBootstrap, "markers" | "shapes">;
   getAvailableTargetKeys?: () => ReadonlySet<string>;
   subscribe?: (refresh: () => void) => () => void;
   mapElement: HTMLElement;
@@ -61,17 +61,6 @@ export function createAnswerPrintLegend(options: {
   controls.append(show.label, link.label, fontLabel, help, warning, choices);
   settings.append(controls);
 
-  const panel = document.createElement("section");
-  panel.className = "answer-print-legend";
-  panel.setAttribute("aria-label", "色分けの凡例");
-  panel.style.fontSize = "12px";
-  const title = document.createElement("strong");
-  title.className = "answer-print-legend-handle";
-  title.textContent = "凡例";
-  const entries = document.createElement("ul");
-  panel.append(title, entries);
-  mapElement.append(panel);
-
   const available =
     options.getAvailableTargetKeys?.() ||
     new Set([
@@ -81,29 +70,33 @@ export function createAnswerPrintLegend(options: {
   const rows: {
     keys: string[];
     input: HTMLInputElement;
-    entry: HTMLLIElement;
     label: HTMLLabelElement;
     ruleId: string;
+    text: string;
+    color: string;
   }[] = [];
-  const entryFragment = document.createDocumentFragment();
   const choiceFragment = document.createDocumentFragment();
   for (const rule of coloring.rules) {
     const keys = Object.entries(coloring.targets)
       .filter(([key, ruleId]) => ruleId === rule.id && available.has(key))
       .map(([key]) => key);
     if (!keys.length && !options.subscribe) continue;
-    const entry = document.createElement("li");
     const swatch = document.createElement("span");
     swatch.className = "answer-print-legend-swatch";
     swatch.style.backgroundColor = rule.color;
-    entry.append(swatch, document.createTextNode(rule.label));
-    entryFragment.append(entry);
+    swatch.setAttribute("aria-hidden", "true");
     const choice = toggle(rule.label, true);
-    choice.label.prepend(swatch.cloneNode());
+    choice.label.prepend(swatch);
     choiceFragment.append(choice.label);
-    rows.push({ keys, input: choice.input, entry, label: choice.label, ruleId: rule.id });
+    rows.push({
+      keys,
+      input: choice.input,
+      label: choice.label,
+      ruleId: rule.id,
+      text: rule.label,
+      color: rule.color,
+    });
   }
-  entries.append(entryFragment);
   choices.append(choiceFragment);
   if (!rows.length) {
     const empty = document.createElement("p");
@@ -111,28 +104,36 @@ export function createAnswerPrintLegend(options: {
     empty.textContent = "印刷対象に色分けされた地図オブジェクトはありません。";
     controls.append(empty);
   }
-  const updatePanel = () => {
-    let any = false;
-    for (const row of rows) {
-      row.entry.hidden = !row.input.checked || !row.keys.length;
-      row.label.hidden = !row.keys.length;
-      any ||= row.input.checked && !!row.keys.length;
-    }
-    panel.hidden = !show.input.checked || !any;
-  };
+  const legend = createColorLegend({
+    mapElement,
+    mode: "print",
+    onChange: () => {
+      hasOverflow();
+      onChange();
+    },
+  });
   let disposed = false;
   let previousHidden = "[]";
   const hasOverflow = () => {
-    const overflow =
-      !disposed &&
-      !panel.hidden &&
-      (panel.scrollHeight > panel.clientHeight + 1 || panel.scrollWidth > panel.clientWidth + 1);
+    const overflow = legend.hasOverflow();
     warning.hidden = !overflow;
     return overflow;
   };
+  const updatePanel = () => {
+    for (const row of rows) row.label.hidden = !row.keys.length;
+    legend.setVisible(show.input.checked);
+    legend.setEntries(
+      rows.map((row) => ({
+        id: row.ruleId,
+        label: row.text,
+        color: row.color,
+        hidden: !row.input.checked || !row.keys.length,
+      })),
+    );
+    legend.setFontSize(Number(fontSize.value));
+  };
   const update = () => {
     updatePanel();
-    panel.style.fontSize = `${fontSize.value}px`;
     const hidden = link.input.checked
       ? rows.filter((r) => !r.input.checked).flatMap((r) => r.keys)
       : [];
@@ -166,37 +167,16 @@ export function createAnswerPrintLegend(options: {
   };
   const stopSubscription = options.subscribe?.(refresh);
   controls.addEventListener("change", update);
-  // 凡例のドラッグで、その下の地図が移動やズームされることを防ぐ。
-  const stop = (event: Event) => event.stopPropagation();
-  for (const event of ["click", "dblclick", "wheel", "mousedown", "touchstart"])
-    panel.addEventListener(event, stop);
   updatePanel();
-  const stopDrag = makeSummaryDraggable(panel, mapElement, onChange, { x: 10, y: 10 }, title);
-  let previousSize = `${panel.offsetWidth}:${panel.offsetHeight}`;
-  const resize = new ResizeObserver(() => {
-    if (disposed) return;
-    hasOverflow();
-    const nextSize = `${panel.offsetWidth}:${panel.offsetHeight}`;
-    if (nextSize !== previousSize) {
-      previousSize = nextSize;
-      onChange();
-    }
-  });
-  resize.observe(mapElement);
-  resize.observe(panel);
   return {
     hasOverflow,
     dispose() {
       if (disposed) return;
       disposed = true;
-      stopDrag();
-      resize.disconnect();
       stopSubscription?.();
       controls.removeEventListener("change", update);
-      for (const event of ["click", "dblclick", "wheel", "mousedown", "touchstart"])
-        panel.removeEventListener(event, stop);
       controls.remove();
-      panel.remove();
+      legend.dispose();
     },
   };
 }

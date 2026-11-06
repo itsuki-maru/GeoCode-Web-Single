@@ -16,6 +16,7 @@ export const editorCommonPrelude = `
 import { createPopupContentRuntime } from "/src/map/common/popup-content.ts";
 let popupContent;
 import { installAnswerColoring, isAnswerColoring } from "/src/map/answer-coloring.ts";
+import { createColorLegend } from "/src/map/common/color-legend.ts";
 let editorColoring;
 const editorColorShapeLayers = {};
 import { makeSummaryDraggable } from "/src/map/common/draggable-summary.ts";
@@ -244,6 +245,8 @@ function editorEntryPlugin(): Plugin {
 }
 
 export default defineConfig({
+  // 印刷時に遅延読み込みするチャンクも、配信されたentryと同じディレクトリから読む。
+  base: "./",
   plugins: [editorEntryPlugin(), {
     name: "bundled-third-party-licenses",
     generateBundle() {
@@ -292,6 +295,9 @@ export default defineConfig({
           new URL("./src/entries/marker-form.ts", import.meta.url),
         ),
         "map-mobile": `${editorVirtualPrefix}map-mobile`,
+        "read-only-map-print": fileURLToPath(
+          new URL("./src/entries/read-only-map-print.ts", import.meta.url),
+        ),
         "temporary-map": fileURLToPath(
           new URL("./src/entries/temporary-map.ts", import.meta.url),
         ),

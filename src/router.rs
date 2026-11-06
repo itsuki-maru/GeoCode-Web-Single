@@ -293,7 +293,10 @@ pub fn build_router(
             post(unlock_account_handler),
         )
         .route("/admin/user/create", post(create_users_handler))
-        .route("/onetimeurl/generate", post(generate_url_handler))
+        .route(
+            "/onetimeurl/generate",
+            post(generate_url_handler).layer(DefaultBodyLimit::max(33 * 1024 * 1024)),
+        )
         .route("/onetimeurl/current", get(current_url_handler))
         .route(
             "/onetimeurl/delete/{id_url}",

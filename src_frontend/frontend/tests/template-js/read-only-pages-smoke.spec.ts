@@ -61,6 +61,7 @@ const dependencyScripts = [
 const tileServers = {
   "1": {
     attribution: "Test tiles",
+    id: 1,
     include_foreign_tiles: true,
     label: "Test tiles",
     layer_name: "test-tiles",
@@ -73,7 +74,11 @@ const tileServers = {
 const layerRecords = {
   "layer-1": {
     id: "layer-1",
+    is_master: false,
     layer_name: "Test Layer",
+    marker_icon_filename: null,
+    marker_icon_id: null,
+    user_id: "smoke-test-account",
   },
 };
 
@@ -1625,17 +1630,69 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
     if (page.templateName === "map-anather.html") {
       expect(
         controlButtons.some((button) =>
-          ["詳しい検索", "リロード", "印刷"].includes(button.textContent || ""),
+          ["詳しい検索", "リロード"].includes(button.textContent || ""),
         ),
       ).toBe(false);
-      const printKey = new dom.window.KeyboardEvent("keydown", {
+    }
+  });
+
+  it.each(
+    pages.filter(({ templateName }) =>
+      ["map-anather.html", "temporary-map.html", "temporary-map-mobile.html"].includes(
+        templateName,
+      ),
+    ),
+  )("$fileName の印刷ボタンとCtrl+PはPC専用", (page) => {
+    const dom = smokeLoadPage(page);
+    const { document, HTMLDialogElement, location } = dom.window;
+    vi.stubGlobal("location", location);
+    // jsdomにはモーダルを開閉するAPIがないため、open属性の切り替えを補う。
+    Object.defineProperties(HTMLDialogElement.prototype, {
+      showModal: {
+        value(this: HTMLDialogElement) {
+          this.setAttribute("open", "");
+        },
+      },
+      close: {
+        value(this: HTMLDialogElement) {
+          this.removeAttribute("open");
+        },
+      },
+    });
+    const printButtons = [
+      ...document.querySelectorAll<HTMLButtonElement>(".leaflet-control button"),
+    ].filter((button) => button.textContent === "地図を印刷");
+    const preview = () => document.querySelector<HTMLDialogElement>("dialog.map-print-host[open]");
+    const pressShortcut = () => {
+      const event = new dom.window.KeyboardEvent("keydown", {
         key: "p",
         ctrlKey: true,
         cancelable: true,
       });
-      dom.window.dispatchEvent(printKey);
-      expect(printKey.defaultPrevented).toBe(false);
+      dom.window.dispatchEvent(event);
+      return event;
+    };
+    if (page.templateName === "temporary-map-mobile.html") {
+      expect(printButtons).toHaveLength(0);
+      expect(pressShortcut().defaultPrevented).toBe(false);
+      expect(preview()).toBeNull();
+      return;
     }
+
+    const expectAndClosePreview = () => {
+      const dialog = preview();
+      expect(dialog, document.querySelector("dialog[open]")?.textContent ?? "").not.toBeNull();
+      expect(dialog!.querySelector("iframe")?.src).toBe(
+        `${location.origin}/assets/read-only-map-print.html`,
+      );
+      dialog!.querySelector<HTMLButtonElement>("header button")!.click();
+      expect(preview()).toBeNull();
+    };
+    expect(printButtons).toHaveLength(1);
+    printButtons[0]!.click();
+    expectAndClosePreview();
+    expect(pressShortcut().defaultPrevented).toBe(true);
+    expectAndClosePreview();
   });
 
   it.each(pages)("$fileNameの表示切替項目が所定の順序で並ぶ", (page) => {
@@ -3044,31 +3101,39 @@ describe.each(["map.html", "map-mobile.html"])("描画入力・移動と表示�
   });
 });
 
-describe.each(["map.html", "map-mobile.html"])("親画面のACKと保存委譲: %s", (templateName) => {
-  const open = () => {
-    const parent = { postMessage: vi.fn() };
-    const page = pages.find((p) => p.templateName === templateName)!;
-    const dom = smokeLoadPage(
-      { ...page, globals: structuredClone(page.globals) },
-      { parentWindow: parent },
+function openEditorForParentMessages(templateName: string, globals: SmokePage["globals"] = {}) {
+  const parent = { postMessage: vi.fn() };
+  const page = pages.find((p) => p.templateName === templateName)!;
+  const dom = smokeLoadPage(
+    { ...page, globals: structuredClone({ ...page.globals, ...globals }) },
+    { parentWindow: parent },
+  );
+  const evaluate = (source: string): any =>
+    new Script(source).runInContext(dom.getInternalVMContext());
+  const send = (data: Record<string, unknown>) =>
+    dom.window.dispatchEvent(
+      new dom.window.MessageEvent("message", {
+        origin: dom.window.location.origin,
+        source: parent as any,
+        data,
+      }),
     );
-    const evaluate = (source: string): any =>
-      new Script(source).runInContext(dom.getInternalVMContext());
-    const send = (data: Record<string, unknown>) =>
-      dom.window.dispatchEvent(
-        new dom.window.MessageEvent("message", {
-          origin: dom.window.location.origin,
-          source: parent as any,
-          data,
-        }),
-      );
-    parent.postMessage.mockClear();
-    return { dom, parent, evaluate, send };
-  };
+  parent.postMessage.mockClear();
+  return { dom, parent, evaluate, send };
+}
+
+describe.each(["map.html", "map-mobile.html"])("親画面のACKと保存委譲: %s", (templateName) => {
+  const open = () => openEditorForParentMessages(templateName);
   it("絞り込み要求は現在の地図への反映後にだけ完了を返す", () => {
     const { parent, evaluate, send } = open();
     const runtimeId = evaluate("editorRuntimeId");
-    send({ type: "mapObjectFilter", requestId: "old", runtimeId: "old", markerIds: [], shapeIds: [] });
+    send({
+      type: "mapObjectFilter",
+      requestId: "old",
+      runtimeId: "old",
+      markerIds: [],
+      shapeIds: [],
+    });
     expect(parent.postMessage).not.toHaveBeenCalled();
     send({ type: "mapObjectFilter", requestId: "filter", runtimeId, markerIds: [], shapeIds: [] });
     expect(evaluate("externalMarkerFilterIds")).toEqual([]);
@@ -3077,7 +3142,13 @@ describe.each(["map.html", "map-mobile.html"])("親画面のACKと保存委譲: 
       expect.any(String),
     );
     evaluate('applyMapObjectFilter = () => { throw Error("failed"); }');
-    send({ type: "mapObjectFilter", requestId: "failed", runtimeId, markerIds: null, shapeIds: null });
+    send({
+      type: "mapObjectFilter",
+      requestId: "failed",
+      runtimeId,
+      markerIds: null,
+      shapeIds: null,
+    });
     expect(parent.postMessage).toHaveBeenLastCalledWith(
       { type: "mapObjectFilterResult", requestId: "failed", runtimeId, success: false },
       expect.any(String),
@@ -3188,6 +3259,155 @@ describe.each(["map.html", "map-mobile.html"])("親画面のACKと保存委譲: 
       expect(evaluate("pendingParentWrites.size")).toBe(0);
     },
   );
+});
+
+const visibleEditorLegend = (dom: JSDOM) =>
+  dom.window.document.querySelector<HTMLElement>(".map-color-legend-live:not([hidden])");
+
+const waitForEditorLegendLabels = (dom: JSDOM, expected: string[]) =>
+  vi.waitFor(() => {
+    const entries = visibleEditorLegend(dom)?.querySelectorAll("li:not([hidden])") ?? [];
+    expect(Array.from(entries, (entry) => entry.textContent)).toEqual(expected);
+  });
+
+describe("通常編集地図の色分け凡例", () => {
+  it.each(["map.html", "map-mobile.html"] as const)(
+    "%s は色分けを適用し、PCでだけ凡例を表示する",
+    async (templateName) => {
+      const { dom, parent, evaluate, send } = openEditorForParentMessages(templateName);
+      const runtimeId = evaluate("editorRuntimeId");
+      const desktop = templateName === "map.html";
+      const coloring = {
+        version: 1,
+        rules: [{ id: "r", label: "対象地点", color: "#1248af" }],
+        targets: { "marker:marker-1": "r" },
+      };
+      expect(dom.window.document.querySelector(".map-color-legend-live")).toBeNull();
+      const apply = (requestId: string, value: unknown, success: boolean) => {
+        send({ type: "mapColoringApply", runtimeId, requestId, coloring: value });
+        expect(parent.postMessage).toHaveBeenLastCalledWith(
+          { type: "mapColoringApplyResult", runtimeId, requestId, success },
+          dom.window.location.origin,
+        );
+      };
+      apply("apply", coloring, true);
+      expect(evaluate("editorColoring.getState()")).toEqual(coloring);
+      await waitForEditorLegendLabels(dom, desktop ? ["対象地点"] : []);
+      if (!desktop) expect(dom.window.document.querySelector(".map-color-legend-live")).toBeNull();
+      const legend = visibleEditorLegend(dom);
+      apply("invalid", { ...coloring, targets: { "marker:存在しない対象": "r" } }, false);
+      expect(evaluate("editorColoring.getState()")).toEqual(coloring);
+      await waitForEditorLegendLabels(dom, desktop ? ["対象地点"] : []);
+      expect(visibleEditorLegend(dom)).toBe(legend);
+      apply("clear", null, true);
+      expect(evaluate("editorColoring.getState()")).toBeNull();
+      await waitForEditorLegendLabels(dom, []);
+    },
+  );
+
+  it("絞り込み・表示切替・削除に追従し、画面外の有効な図形を分類に含める", async () => {
+    const farShape = {
+      ...shapeRecord,
+      id: "shape-far",
+      geojson: {
+        ...shapeRecord.geojson,
+        geometry: {
+          type: "Polygon",
+          coordinates: [
+            [
+              [130, 30],
+              [130.1, 30],
+              [130.1, 30.1],
+              [130, 30],
+            ],
+          ],
+        },
+      },
+    };
+    const { dom, evaluate, send } = openEditorForParentMessages("map.html", {
+      shapesFromAxum: [farShape],
+      zoom: 14,
+    });
+    const runtimeId = evaluate("editorRuntimeId");
+    expect(evaluate('shapeRenderManager.isRenderable("shape-far")')).toBe(true);
+    expect(evaluate('shapeRenderManager.getLayer("shape-far")')).toBeNull();
+    send({
+      type: "mapColoringApply",
+      requestId: "apply",
+      runtimeId,
+      coloring: {
+        version: 1,
+        rules: [
+          { id: "m", label: "地点の分類", color: "#1248af" },
+          { id: "s", label: "区域の分類", color: "#ba4012" },
+        ],
+        targets: { "marker:marker-1": "m", "shape:shape-far": "s" },
+      },
+    });
+    await waitForEditorLegendLabels(dom, ["地点の分類", "区域の分類"]);
+    const panel = visibleEditorLegend(dom)!;
+    const doc = dom.window.document;
+    doc.getElementById("draw-toggle-btn")!.click();
+    doc.querySelector<HTMLButtonElement>('[data-draw-mode="polygon"]')!.click();
+    expect(evaluate("activeDrawMode")).toBe("polygon");
+    const clickAtPoint = (element: Element) =>
+      element.dispatchEvent(
+        new dom.window.MouseEvent("click", { bubbles: true, clientX: 64, clientY: 64 }),
+      );
+    clickAtPoint(panel.querySelector(".map-color-legend-handle")!);
+    expect(evaluate("drawPoints.length")).toBe(0);
+    clickAtPoint(doc.getElementById("map")!);
+    expect(evaluate("drawPoints.length")).toBe(1);
+    doc.getElementById("draw-cancel-btn")!.click();
+    const toggle = (name: string) => {
+      const label = Array.from(doc.querySelectorAll(".leaflet-control-layers-overlays label")).find(
+        (item) => item.textContent?.trim() === name,
+      );
+      label!.querySelector<HTMLInputElement>("input")!.click();
+    };
+    send({
+      type: "mapObjectFilter",
+      requestId: "filter",
+      runtimeId,
+      markerIds: [],
+      shapeIds: ["shape-far"],
+    });
+    await waitForEditorLegendLabels(dom, ["区域の分類"]);
+    // フォーカスは絞り込み対象外でもマーカーをクラスタに一時追加する。
+    send({ type: "focus", objectType: "marker", id: "marker-1", lat: 35.68, lng: 139.76 });
+    expect(evaluate('markersClusterGroup.hasLayer(markers["marker-marker-1"])')).toBe(true);
+    toggle("図形");
+    await waitForEditorLegendLabels(dom, []);
+    toggle("図形");
+    await waitForEditorLegendLabels(dom, ["区域の分類"]);
+    expect(visibleEditorLegend(dom)).toBe(panel);
+    send({
+      type: "mapObjectFilter",
+      requestId: "unfilter",
+      runtimeId,
+      markerIds: null,
+      shapeIds: null,
+    });
+    await waitForEditorLegendLabels(dom, ["地点の分類", "区域の分類"]);
+    toggle("マーカー");
+    await waitForEditorLegendLabels(dom, ["区域の分類"]);
+    toggle("マーカー");
+    await waitForEditorLegendLabels(dom, ["地点の分類", "区域の分類"]);
+    send({
+      type: "mapObjectDelete",
+      requestId: "delete-shape",
+      objectType: "shape",
+      id: "shape-far",
+    });
+    await waitForEditorLegendLabels(dom, ["地点の分類"]);
+    send({
+      type: "mapObjectDelete",
+      requestId: "delete-marker",
+      objectType: "marker",
+      id: "marker-1",
+    });
+    await waitForEditorLegendLabels(dom, []);
+  });
 });
 
 describe("読取地図の多数レイヤと本文取得", () => {

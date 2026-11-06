@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref, computed, watch, onMounted, onUnmounted } from "vue";
+import { nextTick, ref, shallowRef, computed, watch, onMounted, onUnmounted } from "vue";
 import { AxiosError } from "axios";
 import { useRouter } from "vue-router";
 import type {
@@ -56,6 +56,7 @@ import OnetimeSettingModal from "@/components/share/OnetimeSettingModal.vue";
 import OnetimeUrlModal from "@/components/share/OnetimeUrlModal.vue";
 import JsonImportModal from "@/components/json/JsonImportModal.vue";
 import { fetchJsonExport } from "@/utils/json-transfer";
+import type { ShareMapSnapshot } from "../../../template-scripts/src/map/common/share-snapshot";
 
 // --- アプリケーションの初期化 ---
 const appInitStore = useApplicationInitStore();
@@ -242,6 +243,8 @@ const reloadMap = async (
     accountId: authStore.accountId,
     search: displayedQuery.query1 || displayedQuery.query2 ? mapobjStore.search : null,
     analysis: getAnalysisState(),
+    markerGeneration: mapobjStore.recordCache.generation,
+    shapeGeneration: shapeStore.recordCache.generation,
     attributeSearch: mapobjStore.attributeSearch,
     attributeMarkerIds: mapobjStore.attributeMarkerIds,
     attributeShapeIds: mapobjStore.attributeShapeIds,
@@ -263,8 +266,14 @@ const reloadMap = async (
     previousDisplay.shapeLayer,
     previousDisplay.shapeMaster,
   );
-  const restoreDisplay = () => {
-    if (previousDisplay.accountId !== authStore.accountId) return;
+  const restoreDisplay = async () => {
+    if (
+      !isCurrent() ||
+      previousDisplay.accountId !== authStore.accountId ||
+      previousDisplay.markerGeneration !== mapobjStore.recordCache.generation ||
+      previousDisplay.shapeGeneration !== shapeStore.recordCache.generation
+    )
+      return;
     mapobjStore.attributeSearch = previousDisplay.attributeSearch;
     mapobjStore.attributeMarkerIds = previousDisplay.attributeMarkerIds;
     mapobjStore.attributeShapeIds = previousDisplay.attributeShapeIds;
@@ -277,7 +286,8 @@ const reloadMap = async (
     );
     mapObjectQueryFormData.value = previousDisplay.query;
     filterMapObjects();
-    restoreAnalysisState(previousDisplay.analysis);
+    await restoreAnalysisState(previousDisplay.analysis);
+    if (!isCurrent()) return;
     refreshAttributeSearch();
   };
   if (absolute) showProgressModal.value = true;
@@ -302,7 +312,7 @@ const reloadMap = async (
       ]);
       if (!isCurrent()) return false;
       if (!markersLoaded || !shapesLoaded) {
-        restoreDisplay();
+        await restoreDisplay();
         isMapFrameLoading.value = false;
         return false;
       }
@@ -344,7 +354,7 @@ const reloadMap = async (
       if (!synchronized || revision === mapDataRevision) break;
     } while (isCurrent());
     if (!synchronized) {
-      restoreDisplay();
+      await restoreDisplay();
       isMapFrameLoading.value = false;
     } else {
       initializedAccountId = String(accountId);
@@ -358,6 +368,7 @@ const reloadMap = async (
     isMapFrameLoading.value = false;
     if (apiClient.isAxiosError(error) && (error as AxiosError).response?.status === 401)
       authStore.logout();
+    else await restoreDisplay();
     throw error;
   } finally {
     releaseMarkers();
@@ -619,6 +630,7 @@ const {
   },
   (text) => showMessage(text),
   async (coloring) => (await mapIframeRef.value?.setColoring?.(coloring)) ?? false,
+  async () => (await mapIframeRef.value?.discardColoring()) ?? false,
 );
 watch(activeLayer, () => closeAdvancedSearch());
 watch(() => mapobjStore.attributeRevision, filterMapObjects);
@@ -662,6 +674,8 @@ const isQRCodeGenModal = ref(false);
 const isOnetimeSettingModal = ref(false);
 const isOnetimeUrlModal = ref(false);
 const isOpenFullScreenMapModal = ref(false);
+const fullScreenMapRef = ref<InstanceType<typeof FullScreenMapModal> | null>(null);
+const shareSnapshot = shallowRef<ShareMapSnapshot | null>(null);
 const isOpenPrintMapModal = ref(false);
 const isLayerListModal = ref(false);
 const isLayerRenameModal = ref(false);
@@ -836,9 +850,29 @@ function selectTextOrClipboardCopy(elementId: string) {
 // --- 一時 URL ---
 const onetimeSettingRef = ref<InstanceType<typeof OnetimeSettingModal> | null>(null);
 const openOnetimeSetting = (): void => {
+  if (isOnetimeSettingModal.value || isOnetimeUrlModal.value) return;
+  shareSnapshot.value = null;
   onetimeSettingRef.value?.initRows();
   onetimeSettingRef.value?.fetchCurrentSharedUrl();
   isOnetimeSettingModal.value = true;
+};
+
+const openCurrentMapSharing = (snapshot: ShareMapSnapshot): void => {
+  if (
+    !isOpenFullScreenMapModal.value ||
+    isOnetimeSettingModal.value ||
+    isOnetimeUrlModal.value ||
+    isMessageModal.value
+  )
+    return;
+  shareSnapshot.value = snapshot;
+  onetimeSettingRef.value?.fetchCurrentSharedUrl();
+  isOnetimeSettingModal.value = true;
+};
+
+const closeOnetimeSetting = (): void => {
+  isOnetimeSettingModal.value = false;
+  shareSnapshot.value = null;
 };
 
 const onOnetimeGenerated = (
@@ -972,9 +1006,22 @@ watch(
 const mapToolbarRef = ref<InstanceType<typeof MapToolbar> | null>(null);
 const mapObjectQueryFormData = ref<QueryForm>({ query1: "", query2: "" });
 
+const openMapPrint = (): void => {
+  if (isOpenFullScreenMapModal.value) {
+    if (!isOnetimeSettingModal.value && !isOnetimeUrlModal.value && !isMessageModal.value)
+      fullScreenMapRef.value?.openPrint();
+    return;
+  }
+  isOpenPrintMapModal.value = true;
+};
+
 // --- キーボードショートカット ---
 const handleKeyDown = (event: KeyboardEvent) => {
   if (event.defaultPrevented || document.querySelector(".answer-map-overlay, dialog[open]")) return;
+  if (shareSnapshot.value && (isOnetimeSettingModal.value || isOnetimeUrlModal.value)) {
+    if (event.key === "Escape" && isMessageModal.value) closeMessage();
+    return;
+  }
   if (isOpenPrintMapModal.value) return;
   if (
     (event.ctrlKey || event.metaKey) &&
@@ -984,7 +1031,7 @@ const handleKeyDown = (event: KeyboardEvent) => {
     event.key.toLowerCase() === "p"
   ) {
     event.preventDefault();
-    if (!event.repeat) isOpenPrintMapModal.value = true;
+    if (!event.repeat) openMapPrint();
     return;
   }
   if (event.ctrlKey && event.key === "1") {
@@ -1202,7 +1249,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
     @qrCode="isQRCodeGenModal = true"
     @onetimeSetting="openOnetimeSetting()"
     @fullScreenMap="isOpenFullScreenMapModal = true"
-    @printMap="isOpenPrintMapModal = true"
+    @printMap="openMapPrint"
     @exportJson="exportJsonData"
     @importJson="showJsonUploadModal = true"
     @reloadMap="(url, absolute) => reloadMap(url, absolute, false, true)"
@@ -1229,7 +1276,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
           @mapDataRequested="onMapDataRequested"
           @mapObjectWriteRequested="onMapObjectWriteRequested"
           @mapLoaded="onMapLoaded"
-          @printMap="isOpenPrintMapModal = true"
+          @printMap="openMapPrint"
           @loginRedirect="loginRedirect()"
           @previewImage="openReadOnlyPreview"
           @userLocation="liveLocationSharingRef?.receivePosition($event)"
@@ -1369,8 +1416,10 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
   />
 
   <FullScreenMapModal
+    ref="fullScreenMapRef"
     :isOpen="isOpenFullScreenMapModal"
     @close="isOpenFullScreenMapModal = false"
+    @share="openCurrentMapSharing"
   />
 
   <QRCodeGeneratorModal
@@ -1383,7 +1432,9 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
     ref="onetimeSettingRef"
     :isOpen="isOnetimeSettingModal"
     :layerList="layerList"
-    @close="isOnetimeSettingModal = false"
+    :snapshot="shareSnapshot"
+    :zIndex="shareSnapshot ? 20 : 3"
+    @close="closeOnetimeSetting"
     @generated="onOnetimeGenerated"
     @message="showMessage"
   />
@@ -1394,6 +1445,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
     :uuid="oneTimeUuid"
     :isHttps="isHttpsProtocol"
     :expiration="oneTimeExpiration"
+    :zIndex="shareSnapshot ? 21 : 3"
     @close="isOnetimeUrlModal = false"
     @invalidated="handleOnetimeInvalidated"
     @message="showMessage"

@@ -65,6 +65,7 @@ export interface EditableMapBootstrap extends MapBootstrapBase {
 }
 
 export interface AnotherMapBootstrap extends MapBootstrapBase {
+  shareParentOrigins?: string[] | false;
   answerPreview?:
     | {
         answerCount: number;
@@ -85,6 +86,7 @@ export interface AnotherMapBootstrap extends MapBootstrapBase {
 }
 
 export interface TemporaryMapBootstrap extends MapBootstrapBase {
+  shareSnapshot?: import("./common/share-snapshot").StoredShareMapSnapshot | null | false;
   initialView: InitialMapView;
   isChecked: boolean;
   isOverlayTile?: boolean;

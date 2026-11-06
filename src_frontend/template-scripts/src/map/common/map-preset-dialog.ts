@@ -13,6 +13,7 @@ import { createProgressDialog, awaitWithAbort } from "./progress-spinner";
 export function createMapPresetDialogs(
   transport: AttributeTransport,
   restore: (preset: SavedMapPreset, signal: AbortSignal) => Promise<void>,
+  options: { filterOnly?: boolean } = {},
 ) {
   const noticeDialog = createMapMessageDialog(() => syncBusy());
   const dialog = node("dialog"),
@@ -211,6 +212,13 @@ export function createMapPresetDialogs(
   };
   function renderList() {
     dialog.replaceChildren(node("h2", "保存した検索条件"));
+    if (options.filterOnly)
+      dialog.append(
+        node(
+          "p",
+          "この画面では絞り込み条件のみ呼び出せます。色分け条件は色分けに対応した画面で呼び出してください。",
+        ),
+      );
     const toolbar = node("div");
     toolbar.className = "preset-toolbar";
     toolbar.append(
@@ -223,6 +231,10 @@ export function createMapPresetDialogs(
       renderMapPresetsTable(table, {
         items,
         disabled: false,
+        restoreDisabledReason: (preset) =>
+          options.filterOnly && preset.kind === "coloring"
+            ? "この画面では色分け条件を呼び出せません"
+            : undefined,
         restore: (preset) =>
           void request(
             async (signal) => {

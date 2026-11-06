@@ -9,12 +9,14 @@ const props = defineProps<{
   layerList: Map<string, LayersData>;
   isMasterLayer: boolean;
   isHttpsProtocol: boolean;
+  attributeSearchActive?: boolean;
 }>();
 
 const emit = defineEmits<{
   "update:activeLayer": [value: string];
   openFunction: [];
   openToolbar: [];
+  advancedSearch: [];
   openImageUpload: [];
   openImageList: [];
   openQRCode: [];
@@ -49,6 +51,16 @@ const localActiveLayer = computed({
         <button @click="emit('openToolbar')" id="toolbar-open-elm">
           <img :src="`${assetsUrl}tool_24.png`" class="btn-img" alt="tool_24.png" />
         </button>
+        <button
+          type="button"
+          id="advanced-search-elm"
+          :title="attributeSearchActive ? '詳しい検索と色分け（適用中）' : '詳しい検索と色分け'"
+          aria-label="詳しい検索と色分け"
+          :aria-pressed="!!attributeSearchActive"
+          @click="emit('advancedSearch')"
+        >
+          <img :src="`${assetsUrl}search_fill24.png`" class="btn-img" alt="" />
+        </button>
       </div>
     </div>
   </div>
@@ -74,6 +86,7 @@ const localActiveLayer = computed({
   position: fixed;
   bottom: 6%;
   left: 3%;
+  max-width: 94%;
   display: flex;
   margin-bottom: 10px;
   justify-content: space-around;
@@ -84,6 +97,8 @@ const localActiveLayer = computed({
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 180px;
+  min-width: 0;
+  flex-shrink: 1;
   border: #b8b8b8 solid 1px;
 }
 
@@ -108,8 +123,10 @@ const localActiveLayer = computed({
 }
 
 #function-open-elm,
-#toolbar-open-elm {
+#toolbar-open-elm,
+#advanced-search-elm {
   width: 40px;
+  flex-shrink: 0;
   height: 40px;
   font-size: 16px;
   background: white;
@@ -123,6 +140,11 @@ const localActiveLayer = computed({
   margin-right: 10px;
   margin-left: 3px;
   text-align: center;
+}
+
+#advanced-search-elm[aria-pressed="true"] {
+  background: #dceeff;
+  border-color: #2672b8;
 }
 
 .btn-img {

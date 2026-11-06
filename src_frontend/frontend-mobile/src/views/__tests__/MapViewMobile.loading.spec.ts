@@ -70,6 +70,8 @@ const upsertFrame = vi.fn();
 const deleteFrame = vi.fn();
 const focusFrame = vi.fn();
 const filterFrame = vi.fn();
+const filterFrameAndWait = vi.fn();
+const colorFrame = vi.fn();
 const tileFrame = vi.fn();
 const reloadFrame = vi.fn(() => true);
 const frame = defineComponent({
@@ -90,6 +92,9 @@ const frame = defineComponent({
       focusObject: focusFrame,
       updateTileOverlays: tileFrame,
       filterMapObjects: filterFrame,
+      filterMapObjectsAndWait: filterFrameAndWait,
+      setColoring: colorFrame,
+      discardColoring: () => colorFrame(null),
       reloadMapFrame: reloadFrame,
       updateMapObject: updateFrame,
     });
@@ -116,6 +121,87 @@ const changeLayer = async (id: string) => {
   await flushPromises();
 };
 
+const clickIn = async (root: Element, text: string) => {
+  [...root.querySelectorAll<HTMLButtonElement>("button")]
+    .find((b) => b.textContent === text)!
+    .click();
+  await flushPromises();
+};
+async function restoreSavedColoring() {
+  Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+    configurable: true,
+    value() {
+      this.open = true;
+    },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, "close", {
+    configurable: true,
+    value() {
+      this.open = false;
+    },
+  });
+  const fields = [{ id: "n", label: "年数", field_type: "number", choices: [] }];
+  const preset = {
+    id: "saved-colors",
+    kind: "coloring",
+    schema_version: 1,
+    name: "年数の分類",
+    definition: {
+      common_form_id: "form",
+      rules: [
+        {
+          id: "r",
+          label: "50年以上",
+          color: "#ff0000",
+          conditions: [{ field_id: "n", field_type: "number", op: "gte", value: "50" }],
+        },
+      ],
+    },
+    display: { form_label: "設備", fields },
+    create_at: "2026-11-05T00:00:00Z",
+  };
+  const get = api.get.getMockImplementation()!;
+  api.get.mockImplementation((url: string) =>
+    url === "/common-forms"
+      ? Promise.resolve({
+          data: [
+            {
+              id: "form",
+              version: 1,
+              form_title: "設備",
+              form_schema: { fields: [{ id: "n", type: "number", label: "年数" }] },
+            },
+          ],
+        })
+      : url.startsWith("/form-answers/map-presets")
+        ? Promise.resolve({ data: { items: [preset], total: 1 } })
+        : get(url),
+  );
+  api.post.mockResolvedValue({
+    data: {
+      fields,
+      forms: [{ id: "form", label: "設備" }],
+      targets: ["shape:a"],
+      target_count: 1,
+      answer_count: 1,
+      as_of: "2026-11-05T00:00:00Z",
+    },
+  });
+  localStorage.setItem(LAST_ACTIVE_LAYER_STORAGE_KEY, "a");
+  mountView();
+  await flushPromises();
+  wrapper!.getComponent({ name: "MapToolbar" }).vm.$emit("advancedSearch");
+  await flushPromises();
+  const dialog = document.querySelector<HTMLDialogElement>(".advanced-map-search")!;
+  await clickIn(dialog, "保存した検索条件");
+  const list = document.querySelector(".map-preset-dialog.form-settings")!;
+  expect(list.textContent).not.toContain("絞り込み条件のみ");
+  await clickIn(list, "呼び出し");
+  await clickIn(document.querySelector('[aria-label="呼び出し完了"]')!, "閉じる");
+  await clickIn(list, "閉じる");
+  return { dialog, preset };
+}
+
 beforeEach(() => {
   initializeFrame.mockReset().mockResolvedValue(true);
   upsertFrame.mockReset().mockResolvedValue(true);
@@ -124,6 +210,8 @@ beforeEach(() => {
   deleteFrame.mockReset().mockResolvedValue(true);
   focusFrame.mockReset();
   filterFrame.mockReset();
+  filterFrameAndWait.mockReset().mockResolvedValue(true);
+  colorFrame.mockReset().mockResolvedValue(true);
   tileFrame.mockReset().mockResolvedValue(true);
   reloadFrame.mockReset().mockReturnValue(true);
   setActivePinia(createPinia());
@@ -145,6 +233,106 @@ beforeEach(() => {
 afterEach(() => {
   wrapper?.unmount();
   wrapper = undefined;
+});
+
+it("保存した色分けを下書きに呼び出し、地図反映の成功後に両方の検索ボタンを適用中にする", async () => {
+  const { dialog } = await restoreSavedColoring();
+  const toolbar = wrapper!.getComponent({ name: "MapToolbar" });
+  expect(dialog.getAttribute("aria-label")).toBe("詳しい検索と色分け");
+  expect(colorFrame).not.toHaveBeenCalled();
+  expect(toolbar.props("attributeSearchActive")).toBe(false);
+  colorFrame.mockResolvedValueOnce(false);
+  await clickIn(dialog, "色分け実行");
+  expect(dialog.querySelector(".color-error")?.textContent).toContain("反映を確認できません");
+  expect(toolbar.props("attributeSearchActive")).toBe(false);
+  await clickIn(dialog, "色分け実行");
+  expect(colorFrame).toHaveBeenLastCalledWith(
+    expect.objectContaining({ targets: { "shape:a": "r" } }),
+  );
+  expect(toolbar.props("attributeSearchActive")).toBe(true);
+  expect(wrapper!.getComponent({ name: "MapObjectTable" }).props("attributeSearchActive")).toBe(
+    true,
+  );
+  expect(useMapObjectStore().attributeSearch).toBeNull();
+  await clickIn(document.querySelector('[aria-label="色分け完了"]')!, "閉じる");
+  await changeLayer("b");
+  expect(dialog.open).toBe(false);
+  expect(colorFrame).toHaveBeenLastCalledWith(null);
+  expect(toolbar.props("attributeSearchActive")).toBe(false);
+});
+
+it.each([false, true])(
+  "読み込み失敗で元のレイヤと色分けを復元する（レイヤ切替=%s）",
+  async (switchLayer) => {
+    const { dialog } = await restoreSavedColoring();
+    await clickIn(dialog, "色分け実行");
+    await clickIn(document.querySelector('[aria-label="色分け完了"]')!, "閉じる");
+    const previous = colorFrame.mock.calls.at(-1)![0];
+    api.post.mockClear();
+    getShapes = async () => {
+      throw Error("offline");
+    };
+    frameComponent().vm.$emit("mapReloadRequested", switchLayer ? "b" : undefined);
+    await flushPromises();
+    expect(colorFrame).toHaveBeenLastCalledWith(previous);
+    expect(wrapper!.getComponent({ name: "MapToolbar" }).props("attributeSearchActive")).toBe(true);
+    expect(wrapper!.getComponent({ name: "MapToolbar" }).props("activeLayer")).toBe("a");
+    expect(api.post.mock.calls.length).toBeGreaterThan(0);
+    for (const [, request] of api.post.mock.calls) expect(request.scope.layer_ids).toEqual(["a"]);
+  },
+);
+
+it("地図トップと一覧から同じ詳しい検索を開き、適用状態を共有してレイヤ切替時に閉じる", async () => {
+  Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+    configurable: true,
+    value() {
+      this.setAttribute("open", "");
+    },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, "close", {
+    configurable: true,
+    value() {
+      this.removeAttribute("open");
+    },
+  });
+  const get = api.get.getMockImplementation()!;
+  api.get.mockImplementation((url: string) =>
+    url === "/common-forms"
+      ? Promise.resolve({
+          data: [{ id: "form", version: 1, form_title: "設備", form_schema: { fields: [] } }],
+        })
+      : get(url),
+  );
+  mountView();
+  await flushPromises();
+  const toolbar = wrapper!.getComponent({ name: "MapToolbar" });
+  const table = wrapper!.getComponent({ name: "MapObjectTable" });
+  toolbar.vm.$emit("advancedSearch");
+  await flushPromises();
+  const dialog = document.querySelector<HTMLDialogElement>(".advanced-map-search")!;
+  expect(dialog.open).toBe(true);
+  expect(dialog.textContent).toContain("保存した検索条件");
+  useMapObjectStore().setAttributeSearch(
+    { common_form_id: "form", definition_version: 1, layer_ids: null, conditions: [] },
+    {
+      common_form_id: "form",
+      definition_version: 1,
+      as_of: "2026-11-05T00:00:00Z",
+      marker_ids: [],
+      shape_ids: [],
+      target_count: 0,
+    },
+  );
+  await flushPromises();
+  expect(toolbar.props("attributeSearchActive")).toBe(true);
+  expect(table.props("attributeSearchActive")).toBe(true);
+  table.vm.$emit("advancedSearch");
+  await flushPromises();
+  expect(document.querySelectorAll(".advanced-map-search")).toHaveLength(1);
+  expect(dialog.open).toBe(true);
+  await changeLayer("b");
+  expect(dialog.open).toBe(false);
+  expect(toolbar.props("attributeSearchActive")).toBe(false);
 });
 
 it.each([false, true])(
@@ -1611,4 +1799,64 @@ describe("地図再生成中の保存と失敗時の再同期", () => {
     expect(api.request).toHaveBeenCalledTimes(1);
     expect(frameComponent().props("srcUrl")).toBe("");
   });
+});
+
+it("レイヤ切替の認証確認で通信失敗しても元の色分けを維持する", async () => {
+  const { dialog } = await restoreSavedColoring();
+  await clickIn(dialog, "色分け実行");
+  await clickIn(document.querySelector('[aria-label="色分け完了"]')!, "閉じる");
+  const get = api.get.getMockImplementation()!;
+  api.get.mockImplementation((url: string, ...args: unknown[]) =>
+    url.endsWith("/account/auth") ? Promise.reject(Error("offline auth check")) : get(url, ...args),
+  );
+  await changeLayer("b");
+  expect(wrapper!.getComponent({ name: "MapToolbar" }).props("activeLayer")).toBe("a");
+  expect(wrapper!.getComponent({ name: "MapToolbar" }).props("attributeSearchActive")).toBe(true);
+});
+
+it("検索の地図反映中にアカウントが変わっても旧アカウントの条件を復元しない", async () => {
+  await restoreSavedColoring();
+  const markers = useMapObjectStore();
+  const criteria = {
+    common_form_id: "form",
+    definition_version: 1,
+    layer_ids: ["a"],
+    conditions: [],
+    use_map_filter: true,
+  };
+  markers.setAttributeSearch(criteria, {
+    common_form_id: "form",
+    definition_version: 1,
+    as_of: "2026-11-05T00:00:00Z",
+    marker_ids: [],
+    shape_ids: ["a"],
+    target_count: 1,
+  });
+  wrapper!.getComponent({ name: "MapToolbar" }).vm.$emit("advancedSearch");
+  await flushPromises();
+  const ack = deferred<boolean>();
+  filterFrameAndWait.mockReturnValueOnce(ack.promise).mockResolvedValue(true);
+  await clickIn(document.querySelector(".advanced-map-search")!, "絞り込み実行");
+  expect(filterFrameAndWait).toHaveBeenCalled();
+  useAuthStore().setAccount("other-account");
+  await flushPromises();
+  expect(markers.attributeSearch).toBeNull();
+  ack.reject(Error("frame removed"));
+  await flushPromises();
+  expect(useAuthStore().accountId).toBe("other-account");
+  expect(markers.attributeSearch).toBeNull();
+});
+
+it("切替先の地図初期化に失敗しても元の地図と色分けを復元する", async () => {
+  const { dialog } = await restoreSavedColoring();
+  await clickIn(dialog, "色分け実行");
+  await clickIn(document.querySelector('[aria-label="色分け完了"]')!, "閉じる");
+  initializeFrame.mockImplementation(async (snapshot) => snapshot.scopeKey !== "b");
+  colorFrame.mockImplementation(
+    async (value) => value === null || !frameComponent().props("srcUrl").includes("layer=b"),
+  );
+  await changeLayer("b");
+  expect(wrapper!.getComponent({ name: "MapToolbar" }).props("activeLayer")).toBe("a");
+  expect(frameComponent().props("srcUrl")).toContain("layer=a");
+  expect(wrapper!.getComponent({ name: "MapToolbar" }).props("attributeSearchActive")).toBe(true);
 });

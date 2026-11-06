@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ja">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>地図の印刷プレビュー</title>
+        <script src="/assets/marked.min.js"></script>
+        <script src="/assets/leaflet.js"></script>
+        <script src="/assets/xss.min.js"></script>
+        <script src="/assets/leaflet.markercluster.js"></script>
+        <link rel="stylesheet" href="/assets/leaflet.css" />
+        <link rel="stylesheet" href="/assets/map-compat.css" />
+        <link rel="stylesheet" href="/assets/map-controls.css" />
+        <link rel="stylesheet" href="/assets/MarkerCluster.css" />
+        <link rel="stylesheet" href="/assets/MarkerCluster.Default.css" />
+        <link rel="stylesheet" href="/assets/github.css" />
+        <link rel="stylesheet" href="/assets/popup-content.css" />
+        <style>
+            .leaflet-container {
+                font-size: 1rem;
+            }
+            .leaflet-popup {
+                min-width: 500px;
+                max-width: 750px;
+            }
+            .md-detail-contents {
+                width: 476px;
+                min-width: 450px;
+                max-width: 700px;
+                max-height: 500px;
+                overflow-y: auto;
+                margin-top: 8%;
+                padding-top: 3%;
+                padding-right: 6%;
+            }
+            .md-detail-contents video {
+                width: 100%;
+                max-width: 100%;
+                height: auto;
+            }
+            .custom-tooltip {
+                font-size: 14px;
+                color: black;
+                background-color: white;
+            }
+            .shape-name-tooltip {
+                background: transparent;
+                border: none;
+                border-radius: 0;
+                box-shadow: none;
+                color: #7f1d1d;
+                cursor: pointer;
+                font-size: 12px;
+                font-weight: bold;
+                pointer-events: auto;
+                padding: 0;
+            }
+            .shape-name-tooltip::before {
+                display: none;
+            }
+            .shape-name-label {
+                display: inline-block;
+                min-width: 1.5em;
+                min-height: 1.2em;
+            }
+            .shape-measure-marker {
+                background: transparent;
+                border: none;
+            }
+            #measurement-selection-toggle-btn:not(.is-hidden) {
+                display: block;
+                width: 100%;
+            }
+            #map .measurement-selection-summary {
+                padding: 10px 14px;
+                background: rgba(255, 255, 255, 0.96);
+                color: #172b4d;
+                border: 2px solid rgba(0, 0, 0, 0.2);
+                border-radius: 6px;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+                font-size: 14px;
+                line-height: 1.6;
+            }
+            .measurement-selection-summary[hidden] {
+                display: none;
+            }
+            .measurement-selection-summary > :first-child {
+                font-weight: bold;
+            }
+            .shape-measure-label {
+                background: rgba(255, 255, 255, 0.96);
+                border: 1px solid #d0d7de;
+                border-radius: 999px;
+                box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+                color: #0f172a;
+                display: inline-block;
+                font-size: 11px;
+                font-weight: 600;
+                line-height: 1.2;
+                padding: 2px 7px;
+                pointer-events: none;
+                transform: translate(-50%, -50%);
+                white-space: nowrap;
+            }
+            .shape-measure-label--summary {
+                border-radius: 10px;
+                box-shadow: 0 3px 10px rgba(15, 23, 42, 0.14);
+                font-size: 12px;
+                padding: 5px 8px;
+                transform: translate(-50%, 8px);
+            }
+            .shape-measure-label--summary-polyline {
+                transform: translate(-50%, 26px);
+            }
+            .shape-measure-label--summary-circle {
+                transform: translate(-50%, 36px);
+            }
+            .shape-measure-label--summary-rectangle {
+                transform: translate(-50%, 24px);
+            }
+            .shape-measure-label-line + .shape-measure-label-line {
+                margin-top: 2px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="folium-map" id="map"></div>
+        <script type="module" src="/assets/template-read-only-map-print.js"></script>
+    </body>
+</html>

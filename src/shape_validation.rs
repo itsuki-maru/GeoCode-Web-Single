@@ -169,13 +169,14 @@ fn validate_polygon(coordinates: &Value, is_rectangle: bool) -> Result<(), AppEr
             return Err(validation_error("ポリゴンの座標リングが閉じていません。"));
         }
 
-        let mut unique_vertices = Vec::new();
+        let required_vertices = if is_rectangle { 4 } else { 3 };
+        let mut unique_vertices = Vec::with_capacity(required_vertices);
         for position in &parsed_positions[..parsed_positions.len() - 1] {
-            if !unique_vertices.contains(position) {
+            // 必要数だけを保持し、大きな共有図形でも頂点数の二乗探索をしない。
+            if unique_vertices.len() < required_vertices && !unique_vertices.contains(position) {
                 unique_vertices.push(*position);
             }
         }
-        let required_vertices = if is_rectangle { 4 } else { 3 };
         if unique_vertices.len() < required_vertices {
             return Err(validation_error(if is_rectangle {
                 "矩形は異なる4頂点が必要です。"
@@ -201,7 +202,19 @@ fn validate_circle(coordinates: &Value, properties: Option<&Value>) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::validate_shape_geojson;
-    use serde_json::json;
+    use serde_json::{Value, json};
+
+    #[test]
+    fn 多数頂点でも終端まで不正な座標を検証する() {
+        let mut ring: Vec<Value> = (0..20_000)
+            .map(|n| json!([139.0 + f64::from(n) / 100_000.0, 35.0]))
+            .collect();
+        ring.push(ring[0].clone());
+        let mut feature = json!({"type":"Feature","properties":{},"geometry":{"type":"Polygon","coordinates":[ring]}});
+        assert!(validate_shape_geojson("polygon", &feature).is_ok());
+        feature["geometry"]["coordinates"][0][19_999] = json!([181, 35]);
+        assert!(validate_shape_geojson("polygon", &feature).is_err());
+    }
 
     #[test]
     fn accepts_valid_supported_shapes() {

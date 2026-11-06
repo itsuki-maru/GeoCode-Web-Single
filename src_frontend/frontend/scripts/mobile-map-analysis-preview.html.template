@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ja">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="__LEAFLET_CSS__" />
+  <style>
+    html,
+    body,
+    #map {
+      height: 100%;
+      margin: 0;
+    }
+    #map {
+      background-color: #e4eef0;
+      background-image:
+        linear-gradient(#c4d5d955 1px, transparent 1px),
+        linear-gradient(90deg, #c4d5d955 1px, transparent 1px);
+      background-size: 48px 48px;
+    }
+    .base-marker {
+      background: #477ba8;
+      border: 2px solid white;
+      border-radius: 50%;
+    }
+  </style>
+  <div id="map"></div>
+  <script type="module">
+    import * as L from "__LEAFLET_JS__";
+    import { installAnswerColoring, isAnswerColoring } from "__ANSWER_COLORING__";
+    const map = L.map("map", { zoomControl: false }).setView([35.0005, 139.001], 16);
+    const runtime = {
+      map,
+      markers: {},
+      shapeLayers: {},
+      visibleMarkerGroup: L.layerGroup().addTo(map),
+    };
+    const controller = installAnswerColoring(runtime, L);
+    const runtimeId = "mobile-analysis-fixture";
+    const origin = location.origin;
+    const send = (data) => parent.postMessage({ runtimeId, ...data }, origin);
+    addEventListener("message", (event) => {
+      if (event.source !== parent || event.origin !== origin) return;
+      const message = event.data;
+      if (message.type === "mapRuntimeProbe")
+        return send({ type: "mapRuntimeReady", requestId: message.requestId });
+      if (message.runtimeId !== runtimeId) return;
+      let success = true;
+      try {
+        if (message.type === "mapObjectsInitialize") {
+          runtime.visibleMarkerGroup.clearLayers();
+          for (const layer of Object.values(runtime.shapeLayers)) map.removeLayer(layer);
+          for (const key of Object.keys(runtime.markers)) delete runtime.markers[key];
+          for (const key of Object.keys(runtime.shapeLayers)) delete runtime.shapeLayers[key];
+          for (const record of Object.values(message.snapshot.markers))
+            runtime.markers["marker-" + record.id] = L.marker([record.latitude, record.longitude], {
+              icon: L.divIcon({ className: "base-marker", iconSize: [20, 20] }),
+            })
+              .bindTooltip(record.marker_name, { permanent: true })
+              .addTo(runtime.visibleMarkerGroup);
+          for (const record of message.snapshot.shapes)
+            runtime.shapeLayers["shape-" + record.id] = L.polyline(
+              record.geojson.geometry.coordinates.map(([x, y]) => [y, x]),
+              { color: "#477ba8", weight: 8 },
+            )
+              .bindTooltip(record.name, { permanent: true })
+              .addTo(map);
+        } else if (message.type === "mapColoringApply") {
+          const allowed = new Set([
+            ...Object.keys(runtime.markers).map((k) => "marker:" + k.slice(7)),
+            ...Object.keys(runtime.shapeLayers).map((k) => "shape:" + k.slice(6)),
+          ]);
+          if (message.coloring !== null && !isAnswerColoring(message.coloring, allowed))
+            throw Error("Invalid coloring");
+          controller.apply(message.coloring);
+        } else if (message.type === "mapObjectFilter") {
+          for (const [key, layer] of Object.entries(runtime.markers)) {
+            if (!message.markerIds || message.markerIds.includes(key.slice(7)))
+              runtime.visibleMarkerGroup.addLayer(layer);
+            else runtime.visibleMarkerGroup.removeLayer(layer);
+          }
+          for (const [key, layer] of Object.entries(runtime.shapeLayers)) {
+            if (!message.shapeIds || message.shapeIds.includes(key.slice(6))) layer.addTo(map);
+            else map.removeLayer(layer);
+          }
+        } else return;
+      } catch {
+        success = false;
+      }
+      send({ type: message.type + "Result", requestId: message.requestId, success });
+    });
+    send({ type: "mapRuntimeReady" });
+  </script>
+</html>

@@ -43,6 +43,7 @@ template-scripts/
 | `tile-*`、`nowcast-*`                             | 重ね合わせタイル、出典、雨雲時刻・更新                                               |
 | `map-ui-visibility`、`visibility-controls`        | UI・表示切り替え                                                                     |
 | `print-state`                                     | 印刷状態と用紙等の共有定義                                                           |
+| `share-snapshot`                                  | 共有データ型・対象削減・検証、親originの許可判定                                      |
 
 ## 3. エントリーとビルド
 
@@ -53,6 +54,7 @@ template-scripts/
 | `map-anather`          | `entries/map-anather.ts`          | `/assets/template-map-anather.js`          |
 | `temporary-map`        | `entries/temporary-map.ts`        | `/assets/template-temporary-map.js`        |
 | `temporary-map-mobile` | `entries/temporary-map-mobile.ts` | `/assets/template-temporary-map-mobile.js` |
+| `read-only-map-print`  | `entries/read-only-map-print.ts`  | `/assets/template-read-only-map-print.js`  |
 | `live-map`             | `entries/live-map.ts`             | `/assets/template-live-map.js`             |
 | `marker-form`          | `entries/marker-form.ts`          | `/assets/template-marker-form.js`          |
 | `image-preview`        | `entries/image-preview.ts`        | `/assets/template-image-preview.js`        |
@@ -84,13 +86,15 @@ Leafletの `L`、marked、filterXSS等はTera HTMLが先に読み込む。npm管
 
 [bootstrap.ts](src/map/bootstrap.ts) はpage・主要コンテナ・初期座標の型等を検証するが、ネストした全レコードの厳密検証ではない。編集HTMLはbootstrapから旧来の変数名へ値を展開し、結合スクリプトが参照する。すべてのentryが同じ検証関数を通ると解釈しない。
 
+全画面地図のbootstrapは、サーバーが許可した共有送信先を `shareParentOrigins` に持つ。一時共有は任意の `shareSnapshot` に保存済み表示状態・背景地図・タイル定義を持ち、指定時は `isStoredShareMapSnapshot` でも検証する。共有対象の `layers`・`markers`・`shapes` は既存のbootstrap項目を使用する。転送型との違いは [共有スナップショット](#全画面地図の共有スナップショット) を参照する。
+
 Tera変数の正本とJSON埋め込み処理は [テンプレート仕様](../../src/templates/SPECIFICATION.md) を参照。
 
 ## 5. ページ別動作
 
 - **編集地図**: マーカー・図形の作成、移動・編集、削除、計測など。fetchによる更新、トークン更新と親画面通知を持つ。
 - **別画面・一時共有**: `initializeReadOnlyMapPage` が地図を組み立て、表示・検索・計測を提供する。編集用の保存操作を共有しない。
-- **印刷**: `map-anather` のentryが `print=1` を検出すると `initializePrintPreview` に分岐する。
+- **印刷**: 通常地図は `map-anather` の `print=1` で `initializePrintPreview` に分岐する。PC全画面地図・一時共有地図は静的HTMLと `read-only-map-print` のentryを使う。
 - **位置共有**: `/live-api/maps/{publicId}/positions` を取得して位置表示を更新する。公開レイヤ・タイルと位置情報を扱う専用entryで、通常地図bootstrapとは別構成。
 - **公開フォーム**: フォーム定義から入力UIを構築し、画像縮小などを行い、指定されたsubmissionPathへFormDataをPOSTする。マーカー・図形で共有する。
 - **画像プレビュー**: Teraが設定した対象を表示し、Panzoom等で操作する。
@@ -154,6 +158,20 @@ PCの [PrintMapModal.vue](../frontend/src/components/map/PrintMapModal.vue) が�
 
 親は送信元windowとoriginを区別し、state応答はrequestIdも検証する。読み込みは15秒でエラー表示になり、再試行できる。詳細状態・用紙は [print-state.ts](src/map/common/print-state.ts)、実装は [print-preview.ts](src/map/print/print-preview.ts)。
 
+PC全画面地図・一時共有地図は「地図を印刷」または `Ctrl+P`／`Command+P` で、地図自身が画面中央に印刷ダイアログを開く。右上の「閉じる」は通常地図と共通のスタイルを使用する。全画面モーダルの親画面でショートカットを受けた場合は `readOnlyPrintOpen` を表示中の地図iframeに送る。地図は送信元windowと許可originを確認する。モバイル用共有地図では専用のボタンとショートカットを登録しない。
+
+地図は開始時点で表示条件を満たす保持済み地物と、`PrintMapState` の表示設定から `ReadOnlyPrintSnapshot` を作る。画面外の地物を含み、非選択グループ・絞り込み・文字列検索・表示切替で除外した地物は転送対象から外す。一時共有地図で使う地物は、共有時に保存され、地図へ配信されたマーカー・図形に限る。スナップショット作成時の絞り込みで除外された地物や、共有対象外の地物は転送データに含まれない。地物が0件の場合も背景地図と表示中のタイルを印刷できる。地物の合計10,000件超、またはUTF-8 JSONが32MiB超の場合は案内して停止する。
+
+初期データを含まない `/assets/read-only-map-print.html` を同一オリジンのiframeに読み込み、送信元window・origin・要求ID・データ形式を確認して印刷データを渡す。再試行でも押下時点の複製を使う。地物やフォーム本文の再取得、共有URLの再アクセス、パスワード再入力は行わない。画像・タイルは必要時に既存の配信元から取得する。共有期限切れ・停止後も、開いている地図に配信済みの対象は印刷できる。用紙・表示・色分け凡例・印刷・PDFは既存のプレビュー処理を使用する。
+
+### 6.4 全画面地図の共有通信
+
+`map-anather` の通常表示だけに「現在の地図を共有する」を追加する。回答地図と印刷には出さない。押下時に `runtime.getShareSnapshot()` で保持済みデータを複製し、`{ type: "shareMapSnapshot", snapshot }` を `window.parent` へ送る。編集地図や印刷の要求／応答とは別の通知で、requestIdは持たない。
+
+送信先は [share-snapshot.ts](src/map/common/share-snapshot.ts) の `resolveShareParentOrigin` が `document.referrer` のoriginと自分のoriginを比較して決める。同一origin、またはRustがbootstrapの `shareParentOrigins` に明示したoriginだけを許可する。リリース版は同一originのみ、Rust開発ビルド（`debug_assertions`）は `http://localhost:5173` だけを追加する。referrerやURLパラメーターから任意のoriginを信頼せず、共有データを `"*"` へ送信しない。
+
+親の [FullScreenMapModal.vue](../frontend/src/components/map/FullScreenMapModal.vue) は全画面表示中であること、現在のiframeの `contentWindow` と `event.source`、iframe URLのoriginと `event.origin`、`isShareMapSnapshot` の検証を確認する。その後 `MapView` が既存共有設定をsnapshotモードで開く。設定・結果の表示中の追加通知は使わず、元の地図iframeを再生成しない。操作と前面モーダルの詳細は [PC UI仕様](../frontend/SPECIFICATION.md#全画面地図のスナップショット共有) を参照する。
+
 ## 7. 設定保存と表示
 
 ### 通常編集地図の親原本同期
@@ -186,6 +204,8 @@ PCの [PrintMapModal.vue](../frontend/src/components/map/PrintMapModal.vue) が�
 
 印刷スナップショットには有効時だけcoloringを追加し、印刷対象外のキーを除外して深く複製する。専用印刷entryから描画へ明示的に渡す。凡例は印刷内の地図上に置き、分類IDごとの表示と、分類に属する全対象の地図連動を管理する。`answer-visibility.ts`が回答対象と凡例の非表示集合を独立に管理し、検索・レイヤ制限と組み合わせる。文字サイズ変更、見出しのドラッグによる移動、右下のドラッグによる枠サイズ変更に対応し、表示内容・文字・サイズ・位置の変更でPDFを無効化する。
 
+### ブラウザ設定の保存
+
 | 保存キー                                          | 内容                               |
 | ------------------------------------------------- | ---------------------------------- |
 | `geocode-web:last-map-view`                       | 地図の中心・ズーム                 |
@@ -202,6 +222,34 @@ localStorageを使う。どのページが保存・復元を利用するかはen
 通常・モバイル・別画面の重ね合わせタイルはアカウント別に復元する。最新の有効なタイルIDにreconcileし、不要な保存値を整理する。一時共有・位置共有はこのアカウント別保存を利用せず、共有設定・URLから初期表示を決める。位置共有の `is_check_overlay` は未指定・false・不正値で初期非表示。
 
 保存領域が利用不能でも表示を継続する処理を持つ。背景などアカウントIDを含まないキーと、タイル用アカウント別キーを区別する。
+
+### 全画面地図の共有スナップショット
+
+[read-only-page.ts](src/map/read-only-page.ts) の `getShareSnapshot` は、選択グループ・適用済み属性条件・名前／本文検索・マーカー／図形表示の共通部分を、取得済みレコードの論理表示条件から確定する。クラスター内のマーカーや画面外・縮尺でLeaflet本体が未生成の有効な図形も含め、描画DOMや画面内の個数で対象を減らさない。選択した空グループと0件の地図も保持する。
+
+選択グループのデータ取得中／失敗中、および詳しい検索・色分けの反映中は共有を開始せず、iframe内の共有エラーを表示する。検索画面の未適用の入力は使わない。共有ボタン押下時に複製したデータを親へ渡し、共有設定表示後の地図変更や再通知では対象を差し替えない。
+
+[share-snapshot.ts](src/map/common/share-snapshot.ts) の型・検証をVueと共有する。地図描画モジュールに依存しない境界用の型を定義し、最大10,000対象・UTF-8 JSON 32MiBを超えた場合は切り捨てずエラーにする。
+
+| 型・項目 | 内容 |
+| --- | --- |
+| `ShareMapSnapshot` | 送信用。`version: 1`、`state`、`tileServers`、`tileOverlays` に、対象を限定した `layers`・`markers`・配列の `shapes` を加える |
+| `StoredShareMapSnapshot` | 保存・復元用。`version: 1`、`state`、`tileServers`、`tileOverlays`。対象データは既存の共有JSONB欄へ分けて保存する |
+| `state: PrintMapState` | 中心・ズーム、背景地図ID、タイルごとのON/OFF、選択グループ、マーカー／図形／図形名の表示、クラスター設定、検索文字列、共有対象ID、分類名・色・対象別の色分け結果 |
+
+`createShareMapSnapshot` は非選択グループと除外対象のデータを削減し、共有対象IDと色分け割当も削減後の集合へ揃えて深く複製する。除外されたID・本文・メモ・色分け割当を共有に含めない。属性条件を共有先で再評価する方式ではなく、その適用結果を固定する。サーバーでも対象の所有権・所属と管理済みタイル定義を検証する。
+
+保存先の `temporary_urls.map_snapshot` はPC／モバイル一時共有HTMLの `shareSnapshot` へ渡し、bootstrapで検証後、`initializeReadOnlyMapPage` が復元する。保存した中心・ズーム・背景地図・タイルとグループの表示・色分けを優先し、元データの追加取得や属性条件の再検索は行わない。検索解除やグループ切り替えでも除外対象は復活しない。
+
+スナップショット共有画面は通常地図のlocalStorageを読み書きせず、閲覧中の背景地図・表示変更も通常地図の設定へ書き戻さない。タイル定義は保存するが画像自体は配信元から通常取得する。スナップショットなしの共有は、従来の初期表示・URL指定・タイル取得経路を維持する。
+
+### 通常地図・全画面地図・共有地図の色分け凡例
+
+PC通常地図と全画面地図では適用済みの色分けを、PC・モバイルの共有地図では `shareSnapshot.state.coloring` を使う。`rules` の順に、`targets` のうち現在の論理表示条件を満たす対象がある分類の色と名前を表示する。画面範囲やLeafletレイヤの生成状態と分離し、色分けなし・該当分類0件では凡例を隠す。
+
+PC通常地図ではiframeの `editorColoring.apply` で確定した分類と、現在のレイヤ範囲・検索マスク・マーカー／図形の表示条件を使う。検索や表示の切替、レコードの初期化・編集・削除に応じて更新する。全画面地図と共有地図では共有用の対象判定を利用し、適用済みの絞り込み・文字列検索、グループやマーカー／図形の表示切替、データ取得完了に追従する。
+
+表示用の凡例は見出しで移動し、右下のハンドルで枠をリサイズできる。ポインター操作はマウスとタッチに対応し、地図の操作に伝播させない。位置・サイズは画面内に収め、開いているページ内だけで保持する。共有先は標準の位置・サイズを使い、凡例を組み立てるための分類結果は既存の共有形式から取得する。モバイルの共有地図では凡例を地図の説明として扱い、操作UIの表示状態から独立させる。分類チェック・地図との連動・文字サイズの設定は印刷プレビューで扱う。
 
 ## 8. テスト・配布
 
@@ -221,9 +269,13 @@ npm run build
 | `tests/`                                 | bootstrap、共通地図、図形・検索・保存・タイル・ライブ地図・フォーム等 |
 | `tests/editor-entry-contract.spec.ts`    | 編集entry構成                                                         |
 | `tests/read-only-entry-contract.spec.ts` | 閲覧専用entry構成                                                     |
+| `tests/share-snapshot.spec.ts`          | 対象・色分け割当の削減、0件、型・対象参照の検証、共有送信先originの制限 |
+| `tests/read-only-lazy-objects.spec.ts`  | 保持済みレコードからの共有対象確定、取得中／取得失敗の制御、保存状態の復元、localStorageを変更しないこと |
 | `../frontend/tests/template-js/`         | Tera参照、entry結合、実vendorとのスモーク、印刷等                     |
 
 接続テストはPCディレクトリで `npm run test:template-js` を実行する。型チェック抑止箇所を変更した際は、単体テストだけでなくentryとvendorを組み合わせるテストを確認する。ブラウザAPIや実印刷の実機確認とは区別する。
+
+共有処理だけを検証する場合は、このディレクトリで `npm test -- tests/share-snapshot.spec.ts tests/read-only-lazy-objects.spec.ts` を実行する。親のVue連携は [PC UIの検証手順](../frontend/SPECIFICATION.md#7-開発配布テスト)、サーバー側の保存・認可・期限・パスワードとHTML埋め込みは [テンプレートの検証手順](../../src/templates/SPECIFICATION.md#6-検証と変更時の注意) を併せて確認する。実装変更後は `npm run build` と統合配置を行い、共有の専用entryだけでなく共有chunkも更新する。
 
 ## MJPEGカメラ
 
@@ -278,7 +330,7 @@ npm run build
 
 `map/common/answer-coloring.ts` と `answer-map-presets.ts` をPC・モバイルVueから再エクスポートし、条件型・検証を共用する。`map-analysis.ts` は通常地図と回答地図の分類優先処理を共用し、通常地図のレイヤースコープを既存map-filterへ接続する。`coloring-editor.ts` はDOM部品で、VueのAnswerColoringPanelは薄いラッパーとなる。詳しい検索は同部品と保存条件ダイアログを組み込む。
 
-「詳しい検索と色分け」は最大1440px・高さ90dvhとし、幅1000px超では左に絞り込み、右に色分けを配置する。それ以下では1列に並べる。色分けはh3の見出しで常時表示し、回答分析のサイドパネルは従来のdetails・矢印・全幅実行ボタンと書式を維持する。専用CSSは `.advanced-map-search.has-analysis` 内に限定する。保存条件の一覧は `map-presets-table.ts` とCSSをVue・テンプレート双方から使用し、同じ6列の表を表示する。呼び出しは下書きの復元だけを行い、一覧を残して完了メッセージを表示する。全画面の別画面地図には印刷ボタン・印刷ショートカット・リロードボタンを設けない。
+「詳しい検索と色分け」は最大1440px・高さ90dvhとし、幅1000px超では左に絞り込み、右に色分けを配置する。それ以下では1列に並べる。色分けはh3の見出しで常時表示し、回答分析のサイドパネルは従来のdetails・矢印・全幅実行ボタンと書式を維持する。専用CSSは `.advanced-map-search.has-analysis` 内に限定する。保存条件の一覧は `map-presets-table.ts` とCSSをVue・テンプレート双方から使用し、同じ6列の表を表示する。呼び出しは下書きの復元だけを行い、一覧を残して完了メッセージを表示する。全画面の別画面地図には専用のリロードボタンを設けない。
 
 既存ProgressSpinnerのSVG定義とアニメーションを `progress-spinner.ts` / CSSへ共通化する。テンプレートではnative dialogの最前面にスピナーを表示し、検索・色分け・条件呼び出しの完了、失敗、中断、タイムアウトで解除する。PCトップの検索は `mapObjectFilter` のrequestIdとruntimeIdが一致する完了通知を待ち、別画面地図は同画面内の適用処理を待つ。
 
@@ -286,4 +338,4 @@ npm run build
 
 編集地図は `mapColoringApply` と対応する `mapColoringApplyResult` を使用し、runtimeId/requestIdと送信元を照合する。分類色は保存用shapeStyleから分離したanalysisColorで合成する。マーカー更新・図形生成・破棄時には着色コントローラーを更新する。
 
-`map-print-host.ts` は通常・回答地図の印刷ダイアログを共有する。通常印刷はPrintMapStateのcoloring/objectQuery/対象IDを使用し、回答印刷は既存AnswerPrintSnapshotを使用する。凡例は通常地図の遅延読み込みにも追従する。詳しくは [検索仕様](../../docs/SEARCH_AND_GEOCODING.md) と [印刷仕様](../../docs/MAP_PRINTING.md) を参照。
+`map-print-host.ts` は通常・全画面・回答・一時共有地図の印刷ダイアログを共有する。通常印刷は `PrintMapState` の色分け・対象IDを使用し、回答印刷は `AnswerPrintSnapshot` を使用する。凡例は通常地図の遅延読み込みにも追従する。詳しくは [検索仕様](../../docs/SEARCH_AND_GEOCODING.md) と [印刷仕様](../../docs/MAP_PRINTING.md) を参照。

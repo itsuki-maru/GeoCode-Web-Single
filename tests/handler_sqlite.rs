@@ -1337,6 +1337,7 @@ async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
                 share_password: None,
                 include_shapes: false,
                 include_tile_overlays: false,
+                snapshot: None,
             }),
         )
         .await
@@ -1354,6 +1355,7 @@ async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
             share_password: Some("pass1234".to_string()),
             include_shapes: true,
             include_tile_overlays: true,
+            snapshot: None,
         }),
     )
     .await
@@ -1383,6 +1385,7 @@ async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
     .expect("temporary map request should render password page")
     .into_response();
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "no-store");
     let bytes = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("password page body should be readable");
@@ -1410,6 +1413,7 @@ async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
     .expect("temporary map password auth should render map")
     .into_response();
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "no-store");
     let bytes = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("temporary map body should be readable");

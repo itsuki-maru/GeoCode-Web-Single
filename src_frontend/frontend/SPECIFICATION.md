@@ -66,7 +66,32 @@ Service Workerはload時に登録する。`public/service-worker.js` に特別�
 | `components/UserPrivacySetting.vue` | プライバシー、パスワード、TOTP等のアカウント設定               |
 | `components/common/`                | 確認・通知・進捗・モーダル枠                                   |
 
-地図の図形描画・計測・検索はiframe側で実装する。一覧からの選択や編集結果はiframeへ通知する。印刷は `/map-another?print=1` の専用iframeを使用し、現在の地図状態と対象レイヤを引き渡す。
+地図の図形描画・計測・検索はiframe側で実装する。一覧からの選択や編集結果はiframeへ通知する。通常地図の印刷は `/map-another?print=1` を印刷iframeとして使用し、現在の地図状態と対象レイヤを引き渡す。
+
+PC通常地図の色分け凡例は編集地図のiframe内で表示する。`MapIframe` が `mapColoringApply` で渡す適用結果と、地図側の現在の表示条件から表示する分類を決める。位置とサイズは地図を開いている間保持する。[凡例の操作](../../docs/MAP_VIEWING.md#色分けの凡例)
+
+### 全画面地図のスナップショット共有
+
+通常共有と共通の1URL枠を使い、次の経路で現在の地図を共有する。
+
+1. [FullScreenMapModal.vue](src/components/map/FullScreenMapModal.vue) 内の `/map-another` が「現在の地図を共有する」を表示する。iframe側で選択グループ、適用済みの属性条件と名前／本文検索、マーカー／図形の表示を組み合わせ、保持済みデータと中心・ズーム・背景地図・色分け・タイル・クラスター等の表示設定を複製する。
+2. iframeから `{ type: "shareMapSnapshot", snapshot }` を受信する。全画面表示中で、`event.source` が現在のiframeの `contentWindow`、`event.origin` がiframe URLのoriginと一致し、共有型の検証に通った場合だけ `MapView` へ渡す。閉じた画面や再表示前のiframeの通知は受け付けない。
+3. [OnetimeSettingModal.vue](src/components/share/OnetimeSettingModal.vue) をsnapshotモードで開く。受信した地図は再度複製して固定し、対象件数・色分け・背景地図・中心・ズーム・表示中タイル・選択グループを表示する。通常共有のレイヤ選択と図形／タイル追加チェックは出さず、期限・パスワード・新規発行／URL更新を設定する。
+4. `POST /onetimeurl/generate` へ固定した `snapshot` と対応する `layers` を送る。成功時は既存の [OnetimeUrlModal.vue](src/components/share/OnetimeUrlModal.vue) でURLと期限を表示し、コピーと共有停止を提供する。現在URLの取得・生成・停止は通常共有と同じAPIを使い、既存共有設定モーダルからも結果を確認できる。新規発行は以前のURLを失効させ、更新は同じURLの内容と設定を差し替える。
+
+共有対象は画面内の描画数ではなく、条件を満たす保持済みレコードで決める。画面外も含め、除外データは本文・対象ID・色分け割当にも含めない。選択した空グループと0件の地図を保持できる。最大10,000対象・UTF-8 JSON 32MiBで、上限を超えた場合は切り捨てない。背景地図とタイルの定義・表示状態は固定し、画像は共有先で配信元から取得する。
+
+選択グループの取得中／取得失敗と検索・色分けの反映中は、iframe側で共有開始を止めてエラーを表示する。設定モーダル表示中の再通知で対象を差し替えず、送信中は二重送信・入力・閉じる操作を止める。閉じた後の保存応答で結果モーダルを再表示しない。API失敗は親のメッセージモーダルで通知し、再試行できる。
+
+全画面地図より前面に共有設定（z-index 20）、結果（21）、メッセージ（既定30）を表示する。共有操作中は親のショートカットで全画面iframeを破棄せず、モーダルを閉じた後も元の地図を再読み込みしない。通常共有では従来の対象選択UIを維持する。
+
+共有型・復元・送信先originの制限は [地図スクリプト仕様](../template-scripts/SPECIFICATION.md#64-全画面地図の共有通信) を参照する。モバイルでの共有URL閲覧は対応するが、モバイルVueの同名 `FullScreenMapModal` は画像プレビュー用であり、この作成導線ではない。
+
+### 全画面地図と一時共有地図の印刷・PDF出力
+
+「地図を印刷」と地図上の印刷ショートカットは、地図iframe内のスクリプトで処理する。全画面地図を表示中にVue側で `Ctrl+P`／`Command+P` を受けた場合は、`FullScreenMapModal` が表示中の地図iframeのオリジンを指定して `readOnlyPrintOpen` を送る。共有設定・結果・メッセージのモーダルを表示中は送らない。
+
+全画面地図と一時共有地図は地図自身が同一オリジンの `/assets/read-only-map-print.html` を開き、保持済みの印刷対象と表示状態を渡す。一時共有地図は、共有時に保存された地物だけを候補とする。詳細は [地図スクリプト仕様](../template-scripts/SPECIFICATION.md#63-印刷通信) を参照する。
 
 ### PCとモバイルの主な差
 
@@ -79,6 +104,7 @@ Service Workerはload時に登録する。`public/service-worker.js` に特別�
 | 外部サイト設定コンポーネント | あり                            | 対応コンポーネントなし            |
 | 一覧開閉の永続化composable   | あり                            | 対応composableなし                |
 | 編集地図                     | PC用profile                     | タップ向けprofile                 |
+| 現在の地図のスナップショット共有 | 全画面地図から作成              | 作成導線なし。共有URLの閲覧は対応 |
 
 これは現行ソースの実装差であり、バックエンドAPIの可否を表す表ではない。
 
@@ -125,6 +151,8 @@ Piniaの内容はAPIデータをUIで扱うためのメモリ上の状態であ�
 
 更新要求はrequestIdで応答を対応付け、2秒でfalseを返す。地図画面側は反映できなかった場合の再読み込みを処理する。完全なメッセージ一覧と印刷通信は [スクリプト仕様](../template-scripts/SPECIFICATION.md) を参照。
 
+全画面地図の共有通信は `MapIframe` の編集用メッセージとは別に `FullScreenMapModal` が受信する。受信した地図を既存共有設定へ渡す経路は [スナップショット共有](#全画面地図のスナップショット共有) を参照する。
+
 ## 7. 開発・配布・テスト
 
 このディレクトリで実行する:
@@ -141,6 +169,14 @@ npm run build
 `build-only` はViteビルド後に [copy-vendor-assets.mjs](scripts/copy-vendor-assets.mjs) を実行する。この処理が他の地図画面にも必要なvendor資材を供給する。`dist/` の統合・Rustへの組み込みは [全体仕様](../SPECIFICATION.md) の手順を使用する。
 
 `src/**/__tests__/` は認証、router、ストア、composable、モーダル、iframe、位置共有などを検証する。`tests/template-js/` はtemplate-scriptsとTera、vendorをまたぐ契約・スモーク・印刷テストを含む。
+
+共有操作の対象を絞った検証は、このディレクトリで次を実行する。通常共有とスナップショット共有の両方、送信元の検証、対象の固定、0件・エラー・重複操作・前面表示・共有停止・元地図の維持を確認する。
+
+```sh
+npm run test:run -- src/components/map/__tests__/FullScreenMapModal.spec.ts src/components/share/__tests__ src/views/__tests__/MapView.loading.spec.ts
+```
+
+地図側の対象削減・復元は [template-scriptsの検証手順](../template-scripts/SPECIFICATION.md#8-テスト配布)、PC／モバイルへのTera埋め込みは [テンプレート仕様](../../src/templates/SPECIFICATION.md#6-検証と変更時の注意) を併せて確認する。
 
 印刷PDFの任意確認は `scripts/check-print-preview.mjs` と `scripts/check-print-preview-pdfs.py` を使用する。ブラウザ・Playwright・Python等の別途準備が必要で、詳細な実行例は [README](../../README.md) を参照する。
 

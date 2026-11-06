@@ -49,7 +49,8 @@ fn sqlite_expiry_precision_is_consistent_between_management_and_public_pages() {
                 "id": Uuid::nil().to_string(), "user_id": Uuid::nil().to_string(),
                 "url": "/fixture", "expiration": expiration, "password_hash": null,
                 "layers": "{}", "markers": "{}", "shapes": "{}",
-                "include_tile_overlays": false, "create_at": "2020-01-01 00:00:00"
+                "include_tile_overlays": false, "map_snapshot": null,
+                "create_at": "2020-01-01 00:00:00"
             }))
             .unwrap();
             assert_eq!(stored.is_expired(), expired, "public: {expiration}");
@@ -66,8 +67,29 @@ fn payload(layers: Vec<Uuid>, password: Option<&str>, update: bool) -> GenarateU
         share_password: password.map(str::to_owned),
         include_shapes: true,
         include_tile_overlays: false,
+        snapshot: None,
     }
 }
+
+#[test]
+fn 旧形式の通常共有要求はスナップショットなしで読み込める() {
+    let mut value = json!({
+        "minutes": 60,
+        "layers": [Uuid::nil().to_string()],
+        "update_url": false,
+        "share_password": null
+    });
+    for explicit_null in [false, true] {
+        if explicit_null {
+            value["snapshot"] = Value::Null;
+        }
+        let request: GenarateUrlPayload = serde_json::from_value(value.clone()).unwrap();
+        assert!(request.snapshot.is_none());
+        assert!(!request.include_shapes);
+        assert!(!request.include_tile_overlays);
+    }
+}
+
 async fn create(
     pool: &SqlitePool,
     user: Uuid,
@@ -120,7 +142,8 @@ async fn send(app: &Router, path: &str, password: Option<&str>, mobile: bool) ->
     if password.is_some() {
         request = request.header("content-type", "application/x-www-form-urlencoded");
     }
-    app.clone()
+    let response = app
+        .clone()
         .oneshot(
             request
                 .body(Body::from(
@@ -131,7 +154,12 @@ async fn send(app: &Router, path: &str, password: Option<&str>, mobile: bool) ->
                 .unwrap(),
         )
         .await
-        .unwrap()
+        .unwrap();
+    if response.status() == StatusCode::OK {
+        // 地図・パスワード・未検出の公開HTMLをブラウザへ保存させない。
+        assert_eq!(response.headers()["cache-control"], "no-store");
+    }
+    response
 }
 async fn body(response: Response) -> String {
     String::from_utf8(
@@ -165,6 +193,8 @@ async fn snapshot(pool: &SqlitePool, user: Uuid) -> Value {
                 password_hash,
                 'include_tile_overlays',
                 include_tile_overlays,
+                'map_snapshot',
+                json(map_snapshot),
                 'create_at',
                 create_at
             )
@@ -570,6 +600,111 @@ async fn management_requires_login_and_invalidation_is_scoped_to_the_authenticat
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn スナップショット共有も認証と所有者の検証を経て同じ共有枠へ保存する() {
+    let pool = common::test_pool().await;
+    let (owner, layer, _, _) = fixture(&pool, "snapshot-manage-owner").await;
+    let (other, foreign_layer, _, _) = fixture(&pool, "snapshot-manage-other").await;
+    let original = create(&pool, owner, vec![layer], None, false).await;
+    create(&pool, other, vec![foreign_layer], None, false).await;
+    let owner_before = snapshot(&pool, owner).await;
+    let other_before = snapshot(&pool, other).await;
+    sqlx::query(
+        r#"
+        INSERT INTO tileserver_model (
+            id,
+            layer_name,
+            label,
+            url,
+            attribution,
+            include_foreign_tiles,
+            min_zoom,
+            max_zoom,
+            create_at,
+            updated_at
+        ) VALUES (
+            1,
+            'fixture',
+            '標準地図',
+            '/tiles/{z}/{x}/{y}.png',
+            '出典',
+            false,
+            0,
+            22,
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let mut request = payload(vec![layer], None, false);
+    request.snapshot = Some(json!({
+        "version": 1,
+        "state": {
+            "view": {"latitude": 35.5, "longitude": 139.25, "zoom": 12},
+            "tileServerId": "1", "overlays": {},
+            "markersVisible": true, "shapesVisible": true, "shapeNamesVisible": false,
+            "layerIds": [layer], "markerIds": [], "shapeIds": []
+        },
+        "layers": {layer.to_string(): {
+            "id": layer, "user_id": owner, "layer_name": "captured layer", "is_master": true,
+            "restrict_free_text": false, "marker_icon_id": null, "marker_icon_filename": null
+        }},
+        "markers": {}, "shapes": [],
+        "tileServers": {"1": {
+            "id": 1, "layer_name": "fixture", "label": "標準地図",
+            "url": "/tiles/{z}/{x}/{y}.png", "attribution": "出典",
+            "include_foreign_tiles": false, "min_zoom": 0, "max_zoom": 22
+        }},
+        "tileOverlays": []
+    }));
+    let router = geocode_web_single::router::build_router(
+        pool.clone(),
+        geocode_web_single::build_tera_extension().unwrap(),
+        None,
+    );
+    for (user, expected) in [
+        (None, StatusCode::UNAUTHORIZED),
+        (Some(other), StatusCode::BAD_REQUEST),
+        (Some(owner), StatusCode::OK),
+    ] {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri("/onetimeurl/generate")
+            .header("content-type", "application/json");
+        if let Some(user) = user {
+            let token =
+                geocode_web_single::auth::create_token(&user.to_string(), 30, "access_token", 0)
+                    .unwrap();
+            builder = builder.header("cookie", format!("access_token={token}"));
+        }
+        let response = router
+            .clone()
+            .oneshot(
+                builder
+                    .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+        if expected != StatusCode::OK {
+            assert_eq!(snapshot(&pool, owner).await, owner_before);
+        } else {
+            let issued: CreateUpdatedTemporaryUrlResponse =
+                serde_json::from_str(&body(response).await).unwrap();
+            assert_ne!(issued.id, original.id);
+            let stored = snapshot(&pool, owner).await;
+            assert_eq!(stored["id"], issued.id);
+            assert_eq!(stored["map_snapshot"]["version"], 1);
+            assert_eq!(stored["map_snapshot"]["state"]["view"]["latitude"], 35.5);
+        }
+        assert_eq!(snapshot(&pool, other).await, other_before);
+    }
 }
 
 #[tokio::test]

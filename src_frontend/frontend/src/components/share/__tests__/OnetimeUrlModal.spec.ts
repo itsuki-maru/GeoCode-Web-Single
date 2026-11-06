@@ -115,6 +115,8 @@ describe("共有URLの表示と停止", () => {
     await stop(wrapper);
     expect(api.delete).toHaveBeenCalledExactlyOnceWith(`${invalidateOntimeMapUrl}share-abc`);
     expect(wrapper.emitted("invalidated")).toBeUndefined();
+    await stop(wrapper);
+    expect(api.delete).toHaveBeenCalledTimes(1);
     resolve({});
     await flushPromises();
     expect(wrapper.emitted("invalidated")).toEqual([[]]);
@@ -127,7 +129,9 @@ describe("共有URLの表示と停止", () => {
     await stop(wrapper);
     await flushPromises();
     expect(wrapper.emitted("invalidated")).toBeUndefined();
-    expect(wrapper.emitted("message")).toBeUndefined();
+    expect(wrapper.emitted("message")).toEqual([
+      ["共有を停止できませんでした。通信状態を確認してもう一度実行してください。"],
+    ]);
     expect(wrapper.emitted("close")).toBeUndefined();
     await stop(wrapper);
     await flushPromises();

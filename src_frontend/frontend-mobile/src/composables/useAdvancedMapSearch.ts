@@ -38,11 +38,13 @@ export function useAdvancedMapSearch(
     activeRequest = undefined;
     previous?.controller.abort();
   };
-  const transport: AttributeTransport = async (path, body, signal) => {
+  const transport: AttributeTransport = async (path, body, signal, method) => {
     try {
-      return body === undefined
-        ? (await apiClient.get(path, { signal })).data
-        : (await apiClient.post(path, body, { signal, timeout: 60000 })).data;
+      return method === "DELETE"
+        ? (await apiClient.delete(path, { signal, timeout: 60000 })).data
+        : body === undefined
+          ? (await apiClient.get(path, { signal })).data
+          : (await apiClient.post(path, body, { signal, timeout: 60000 })).data;
     } catch (e) {
       if (apiClient.isAxiosError(e)) {
         if (e.response?.status === 409)
@@ -60,6 +62,7 @@ export function useAdvancedMapSearch(
   onMounted(() => {
     modal = createAdvancedMapSearchModal({
       transport,
+      savedFilters: true,
       getApplied: () => markers.attributeSearch,
       getLayerIds: () => (layer.value === master.value ? null : [layer.value]),
       getContext: context,

@@ -1,4 +1,8 @@
 // @ts-nocheck -- 編集地図と親画面の差分・初期データ同期境界。
+let editorColorLegend;
+let editorLegendColoring = null;
+let editorLegendFrame = null;
+
 editorColoring = installAnswerColoring(
   {
     map,
@@ -11,6 +15,12 @@ editorColoring = installAnswerColoring(
     },
   },
   L,
+  editorEntryProfile.isMobile
+    ? undefined
+    : (coloring) => {
+        editorLegendColoring = coloring;
+        scheduleEditorLegendUpdate();
+      },
 );
 const editorRuntimeId = "runtime-" + Date.now() + "-" + Math.random().toString(36).slice(2);
 let editorDataReady = window.__GEOCODE_MAP_BOOTSTRAP__?.dataSource !== "parent";
@@ -28,6 +38,53 @@ let editorParentOrigin = [
 ].includes(initialEditorParentOrigin)
   ? initialEditorParentOrigin
   : null;
+
+function refreshEditorColorLegend() {
+  const coloring = editorDataReady ? editorLegendColoring : null;
+  const used = new Set();
+  if (coloring) {
+    const markersVisible = map.hasLayer(markersClusterGroup);
+    const allowedMarkers =
+      markersVisible && externalMarkerFilterIds !== null ? new Set(externalMarkerFilterIds) : null;
+    for (const [key, ruleId] of Object.entries(coloring.targets)) {
+      const [kind, id] = key.split(":");
+      if (kind === "marker") {
+        if (!markersVisible || (allowedMarkers && !allowedMarkers.has(id))) continue;
+        const record = markersFromAxum[id];
+        const marker = markers[`marker-${id}`];
+        // フォーカスによる一時追加も、選択レイヤと絞り込みを満たす場合だけ数える。
+        if (
+          record &&
+          (is_master || record.layer_id === layer) &&
+          marker &&
+          markersClusterGroup.hasLayer(marker)
+        )
+          used.add(ruleId);
+      } else if (shapeRenderManager?.isVisible(id)) {
+        used.add(ruleId);
+      }
+    }
+  }
+  const entries = coloring?.rules.filter((rule) => used.has(rule.id)) ?? [];
+  if (!editorColorLegend && !entries.length) return;
+  editorColorLegend ??= createColorLegend({ mapElement: map.getContainer() });
+  editorColorLegend.setEntries(entries);
+}
+
+function scheduleEditorLegendUpdate() {
+  if (
+    editorEntryProfile.isMobile ||
+    editorLegendFrame !== null ||
+    (!editorLegendColoring && !editorColorLegend)
+  )
+    return;
+  // 一括更新では地物ごとの描画イベントを購読せず、確定した結果をまとめて反映する。
+  editorLegendFrame = requestAnimationFrame(() => {
+    editorLegendFrame = null;
+    refreshEditorColorLegend();
+  });
+}
+
 function announceEditorRuntime(requestId) {
   if (window.parent !== window && editorParentOrigin)
     window.parent.postMessage(
@@ -38,6 +95,7 @@ function announceEditorRuntime(requestId) {
 
 // API保存と親画面の同期は独立させ、ACKが失われても保存を二重実行しない。
 function notifyParentMapObjectChange(change) {
+  scheduleEditorLegendUpdate();
   if (window.parent === window || !editorParentOrigin) return;
   const mutationId = editorRuntimeId + "-" + ++editorMutationSequence;
   const message = {
@@ -273,6 +331,7 @@ async function applyEditorMapSnapshot(snapshot) {
   const selectedShapeType =
     typeof measurementSelectionType !== "undefined" ? measurementSelectionType : null;
   editorDataReady = false;
+  scheduleEditorLegendUpdate();
   clearShapeGeometryEditing();
   closeShapeNameEditor();
   markersClusterGroup.clearLayers();
@@ -311,6 +370,7 @@ async function applyEditorMapSnapshot(snapshot) {
   renderVisibleShapes();
   if (editorEntryProfile.isMobile) renderVisibleMarkers();
   editorDataReady = true;
+  scheduleEditorLegendUpdate();
   return true;
 }
 
@@ -493,6 +553,7 @@ window.addEventListener("message", function (event) {
       } catch {
         if (!messageData.requestId) throw Error("地図への絞り込みの反映に失敗しました。");
       }
+      if (success) scheduleEditorLegendUpdate();
       if (messageData.requestId)
         event.source.postMessage(
           {
@@ -505,6 +566,7 @@ window.addEventListener("message", function (event) {
         );
     } else if (messageData["type"] === "markerFilter") {
       applyMarkerFilter(messageData["ids"]);
+      scheduleEditorLegendUpdate();
     } else if (messageData["type"] === "tileOverlaysUpdate") {
       let success = false;
       try {
@@ -530,6 +592,7 @@ window.addEventListener("message", function (event) {
       } catch (error) {
         console.error("Map object update from parent failed:", error);
       }
+      if (success) scheduleEditorLegendUpdate();
       event.source.postMessage(
         {
           type: "mapObjectUpdateResult",
@@ -548,6 +611,7 @@ window.addEventListener("message", function (event) {
       } catch (error) {
         console.error("Map object delete from parent failed:", error);
       }
+      if (success) scheduleEditorLegendUpdate();
       event.source.postMessage(
         {
           type: "mapObjectDeleteResult",
@@ -640,7 +704,21 @@ function logout() {
 }
 
 announceEditorRuntime();
+function handleEditorLegendVisibility({ layer }) {
+  if (layer === markersClusterGroup || layer === drawnShapesGroup) scheduleEditorLegendUpdate();
+}
+if (!editorEntryProfile.isMobile) {
+  map.on("overlayadd overlayremove", handleEditorLegendVisibility);
+}
 map.on("unload", () => {
+  if (!editorEntryProfile.isMobile) {
+    map.off("overlayadd overlayremove", handleEditorLegendVisibility);
+    if (editorLegendFrame !== null) cancelAnimationFrame(editorLegendFrame);
+    editorLegendFrame = null;
+    editorLegendColoring = null;
+    editorColorLegend?.dispose();
+    editorColorLegend = undefined;
+  }
   ++editorSnapshotGeneration;
   pendingParentChanges.forEach(clearTimeout);
   pendingParentChanges.clear();

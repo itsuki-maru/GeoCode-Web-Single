@@ -61,7 +61,11 @@ const clone = (state: AnswerColoring | null): AnswerColoring | null =>
   state ? JSON.parse(JSON.stringify(state)) : null;
 
 /** スタイルは回答用 iframe が管理し、永続化したレコードやポップアップは変更しない。 */
-export function installAnswerColoring(runtime: any, leaflet: any): AnswerColoringController {
+export function installAnswerColoring(
+  runtime: any,
+  leaflet: any,
+  onChange?: (state: AnswerColoring | null) => void,
+): AnswerColoringController {
   if (runtime.answerColoring) return runtime.answerColoring;
   let current: AnswerColoring | null = null;
   let disposed = false;
@@ -189,6 +193,7 @@ export function installAnswerColoring(runtime: any, leaflet: any): AnswerColorin
         render(current);
         throw error;
       }
+      onChange?.(clone(current));
     },
     getState: () => clone(current),
     dispose() {

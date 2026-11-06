@@ -1,10 +1,10 @@
 // UI確認用のVite fixture。実データを使わず、実コンポーネントをブラウザーで表示する。
 // node scripts/check-map-search-ui.mjs
-// /map-search-ui.html?view=search|answer|panels|list&mobile=1
+// /map-search-ui.html?view=search|pc-search|mobile-search|answer|panels|list&mobile=1
 // &template=1 で別画面地図の共通Markdown CSSも読み込む。
 // ?width=390&height=844 を付けると、その幅のiframeでレスポンシブ表示を確認できる。
 import { execFileSync } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
@@ -60,6 +60,7 @@ const fixture = `<!doctype html><html lang="ja"><meta charset="utf-8"><meta name
 <div id="app"></div><output id="output" aria-label="地図への適用状況">検索0回・色分け0回</output>
 <script type="module">
 import {createApp,h,ref,onMounted,nextTick} from 'vue';
+import {createPinia} from 'pinia';
 import Pc from '/src/components/map-object/AnswerColoringPanel.vue';
 import Mobile from '${moduleUrl(resolve(frontend, "../frontend-mobile/src/components/map-object/AnswerColoringPanel.vue"))}';
 import Before from '${moduleUrl(resolve(beforeDir, "frontend.vue"))}';
@@ -68,12 +69,18 @@ import List from '/src/components/map-object/SavedMapPresetsModal.vue';
 import MobileList from '${moduleUrl(resolve(frontend, "../frontend-mobile/src/components/map-object/SavedMapPresetsModal.vue"))}';
 import Answer from '/src/components/map-object/AnswerMapModal.vue';
 import MobileAnswer from '${moduleUrl(resolve(frontend, "../frontend-mobile/src/components/map-object/AnswerMapModal.vue"))}';
+import MobileMapAnalysisFixture from '/scripts/MobileMapAnalysisFixture.vue';
+import PcMapAnalysisFixture from '/scripts/PcMapAnalysisFixture.vue';
 import {createAdvancedMapSearchModal,attributeTransport} from '${moduleUrl(resolve(frontend, "../template-scripts/src/map/common/advanced-map-search.ts"))}';
 const params=new URLSearchParams(location.search),mobile=params.has('mobile'),view=params.get('view')||'search';
 const specification=${JSON.stringify(specification)},fields=${JSON.stringify(fields)},formId=${JSON.stringify(formId)};
 if(params.has('width')) {
   const frame=document.createElement('iframe'); frame.className='responsive'; frame.title='狭い画面の確認'; frame.style.width=params.get('width')+'px';frame.style.height=(params.get('height')||844)+'px';
   params.delete('width');params.delete('height');frame.src='/map-search-ui.html?'+params;document.body.replaceChildren(frame);
+} else if(view==='mobile-search'||view==='pc-search') {
+  await import('${moduleUrl(resolve(frontend, "../frontend-mobile/src/assets/base.css"))}');
+  document.querySelector('#output').remove();
+  createApp(view==='mobile-search'?MobileMapAnalysisFixture:PcMapAnalysisFixture).use(createPinia()).mount('#app');
 } else if(view==='search') {
   let applied=null,colors=null,coloring=null,searches=0,applications=0;
   const report=()=>document.querySelector('#output').textContent='検索'+searches+'回・色分け'+applications+'回';
@@ -96,6 +103,12 @@ if(params.has('width')) {
 const server = await createServer({
   root: frontend,
   configFile: false,
+  define: {
+    "import.meta.env.VITE_ASSET_PATH": JSON.stringify(
+      `${moduleUrl(resolve(frontend, "../frontend-mobile/public"))}/`,
+    ),
+    "import.meta.env.VITE_IP_ADDRESS": JSON.stringify(""),
+  },
   logLevel: "error",
   plugins: [
     {
@@ -115,6 +128,36 @@ const server = await createServer({
             res.setHeader("content-type", "application/json");
             res.end(JSON.stringify(value));
           };
+          if (url.pathname === "/scripts/mobile-map-analysis-preview.html") {
+            const html = (
+              await readFile(
+                resolve(frontend, "scripts/mobile-map-analysis-preview.html.template"),
+                "utf8",
+              )
+            )
+              .replace(
+                "__LEAFLET_CSS__",
+                moduleUrl(
+                  resolve(frontend, "../template-scripts/node_modules/leaflet/dist/leaflet.css"),
+                ),
+              )
+              .replace(
+                "__LEAFLET_JS__",
+                moduleUrl(
+                  resolve(
+                    frontend,
+                    "../template-scripts/node_modules/leaflet/dist/leaflet-src.esm.js",
+                  ),
+                ),
+              )
+              .replace(
+                "__ANSWER_COLORING__",
+                moduleUrl(resolve(frontend, "../template-scripts/src/map/answer-coloring.ts")),
+              );
+            res.setHeader("content-type", "text/html; charset=utf-8");
+            res.end(await server.transformIndexHtml(req.url, html));
+            return;
+          }
           if (url.pathname === "/map-search-ui.html") {
             res.setHeader("content-type", "text/html; charset=utf-8");
             const html = url.searchParams.has("template")
@@ -156,16 +199,52 @@ const server = await createServer({
                 form_schema: { fields: fields.map((f) => ({ ...f, type: f.field_type })) },
               },
             ]);
-          if (url.pathname === "/form-answers/map-filter")
+          if (url.pathname === "/form-answers/map-filter") {
+            let body = "";
+            for await (const chunk of req) body += chunk;
+            const request = body ? JSON.parse(body) : {};
+            const mobileScope = request.scope?.layer_ids?.includes("fixture-layer");
+            const targets = mobileScope
+              ? [
+                  ["marker:one", 60],
+                  ["shape:two", 30],
+                ]
+                  .filter(
+                    ([key, age]) =>
+                      (!request.targets || request.targets.includes(key)) &&
+                      (request.conditions || []).every((c) =>
+                        c.op === "gte"
+                          ? age >= Number(c.value)
+                          : c.op === "eq"
+                            ? age === Number(c.value)
+                            : true,
+                      ),
+                  )
+                  .map(([key]) => key)
+              : ["marker:one"];
             return json({
               forms: [{ id: formId, label: "設備点検" }],
               fields,
               forms_overflow: false,
-              targets: ["marker:one"],
-              target_count: 1,
-              answer_count: 1,
+              targets,
+              target_count: targets.length,
+              answer_count: targets.length,
               as_of: "2026-11-02T00:00:00Z",
             });
+          }
+          if (url.pathname === "/map-objects/search/attributes" && req.method === "POST") {
+            let body = "";
+            for await (const chunk of req) body += chunk;
+            const request = JSON.parse(body);
+            return json({
+              common_form_id: request.common_form_id,
+              definition_version: request.definition_version,
+              as_of: "2026-11-05T00:00:00Z",
+              marker_ids: ["one"],
+              shape_ids: [],
+              target_count: 1,
+            });
+          }
           if (url.pathname === "/form-answers/map-presets") {
             if (req.method === "GET")
               return json({ items: presets, total: presets.length, page: 1, page_size: 20 });
@@ -188,7 +267,7 @@ const server = await createServer({
     },
   ],
   resolve: {
-    dedupe: ["vue"],
+    dedupe: ["vue", "pinia"],
     alias: [
       {
         find: "@/axiosClient",
