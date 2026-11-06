@@ -22,6 +22,7 @@ const isLoginView = computed(() => route.name === "login");
           <RouterLink to="/users/list">ユーザー管理</RouterLink>
           <RouterLink to="/live-maps">位置共有マップ</RouterLink>
           <RouterLink to="/tile-overlays">タイル追加設定</RouterLink>
+          <RouterLink to="/map-display-settings">地図表示設定</RouterLink>
         </nav>
       </div>
     </header>

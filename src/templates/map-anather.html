@@ -377,6 +377,9 @@
                 longitude: {{ longitude }},
                 zoom: {{ zoom }},
             },
+            {% if clusteringMinZoom is defined %}
+            clusteringMinZoom: {{ clusteringMinZoom }},
+            {% endif %}
             tileServers: {{ tileServers | json_encode_for_html | safe }},
             tileOverlays: {{ tileOverlays | json_encode_for_html | safe }},
             tileVisibilityAccountId: {{ tileVisibilityAccountId | json_encode_for_html | safe }},

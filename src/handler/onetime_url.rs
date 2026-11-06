@@ -1,3 +1,4 @@
+use super::admin::load_clustering_min_zoom;
 use crate::error::AppError;
 use crate::model::{
     CreateUpdatedTemporaryUrlResponse, CurrentTemporaryUrlResponse, GenarateUrlPayload,
@@ -706,6 +707,7 @@ async fn render_temporary_map_page(
         .transpose()?;
     let mut context = Context::new();
     if let Some(snapshot) = &shared_snapshot {
+        context.insert("clusteringMinZoom", &load_clustering_min_zoom(pool).await?);
         // スナップショット共有では、保存後のタイル設定を追加取得しない。
         context.insert("tileServers", &snapshot["tileServers"]);
         context.insert("tileOverlays", &snapshot["tileOverlays"]);

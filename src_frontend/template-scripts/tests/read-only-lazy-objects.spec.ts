@@ -186,6 +186,36 @@ describe("lazy groups in the actual read-only map runtime", () => {
     expect(legend.hidden).toBe(true);
   });
 
+  it.each([12, 15])("共有地図は保存された解除状態に閲覧時の下限 %i を適用する", (minZoom) => {
+    const base = window.__GEOCODE_MAP_BOOTSTRAP__ as AnotherMapBootstrap;
+    const state = {
+      view: { latitude: 36, longitude: 140, zoom: 12 },
+      tileServerId: "1",
+      overlays: {},
+      layerIds: [],
+      markersVisible: true,
+      shapesVisible: true,
+      shapeNamesVisible: false,
+      clusteringEnabled: false,
+    };
+    window.__GEOCODE_MAP_BOOTSTRAP__ = {
+      ...base,
+      page: "temporary-map",
+      isMaster: false,
+      isChecked: false,
+      isMapUiHidden: false,
+      layers: {},
+      markers: {},
+      shapes: {},
+      clusteringMinZoom: minZoom,
+      shareSnapshot: { version: 1, state, tileServers: base.tileServers, tileOverlays: [] },
+    };
+    runtime = initializeReadOnlyMapPage("temporary-map");
+    const input = document.querySelector<HTMLInputElement>(".marker-clustering-control input")!;
+    expect(input.checked).toBe(minZoom === 15);
+    expect(input.disabled).toBe(minZoom === 15);
+  });
+
   it.each(["temporary-map", "temporary-map-mobile"] as const)(
     "共有地図（%s）は保存した地図と色分けの凡例を復元し、追加データを取得しない",
     async (page) => {

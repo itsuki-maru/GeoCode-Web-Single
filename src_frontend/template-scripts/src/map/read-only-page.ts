@@ -7,6 +7,7 @@ import { createTileVisibilityStorage } from "./common/tile-visibility-storage";
 import { createPopupContentRuntime } from "./common/popup-content";
 import { createLazyLayerObjects } from "./common/lazy-layer-objects";
 import { createShareMapSnapshot, resolveShareParentOrigin } from "./common/share-snapshot";
+import { installReadOnlyFullscreenClose } from "./common/read-only-fullscreen-close";
 import { createMapMessageDialog } from "./common/map-message-dialog";
 import { createColorLegend } from "./common/color-legend";
 import { openMapPrintPreview, READ_ONLY_MAP_PRINT_PATH } from "./common/map-print-host";
@@ -984,6 +985,7 @@ export function initializeReadOnlyMapPage(
           control: visibilityControl,
           allowed: clusteringAllowed,
           initialEnabled: initialState?.clusteringEnabled ?? true,
+          minZoom: printState?.clusteringMinZoom ?? bootstrap.clusteringMinZoom,
         })
       : undefined;
 
@@ -1144,6 +1146,7 @@ export function initializeReadOnlyMapPage(
           : null,
         clusteringEnabled: markerClustering?.getEnabled() ?? true,
         clusteringAllowed,
+        clusteringMinZoom: markerClustering?.minZoom,
         markersVisible: map.hasLayer(visibleMarkerGroup),
         shapesVisible: map.hasLayer(shapeVisibilityLayer),
         shapeNamesVisible: map.hasLayer(shapeNameVisibilityLayer),
@@ -1230,6 +1233,8 @@ export function initializeReadOnlyMapPage(
     if (input) input.value = initialState.objectQuery;
   }
   if (expectedPage === "map-anather" && !isAnswerPreview && !isPrint) {
+    const disposeClose = installReadOnlyFullscreenClose(bootstrap.shareParentOrigins || []);
+    if (disposeClose) map.once("unload", disposeClose);
     const messages = createMapMessageDialog();
     const control = L.control({ position: "topleft" });
     const button = document.createElement("button");

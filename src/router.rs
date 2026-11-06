@@ -29,8 +29,8 @@ use crate::handler::account::{
     disable_token, get_account_info_handler, refresh_token_handler, signup_handler, token_handler,
 };
 use crate::handler::admin::{
-    admin_index_get_handler, create_users_handler, get_users_handler, unlock_account_handler,
-    update_users_handler,
+    admin_index_get_handler, create_users_handler, get_map_display_settings, get_users_handler,
+    unlock_account_handler, update_map_display_settings, update_users_handler,
 };
 use crate::handler::assets::{
     image_preview_html_get_handler, serve_image_file, serve_marker_icon_file, serve_static_file,
@@ -132,6 +132,10 @@ pub fn build_router(
 
     // アクセストークンによる認可を要する
     let mut secured_routes = Router::new()
+        .route(
+            "/admin/map-display-settings",
+            get(get_map_display_settings).put(update_map_display_settings),
+        )
         .route(
             "/shape/{shape_id}/geometry",
             put(update_shape_geometry_handler),

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { installMarkerClustering } from "../src/map/common/marker-clustering";
 
-function fixture(zoom = 14, allowed = true, initialEnabled = true) {
+function fixture(zoom = 9, allowed = true, initialEnabled = true, minZoom: number | null = 10) {
   vi.useFakeTimers();
   const handlers = new Map<string, () => void>();
   const groupHandlers = new Map<string, () => void>();
@@ -29,6 +29,7 @@ function fixture(zoom = 14, allowed = true, initialEnabled = true) {
     control: { getContainer: () => container },
     allowed,
     initialEnabled,
+    minZoom: minZoom ?? undefined,
   });
   const input = container.querySelector<HTMLInputElement>("input")!;
   const zoomTo = (nextZoom: number) => {
@@ -45,41 +46,45 @@ afterEach(() => {
 });
 
 describe("marker clustering control", () => {
-  it("enables by default and only unlocks at zoom 15", () => {
-    const f = fixture();
+  it.each([
+    [15, null],
+    [10, 10],
+  ] as const)("unlocks at zoom %i", (zoom, configured) => {
+    const f = fixture(zoom - 1, true, true, configured);
     expect(f.input.checked).toBe(true);
     expect(f.input.disabled).toBe(true);
-    f.zoomTo(15);
+    expect(f.input.closest("label")?.title).toBe(`ズーム${zoom}以上で解除できます`);
+    f.zoomTo(zoom);
     vi.advanceTimersByTime(350);
     expect(f.input.checked).toBe(true);
     expect(f.input.disabled).toBe(false);
     f.input.click();
     expect(f.runtime.getEnabled()).toBe(false);
-    expect(f.group.options.disableClusteringAtZoom).toBe(15);
+    expect(f.group.options.disableClusteringAtZoom).toBe(zoom);
     expect(f.group.addLayers).toHaveBeenLastCalledWith(f.markers);
   });
 
   it("resets on shrinking and waits for animation cleanup before rebuilding", () => {
-    const f = fixture(15);
+    const f = fixture(10);
     f.input.click();
-    f.zoomTo(14);
+    f.zoomTo(9);
     expect(f.input.checked).toBe(true);
     expect(f.input.disabled).toBe(true);
-    expect(f.group.options.disableClusteringAtZoom).toBe(15);
+    expect(f.group.options.disableClusteringAtZoom).toBe(10);
     f.groupHandlers.get("animationend")?.();
     vi.advanceTimersByTime(0);
     expect(f.group.options.disableClusteringAtZoom).toBeNull();
-    f.zoomTo(15);
+    f.zoomTo(10);
     vi.advanceTimersByTime(350);
     expect(f.runtime.getEnabled()).toBe(true);
   });
 
   it("keeps an explicit fixed-off setting disabled at every zoom", () => {
-    const f = fixture(14, false);
+    const f = fixture(9, false);
     f.runtime.setEnabled(true);
-    f.zoomTo(15);
+    f.zoomTo(10);
     vi.advanceTimersByTime(350);
-    f.zoomTo(14);
+    f.zoomTo(9);
     vi.advanceTimersByTime(350);
     expect(f.runtime.isAllowed()).toBe(false);
     expect(f.input.checked).toBe(false);
@@ -87,20 +92,20 @@ describe("marker clustering control", () => {
     expect(f.group.clearLayers).not.toHaveBeenCalled();
   });
 
-  it("normalizes a manual release below 15 but restores it at 15", () => {
-    const low = fixture(14, true, false);
+  it("normalizes a manual release below 10 but restores it at 10", () => {
+    const low = fixture(9, true, false);
     expect(low.runtime.getEnabled()).toBe(true);
-    const high = fixture(15, true, false);
+    const high = fixture(10, true, false);
     expect(high.runtime.getEnabled()).toBe(false);
-    expect(high.group.options.disableClusteringAtZoom).toBe(15);
+    expect(high.group.options.disableClusteringAtZoom).toBe(10);
   });
 
   it("survives overlay list replacement and cancels pending work on unload", () => {
-    const f = fixture(15);
+    const f = fixture(10);
     f.container.querySelector(".leaflet-control-layers-overlays")!.replaceChildren();
     expect(f.input.isConnected).toBe(true);
     f.input.click();
-    f.zoomTo(14);
+    f.zoomTo(9);
     f.handlers.get("unload")?.();
     vi.advanceTimersByTime(350);
     expect(f.group.clearLayers).toHaveBeenCalledTimes(1);

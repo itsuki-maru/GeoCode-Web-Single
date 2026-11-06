@@ -47,6 +47,7 @@ const stateFields = [
   "overlays",
   "clusteringEnabled",
   "clusteringAllowed",
+  "clusteringMinZoom",
   "markersVisible",
   "shapesVisible",
   "shapeNamesVisible",

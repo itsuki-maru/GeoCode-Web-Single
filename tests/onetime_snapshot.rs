@@ -10,6 +10,7 @@ use axum::{
 };
 use geocode_web_single::{
     handler::{
+        admin::{MapDisplaySettings, update_map_display_settings},
         onetime_url::{
             current_url_handler, generate_url_handler, invalidate_url_handler,
             temporary_map_get_handler,
@@ -213,6 +214,7 @@ async fn rendered(pool: &SqlitePool, id: &str, mobile: bool) -> Value {
                 "shapes": {{ shapesObj | json_encode() | safe }},
                 "tiles": {{ tileServers | json_encode() | safe }},
                 "overlays": {{ tileOverlays | json_encode() | safe }}
+                {% if clusteringMinZoom is defined %},"clusteringMinZoom": {{ clusteringMinZoom }}{% endif %}
             }"#,
         )
         .unwrap();
@@ -297,8 +299,20 @@ async fn 取得済みの地図と色分けを保存し除外データを公開�
     .execute(&pool)
     .await
     .unwrap();
+    // 共有作成後の管理設定を、PC・モバイルの閲覧時に反映する。
+    let admin = common::create_test_admin(&pool, "snapshot-map-settings-admin").await;
+    let _ = update_map_display_settings(
+        Extension(admin),
+        Extension(pool.clone()),
+        Json(MapDisplaySettings {
+            clustering_min_zoom: 17,
+        }),
+    )
+    .await
+    .unwrap();
     for mobile in [false, true] {
         let output = rendered(&pool, &id, mobile).await;
+        assert_eq!(output["clusteringMinZoom"], 17);
         assert_eq!(output["snapshot"], data["map_snapshot"]);
         assert_eq!(output["tiles"], data["map_snapshot"]["tileServers"]);
         assert_eq!(output["markers"], data["markers"]);

@@ -87,6 +87,13 @@ describe("share snapshot data boundary", () => {
     expect(captured.state.view.latitude).toBe(35);
     expect(isShareMapSnapshot(captured)).toBe(true);
   });
+  it("解除状態を保存し、クラスタ解除下限は共有データに含めない", () => {
+    const data = fixture();
+    const state = { ...data.state, clusteringEnabled: false, clusteringMinZoom: 10 };
+    const captured = createShareMapSnapshot(data, state, new Set(["marker:keep"]));
+    expect(captured.state.clusteringEnabled).toBe(false);
+    expect(captured.state).not.toHaveProperty("clusteringMinZoom");
+  });
   it("0件やグループ未選択を全件扱いにしない", () => {
     const data = fixture();
     const captured = createShareMapSnapshot(data, { ...data.state, layerIds: [] }, new Set());

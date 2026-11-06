@@ -19,7 +19,12 @@ it("ログイン時は管理ナビゲーションを隠し、ログイン後に�
   expect(w.find("nav").exists()).toBe(false);
   state.route.name = "List";
   await w.vm.$nextTick();
-  expect(w.findAll("nav a")).toHaveLength(3);
+  expect(w.findAll("nav a").map((link) => link.text())).toEqual([
+    "ユーザー管理",
+    "位置共有マップ",
+    "タイル追加設定",
+    "地図表示設定",
+  ]);
   expect(w.get("main").classes()).not.toContain("login-content");
   w.unmount();
 });

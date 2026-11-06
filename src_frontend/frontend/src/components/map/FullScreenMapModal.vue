@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, ref, watch } from "vue";
 import { mapAnatherLayerUrl } from "@/router/urls";
 import {
   isShareMapSnapshot,
@@ -8,6 +8,7 @@ import {
 
 const props = defineProps<{
   isOpen: boolean;
+  closeBlocked?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -16,24 +17,98 @@ const emit = defineEmits<{
 }>();
 
 const mapIframe = ref<HTMLIFrameElement | null>(null);
-const openPrint = (): void => {
+const childModalOpen = ref(false);
+const closeRequestId = ref<number | null>(null);
+const closeResponseTimeoutMs = 750;
+let closeBridgeReady = false;
+let sessionId = 0;
+let requestSequence = 0;
+let closeTimer: number | undefined;
+
+const sendToMap = (message: Record<string, unknown>): void => {
   const iframe = mapIframe.value;
   if (!props.isOpen || !iframe?.contentWindow) return;
   const origin = new URL(iframe.src, window.location.href).origin;
-  iframe.contentWindow.postMessage({ type: "readOnlyPrintOpen" }, origin);
+  iframe.contentWindow.postMessage(message, origin);
 };
-defineExpose({ openPrint });
+
+const clearCloseRequest = (): void => {
+  window.clearTimeout(closeTimer);
+  closeTimer = undefined;
+  closeRequestId.value = null;
+};
+
+const resetCloseBridge = (): void => {
+  clearCloseRequest();
+  sessionId += 1;
+  closeBridgeReady = false;
+  childModalOpen.value = false;
+};
+
+const connectCloseBridge = (): void => {
+  sendToMap({ type: "readOnlyFullscreenCloseConnect", sessionId });
+};
+
+const requestClose = (): void => {
+  if (!props.isOpen || props.closeBlocked || childModalOpen.value || closeRequestId.value !== null)
+    return;
+  const requestId = ++requestSequence;
+  closeRequestId.value = requestId;
+  if (!closeBridgeReady) connectCloseBridge();
+  sendToMap({ type: "readOnlyFullscreenCloseRequest", sessionId, requestId });
+  closeTimer = window.setTimeout(() => {
+    clearCloseRequest();
+    // 読み込み失敗や認証画面への遷移時にも全画面から退出できるようにする。
+    if (!closeBridgeReady && props.isOpen && !props.closeBlocked) emit("close");
+  }, closeResponseTimeoutMs);
+};
+
+const onFrameLoad = (event: Event): void => {
+  if (!props.isOpen || event.currentTarget !== mapIframe.value) return;
+  const requestedWhileLoading = !closeBridgeReady && closeRequestId.value !== null;
+  resetCloseBridge();
+  if (requestedWhileLoading) requestClose();
+  else connectCloseBridge();
+};
+
+const openPrint = (): void => sendToMap({ type: "readOnlyPrintOpen" });
+defineExpose({ openPrint, requestClose });
 
 const handleMessage = (event: MessageEvent): void => {
   const iframe = mapIframe.value;
   if (!props.isOpen || !iframe?.contentWindow || event.source !== iframe.contentWindow) return;
   if (event.origin !== new URL(iframe.src, window.location.href).origin) return;
-  if (event.data?.type !== "shareMapSnapshot" || !isShareMapSnapshot(event.data.snapshot)) return;
-  emit("share", event.data.snapshot);
+  const data = event.data;
+  if (data?.type === "shareMapSnapshot" && isShareMapSnapshot(data.snapshot)) {
+    emit("share", data.snapshot);
+    return;
+  }
+  if (data?.sessionId !== sessionId || typeof data.modalOpen !== "boolean") return;
+  if (data.type === "readOnlyFullscreenCloseState") {
+    closeBridgeReady = true;
+    childModalOpen.value = data.modalOpen;
+    if (data.modalOpen) clearCloseRequest();
+  } else if (data.type === "readOnlyFullscreenCloseResult") {
+    if (closeRequestId.value === null || data.requestId !== closeRequestId.value) return;
+    clearCloseRequest();
+    closeBridgeReady = true;
+    childModalOpen.value = data.modalOpen;
+    if (!data.modalOpen && !props.closeBlocked) emit("close");
+  }
 };
 
+watch(() => props.isOpen, resetCloseBridge, { immediate: true, flush: "sync" });
+watch(
+  () => props.closeBlocked,
+  (blocked) => {
+    if (blocked) clearCloseRequest();
+  },
+);
 onMounted(() => window.addEventListener("message", handleMessage));
-onUnmounted(() => window.removeEventListener("message", handleMessage));
+onUnmounted(() => {
+  clearCloseRequest();
+  window.removeEventListener("message", handleMessage);
+});
 </script>
 
 <template>
@@ -44,8 +119,17 @@ onUnmounted(() => window.removeEventListener("message", handleMessage));
       :src="mapAnatherLayerUrl"
       title="全画面地図"
       frameborder="0"
+      @load="onFrameLoad"
     ></iframe>
-    <button class="fullscreen-close-btn" @click="emit('close')">閉じる</button>
+    <button
+      v-show="!childModalOpen && !closeBlocked"
+      type="button"
+      class="fullscreen-close-btn"
+      :disabled="closeRequestId !== null"
+      @click="requestClose"
+    >
+      閉じる
+    </button>
   </div>
 </template>
 

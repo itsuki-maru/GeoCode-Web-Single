@@ -1,4 +1,8 @@
-export const MARKER_CLUSTERING_MIN_ZOOM = 15;
+const DEFAULT_CLUSTERING_MIN_ZOOM = 15;
+
+export function isClusteringMinZoom(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 22;
+}
 
 interface ClusteringMap {
   getZoom(): number;
@@ -22,6 +26,7 @@ interface MarkerClusteringOptions {
   control: { getContainer(): HTMLElement | null };
   allowed?: boolean;
   initialEnabled?: boolean;
+  minZoom?: number;
 }
 
 /** フィルター、編集、回答の色分けに使うマーカーグループの同一性を維持する。 */
@@ -32,7 +37,11 @@ export function installMarkerClustering({
   control,
   allowed = true,
   initialEnabled = true,
+  minZoom: configuredMinZoom,
 }: MarkerClusteringOptions) {
+  const minZoom = isClusteringMinZoom(configuredMinZoom)
+    ? configuredMinZoom
+    : DEFAULT_CLUSTERING_MIN_ZOOM;
   const row = document.createElement("div");
   row.className = "marker-clustering-control";
   const label = document.createElement("label");
@@ -48,7 +57,7 @@ export function installMarkerClustering({
   control.getContainer()?.querySelector(".leaflet-control-layers-list")?.append(row);
   leaflet.DomEvent.disableClickPropagation(row);
 
-  let enabled = allowed && (map.getZoom() < MARKER_CLUSTERING_MIN_ZOOM || initialEnabled);
+  let enabled = allowed && (map.getZoom() < minZoom || initialEnabled);
   let disposed = false;
   let zooming = false;
   let settling = false;
@@ -56,7 +65,7 @@ export function installMarkerClustering({
 
   const rebuild = () => {
     if (disposed || !allowed || zooming || settling) return;
-    const disableAt = enabled ? null : MARKER_CLUSTERING_MIN_ZOOM;
+    const disableAt = enabled ? null : minZoom;
     if (markerGroup.options?.disableClusteringAtZoom === disableAt) return;
     const markers = markerGroup.getLayers();
     markerGroup.options!.disableClusteringAtZoom = disableAt;
@@ -65,16 +74,16 @@ export function installMarkerClustering({
   };
   const syncInput = () => {
     input.checked = enabled;
-    input.disabled = !allowed || map.getZoom() < MARKER_CLUSTERING_MIN_ZOOM;
+    input.disabled = !allowed || map.getZoom() < minZoom;
     label.title = !allowed
       ? "地図の設定によりクラスタは無効です"
       : input.disabled
-        ? "ズーム15以上で解除できます"
+        ? `ズーム${minZoom}以上で解除できます`
         : "チェックを外すとクラスタを解除します";
   };
   const setEnabled = (value: boolean) => {
     if (disposed) return;
-    enabled = allowed && (map.getZoom() < MARKER_CLUSTERING_MIN_ZOOM || value);
+    enabled = allowed && (map.getZoom() < minZoom || value);
     syncInput();
     rebuild();
   };
@@ -126,5 +135,5 @@ export function installMarkerClustering({
   syncInput();
   rebuild();
 
-  return { getEnabled: () => enabled, isAllowed: () => allowed, setEnabled, dispose };
+  return { minZoom, getEnabled: () => enabled, isAllowed: () => allowed, setEnabled, dispose };
 }

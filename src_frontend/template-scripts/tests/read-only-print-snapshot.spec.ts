@@ -161,10 +161,11 @@ describe("read-only print snapshot", () => {
     const { source, state } = fixture();
     const snapshot = createReadOnlyPrintSnapshot(
       { ...source, snapshotShare: true },
-      { ...state, layerIds: [] },
+      { ...state, layerIds: [], clusteringMinZoom: 12 },
       new Set(),
     );
     expect(snapshot.snapshotShare).toBe(true);
+    expect(snapshot.state.clusteringMinZoom).toBe(12);
     expect(snapshot.layers).toEqual({});
     expect(snapshot.markers).toEqual({});
     expect(snapshot.shapes).toEqual([]);
