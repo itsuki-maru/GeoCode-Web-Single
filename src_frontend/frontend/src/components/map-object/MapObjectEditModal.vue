@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { ref, watch, computed, onBeforeUnmount } from "vue";
+import "./desktop-data-modal.css";
+import BaseModal from "@/components/common/BaseModal.vue";
 import { mergeFreeText, type FormBody } from "@/utils/form-body";
 import apiClient from "@/axiosClient";
 import MessageModal from "@/components/common/MessageModal.vue";
 import MapObjectFormInputModal from "./MapObjectFormInputModal.vue";
+import FormAnswersModal from "./FormAnswersModal.vue";
 import type { MapObjectData, ShapeData } from "@/interface";
 import ConfirmModal from "@/components/common/ConfirmModal.vue";
 import MapObjectFormSettingsModal from "@/components/map-object/MapObjectFormSettingsModal.vue";
@@ -40,12 +43,18 @@ const activeShapeLineType = ref("solid");
 const activeShapeArrowType = ref<"none" | "start" | "end" | "both">("none");
 const activeShapeWeight = ref(5);
 const isDeleteCheckModal = ref(false);
+const deleteBusy = ref(false);
 const isFormSettingsOpen = ref(false);
 const isFormInputOpen = ref(false),
+  isFormAnswersOpen = ref(false),
   formAvailable = ref(false),
   confirmFormOpen = ref(false),
   updateBusy = ref(false);
+const formDestination = ref<"input" | "answers">("input");
 const initialEditState = ref("");
+const shapeSettingsOpen = ref(false),
+  helpOpen = ref(false),
+  managedOpen = ref(false);
 const bodyInfo = ref<FormBody | null>(null),
   bodyLoading = ref(false),
   bodyError = ref("");
@@ -232,9 +241,13 @@ const loadTarget = (): void => {
 watch(
   () => [props.targetId, props.targetType, props.isOpen] as const,
   () => {
+    isDeleteCheckModal.value = false;
+    shapeSettingsOpen.value = helpOpen.value = managedOpen.value = false;
     isFormInputOpen.value = false;
+    isFormAnswersOpen.value = false;
     isFormSettingsOpen.value = false;
     confirmFormOpen.value = false;
+    formDestination.value = "input";
     if (props.isOpen) {
       loadTarget();
       initialEditState.value = editState();
@@ -358,7 +371,7 @@ const saveMapObject = async (keepOpen = false): Promise<boolean> => {
   return true;
 };
 const updateMapObject = async (keepOpen = false): Promise<boolean> => {
-  if (updateBusy.value) return false;
+  if (updateBusy.value || deleteBusy.value) return false;
   updateBusy.value = true;
   try {
     return await saveMapObject(keepOpen);
@@ -366,25 +379,39 @@ const updateMapObject = async (keepOpen = false): Promise<boolean> => {
     updateBusy.value = false;
   }
 };
-const openFormInput = () => {
-  if (!formAvailable.value || updateBusy.value) return;
+const openFormDestination = (destination: "input" | "answers") => {
+  if (destination === "input") isFormInputOpen.value = true;
+  else isFormAnswersOpen.value = true;
+};
+const openForm = (destination: "input" | "answers") => {
+  if (
+    !props.targetId ||
+    updateBusy.value ||
+    deleteBusy.value ||
+    bodyLoading.value ||
+    bodyError.value
+  )
+    return;
+  if (destination === "input" && !formAvailable.value) return;
+  formDestination.value = destination;
   if (editState() !== initialEditState.value) {
     confirmFormOpen.value = true;
     return;
   }
-  isFormInputOpen.value = true;
+  openFormDestination(destination);
 };
 const saveThenOpenForm = async () => {
   confirmFormOpen.value = false;
   const id = props.targetId,
-    type = props.targetType;
+    type = props.targetType,
+    destination = formDestination.value;
   if (
     (await updateMapObject(true)) &&
     props.isOpen &&
     props.targetId === id &&
     props.targetType === type
   )
-    isFormInputOpen.value = true;
+    openFormDestination(destination);
 };
 const formSaved = (object: MapObjectData | ShapeData) => {
   if (object.id !== props.targetId) return;
@@ -418,26 +445,42 @@ const formSaved = (object: MapObjectData | ShapeData) => {
   isFormInputOpen.value = false;
   emit("updated", payload, previousLayerId);
   emit("close");
-  emit("message", "フォームの回答を保存しました。");
+  emit("message", "フォームの登録内容を保存しました。");
 };
 
 const deleteMarker = async (): Promise<void> => {
-  if (props.targetId === "" || isShape.value) {
+  if (
+    !isDeleteCheckModal.value ||
+    !props.targetId ||
+    isShape.value ||
+    deleteBusy.value ||
+    updateBusy.value
+  )
     return;
-  }
   const id = props.targetId;
-  const deleted = await mapobjStore.deleteMapObject(id);
-  isDeleteCheckModal.value = false;
-  if (!deleted) {
-    emit("message", "マーカーを削除できませんでした。");
-    return;
+  deleteBusy.value = true;
+  try {
+    const deleted = await mapobjStore.deleteMapObject(id);
+    const current = props.isOpen && props.targetType === "marker" && props.targetId === id;
+    if (current) isDeleteCheckModal.value = false;
+    if (!deleted) {
+      if (current) emit("message", "マーカーを削除できませんでした。");
+      return;
+    }
+    if (current) emit("close");
+    emit("deleted", id);
+  } catch {
+    if (props.isOpen && props.targetType === "marker" && props.targetId === id) {
+      isDeleteCheckModal.value = false;
+      emit("message", "マーカーを削除できませんでした。");
+    }
+  } finally {
+    deleteBusy.value = false;
   }
-  emit("close");
-  emit("deleted", id);
 };
 
 function insertMarkdown(text: string) {
-  if (inputRestricted.value) return;
+  if (inputRestricted.value || updateBusy.value || deleteBusy.value) return;
   const textareaElm = detailTextarea.value;
   if (!textareaElm || bodyLoading.value || bodyError.value || bodyInfo.value?.sync_required) return;
   textareaElm.focus();
@@ -460,94 +503,163 @@ const insertUploadedMarkdown = (markdownLink: string) => {
   insertMarkdown(markdownLink);
 };
 
+const editorTools = [
+  {
+    label: "ファイル追加",
+    title: "ファイルの追加",
+    icon: "smartphone_line24.png",
+    action: "upload",
+  },
+  { label: "ファイル一覧", title: "ファイル一覧", icon: "documents_line24.png", action: "files" },
+  { label: "見出し", title: "## を挿入", icon: "format_h2_24.png", markdown: "## " },
+  { label: "小見出し", title: "### を挿入", icon: "format_h3_24.png", markdown: "### " },
+  { label: "箇条書き", title: "- を挿入", icon: "format_list_bulleted_24.png", markdown: "- " },
+  { label: "番号付き", title: "1. を挿入", icon: "format_list_numbered_24.png", markdown: "1. " },
+  { label: "太字", title: "** を挿入", icon: "format_bold_24.png", markdown: "**" },
+  {
+    label: "リンク",
+    title: "[ Title ]( URL )を挿入",
+    icon: "link_24.png",
+    markdown: "[ Title ]( URL )",
+  },
+  {
+    label: "折りたたみ",
+    title: ":::details を挿入",
+    icon: "more_24.png",
+    markdown: ":::details タイトル\n非表示にする内容\n:::",
+  },
+  {
+    label: "補足",
+    title: ":::note を挿入",
+    icon: "info_24.png",
+    markdown: ":::note タイトル\n内容\n:::",
+  },
+  {
+    label: "注意",
+    title: ":::warning を挿入",
+    icon: "warning_24.png",
+    markdown: ":::warning タイトル\n内容\n:::",
+  },
+];
+const textEditingDisabled = computed(
+  () =>
+    inputRestricted.value ||
+    bodyLoading.value ||
+    !!bodyInfo.value?.sync_required ||
+    !!bodyError.value,
+);
+const runEditorTool = (tool: (typeof editorTools)[number]) => {
+  if (textEditingDisabled.value || updateBusy.value || deleteBusy.value) return;
+  if (tool.action === "upload") emit("openImageUpload");
+  else if (tool.action === "files") emit("openImageList");
+  else if (tool.markdown) insertMarkdown(tool.markdown);
+};
+
 defineExpose({ insertUploadedMarkdown, updateMapObject });
 </script>
 
 <template>
-  <div class="overlay-map-object-edit" v-show="isOpen">
+  <BaseModal
+    class="desktop-data-modal desktop-object-edit overlay-map-object-edit"
+    :isOpen="isOpen"
+    :closeOnOverlayClick="false"
+    @close="emit('close')"
+  >
     <div
-      class="content-map-object-edit"
-      :inert="updateBusy || isFormInputOpen || isFormSettingsOpen || confirmFormOpen"
+      class="desktop-data-panel content-map-object-edit"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="map-object-edit-h2"
+      :inert="
+        updateBusy ||
+        deleteBusy ||
+        isDeleteCheckModal ||
+        isFormInputOpen ||
+        isFormAnswersOpen ||
+        isFormSettingsOpen ||
+        confirmFormOpen ||
+        undefined
+      "
     >
-      <h2 class="modal-h2">{{ isShape ? "図形情報の編集" : "マーカー情報の編集" }}</h2>
-      <div class="title-select-row">
-        <div class="input-select-row-group title-input">
-          <label class="row">{{ isShape ? "図形名" : "マーカー名" }}</label>
-          <input
-            class="input-text input-text-title"
-            type="text"
-            :placeholder="isShape ? '図形名' : 'マーカー名'"
-            :maxlength="isShape ? 80 : undefined"
-            v-model="activeObjectName"
-          />
-        </div>
-        <div class="input-select-row-group group-select">
-          <label class="row">レイヤ選択</label>
-          <select
-            class="select-elm-editform"
-            :value="activeObjectLayer"
-            @change="selectObjectLayer"
-          >
-            <option v-for="[id, obj] in layerList" :key="id" :value="obj.id">
-              {{ obj.name }}
-            </option>
-          </select>
-        </div>
-      </div>
-      <div v-if="isShape" class="shape-style-row">
-        <label>
-          色
-          <input
-            :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
-            v-model="activeShapeColor"
-            type="color"
-            aria-label="図形色"
-          />
-        </label>
-        <label>
-          線種
-          <select
-            :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
-            v-model="activeShapeLineType"
-            class="select-elm-editform shape-line-select"
-          >
-            <option v-for="option in lineTypeOptions" :key="option.value" :value="option.value">
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-        <label v-if="isPolyline">
-          矢印
-          <select
-            :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
-            v-model="activeShapeArrowType"
-            class="select-elm-editform shape-line-select"
-          >
-            <option v-for="option in arrowTypeOptions" :key="option.value" :value="option.value">
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-        <label class="shape-weight-label">
-          太さ
-          <input
-            :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
-            v-model.number="activeShapeWeight"
-            type="range"
-            min="1"
-            max="10"
-            step="1"
-          />
-          <output>{{ activeShapeWeight }}px</output>
-        </label>
-      </div>
-      <div class="textarea-row">
-        <div class="input-select-row-group">
-          <label class="row" for="detail">
-            {{ isShape ? "メモ（Markdown）" : "マーカーの内容" }}
-            <span class="free-input-label">{{ inputRestricted ? "入力制限中" : "自由入力" }}</span>
-          </label>
-          <div class="markdown-editor">
+      <header class="desktop-data-header">
+        <h2 id="map-object-edit-h2">{{ isShape ? "図形情報の編集" : "マーカー情報の編集" }}</h2>
+        <button
+          type="button"
+          class="close-button"
+          :disabled="updateBusy || deleteBusy"
+          @click="emit('close')"
+        >
+          閉じる
+        </button>
+      </header>
+      <div class="desktop-data-body">
+        <section class="edit-section basic-information" aria-labelledby="object-basic-heading">
+          <h3 id="object-basic-heading">基本情報</h3>
+          <div class="input-text-row title-select-row">
+            <label :for="`object-name-${targetType}`"
+              >{{ isShape ? "図形名" : "マーカー名" }}
+              <input
+                :id="`object-name-${targetType}`"
+                class="input-text"
+                type="text"
+                :placeholder="isShape ? '図形名' : 'マーカー名'"
+                :maxlength="isShape ? 80 : undefined"
+                v-model="activeObjectName"
+              />
+            </label>
+            <label :for="`object-layer-${targetType}`"
+              >所属レイヤ
+              <select
+                :id="`object-layer-${targetType}`"
+                class="select-elm-editform"
+                :value="activeObjectLayer"
+                @change="selectObjectLayer"
+              >
+                <option v-for="[id, obj] in layerList" :key="id" :value="obj.id">
+                  {{ obj.name }}
+                </option>
+              </select>
+            </label>
+          </div>
+        </section>
+        <div class="editor-columns">
+          <section class="edit-section textarea-row editor-main">
+            <label class="detail-label" for="detail">
+              {{ isShape ? "メモ（Markdown）" : "マーカーの内容" }}
+              <span class="free-input-label">{{
+                inputRestricted ? "入力制限中" : "自由入力"
+              }}</span>
+            </label>
+            <p v-if="bodyLoading" class="input-help" role="status">本文・メモを読み込んでいます…</p>
+            <p v-if="bodyError" class="input-warning" role="alert">{{ bodyError }}</p>
+            <p v-if="bodyInfo?.sync_required" class="input-warning" role="alert">
+              本文・メモと登録の対応確認が必要です。登録一覧の「編集」から確認してください。
+            </p>
+            <p v-if="inputRestricted" class="input-warning" role="status">
+              <strong>入力が制限されています。</strong
+              >名前と所属レイヤを変更できます。内容・メモはフォームから登録してください。<span
+                v-if="isShape"
+                >図形の頂点は地図上で編集できます。</span
+              >
+            </p>
+            <div class="editor-tools" role="group" aria-label="書式・ファイル">
+              <h4>書式・ファイル</h4>
+              <div class="input-tools map-object-edit-row">
+                <button
+                  v-for="tool in editorTools"
+                  :key="tool.title"
+                  type="button"
+                  :disabled="textEditingDisabled || updateBusy || deleteBusy"
+                  @click="runEditorTool(tool)"
+                  class="btn-function-image"
+                  :title="tool.title"
+                >
+                  <img :src="`${assetsUrl}${tool.icon}`" class="function-img" alt="" /><span>{{
+                    tool.label
+                  }}</span>
+                </button>
+              </div>
+            </div>
             <textarea
               ref="detailTextarea"
               class="input-detail-markdown"
@@ -561,198 +673,169 @@ defineExpose({ insertUploadedMarkdown, updateMapObject });
               :maxlength="isShape ? 10000 : undefined"
               v-model="activeObjectDetail"
             ></textarea>
-            <button
-              type="button"
-              :disabled="updateBusy || bodyLoading || !!bodyError"
-              @click="updateMapObject()"
-              class="btn-update"
+
+            <div id="detail-input-help" class="input-help">
+              <p>自由入力は、フォーム登録の分析対象にはなりません。</p>
+              <details
+                class="input-help-details"
+                :open="helpOpen"
+                @toggle="helpOpen = ($event.target as HTMLDetailsElement).open"
+              >
+                <summary>自由入力とフォーム登録について</summary>
+                <p>
+                  分析するデータは「新しい登録を追加」から入力してください。フォーム未設定の場合は「入力フォーム設定」から設定できます。
+                </p>
+                <p>
+                  フォーム経由で追記された文章を直接編集しても、分析用の登録データは変更されません。既存の登録は「登録内容を確認・更新」から修正できます。
+                </p>
+              </details>
+            </div>
+          </section>
+          <aside class="editor-sidebar" aria-label="表示設定とフォーム登録">
+            <details
+              v-if="isShape"
+              class="edit-section shape-settings"
+              :open="shapeSettingsOpen"
+              @toggle="shapeSettingsOpen = ($event.target as HTMLDetailsElement).open"
             >
-              +更新
-            </button>
-          </div>
+              <summary>図形の表示設定</summary>
+              <div class="shape-style-row">
+                <label>
+                  色
+                  <input
+                    :disabled="
+                      inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError
+                    "
+                    v-model="activeShapeColor"
+                    type="color"
+                    aria-label="図形色"
+                  />
+                </label>
+                <label>
+                  線種
+                  <select
+                    :disabled="
+                      inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError
+                    "
+                    v-model="activeShapeLineType"
+                    class="shape-line-select"
+                  >
+                    <option
+                      v-for="option in lineTypeOptions"
+                      :key="option.value"
+                      :value="option.value"
+                    >
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </label>
+                <label v-if="isPolyline">
+                  矢印
+                  <select
+                    :disabled="
+                      inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError
+                    "
+                    v-model="activeShapeArrowType"
+                    class="shape-line-select"
+                  >
+                    <option
+                      v-for="option in arrowTypeOptions"
+                      :key="option.value"
+                      :value="option.value"
+                    >
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </label>
+                <label class="shape-weight-label">
+                  太さ
+                  <input
+                    :disabled="
+                      inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError
+                    "
+                    v-model.number="activeShapeWeight"
+                    type="range"
+                    min="1"
+                    max="10"
+                    step="1"
+                  />
+                  <output>{{ activeShapeWeight }}px</output>
+                </label>
+              </div>
+            </details>
+            <section class="edit-section form-registration" aria-labelledby="object-form-heading">
+              <h3 id="object-form-heading">フォーム登録</h3>
+              <p v-if="!formAvailable" class="input-help">
+                新しく登録するには、入力フォームを設定してください。
+              </p>
+              <div class="btn-commit-row" :class="{ 'has-form-input': formAvailable }">
+                <button
+                  v-if="formAvailable"
+                  type="button"
+                  class="btn-form-new"
+                  :disabled="updateBusy || deleteBusy || bodyLoading || !!bodyError"
+                  @click="openForm('input')"
+                >
+                  新しい登録を追加
+                </button>
+                <button
+                  type="button"
+                  class="btn-form-history"
+                  :disabled="updateBusy || deleteBusy || bodyLoading || !!bodyError || !targetId"
+                  @click="openForm('answers')"
+                >
+                  登録内容を確認・更新
+                </button>
+              </div>
+              <button
+                type="button"
+                :disabled="updateBusy || deleteBusy || bodyLoading || !!bodyError"
+                @click="isFormSettingsOpen = true"
+                class="btn-form-settings"
+              >
+                入力フォーム設定
+              </button>
+              <details
+                v-if="bodyInfo && !bodyInfo.sync_required && bodyInfo.managed_markdown"
+                class="managed-answers"
+                :open="managedOpen"
+                @toggle="managedOpen = ($event.target as HTMLDetailsElement).open"
+              >
+                <summary>本文・メモに反映された登録内容</summary>
+                <pre>{{ bodyInfo.managed_markdown }}</pre>
+              </details>
+            </section>
+          </aside>
         </div>
       </div>
-      <div class="map-object-edit-row">
-        <button
-          :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
-          @click="!inputRestricted && emit('openImageUpload')"
-          class="btn-function-image"
-          title="ファイルの追加"
-        >
-          <img
-            :src="`${assetsUrl}smartphone_line24.png`"
-            class="function-img"
-            alt="smartphone_line24.png"
-          />
-        </button>
-        <button
-          :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
-          @click="!inputRestricted && emit('openImageList')"
-          class="btn-function-image"
-          title="ファイル一覧"
-        >
-          <img
-            :src="`${assetsUrl}documents_line24.png`"
-            class="function-img"
-            alt="documents_line24.png"
-          />
-        </button>
-        <button
-          :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
-          @click="insertMarkdown('## ')"
-          class="btn-function-image"
-          title="## を挿入"
-        >
-          <img :src="`${assetsUrl}format_h2_24.png`" class="function-img" alt="format_h2_24.png" />
-        </button>
-        <button
-          :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
-          @click="insertMarkdown('### ')"
-          class="btn-function-image"
-          title="### を挿入"
-        >
-          <img :src="`${assetsUrl}format_h3_24.png`" class="function-img" alt="format_h3_24.png" />
-        </button>
-        <button
-          :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
-          @click="insertMarkdown('- ')"
-          class="btn-function-image"
-          title="- を挿入"
-        >
-          <img
-            :src="`${assetsUrl}format_list_bulleted_24.png`"
-            class="function-img"
-            alt="format_list_bulleted_24.png"
-          />
-        </button>
-        <button
-          :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
-          @click="insertMarkdown('1. ')"
-          class="btn-function-image"
-          title="1. を挿入"
-        >
-          <img
-            :src="`${assetsUrl}format_list_numbered_24.png`"
-            class="function-img"
-            alt="format_list_numbered_24.png"
-          />
-        </button>
-        <button
-          :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
-          @click="insertMarkdown('**')"
-          class="btn-function-image"
-          title="** を挿入"
-        >
-          <img
-            :src="`${assetsUrl}format_bold_24.png`"
-            class="function-img"
-            alt="format_bold_24.png"
-          />
-        </button>
-        <button
-          :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
-          @click="insertMarkdown('[ Title ]( URL )')"
-          class="btn-function-image"
-          title="[ Title ]( URL )を挿入"
-        >
-          <img :src="`${assetsUrl}link_24.png`" class="function-img" alt="link_24.png" />
-        </button>
-        <button
-          :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
-          @click="insertMarkdown(':::details タイトル\n非表示にする内容\n:::')"
-          class="btn-function-image"
-          title=":::details を挿入"
-        >
-          <img :src="`${assetsUrl}more_24.png`" class="function-img" alt="more_24.png" />
-        </button>
-        <button
-          :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
-          @click="insertMarkdown(':::note タイトル\n内容\n:::')"
-          class="btn-function-image"
-          title=":::note を挿入"
-        >
-          <img :src="`${assetsUrl}info_24.png`" class="function-img" alt="info_24.png" />
-        </button>
-        <button
-          :disabled="inputRestricted || bodyLoading || !!bodyInfo?.sync_required || !!bodyError"
-          @click="insertMarkdown(':::warning タイトル\n内容\n:::')"
-          class="btn-function-image"
-          title=":::warning を挿入"
-        >
-          <img :src="`${assetsUrl}warning_24.png`" class="function-img" alt="warning_24.png" />
-        </button>
+      <footer class="desktop-data-footer">
         <button
           v-if="!isShape"
-          @click="isDeleteCheckModal = true"
-          class="btn-function-image"
-          title="マーカーを削除"
-        >
-          <img :src="`${assetsUrl}delete_24.png`" class="function-img" alt="delete24.png" />
-        </button>
-      </div>
-      <div id="detail-input-help" class="input-help">
-        <p v-if="bodyError" role="alert">{{ bodyError }}</p>
-        <p v-if="bodyInfo?.sync_required">
-          本文・メモと回答の対応確認が必要です。回答一覧の「編集」から確認してください。
-        </p>
-        <details
-          v-if="bodyInfo && !bodyInfo.sync_required && bodyInfo.managed_markdown"
-          class="managed-answers"
-        >
-          <summary>フォーム回答からの内容（回答一覧から編集）</summary>
-          <pre>{{ bodyInfo.managed_markdown }}</pre>
-        </details>
-        <p v-if="inputRestricted">
-          <strong>入力が制限されています。</strong
-          >名前と所属レイヤを変更できます。内容・メモはフォームから登録してください。
-          <span v-if="isShape">図形の頂点は地図上で編集できます。</span>
-        </p>
-        <p>ここに直接入力した内容は、<strong>フォーム回答の分析対象にはなりません</strong>。</p>
-        <p v-if="!bodyInfo">
-          フォーム回答から追記された文章を直接編集しても、分析用の回答データは変更されません。
-        </p>
-        <p v-if="formAvailable">
-          分析するデータは「<strong>フォームで回答を登録</strong>」から入力してください。
-        </p>
-        <p v-else>
-          分析するデータはフォームから登録します。未設定の場合は「<strong>入力フォーム設定</strong>」から設定してください。
-        </p>
-      </div>
-      <div class="btn-commit-row">
-        <button
-          :disabled="updateBusy || bodyLoading || !!bodyError"
-          @click="isFormSettingsOpen = true"
-          class="btn-form-settings"
-        >
-          入力フォーム設定
-        </button>
-        <button
-          v-if="formAvailable"
           type="button"
-          class="btn-form-settings"
-          :disabled="updateBusy || bodyLoading || !!bodyError"
-          @click="openFormInput"
+          class="btn-delete-marker"
+          title="マーカーを削除"
+          :disabled="updateBusy || deleteBusy || !targetId"
+          @click="isDeleteCheckModal = true"
         >
-          フォームで回答を登録
+          マーカーを削除
         </button>
-      </div>
-      <button
-        type="button"
-        class="close-button"
-        :disabled="updateBusy || bodyLoading || !!bodyError"
-        @click="emit('close')"
-      >
-        閉じる
-      </button>
+        <button
+          type="button"
+          :disabled="updateBusy || deleteBusy || bodyLoading || !!bodyError"
+          @click="updateMapObject()"
+          class="btn-update"
+        >
+          {{ updateBusy ? "保存中…" : "変更を保存" }}
+        </button>
+      </footer>
     </div>
-  </div>
-
+  </BaseModal>
   <ConfirmModal
-    :isOpen="isDeleteCheckModal"
+    :isOpen="isOpen && isDeleteCheckModal"
     title="削除の確認"
-    message="本当にこのマーカーを削除しますか？"
+    :message="deleteBusy ? 'マーカーを削除しています…' : '本当にこのマーカーを削除しますか？'"
     @confirm="deleteMarker"
-    @cancel="isDeleteCheckModal = false"
+    @cancel="!deleteBusy && (isDeleteCheckModal = false)"
   />
   <MapObjectFormSettingsModal
     :isOpen="isFormSettingsOpen"
@@ -772,345 +855,367 @@ defineExpose({ insertUploadedMarkdown, updateMapObject });
   />
   <MessageModal
     :isOpen="confirmFormOpen"
-    message="未保存の編集内容を保存して、フォーム入力を開きますか？"
-    confirmLabel="保存してフォームを開く"
+    :message="
+      formDestination === 'answers'
+        ? '未保存の編集内容を保存して、登録一覧を開きますか？'
+        : '未保存の編集内容を保存して、フォーム入力を開きますか？'
+    "
+    :confirmLabel="
+      formDestination === 'answers' ? '保存して登録一覧を開く' : '保存してフォームを開く'
+    "
     @close="confirmFormOpen = false"
     @confirm="saveThenOpenForm"
+  />
+  <FormAnswersModal
+    v-if="isOpen && isFormAnswersOpen"
+    :isOpen="isFormAnswersOpen"
+    :targetType="targetType"
+    :targetId="targetId"
+    @close="isFormAnswersOpen = false"
   />
 </template>
 
 <style scoped>
-.managed-answers pre {
-  white-space: pre-wrap;
+.content-map-object-edit {
+  color: #243248;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 700;
+}
+.input-text-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+.input-text-row label,
+.shape-style-row label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.input-text,
+.select-elm-editform,
+.shape-line-select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid #b7c3d1;
+  border-radius: 8px;
+  box-sizing: border-box;
+  background: #fff;
+  color: #243248;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 400;
+}
+summary {
+  min-height: 28px;
+  cursor: pointer;
   overflow-wrap: anywhere;
-  max-height: 16vh;
-  overflow: auto;
+}
+.shape-settings > summary {
+  font-weight: 700;
+}
+.shape-style-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 14px;
+}
+.shape-style-row input[type="color"] {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  height: 44px;
+  border: 1px solid #b7c3d1;
+  border-radius: 8px;
+  background: #fff;
+}
+.shape-weight-label {
+  grid-column: 1 / -1;
+}
+.shape-weight-label input {
+  width: 100%;
+  min-width: 0;
+  margin: 6px 0;
+}
+.shape-weight-label output {
+  color: #52647b;
+  font-size: 13px;
+}
+.detail-label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-weight: 700;
 }
 .free-input-label {
   display: inline-block;
-  margin-left: 8px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: #e9edf2;
-  color: #425466;
-  font-size: 0.8rem;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: #e9eef4;
+  color: #52647b;
+  font-size: 12px;
+  font-weight: 500;
+}
+.input-detail-markdown {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  height: clamp(240px, 40dvh, 480px);
+  padding: 12px;
+  resize: vertical;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.6;
+  color: #243248;
+  background: #fff;
+  border: 1px solid #b7c3d1;
+  border-radius: 8px;
+}
+.input-detail-markdown:focus {
+  outline: 2px solid #4b78bd;
+  outline-offset: 1px;
+}
+.editor-tools {
+  margin: 0 0 12px;
+  border: 1px solid #dce3eb;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px;
+}
+.map-object-edit-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.btn-function-image {
+  flex: 0 1 82px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 64px;
+  margin: 0;
+  padding: 8px 2px;
+  border: 1px solid #d3deeb;
+  border-radius: 8px;
+  box-shadow: none;
+  background: #fff;
+  color: #33465f;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.function-img {
+  display: block;
+  width: 24px;
+  height: 24px;
+  margin-bottom: 5px;
+  border: 0;
+  box-shadow: none;
 }
 .input-help {
-  color: #475569;
-  font-size: 0.875rem;
+  color: #52647b;
+  font-size: 13px;
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
-.input-help {
-  margin-top: 8px;
-  text-align: left;
-}
 .input-help p {
-  margin: 4px 0;
+  margin: 10px 0 0;
+}
+.input-help-details {
+  margin-top: 8px;
+}
+.input-warning {
+  margin: 0 0 10px;
+  padding: 10px;
+  border: 1px solid #e3c78b;
+  border-radius: 8px;
+  background: #fff9eb;
+  color: #704d15;
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 .btn-commit-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  max-width: calc(100% - 24px);
-}
-.btn-commit-row button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.overlay-map-object-edit {
-  z-index: 1;
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.content-map-object-edit {
-  position: relative;
-  z-index: 2;
-  width: 65%;
-  padding: 1em;
-  background: whitesmoke;
-  border-radius: 10px;
-  margin: 16px auto;
-  max-height: calc(100dvh - 32px);
-  overflow-y: auto;
-  padding: 20px;
-  box-sizing: border-box;
-}
-
-.modal-h2 {
-  border-bottom: solid 2px #acacac;
-  text-align: center;
-}
-
-.title-select-row {
-  display: flex;
-  width: 100%;
-  gap: 20px;
-}
-
-.input-select-row-group {
-  text-align: left;
-}
-
-.title-input {
-  width: 80%;
-}
-
-.group-select {
-  width: 20%;
-}
-
-.input-text {
-  font-size: 20px;
-  width: 100%;
-  padding: 0.6em 1.2em;
-  display: flex;
-  margin-bottom: 2%;
-  border-radius: 5px;
-}
-
-.input-text:focus {
-  outline: none;
-  border-color: #007bff;
-  box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
-}
-
-.input-text-title {
-  border-radius: 8px;
-  border: 1px solid #999999;
-  padding: 0.6em 1.2em;
-  font-family: inherit;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-  box-sizing: border-box;
-}
-
-.select-elm-editform {
-  font-size: 20px;
-  width: 100%;
-  margin-bottom: 2%;
-  border-radius: 5px;
-  padding: 0.6em 1.2em;
-  font-family: inherit;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-  background-color: #ffffff;
-  border-color: #555;
-  border: 1px solid #ccc;
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  background-repeat: no-repeat;
-  background-position: right 1em center;
-  text-align: center;
-}
-
-.select-elm-editform:focus {
-  outline: none;
-  border-color: #007bff;
-  box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
-}
-
-.select-elm-editform:hover {
-  border-color: #888;
-}
-
-.textarea-row {
-  text-align: center;
-  margin-bottom: 10px;
-}
-
-.shape-style-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 24px;
-  margin: 12px 0;
-  text-align: left;
-}
-
-.shape-style-row label {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
-}
-
-.shape-line-select {
-  width: 180px;
-  margin: 0;
-}
-
-.shape-weight-label {
-  flex: 1;
-}
-
-.shape-weight-label input {
-  flex: 1;
-}
-
-.markdown-editor {
-  position: relative;
-}
-
-.input-detail-markdown {
-  display: block;
-  resize: vertical;
-  font-size: 20px;
-  width: 100%;
-  border-radius: 8px;
-  border: 1px solid #999999;
-  padding: 0.6em 1.2em 76px;
-  font-family: inherit;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-  box-sizing: border-box;
-  height: 44vh;
-}
-
-.shape-detail-markdown {
-  height: 36vh;
-}
-
-.input-detail-markdown:focus {
-  outline: none;
-  border-color: #007bff;
-  box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
-}
-
-.map-object-edit-row {
-  display: flex;
-  width: 100%;
-  gap: 20px;
-  justify-content: center;
-  margin-bottom: 1%;
-}
-
-.btn-commit-row {
-  position: static;
   margin-top: 12px;
 }
-
-.btn-function-image {
-  width: 55px;
-  height: 40px;
-  font-size: 16px;
-  background: white;
-  color: #000000;
-  padding: 8px 5px;
-  text-decoration: none;
-  border: 1px;
-  border-radius: 15px;
-  transition: background-color 0.3s;
-  margin-right: 10px;
-  margin-left: 5px;
-  text-align: center;
-}
-
-.function-img {
-  border: none;
-  box-shadow: none;
-  width: 24px;
-}
-
-.close-button {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  padding: 0.6em 1.2em;
-  background-color: #5f5f5f;
-  color: #fff;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-  font: inherit;
-  font-weight: 500;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-
-.close-button:hover {
-  border-color: #396cd8;
-}
-
-.close-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-.btn-update {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  z-index: 1;
-  min-width: 90px;
-  height: 44px;
+.btn-commit-row button {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
   margin: 0;
-  padding: 0 14px;
-  border: 1px solid rgb(23, 155, 126);
-  border-radius: 16px;
-  background: rgb(23, 155, 126);
+  padding: 10px 12px;
+  box-sizing: border-box;
+  border: 1px solid #718db4;
+  border-radius: 8px;
+  box-shadow: none;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.btn-form-new {
+  background: #edf4ff;
+  color: #183e75;
+}
+.btn-form-history {
+  background: #fff;
+  color: #183e75;
+}
+.btn-form-settings {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 44px;
+  margin: 4px 0 0;
+  padding: 10px 0;
+  background: transparent;
+  color: #335d96;
+  border: 0;
+  box-shadow: none;
+  font: inherit;
+  font-size: 14px;
+  text-decoration: underline;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.managed-answers {
+  margin-top: 6px;
+  color: #52647b;
+  font-size: 13px;
+}
+.managed-answers pre {
+  margin: 8px 0 0;
+  padding: 10px;
+  border: 1px solid #dce3eb;
+  border-radius: 6px;
+  background: #f8fafc;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.btn-update {
+  min-width: 140px;
+  min-height: 42px;
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid #137b67;
+  border-radius: 8px;
+  background: #15806b;
   color: #fff;
-  box-shadow: 3px 3px 5px 0 rgba(75, 75, 75, 0.5);
+  box-shadow: none;
+  font: inherit;
   font-size: 16px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
 }
-.btn-update:disabled {
+button:disabled {
   opacity: 0.5;
   cursor: default;
 }
-.btn-form-settings {
-  min-width: 112px;
-  height: 44px;
-  padding: 0 14px;
-  border: 1px solid #7890b6;
-  border-radius: 16px;
-  background: #edf4ff;
-  color: #183a70;
-  font-weight: 700;
+
+.basic-information {
+  margin-bottom: 24px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #dce3eb;
+}
+.title-select-row,
+.input-text-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 20px;
+}
+.editor-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 300px);
+  align-items: start;
+  gap: 24px;
+}
+.editor-main,
+.editor-sidebar {
+  min-width: 0;
+}
+.editor-sidebar {
+  display: grid;
+  gap: 20px;
+}
+.editor-sidebar > .edit-section {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #dce3eb;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.editor-tools h4 {
+  margin: 0 0 8px;
+  color: #52647b;
+  font-size: 13px;
+  font-weight: 600;
+}
+.close-button,
+.btn-delete-marker {
+  min-height: 42px;
+  margin: 0;
+  padding: 10px 16px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  box-shadow: none;
+  font: inherit;
+  line-height: 1.5;
   cursor: pointer;
 }
-
-@media (orientation: portrait) {
-  .content-map-object-edit {
-    width: calc(100vw - 32px);
-    max-width: 960px;
-    max-height: calc(100vh - 32px);
-    max-height: calc(100dvh - 32px);
-    margin: 16px auto;
-    overflow-y: auto;
+.close-button {
+  background: #5f5f5f;
+  color: #fff;
+}
+.btn-delete-marker {
+  margin-right: auto;
+  border-color: #b42318;
+  background: #b42318;
+  color: #fff;
+}
+@media (max-width: 900px) {
+  .editor-columns {
+    grid-template-columns: minmax(0, 1fr);
   }
-
-  .map-object-edit-row {
-    flex-wrap: wrap;
-    gap: 12px;
-    margin-bottom: 16px;
+}
+@media (max-width: 600px) {
+  .input-text-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
   }
-
   .btn-function-image {
-    flex: 0 0 55px;
-    margin: 0;
+    flex-basis: 82px;
   }
-
-  .btn-commit-row {
-    position: static;
-    display: flex;
-    justify-content: flex-end;
-    gap: 12px;
-    margin-top: 12px;
-  }
-
-  .btn-update {
-    margin: 0;
+  .btn-update,
+  .btn-delete-marker {
+    flex: 1 1 140px;
+    min-width: 0;
   }
 }
 </style>

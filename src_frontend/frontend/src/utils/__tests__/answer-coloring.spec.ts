@@ -18,7 +18,7 @@ const rule = {
   color: "#2166ac",
   conditions: [condition("9007199254740993.1")],
 };
-describe("回答色分けのAPI条件", () => {
+describe("登録色分けのAPI条件", () => {
   it("2万対象でも所属と重複を検証する", () => {
     const targets = Array.from({ length: 20_000 }, (_, n) => `shape:target-${n}`);
     const allowed = new Set(targets);
@@ -27,7 +27,7 @@ describe("回答色分けのAPI条件", () => {
     expect(() => validateColorTargets([...targets, "shape:outside"], allowed)).toThrow("対象情報");
   });
 
-  it("20条件を二つのAPI配列へ分配し、同じ回答・履歴モードと数値精度を維持する", () => {
+  it("20条件を二つのAPI配列へ分配し、同じ登録・履歴モードと数値精度を維持する", () => {
     const query = {
       mode: "history",
       as_of: "2026-10-20T00:00:00Z",
@@ -78,7 +78,7 @@ describe("回答色分けのAPI条件", () => {
       ),
     ).toThrow("個別フォーム");
   });
-  it("同じ回答に適用する条件を移して、10件ずつの上限に収める", () => {
+  it("同じ登録に適用する条件を移して、10件ずつの上限に収める", () => {
     const request = createColorRuleRequest(
       { conditions: [condition("0")] },
       { common_form_id: "form", conditions: Array.from({ length: 10 }, () => condition("1")) },

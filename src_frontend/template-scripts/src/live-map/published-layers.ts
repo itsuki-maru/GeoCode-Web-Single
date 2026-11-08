@@ -19,6 +19,7 @@ import {
 import { extractYouTubeId } from "../map/common/base";
 import { installMapMarkdownExtensions } from "../map/common/markdown-extensions";
 import { installMapMarkdownRenderer } from "../map/common/markdown-renderer";
+import { sanitizeMapHtml } from "../map/common/markdown-sanitizer";
 import { installMjpegCameras } from "../map/common/mjpeg-camera";
 import { createCollapsibleLayerControl } from "./controls";
 
@@ -57,7 +58,7 @@ export function addPublishedLayerControl(
         renderDeferredBody: (text, links) =>
           renderProgressiveMarkdown(
             text,
-            (html) => renderIframe(filterXSS(html, xssOptions)),
+            (html) => renderIframe(sanitizeMapHtml(html, filterXSS, xssOptions)),
             links,
           ),
       }) as any,
@@ -75,7 +76,11 @@ export function addPublishedLayerControl(
     markdown: string,
     links?: Parameters<typeof renderProgressiveMarkdown>[2],
   ) =>
-    renderProgressiveMarkdown(markdown, (html) => renderIframe(filterXSS(html, xssOptions)), links);
+    renderProgressiveMarkdown(
+      markdown,
+      (html) => renderIframe(sanitizeMapHtml(html, filterXSS, xssOptions)),
+      links,
+    );
   const popupContent = (name: string, memo: string) =>
     `<div class="md-detail-contents"><h1>${escapeHtml(name)}</h1>${renderContentMarkdown(memo)}</div>`;
   const bindContent = (layer: any, name: string, memo: string, showHoverName = true) => {

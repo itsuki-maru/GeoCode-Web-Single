@@ -190,7 +190,7 @@ pub async fn delete_shape_handler(
     }))
 }
 
-// 頂点座標だけを更新し、本文・メモ・回答・スタイルは最新値を保持する。
+// 頂点座標だけを更新し、本文・メモ・登録・スタイルは最新値を保持する。
 pub async fn update_shape_geometry_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,

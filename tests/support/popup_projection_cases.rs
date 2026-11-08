@@ -60,8 +60,8 @@ pub fn cases() -> Vec<PopupCase> {
         ),
         PopupCase::new(
             "legacy Unicode byte offsets",
-            vec!["**回答🗾**\n", "e\u{301}追記🙂"],
-            "前置き漢字**回答🗾**\n間e\u{301}追記🙂末尾🧰",
+            vec!["**登録🗾**\n", "e\u{301}追記🙂"],
+            "前置き漢字**登録🗾**\n間e\u{301}追記🙂末尾🧰",
             None,
             "前置き漢字間末尾🧰",
             false,
@@ -102,7 +102,7 @@ pub fn cases() -> Vec<PopupCase> {
         ),
         PopupCase::new(
             "legacy missing answer text",
-            vec!["ない回答"],
+            vec!["ない登録"],
             "自由のみ",
             None,
             "",

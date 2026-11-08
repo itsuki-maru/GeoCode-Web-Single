@@ -22,7 +22,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("回答地図へ現在位置を引き継ぐ", () => {
+describe("登録地図へ現在位置を引き継ぐ", () => {
   it("現在のトップ位置を検索条件と分けて送信する", async () => {
     vi.spyOn(iframe.contentWindow!, "postMessage").mockImplementation((data) => {
       window.dispatchEvent(

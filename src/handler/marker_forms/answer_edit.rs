@@ -1,5 +1,6 @@
-//! 所有者のみが、既存の回答と、それに連動して管理される本文の表示用データを修正できる。
+//! 所有者のみが、既存の登録と、それに連動して管理される本文の表示用データを修正できる。
 use super::*;
+use crate::model::AnswerBodyReconcile;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{Sqlite, Transaction};
@@ -69,7 +70,7 @@ fn invalid(text: &str) -> AppError {
 }
 
 // テキストの照合は、曖昧さのない旧形式データを取り込む場合にのみ使う。その後は
-// 文字列の一致ではなく、永続化した構造によって各回答を識別する。
+// 文字列の一致ではなく、永続化した構造によって各登録を識別する。
 fn adopt(body: &str, answers: &[impl AnswerText]) -> Option<Vec<BodyPart>> {
     let mut matches = Vec::new();
     for answer in answers {
@@ -389,7 +390,7 @@ pub(crate) async fn append_parts(
     store_parts(tx, user, kind, target, parts.as_deref()).await
 }
 
-// 通常のオブジェクト API は自由記述を更新できるが、構造化された回答の表示用データは
+// 通常のオブジェクト API は自由記述を更新できるが、構造化された登録の表示用データは
 // 変更できない。旧クライアントは、変更していない本文全体を送信する場合がある。
 pub(crate) async fn normal_body(
     tx: &mut Transaction<'_, Sqlite>,
@@ -408,7 +409,7 @@ pub(crate) async fn normal_body(
         replace_free(
             doc.parts.as_ref().ok_or_else(|| {
                 invalid(
-                    "本文・メモと回答の対応確認が必要です。回答一覧から回答を編集してください。",
+                    "本文・メモと登録の対応確認が必要です。登録一覧から登録内容を編集してください。",
                 )
             })?,
             free,
@@ -418,7 +419,7 @@ pub(crate) async fn normal_body(
         return Ok(doc.body);
     } else {
         let next = adopt(requested, &doc.answers)
-            .ok_or_else(|| invalid("フォーム由来の内容は回答一覧から編集してください。"))?;
+            .ok_or_else(|| invalid("フォーム由来の内容は登録一覧から編集してください。"))?;
         let ids = |p: &[BodyPart]| {
             p.iter()
                 .filter_map(|p| match p {
@@ -429,7 +430,7 @@ pub(crate) async fn normal_body(
         };
         if let Some(old) = &doc.parts {
             if ids(old) != ids(&next) {
-                return Err(invalid("フォーム回答の並び順は変更できません。"));
+                return Err(invalid("フォーム登録の並び順は変更できません。"));
             }
         }
         next
@@ -565,7 +566,7 @@ fn editable_schema(a: &Answer) -> Result<MarkerFormSchema, AppError> {
     let snapshot = a
         .form_snapshot
         .as_ref()
-        .ok_or_else(|| invalid("投稿時のフォーム定義がないため、この回答は編集できません。"))?;
+        .ok_or_else(|| invalid("投稿時のフォーム定義がないため、この登録は編集できません。"))?;
     let schema: MarkerFormSchema = serde_json::from_value(snapshot["form_schema"].clone())
         .map_err(|_| invalid("投稿時のフォーム定義が不正です。"))?;
     let values = a.submitted_values.as_object().ok_or(AppError::BadRequest)?;
@@ -575,7 +576,7 @@ fn editable_schema(a: &Answer) -> Result<MarkerFormSchema, AppError> {
             .any(|id| !schema.fields.iter().any(|field| field.id == *id))
     {
         return Err(invalid(
-            "投稿時のフォーム定義が不足しているため、この回答は編集できません。",
+            "投稿時のフォーム定義が不足しているため、この登録は編集できません。",
         ));
     }
     Ok(schema)
@@ -591,7 +592,7 @@ pub async fn get_handler(
     let snapshot = a
         .form_snapshot
         .as_ref()
-        .ok_or_else(|| invalid("投稿時のフォーム定義がないため、この回答は編集できません。"))?;
+        .ok_or_else(|| invalid("投稿時のフォーム定義がないため、この登録は編集できません。"))?;
     let doc = document(&mut tx, &user, &kind, &a.target_id).await?;
     let mut display_values = a.submitted_values.clone();
     if let Some(fields) = snapshot
@@ -655,7 +656,7 @@ async fn build_edit(
     let snapshot = a
         .form_snapshot
         .as_ref()
-        .ok_or_else(|| invalid("投稿時のフォーム定義がないため、この回答は編集できません。"))?;
+        .ok_or_else(|| invalid("投稿時のフォーム定義がないため、この登録は編集できません。"))?;
     let schema = editable_schema(a)?;
     let title = snapshot["form_title"]
         .as_str()
@@ -706,8 +707,14 @@ async fn build_edit(
             f.required = false;
         }
     }
-    let (mut values, _, prepared) =
-        build_submission(&loose, &payload.values, uploads, title).await?;
+    let (mut values, _, prepared) = build_submission(
+        &loose,
+        &payload.values,
+        uploads,
+        title,
+        SubmissionTrust::AuthorizedOwner,
+    )
+    .await?;
     let result = (|| {
         let mut sections = Vec::new();
         for f in &schema.fields {
@@ -841,7 +848,7 @@ pub async fn update_handler(
             if reconcile.token!=token(&doc) {return Err(AppError::Conflict);}
             let mut p=vec![BodyPart::Text{text:reconcile.free_text.clone()}];
             p.extend(doc.answers.iter().map(|a|BodyPart::Answer{id:a.id.clone()}));p
-        } else {doc.parts.clone().ok_or_else(||invalid("本文・メモと回答の対応確認が必要です。自由記述として残す内容を確認してください。"))?};
+        } else {doc.parts.clone().ok_or_else(||invalid("本文・メモと登録の対応確認が必要です。自由記述として残す内容を確認してください。"))?};
         for a in &mut doc.answers {if a.id==id {a.rendered_markdown=markdown.clone();}}
         let body=render(&parts,&doc.answers).ok_or(AppError::Conflict)?;
         // 画像ファイルを作成する前に、本文を検証する。
@@ -861,10 +868,121 @@ pub async fn update_handler(
             .bind(SqlJson(values)).bind(&markdown).bind(Utc::now().naive_utc()).bind(&id).execute(&mut *tx).await?;
         let object=write_body(&mut tx,&user,&kind,&old.target_id,&body,&parts).await?;
         tx.commit().await?;
-        Ok::<_,AppError>(([(axum::http::header::CACHE_CONTROL,"no-store")],Json(json!({"message":"回答を更新しました。","object":object}))).into_response())
+        Ok::<_,AppError>(([(axum::http::header::CACHE_CONTROL,"no-store")],Json(json!({"message":"登録内容を更新しました。","object":object}))).into_response())
     }.await;
     if result.is_err() {
         cleanup_images(&prepared).await;
     }
     result
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteAnswerRequest {
+    pub revision: i64,
+    pub reconcile: Option<AnswerBodyReconcile>,
+}
+
+/// 登録と本文中の対応する部分を一緒に削除する。画像ファイルは他の本文からも
+/// 参照できるため、ファイル管理から明示的に削除されるまで保持する。
+pub async fn delete_handler(
+    Extension(user): Extension<String>,
+    Extension(pool): Extension<SqlitePool>,
+    Path((kind, id)): Path<(String, String)>,
+    Json(payload): Json<DeleteAnswerRequest>,
+) -> Result<Response, AppError> {
+    table(&kind)?;
+    // 読み取り前に書き込み権を確保し、登録編集・新規投稿との競合も直列化する。
+    let mut tx = super::super::answer_sqlite::begin_write(&pool).await?;
+    let current = answer(&mut tx, &user, &kind, &id).await?;
+    if current.revision != payload.revision {
+        return Err(AppError::Conflict);
+    }
+    let mut doc = document(&mut tx, &user, &kind, &current.target_id).await?;
+    let mut parts = if let Some(reconcile) = &payload.reconcile {
+        if reconcile.token != token(&doc) {
+            return Err(AppError::Conflict);
+        }
+        let mut parts = vec![BodyPart::Text {
+            text: reconcile.free_text.clone(),
+        }];
+        parts.extend(
+            doc.answers
+                .iter()
+                .map(|a| BodyPart::Answer { id: a.id.clone() }),
+        );
+        parts
+    } else {
+        doc.parts.clone().ok_or_else(|| {
+            invalid(
+                "本文・メモと登録の対応確認が必要です。自由記述として残す内容を確認してください。",
+            )
+        })?
+    };
+    parts.retain(|part| !matches!(part, BodyPart::Answer { id: part_id } if part_id == &id));
+    doc.answers.retain(|a| a.id != id);
+    let body = render(&parts, &doc.answers).ok_or(AppError::Conflict)?;
+    let deleted = sqlx::query(&format!(
+        r#"
+        DELETE FROM {kind}_form_submission_model
+        WHERE id = $1
+            AND revision = $2
+        "#
+    ))
+    .bind(&id)
+    .bind(payload.revision)
+    .execute(&mut *tx)
+    .await?;
+    if deleted.rows_affected() != 1 {
+        return Err(AppError::Conflict);
+    }
+    let object = write_body(&mut tx, &user, &kind, &current.target_id, &body, &parts).await?;
+    tx.commit().await?;
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(json!({"message":"登録内容を削除しました。","object":object})),
+    )
+        .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 登録の本文はMarkdownとして更新し、項目名・選択肢の文字表現は維持する。
+    #[tokio::test]
+    async fn editing_regenerates_markdown_without_changing_literal_labels_or_choices() {
+        let old = Answer {
+            id: Uuid::new_v4().to_string(),
+            target_id: Uuid::new_v4().to_string(),
+            submitted_values: json!({"content":"変更前","choice":"**選択肢**"}),
+            form_snapshot: Some(json!({
+                "form_title":"# 登録フォーム",
+                "form_schema":{"fields":[
+                    {"id":"content","label":"**内容**","type":"textarea"},
+                    {"id":"choice","label":"選択","type":"select","choices":["**選択肢**"]}
+                ]}
+            })),
+            rendered_markdown: "変更前の本文".into(),
+            revision: 1,
+            edited_at: None,
+        };
+        let markdown = "## 修正後\n\n**太字**\n\n- 項目\n\n[リンク](https://example.com)";
+        let mut payload: MarkerFormSubmissionRequest = serde_json::from_value(json!({
+            "revision":1,
+            "values":{"content":markdown,"choice":"**選択肢**"}
+        }))
+        .unwrap();
+        let (values, rendered, images) = build_edit(&old, &mut payload, &HashMap::new())
+            .await
+            .unwrap();
+        assert_eq!(values["content"], markdown);
+        assert_eq!(values["choice"], "**選択肢**");
+        assert!(rendered.contains("## フォーム投稿: \\# 登録フォーム"));
+        assert!(rendered.contains("### \\*\\*内容\\*\\*"));
+        assert!(rendered.contains(markdown));
+        assert!(rendered.contains("\\*\\*選択肢\\*\\*"));
+        assert!(!rendered.contains("変更前"));
+        assert!(images.is_empty());
+    }
 }

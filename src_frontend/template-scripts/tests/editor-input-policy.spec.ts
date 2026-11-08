@@ -76,19 +76,19 @@ describe("地図編集の自由記述制限", () => {
     c.syncMarkerInputRestriction(marker, { layer_id: "free" });
     expect(marker.dragging.disable).toHaveBeenCalledTimes(2);
   });
-  it("自由記述を変えずに保存するときは元の順序を維持し、変更しても回答部分を保持する", () => {
+  it("自由記述を変えずに保存するときは元の順序を維持し、変更しても登録部分を保持する", () => {
     const { c } = setup();
     const info = {
-      body: "前回答1後回答2",
+      body: "前登録1後登録2",
       free_text: "前後",
       parts: [
         { type: "text", text: "前" },
-        { type: "answer", id: "a", markdown: "回答1" },
+        { type: "answer", id: "a", markdown: "登録1" },
         { type: "text", text: "後" },
-        { type: "answer", id: "b", markdown: "回答2" },
+        { type: "answer", id: "b", markdown: "登録2" },
       ],
     };
-    expect(c.mergeShapeFreeText(info, "前後")).toBe("前回答1後回答2");
-    expect(c.mergeShapeFreeText(info, "変更後")).toBe("変更後回答1回答2");
+    expect(c.mergeShapeFreeText(info, "前後")).toBe("前登録1後登録2");
+    expect(c.mergeShapeFreeText(info, "変更後")).toBe("変更後登録1登録2");
   });
 });

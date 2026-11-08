@@ -47,7 +47,7 @@ const text = (value: unknown, max = 5000): value is string =>
 const formId = (value: unknown): value is string => text(value, 128) && !!value.trim();
 
 function validateConditions(value: unknown): asserts value is Record<string, unknown>[] {
-  if (!Array.isArray(value) || value.length > 10) throw Error("回答条件は10件以内にしてください。");
+  if (!Array.isArray(value) || value.length > 10) throw Error("登録条件は10件以内にしてください。");
   for (const condition of value) {
     if (
       !record(condition) ||
@@ -249,7 +249,7 @@ export function describeMapPreset(preset: SavedMapPreset): string {
     return `${label} ${operation}${value ? ` ${value}` : ""}${condition.op === "between" ? `〜${condition.upper}` : ""}`;
   };
   return preset.kind === "filter"
-    ? preset.definition.conditions.map(describe).join(" ／ ") || "回答条件なし"
+    ? preset.definition.conditions.map(describe).join(" ／ ") || "登録条件なし"
     : preset.definition.rules
         .map((rule) => `${rule.label}：${rule.conditions.map(describe).join(" ／ ")}`)
         .join("\n");

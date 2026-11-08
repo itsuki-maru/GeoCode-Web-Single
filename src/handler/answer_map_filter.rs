@@ -1,4 +1,4 @@
-//! 回答地図の初期対象集合または通常地図のレイヤー範囲で、同一回答に追加条件を適用する。
+//! 登録地図の初期対象集合または通常地図のレイヤー範囲で、同一登録に追加条件を適用する。
 use super::form_answers::{
     AnswerCondition, AnswerQuery, FieldOption, append_conditions, build_query, merge_field,
     validate,
@@ -308,7 +308,7 @@ pub(super) fn validate_request(r: &MapFilterRequest) -> Result<DateTime<Utc>, Ap
         .ok_or_else(|| invalid("検索基準日時がありません。地図を開き直してください。"))?;
     if r.scope.is_some() && (r.query.mode != "latest" || r.targets.len() > 512) {
         return Err(invalid(
-            "通常地図は最新回答を検索し、再判定対象は512件以内にしてください。",
+            "通常地図は最新登録を検索し、再判定対象は512件以内にしてください。",
         ));
     }
     let extra = AnswerQuery {
@@ -334,7 +334,7 @@ pub(super) async fn validate_conditions(
             .iter()
             .any(|f| f.id == condition.field_id && f.field_type == condition.field_type);
         // CSVでは表示対象がさらに狭まる。missing条件の定義が残らない場合だけ、
-        // 元の一覧条件に一致する同一フォームの過去定義で検証する（回答定義の補完はしない）。
+        // 元の一覧条件に一致する同一フォームの過去定義で検証する（登録定義の補完はしない）。
         if !known
             && include_missing_history
             && condition.op == "missing"

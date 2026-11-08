@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import "./mobile-data-modal.css";
 import { ref, watch, onBeforeUnmount } from "vue";
 import BaseModal from "@/components/common/BaseModal.vue";
+import { useMobileModalViewport } from "@/composables/useMobileModalViewport";
 import apiClient from "@/axiosClient";
 import { baseUrl } from "@/settingMobile";
 import { resizeImage } from "@/utils/form-image-resize";
@@ -28,6 +30,7 @@ interface InputConfig {
   values: Record<string, unknown>;
 }
 const formId = `owner-form-input-${Math.random().toString(36).slice(2)}`;
+const modalViewportStyle = useMobileModalViewport();
 const props = defineProps<{
   isOpen: boolean;
   targetType: "marker" | "shape";
@@ -71,7 +74,7 @@ const errorText = (error: unknown, fallback: string) => {
     const status = error.response?.status;
     if (status === 409)
       return props.answerId
-        ? "回答または本文・メモが他で更新されました。入力内容を控えたうえで再読み込みしてください。"
+        ? "登録または本文・メモが他で更新されました。入力内容を控えたうえで再読み込みしてください。"
         : "フォームの設定が変更されました。再読み込みして入力内容を確認してください。";
     if (status === 404) return "対象またはフォームが見つかりません。編集画面を開き直してください。";
     return (
@@ -227,157 +230,170 @@ const submit = async () => {
 };
 </script>
 <template>
-  <BaseModal :isOpen="isOpen" :zIndex="answerId ? 40 : 20" :closeOnOverlayClick="false">
+  <BaseModal
+    class="mobile-data-modal"
+    :style="modalViewportStyle"
+    :isOpen="isOpen"
+    :zIndex="answerId ? 40 : 20"
+    :closeOnOverlayClick="false"
+  >
     <section
-      class="form-input"
+      class="form-input mobile-data-panel"
       role="dialog"
       aria-modal="true"
-      :aria-label="answerId ? 'フォーム回答の編集' : 'フォームで回答を登録'"
+      :aria-label="answerId ? 'フォーム登録内容の編集' : 'フォーム登録'"
       :aria-busy="saving || loading"
     >
-      <h2>{{ answerId ? "フォーム回答の編集" : "フォームで回答を登録" }}</h2>
-      <p class="intro">
-        {{
-          answerId
-            ? "投稿時の項目で回答を修正し、分析用データと本文・メモを更新します。回答件数は増えません。"
-            : "回答を分析用データとして保存し、本文・メモにも追記します。"
-        }}
-      </p>
-      <p v-if="loading" role="status">フォームを読み込んでいます…</p>
-      <p v-if="message" class="error" role="alert">{{ message }}</p>
-      <button
-        v-if="!loading && (!config || conflict)"
-        type="button"
-        class="btn-close"
-        :disabled="saving"
-        @click="load"
-      >
-        再読み込み
-      </button>
-      <section v-if="answerId && config?.body_info?.sync_required" class="body-reconcile">
-        <p role="alert">
-          本文・メモと回答の対応を自動判定できません。自由記述として残す内容を確認してください。回答部分は投稿順で再構成します。
-        </p>
-        <details>
-          <summary>現在の本文・メモ</summary>
-          <pre>{{ config.body_info.body }}</pre>
-        </details>
-        <label
-          >自由記述として残す内容<textarea v-model="reconcileText" :disabled="saving || conflict" />
-        </label>
-        <details>
-          <summary>再生成するフォーム回答部分（今回の修正は保存時に反映）</summary>
-          <pre>{{ config.body_info.managed_markdown }}</pre>
-        </details>
-        <label
-          ><input
-            type="checkbox"
-            v-model="reconcileConfirmed"
-            :disabled="saving || conflict"
-          />自由記述として残す内容と回答部分を確認しました</label
-        >
-      </section>
-      <form v-if="config" :id="formId" @submit.prevent="submit">
-        <h3>{{ config.form_title }}</h3>
-        <p v-if="config.form_description" class="description">{{ config.form_description }}</p>
-        <fieldset :disabled="saving || loading || conflict">
-          <div v-for="f in config.form_schema.fields" :key="f.id" class="field">
-            <label :for="`owner-form-${f.id}`"
-              >{{ f.label }}<span v-if="f.required">（必須）</span></label
-            >
-            <textarea
-              v-if="f.type === 'textarea'"
-              :id="`owner-form-${f.id}`"
-              v-model="values[f.id] as string"
-              :required="f.required"
-              :maxlength="f.max_length || 2000"
-            />
-            <select
-              v-else-if="f.type === 'select'"
-              :id="`owner-form-${f.id}`"
-              v-model="values[f.id]"
-              :required="f.required"
-            >
-              <option value="">選択してください</option>
-              <option v-for="c in f.choices" :key="c" :value="c">{{ c }}</option>
-            </select>
-            <div
-              v-else-if="f.type === 'radio'"
-              :id="`owner-form-${f.id}`"
-              role="radiogroup"
-              :aria-label="f.label"
-            >
-              <label v-for="c in f.choices" :key="c" class="choice"
-                ><input
-                  v-model="values[f.id]"
-                  type="radio"
-                  :name="f.id"
-                  :value="c"
-                  :required="f.required"
-                />{{ c }}</label
-              ><button
-                v-if="!f.required"
-                type="button"
-                class="btn-close"
-                @click="values[f.id] = ''"
-              >
-                選択を解除
-              </button>
-            </div>
-            <label v-else-if="f.type === 'checkbox'" class="choice"
-              ><input
-                :id="`owner-form-${f.id}`"
-                v-model="values[f.id]"
-                type="checkbox"
-                :required="f.required"
-              />はい</label
-            >
-            <template v-else-if="f.type === 'image'">
-              <template v-if="answerId">
-                <img
-                  v-if="existingImage(f.id) && imageActions[f.id] === 'keep'"
-                  :src="existingImage(f.id)"
-                  :alt="f.label"
-                  class="existing-image"
-                />
-                <select v-model="imageActions[f.id]" :aria-label="f.label + 'の画像操作'">
-                  <option value="keep" :disabled="!existingImage(f.id)">既存画像を保持</option>
-                  <option value="replace">画像を差し替え</option>
-                  <option value="remove" :disabled="f.required">回答から画像を削除</option>
-                </select>
-              </template>
-              <input
-                v-if="!answerId || imageActions[f.id] === 'replace'"
-                :id="`owner-form-${f.id}`"
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                :required="answerId ? imageActions[f.id] === 'replace' : f.required"
-                @change="prepareImage(f, $event)"
-              />
-              <small>{{
-                answerId
-                  ? "画像ファイル本体は削除しません。"
-                  : "今回の回答に添付する画像を選択してください。過去の画像は保持されます。"
-              }}</small>
-              <span role="status">{{ imageStatus[f.id] }}</span>
-            </template>
-            <input
-              v-else
-              :id="`owner-form-${f.id}`"
-              :value="values[f.id]"
-              @input="values[f.id] = ($event.target as HTMLInputElement).value"
-              :type="f.type"
-              :required="f.required"
-              :maxlength="f.max_length || 200"
-              :step="f.type === 'number' ? 'any' : undefined"
-            />
-          </div>
-        </fieldset>
-      </form>
-      <div class="actions">
+      <header class="mobile-data-header">
+        <h2>{{ answerId ? "フォーム登録内容の編集" : "フォーム登録" }}</h2>
         <button class="btn-close" type="button" :disabled="saving" @click="emit('close')">
           閉じる
         </button>
+      </header>
+      <div class="mobile-data-body">
+        <p class="intro">
+          {{
+            answerId
+              ? "投稿時の項目で登録内容を修正し、分析用データと本文・メモを更新します。登録件数は増えません。"
+              : "登録内容を分析用データとして保存し、本文・メモにも追記します。"
+          }}
+        </p>
+        <p v-if="loading" role="status">フォームを読み込んでいます…</p>
+        <p v-if="message" class="error" role="alert">{{ message }}</p>
+        <button
+          v-if="!loading && (!config || conflict)"
+          type="button"
+          class="btn-close"
+          :disabled="saving"
+          @click="load"
+        >
+          再読み込み
+        </button>
+        <section v-if="answerId && config?.body_info?.sync_required" class="body-reconcile">
+          <p role="alert">
+            本文・メモと登録の対応を自動判定できません。自由記述として残す内容を確認してください。登録部分は投稿順で再構成します。
+          </p>
+          <details>
+            <summary>現在の本文・メモ</summary>
+            <pre>{{ config.body_info.body }}</pre>
+          </details>
+          <label
+            >自由記述として残す内容<textarea
+              v-model="reconcileText"
+              :disabled="saving || conflict"
+            />
+          </label>
+          <details>
+            <summary>再生成するフォーム登録部分（今回の修正は保存時に反映）</summary>
+            <pre>{{ config.body_info.managed_markdown }}</pre>
+          </details>
+          <label
+            ><input
+              type="checkbox"
+              v-model="reconcileConfirmed"
+              :disabled="saving || conflict"
+            />自由記述として残す内容と登録部分を確認しました</label
+          >
+        </section>
+        <form v-if="config" :id="formId" @submit.prevent="submit">
+          <h3>{{ config.form_title }}</h3>
+          <p v-if="config.form_description" class="description">{{ config.form_description }}</p>
+          <fieldset :disabled="saving || loading || conflict">
+            <div v-for="f in config.form_schema.fields" :key="f.id" class="field">
+              <label :for="`owner-form-${f.id}`"
+                >{{ f.label }}<span v-if="f.required">（必須）</span></label
+              >
+              <textarea
+                v-if="f.type === 'textarea'"
+                :id="`owner-form-${f.id}`"
+                v-model="values[f.id] as string"
+                :required="f.required"
+                :maxlength="f.max_length || 2000"
+              />
+              <select
+                v-else-if="f.type === 'select'"
+                :id="`owner-form-${f.id}`"
+                v-model="values[f.id]"
+                :required="f.required"
+              >
+                <option value="">選択してください</option>
+                <option v-for="c in f.choices" :key="c" :value="c">{{ c }}</option>
+              </select>
+              <div
+                v-else-if="f.type === 'radio'"
+                :id="`owner-form-${f.id}`"
+                role="radiogroup"
+                :aria-label="f.label"
+              >
+                <label v-for="c in f.choices" :key="c" class="choice"
+                  ><input
+                    v-model="values[f.id]"
+                    type="radio"
+                    :name="f.id"
+                    :value="c"
+                    :required="f.required"
+                  /><span>{{ c }}</span></label
+                ><button
+                  v-if="!f.required"
+                  type="button"
+                  class="btn-close"
+                  @click="values[f.id] = ''"
+                >
+                  選択を解除
+                </button>
+              </div>
+              <label v-else-if="f.type === 'checkbox'" class="choice"
+                ><input
+                  :id="`owner-form-${f.id}`"
+                  v-model="values[f.id]"
+                  type="checkbox"
+                  :required="f.required"
+                /><span>はい</span></label
+              >
+              <template v-else-if="f.type === 'image'">
+                <template v-if="answerId">
+                  <img
+                    v-if="existingImage(f.id) && imageActions[f.id] === 'keep'"
+                    :src="existingImage(f.id)"
+                    :alt="f.label"
+                    class="existing-image"
+                  />
+                  <select v-model="imageActions[f.id]" :aria-label="f.label + 'の画像操作'">
+                    <option value="keep" :disabled="!existingImage(f.id)">既存画像を保持</option>
+                    <option value="replace">画像を差し替え</option>
+                    <option value="remove" :disabled="f.required">登録から画像を削除</option>
+                  </select>
+                </template>
+                <input
+                  v-if="!answerId || imageActions[f.id] === 'replace'"
+                  :id="`owner-form-${f.id}`"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  :required="answerId ? imageActions[f.id] === 'replace' : f.required"
+                  @change="prepareImage(f, $event)"
+                />
+                <small>{{
+                  answerId
+                    ? "画像ファイル本体は削除しません。"
+                    : "今回の登録に添付する画像を選択してください。過去の画像は保持されます。"
+                }}</small>
+                <span role="status">{{ imageStatus[f.id] }}</span>
+              </template>
+              <input
+                v-else
+                :id="`owner-form-${f.id}`"
+                :value="values[f.id]"
+                @input="values[f.id] = ($event.target as HTMLInputElement).value"
+                :type="f.type"
+                :required="f.required"
+                :maxlength="f.max_length || 200"
+                :step="f.type === 'number' ? 'any' : undefined"
+              />
+            </div>
+          </fieldset>
+        </form>
+      </div>
+      <footer class="mobile-data-footer actions">
         <button
           v-if="config"
           class="btn-close btn-save"
@@ -391,9 +407,9 @@ const submit = async () => {
             (!!answerId && !!config?.body_info?.sync_required && !reconcileConfirmed)
           "
         >
-          {{ saving ? "保存中…" : answerId ? "回答を更新" : "回答を保存" }}
+          {{ saving ? "保存中…" : answerId ? "登録内容を更新" : "登録内容を保存" }}
         </button>
-      </div>
+      </footer>
     </section>
   </BaseModal>
 </template>
@@ -403,33 +419,36 @@ const submit = async () => {
   margin: 12px 0;
   border: 1px solid #b8892a;
   border-radius: 8px;
+  min-width: 0;
 }
 .body-reconcile pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  max-height: 25vh;
-  overflow: auto;
 }
 .existing-image {
   display: block;
-  max-width: 160px;
+  max-width: min(160px, 100%);
   max-height: 160px;
+  object-fit: contain;
 }
 .form-input {
-  width: min(600px, calc(100vw - 64px));
-  max-height: calc(100dvh - 96px);
-  overflow: auto;
-  box-sizing: border-box;
   color: #222;
+  overflow-wrap: anywhere;
 }
-h2 {
-  text-align: center;
-  border-bottom: 1px solid #aaa;
+.mobile-data-body > :first-child {
   margin-top: 0;
 }
+h3 {
+  margin: 20px 0 12px;
+  font-size: 18px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
 .intro {
-  text-align: center;
+  margin: 0 0 16px;
   font-size: 14px;
+  line-height: 1.6;
+  color: #475569;
 }
 .description {
   white-space: pre-wrap;
@@ -444,12 +463,19 @@ fieldset {
   padding: 0;
   margin: 0;
   min-width: 0;
+  max-width: 100%;
+}
+form {
+  min-width: 0;
+  max-width: 100%;
 }
 .field {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin: 16px 0;
+  min-width: 0;
+  max-width: 100%;
 }
 .field > label {
   font-weight: 600;
@@ -459,9 +485,17 @@ fieldset {
 textarea,
 select {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   box-sizing: border-box;
-  min-height: 36px;
+  min-height: 44px;
+  padding: 10px;
+  border: 1px solid #a9b5c6;
+  border-radius: 8px;
+  background: #fff;
+  color: #222;
   font: inherit;
+  font-size: 16px;
 }
 textarea {
   min-height: 100px;
@@ -469,16 +503,24 @@ textarea {
 }
 .choice {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  margin: 6px 0;
+  margin: 8px 0;
+  min-width: 0;
+  max-width: 100%;
+  line-height: 1.5;
+}
+.choice input {
+  flex: 0 0 auto;
+  margin: 4px 0 0;
+}
+.choice span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .actions {
   display: flex;
-  justify-content: space-between;
-  margin-top: 16px;
-  gap: 12px;
-  flex-wrap: nowrap;
 }
 .btn-close {
   background: #5f5f5f;
@@ -486,11 +528,19 @@ textarea {
   border: 0;
   border-radius: 8px;
   padding: 10px 16px;
+  margin: 0;
   font: inherit;
   cursor: pointer;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .btn-save {
   background: #179b7e;
+  width: 100%;
+  min-height: 44px;
+  font-weight: 600;
+  font-size: 16px;
 }
 .btn-close:disabled {
   opacity: 0.5;

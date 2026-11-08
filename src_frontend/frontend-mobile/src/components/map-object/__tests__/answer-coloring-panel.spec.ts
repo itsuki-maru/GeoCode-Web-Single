@@ -59,7 +59,7 @@ describe("色分けの分類編集", () => {
     expect(w.get('[aria-label="分類名"]').element.value).toBe("保存した分類");
     expect(w.get('[aria-label="色分けの条件値"]').element.value).toBe("9007199254740993.1");
     expect(w.get('[aria-label="色分けの範囲終了値"]').element.value).toBe("9007199254740994.1");
-    expect(w.get('[aria-label="色分けの回答値"]').element.value).toBe("false");
+    expect(w.get('[aria-label="色分けの登録値"]').element.value).toBe("false");
     expect(w.emitted("apply")).toBeUndefined();
     expect(apiClient.post).not.toHaveBeenCalled();
     await click(w, "検索条件を保存");
@@ -109,7 +109,7 @@ describe("色分けの分類編集", () => {
     await click(w, "分類を追加");
     await w.findAll('[aria-label="分類名"]')[1].setValue("未確認");
     await w.findAll('[aria-label="色分けの入力項目"]')[1].setValue("c:checkbox");
-    await w.get('[aria-label="色分けの回答値"]').setValue("false");
+    await w.get('[aria-label="色分けの登録値"]').setValue("false");
     await w.findAll('[aria-label="分類を上へ"]')[1].trigger("click");
     await click(w, "色分け実行");
     const value = w.emitted("apply")![0][0] as any;

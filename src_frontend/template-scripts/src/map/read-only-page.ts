@@ -31,6 +31,7 @@ import { installMjpegCameras } from "./common/mjpeg-camera";
 import { createReadOnlyLayerGroupRuntime } from "./common/layer-groups";
 import { installMapMarkdownExtensions } from "./common/markdown-extensions";
 import { downloadMapContentFile, installMapMarkdownRenderer } from "./common/markdown-renderer";
+import { sanitizeMapHtml } from "./common/markdown-sanitizer";
 import { createReadOnlyMapRuntime } from "./common/map-runtime";
 import { createMapUiVisibilityRuntime } from "./common/map-ui-visibility";
 import { isValidMapView, loadLastMapView, observeMapView } from "./common/map-view-persistence";
@@ -183,7 +184,7 @@ export function initializeReadOnlyMapPage(
   const isPrint = (isAnother || isSnapshotPrint) && Boolean(printState);
   const isAnswerPreview =
     expectedPage === "form-answer-map" || (isAnother && Boolean(bootstrap.answerPreview));
-  // 印刷元の絞り込みは、共通フォームの回答フィルターや凡例フィルターとは独立している。
+  // 印刷元の絞り込みは、共通フォームの登録フィルターや凡例フィルターとは独立している。
   const usesPrintTargetIds = isPrint && !isAnswerPreview;
   const printMarkerIds =
     usesPrintTargetIds && Array.isArray(printState?.markerIds)
@@ -240,7 +241,7 @@ export function initializeReadOnlyMapPage(
         renderDeferredBody: (text, links) =>
           renderProgressiveMarkdown(
             text,
-            (html) => renderIframe(filterXSS(html, xssOptions)),
+            (html) => renderIframe(sanitizeMapHtml(html, filterXSS, xssOptions)),
             links,
           ),
       }),
@@ -256,7 +257,11 @@ export function initializeReadOnlyMapPage(
     marked,
   });
   const renderContentMarkdown = (markdown, links) =>
-    renderProgressiveMarkdown(markdown, (html) => renderIframe(filterXSS(html, xssOptions)), links);
+    renderProgressiveMarkdown(
+      markdown,
+      (html) => renderIframe(sanitizeMapHtml(html, filterXSS, xssOptions)),
+      links,
+    );
 
   let map: DynamicRecord;
   let bounds: unknown;
@@ -315,7 +320,7 @@ export function initializeReadOnlyMapPage(
     isAnother && !isSnapshotPrint
       ? createPopupContentRuntime({
           map,
-          sanitizeHtml: (html) => filterXSS(html, xssOptions),
+          sanitizeHtml: (html) => sanitizeMapHtml(html, filterXSS, xssOptions),
           analysis: bootstrap.popupAnalysis,
           renderMarkdown: renderContentMarkdown,
           setupImages: setupDetailsLazyImages,
@@ -441,7 +446,7 @@ export function initializeReadOnlyMapPage(
     getMap: () => map,
     renderIframe,
     renderMarkdown: renderContentMarkdown,
-    sanitizeHtml: (html) => filterXSS(html, xssOptions),
+    sanitizeHtml: (html) => sanitizeMapHtml(html, filterXSS, xssOptions),
     setupDetailsLazyImages: (root) => setupDetailsLazyImages(root, renderContentMarkdown),
   });
   if (!isSnapshotPrint) {
@@ -567,7 +572,7 @@ export function initializeReadOnlyMapPage(
       markers,
       parseMarkdown: renderContentMarkdown,
       renderIframe,
-      sanitizeHtml: (html) => filterXSS(html, xssOptions),
+      sanitizeHtml: (html) => sanitizeMapHtml(html, filterXSS, xssOptions),
       setupDetailsLazyImages: (root) => setupDetailsLazyImages(root, renderContentMarkdown),
       shapeRecords,
     });
@@ -579,7 +584,7 @@ export function initializeReadOnlyMapPage(
     }
   }
 
-  // 表示設定・検索・回答条件は描画済みオブジェクトの有無とは独立して判定する。
+  // 表示設定・検索・登録条件は描画済みオブジェクトの有無とは独立して判定する。
   const matchesCurrentShapeSearch = (record) => {
     if (!shapeSearchQuery) return true;
     const cached = shapeSearchMatches.get(record);

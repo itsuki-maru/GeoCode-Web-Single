@@ -15,6 +15,9 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "htmlparser2": [
+        "./node_modules/htmlparser2"
       ]
     }
   }

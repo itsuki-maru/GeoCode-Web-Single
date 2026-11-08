@@ -64,7 +64,7 @@ async fn map_csv_matches_applied_conditions_visible_targets_and_existing_csv() {
         let csv = map_csv(&pool, f.owner, &r).await;
         assert_eq!(csv.matches("\r\n").count() - 1, count);
         assert!(!csv.contains("他人"));
-        assert!(!csv.contains(&f.ids[0].to_string())); // 日付と年数が別回答に一致しても採用しない
+        assert!(!csv.contains(&f.ids[0].to_string())); // 日付と年数が別登録に一致しても採用しない
         r.targets = vec![format!("marker:{}", f.ids[2])];
         let csv = map_csv(&pool, f.owner, &r).await;
         assert_eq!(
@@ -98,7 +98,7 @@ async fn map_csv_matches_applied_conditions_visible_targets_and_existing_csv() {
     .unwrap();
     assert_eq!(csv, original); // 列順・値・順序を含め既存CSVと完全一致
 
-    // 一覧10条件と地図10条件は別枠で検証し、合計20条件でも同一回答へ適用する。
+    // 一覧10条件と地図10条件は別枠で検証し、合計20条件でも同一登録へ適用する。
     let condition = json!({"field_id":"n","field_type":"number","op":"gte","value":"20"});
     let mut r = request(&f, "history", Value::Array(vec![condition.clone(); 10]));
     r.query.common_form_id = Some(f.form.to_string());
@@ -204,7 +204,7 @@ async fn map_csv_preserves_missing_definitions_and_one_read_snapshot() {
     )
     .await
     .unwrap();
-    // 出力用トランザクション確定後の追加回答と定義は列にも行にも混入しない。
+    // 出力用トランザクション確定後の追加登録と定義は列にも行にも混入しない。
     sqlx::query(
         r#"
         INSERT INTO marker_form_submission_model (
@@ -859,7 +859,7 @@ async fn attribute_search_latest_scope_current_definition_and_updates() {
             .is_err()
     );
     r.layer_ids = None;
-    // 同じIDの図形も独立した対象。別フォームの回答は最新選択を妨げない。
+    // 同じIDの図形も独立した対象。別フォームの登録は最新選択を妨げない。
     sqlx::query(
         r#"
         UPDATE shape_form_submission_model

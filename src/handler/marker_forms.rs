@@ -1,8 +1,10 @@
 pub(crate) mod answer_edit;
 pub use answer_edit::{
-    get_handler as answer_edit_get_handler, update_handler as answer_edit_update_handler,
+    delete_handler as answer_delete_handler, get_handler as answer_edit_get_handler,
+    update_handler as answer_edit_update_handler,
 };
 mod owner_input;
+mod public_markdown;
 pub use owner_input::{
     get_marker_input_handler, get_shape_input_handler, submit_marker_input_handler,
     submit_shape_input_handler,
@@ -35,7 +37,7 @@ use tera::{Context, Tera};
 use tokio::{fs::File, io::AsyncWriteExt, sync::Mutex, task};
 use uuid::Uuid;
 
-const MAX_FIELDS: usize = 20;
+const MAX_FIELDS: usize = 30;
 const MAX_IMAGES: usize = 3;
 const MAX_MULTIPART_IMAGE_BYTES: usize = 1_500_000;
 const MAX_SUBMISSION_JSON_BYTES: usize = 64 * 1024;
@@ -47,6 +49,13 @@ const MAX_SUBMISSIONS_PER_MINUTE: i32 = 30;
 const SHAPE_MEMO_MAX_LENGTH: usize = 10_000;
 const JPEG_QUALITIES: &[u8] = &[82, 76, 70, 64, 58, 52];
 const THUMBNAIL_QUALITIES: &[u8] = &[78, 70, 62, 54, 46];
+
+// 投稿経路は、認可済みハンドラーだけが指定する。リクエスト JSON からは受け取らない。
+#[derive(Debug, Clone, Copy)]
+enum SubmissionTrust {
+    Public,
+    AuthorizedOwner,
+}
 
 #[derive(Debug, FromRow)]
 struct OwnerFormRow {
@@ -504,7 +513,7 @@ async fn render_marker_form_not_found(tera: &Arc<Mutex<Tera>>) -> Result<Respons
     Ok((StatusCode::NOT_FOUND, Html(rendered)).into_response())
 }
 
-/// 公開フォームの投稿を検証し、画像と回答履歴を保存してマーカー本文へMarkdownを追記する。
+/// 公開フォームの投稿を検証し、画像と登録履歴を保存してマーカー本文へMarkdownを追記する。
 pub async fn submit_marker_form_handler(
     Extension(pool): Extension<SqlitePool>,
     Path(public_id): Path<String>,
@@ -529,8 +538,14 @@ pub async fn submit_marker_form_handler(
     validate_submission_keys(schema, &payload.values)?;
     validate_uploaded_image_keys(schema, &uploaded_images)?;
 
-    let (submitted_values, rendered_markdown, prepared_images) =
-        build_submission(schema, &payload.values, &uploaded_images, &form.form_title).await?;
+    let (submitted_values, rendered_markdown, prepared_images) = build_submission(
+        schema,
+        &payload.values,
+        &uploaded_images,
+        &form.form_title,
+        SubmissionTrust::Public,
+    )
+    .await?;
 
     let result = persist_submission(
         &pool,
@@ -574,8 +589,14 @@ pub async fn submit_shape_form_handler(
     let schema = &form.form_schema.0;
     validate_submission_keys(schema, &payload.values)?;
     validate_uploaded_image_keys(schema, &uploaded_images)?;
-    let (submitted_values, rendered_markdown, prepared_images) =
-        build_submission(schema, &payload.values, &uploaded_images, &form.form_title).await?;
+    let (submitted_values, rendered_markdown, prepared_images) = build_submission(
+        schema,
+        &payload.values,
+        &uploaded_images,
+        &form.form_title,
+        SubmissionTrust::Public,
+    )
+    .await?;
 
     if let Err(error) = persist_shape_submission(
         &pool,
@@ -601,6 +622,7 @@ async fn build_submission(
     values: &HashMap<String, JsonValue>,
     uploaded_images: &HashMap<String, UploadedFormImage>,
     form_title: &str,
+    trust: SubmissionTrust,
 ) -> Result<(JsonValue, String, Vec<PreparedImage>), AppError> {
     let mut processed_fields = HashMap::new();
     for field in &schema.fields {
@@ -612,10 +634,23 @@ async fn build_submission(
             continue;
         }
         let value = values.get(&field.id).unwrap_or(&JsonValue::Null);
-        processed_fields.insert(
-            field.id.clone(),
-            process_non_image_field_value(field, value)?,
-        );
+        // 元の型・長さを最初に検証し、安全化後も必須・文字数制限を満たすことを確認する。
+        let original = process_non_image_field_value(field, value)?;
+        let processed = if matches!(trust, SubmissionTrust::Public)
+            && matches!(field.field_type.as_str(), "text" | "textarea")
+            && let Some(text) = original.0.as_str()
+        {
+            let safe = public_markdown::sanitize_public_markdown(text).ok_or_else(|| {
+                AppError::Validation(format!(
+                    "{}を安全なMarkdownとして処理できません。",
+                    field.label
+                ))
+            })?;
+            process_non_image_field_value(field, &JsonValue::String(safe))?
+        } else {
+            original
+        };
+        processed_fields.insert(field.id.clone(), processed);
     }
 
     let mut prepared_images = Vec::new();
@@ -670,7 +705,7 @@ async fn build_submission(
     ))
 }
 
-/// 容量確認、画像保存、回答履歴登録、マーカー追記を1つのDBトランザクションとして処理する。
+/// 容量確認、画像保存、登録履歴登録、マーカー追記を1つのDBトランザクションとして処理する。
 async fn persist_submission(
     pool: &SqlitePool,
     form: &PublicFormRow,
@@ -881,7 +916,7 @@ async fn persist_submission(
     Ok(updated)
 }
 
-/// 容量確認、画像保存、回答履歴登録、図形メモ追記を1つのDBトランザクションで処理する。
+/// 容量確認、画像保存、登録履歴登録、図形メモ追記を1つのDBトランザクションで処理する。
 async fn persist_shape_submission(
     pool: &SqlitePool,
     form: &ShapePublicFormRow,
@@ -1285,9 +1320,9 @@ pub(crate) fn validate_config(payload: &MarkerFormConfigUpdate) -> Result<(), Ap
     if payload.form_schema.fields.len() > MAX_FIELDS
         || (payload.enabled && payload.form_schema.fields.is_empty())
     {
-        return Err(AppError::Validation(
-            "有効なフォームには1〜20件の入力項目が必要です。".into(),
-        ));
+        return Err(AppError::Validation(format!(
+            "有効なフォームには1〜{MAX_FIELDS}件の入力項目が必要です。"
+        )));
     }
 
     let mut ids = HashSet::new();
@@ -1491,7 +1526,7 @@ async fn check_rate_limit(pool: &SqlitePool, marker_id: &str) -> Result<(), AppE
     Ok(())
 }
 
-/// multipart/form-dataから回答JSONと画像を読み取り、形式とサイズを検証する。
+/// multipart/form-dataから登録JSONと画像を読み取り、形式とサイズを検証する。
 async fn parse_marker_form_multipart(
     multipart: &mut Multipart,
 ) -> Result<
@@ -1513,17 +1548,17 @@ async fn parse_marker_form_multipart(
 
         if field_name == "submission" {
             if submission.is_some() {
-                return Err(AppError::Validation("回答データが重複しています。".into()));
+                return Err(AppError::Validation("登録データが重複しています。".into()));
             }
             let bytes = read_multipart_field(
                 &mut field,
                 MAX_SUBMISSION_JSON_BYTES,
-                "回答データは64KB以内にしてください。",
+                "登録データは64KB以内にしてください。",
             )
             .await?;
             submission = Some(
                 serde_json::from_slice::<MarkerFormSubmissionRequest>(&bytes)
-                    .map_err(|_| AppError::Validation("回答データのJSONが不正です。".into()))?,
+                    .map_err(|_| AppError::Validation("登録データのJSONが不正です。".into()))?,
             );
             continue;
         }
@@ -1566,7 +1601,7 @@ async fn parse_marker_form_multipart(
     }
 
     let submission = submission
-        .ok_or_else(|| AppError::Validation("回答データが送信されていません。".into()))?;
+        .ok_or_else(|| AppError::Validation("登録データが送信されていません。".into()))?;
     Ok((submission, uploaded_images))
 }
 
@@ -1607,7 +1642,7 @@ fn validate_uploaded_image_keys(
     }
     Ok(())
 }
-/// 送信された回答の項目IDがフォーム定義に存在するか検証する。
+/// 送信された登録の項目IDがフォーム定義に存在するか検証する。
 fn validate_submission_keys(
     schema: &MarkerFormSchema,
     values: &HashMap<String, JsonValue>,
@@ -1669,8 +1704,10 @@ fn process_non_image_field_value(
         return Ok((JsonValue::Number(number.clone()), Some(number.to_string())));
     }
 
+    let is_markdown_text = matches!(field.field_type.as_str(), "text" | "textarea");
     let raw = match value {
         JsonValue::Null => "",
+        JsonValue::String(value) if is_markdown_text => value.as_str(),
         JsonValue::String(value) => value.trim(),
         _ => {
             return Err(AppError::Validation(format!(
@@ -1679,10 +1716,10 @@ fn process_non_image_field_value(
             )));
         },
     };
-    if field.required && raw.is_empty() {
+    if field.required && raw.trim().is_empty() {
         return Err(required_error(field));
     }
-    if raw.is_empty() {
+    if raw.trim().is_empty() {
         return Ok((JsonValue::Null, None));
     }
     let max_length = field.max_length.unwrap_or_else(|| {
@@ -1729,7 +1766,11 @@ fn process_non_image_field_value(
     }
     Ok((
         JsonValue::String(raw.to_string()),
-        Some(escape_markdown(raw)),
+        Some(if is_markdown_text {
+            raw.to_string()
+        } else {
+            escape_markdown(raw)
+        }),
     ))
 }
 
@@ -1738,7 +1779,7 @@ fn required_error(field: &MarkerFormField) -> AppError {
     AppError::Validation(format!("{}は必須項目です。", field.label))
 }
 
-/// 第三者の入力がMarkdown構文として解釈されないよう特殊文字をエスケープする。
+/// フォーム名・項目名・選択肢をMarkdown構文として解釈しないようエスケープする。
 fn escape_markdown(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for character in value.chars() {
@@ -1920,12 +1961,168 @@ mod tests {
     }
 
     #[test]
-    /// 回答のMarkdown特殊文字が安全にエスケープされることを確認する。
-    fn markdown_from_answers_is_escaped() {
+    /// フォーム名・項目名・選択肢のMarkdown特殊文字をエスケープする。
+    fn markdown_labels_and_choices_are_escaped() {
         assert_eq!(
             escape_markdown("# [x](javascript:alert(1))"),
             "\\# \\[x\\]\\(javascript:alert\\(1\\)\\)"
         );
+    }
+
+    #[test]
+    /// 30項目を受け付け、有効・無効にかかわらず31項目を拒否する。
+    fn accepts_thirty_fields_and_rejects_thirty_one() {
+        let mut config = MarkerFormConfigUpdate {
+            source_form: None,
+            enabled: true,
+            form_title: "登録フォーム".into(),
+            form_description: String::new(),
+            form_schema: MarkerFormSchema {
+                fields: (0..30)
+                    .map(|n| field(&format!("field_{n}"), "text"))
+                    .collect(),
+            },
+            password_mode: "keep".into(),
+            password: None,
+        };
+        assert!(validate_config(&config).is_ok());
+        config.form_schema.fields.push(field("field_30", "text"));
+        assert!(
+            matches!(validate_config(&config), Err(AppError::Validation(message)) if message.contains("30"))
+        );
+        config.enabled = false;
+        assert!(validate_config(&config).is_err());
+    }
+
+    #[test]
+    /// テキストのMarkdownを保持し、選択肢の記号は文字として扱う。
+    fn text_values_preserve_markdown_while_choices_remain_literal() {
+        let markdown = "## 見出し\n\n**太字** と [リンク](https://example.com)\n\n- 項目\n\n`code`";
+        for kind in ["text", "textarea"] {
+            let (stored, rendered) =
+                process_non_image_field_value(&field("content", kind), &json!(markdown)).unwrap();
+            assert_eq!(stored, json!(markdown));
+            assert_eq!(rendered.as_deref(), Some(markdown));
+        }
+        for kind in ["select", "radio"] {
+            let mut choice = field("choice", kind);
+            choice.choices = vec!["**選択肢**".into()];
+            let (stored, rendered) =
+                process_non_image_field_value(&choice, &json!("**選択肢**")).unwrap();
+            assert_eq!(stored, json!("**選択肢**"));
+            assert_eq!(rendered.as_deref(), Some("\\*\\*選択肢\\*\\*"));
+        }
+    }
+
+    #[test]
+    /// 字下げ・Markdownの改行用空白を保持し、空白だけの値は未入力として扱う。
+    fn markdown_keeps_indentation_and_hard_breaks_but_blank_values_remain_empty() {
+        let mut content = field("content", "textarea");
+        let markdown = "    indented code\n\n本文  \n次の行  ";
+        let (stored, rendered) = process_non_image_field_value(&content, &json!(markdown)).unwrap();
+        assert_eq!(stored, markdown);
+        assert_eq!(rendered.as_deref(), Some(markdown));
+        let (stored, rendered) = process_non_image_field_value(&content, &json!(" \n  ")).unwrap();
+        assert!(stored.is_null());
+        assert!(rendered.is_none());
+        content.required = true;
+        assert!(process_non_image_field_value(&content, &json!(" \n  ")).is_err());
+    }
+
+    #[tokio::test]
+    /// 所有者の登録値を保持し、生成本文ではフォーム名と項目名をエスケープする。
+    async fn submission_preserves_text_markdown_and_escapes_form_labels() {
+        let schema = MarkerFormSchema {
+            fields: vec![MarkerFormField {
+                label: "**項目名**".into(),
+                ..field("content", "textarea")
+            }],
+        };
+        let markdown = "# 見出し\n\n**内容**\n\n- 登録値";
+        let values = HashMap::from([("content".into(), json!(markdown))]);
+        let (stored, rendered, images) = build_submission(
+            &schema,
+            &values,
+            &HashMap::new(),
+            "# フォーム名",
+            SubmissionTrust::AuthorizedOwner,
+        )
+        .await
+        .unwrap();
+        assert_eq!(stored["content"], markdown);
+        assert!(rendered.contains("## フォーム投稿: \\# フォーム名"));
+        assert!(rendered.contains("### \\*\\*項目名\\*\\*"));
+        assert!(rendered.contains(markdown));
+        assert!(images.is_empty());
+    }
+
+    #[tokio::test]
+    /// 公開投稿は安全化後の必須・文字数制限も検証し、内部登録は原文を保持する。
+    async fn public_sanitization_revalidates_required_and_output_length() {
+        let mut content = field("content", "textarea");
+        content.required = true;
+        let mut schema = MarkerFormSchema {
+            fields: vec![content],
+        };
+        let values = HashMap::from([("content".into(), json!("<script>bad()</script>"))]);
+        assert!(matches!(
+            build_submission(
+                &schema,
+                &values,
+                &HashMap::new(),
+                "点検",
+                SubmissionTrust::Public
+            )
+            .await,
+            Err(AppError::Validation(_))
+        ));
+        let (stored, _, _) = build_submission(
+            &schema,
+            &values,
+            &HashMap::new(),
+            "点検",
+            SubmissionTrust::AuthorizedOwner,
+        )
+        .await
+        .unwrap();
+        assert_eq!(stored["content"], values["content"]);
+        schema.fields[0].required = false;
+        let (stored, markdown, _) = build_submission(
+            &schema,
+            &values,
+            &HashMap::new(),
+            "点検",
+            SubmissionTrust::Public,
+        )
+        .await
+        .unwrap();
+        assert!(stored["content"].is_null());
+        assert!(!markdown.contains("bad()"));
+
+        let link = "<a href=\"/guide\">資料</a>";
+        schema.fields[0].max_length = Some(link.chars().count());
+        let values = HashMap::from([("content".into(), json!(link))]);
+        assert!(matches!(
+            build_submission(
+                &schema,
+                &values,
+                &HashMap::new(),
+                "点検",
+                SubmissionTrust::Public
+            )
+            .await,
+            Err(AppError::Validation(_))
+        ));
+        let (stored, _, _) = build_submission(
+            &schema,
+            &values,
+            &HashMap::new(),
+            "点検",
+            SubmissionTrust::AuthorizedOwner,
+        )
+        .await
+        .unwrap();
+        assert_eq!(stored["content"], link);
     }
 
     #[test]

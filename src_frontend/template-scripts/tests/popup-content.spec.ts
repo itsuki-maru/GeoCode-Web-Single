@@ -10,9 +10,9 @@ const filterXSS = (html: string) =>
 function fixture(overrides: Record<string, any> = {}) {
   const handlers: Record<string, (event: any) => void> = {};
   const loadBody = vi.fn(async () => ({
-    body: "自由\n回答",
+    body: "自由\n登録",
     free_text: "自由\n",
-    managed_markdown: "回答",
+    managed_markdown: "登録",
     sync_required: false,
   }));
   const setupImages = vi.fn((root: ParentNode) => setupDetailsLazyImages(root));
@@ -32,7 +32,7 @@ function fixture(overrides: Record<string, any> = {}) {
   const host = document.createElement("div");
   document.body.append(host);
   const popup = { getElement: () => host, update: vi.fn(), setContent: vi.fn() };
-  const open = (kind: "marker" | "shape" = "marker", body = "自由\n回答") => {
+  const open = (kind: "marker" | "shape" = "marker", body = "自由\n登録") => {
     host.innerHTML = runtime.render({ kind, id: "same", name: "<対象>", body });
     handlers.popupopen({ popup });
   };
@@ -60,7 +60,7 @@ afterEach(() => {
 describe("owner popup content selector", () => {
   it("描画キャッシュの破棄時に準備済み本文を解放し、分類データは印刷用に保持する", async () => {
     const f = fixture();
-    const content = { kind: "shape" as const, id: "same", name: "<対象>", body: "自由\n回答" };
+    const content = { kind: "shape" as const, id: "same", name: "<対象>", body: "自由\n登録" };
     f.runtime.render(content);
     f.runtime.render(content);
     expect(f.renderMarkdown).toHaveBeenCalledTimes(1);
@@ -143,7 +143,7 @@ describe("owner popup content selector", () => {
     f.choose("answers");
     f.choose("normal");
     expect(f.renderMarkdown).toHaveBeenCalledTimes(3);
-    expect(f.host.querySelector(".popup-content-body")!.textContent).toBe("自由\n回答");
+    expect(f.host.querySelector(".popup-content-body")!.textContent).toBe("自由\n登録");
     f.handlers.popupclose({ popup: f.popup });
     expect(f.popup.setContent).toHaveBeenLastCalledWith(expect.any(String));
     f.open();
@@ -155,7 +155,7 @@ describe("owner popup content selector", () => {
   it("does not redraw the body when frozen print data is available synchronously", () => {
     const f = fixture({
       snapshot: {
-        "marker:same": { free_text: "自由", managed_markdown: "回答", sync_required: false },
+        "marker:same": { free_text: "自由", managed_markdown: "登録", sync_required: false },
       },
     });
     f.open();
@@ -202,11 +202,11 @@ describe("owner popup content selector", () => {
       f.open(kind);
       await vi.waitFor(() => expect(f.select().options[0].disabled).toBe(false));
       expect(f.select().value).toBe("normal");
-      expect(f.host.querySelector(".popup-content-body")!.textContent).toBe("自由\n回答");
+      expect(f.host.querySelector(".popup-content-body")!.textContent).toBe("自由\n登録");
       f.choose("free");
       expect(f.host.querySelector(".popup-content-body")!.textContent).toBe("自由\n");
       f.choose("answers");
-      expect(f.host.querySelector(".popup-content-body")!.textContent).toBe("回答");
+      expect(f.host.querySelector(".popup-content-body")!.textContent).toBe("登録");
       expect(f.host.querySelector("h1")!.textContent).toBe("<対象>");
       expect(f.setupImages).toHaveBeenCalled();
       f.handlers.popupclose({ popup: f.popup });
@@ -220,7 +220,7 @@ describe("owner popup content selector", () => {
     const f = fixture({
       answerMap: true,
       snapshot: {
-        "shape:same": { free_text: "自由", managed_markdown: "回答", sync_required: false },
+        "shape:same": { free_text: "自由", managed_markdown: "登録", sync_required: false },
       },
     });
     f.runtime.setAnalysis("shape:same", "<strong>分析値</strong>");
@@ -262,9 +262,9 @@ describe("owner popup content selector", () => {
           if (mode === "failed") throw Error("network");
           if (mode === "missing") return {};
           return {
-            body: mode === "stale" ? "変更後" : "自由\n回答",
+            body: mode === "stale" ? "変更後" : "自由\n登録",
             free_text: "自由",
-            managed_markdown: "回答",
+            managed_markdown: "登録",
             sync_required: mode === "ambiguous",
           };
         },
@@ -277,7 +277,7 @@ describe("owner popup content selector", () => {
       );
       expect(f.select().options[0].disabled).toBe(true);
       expect(f.select().value).toBe("normal");
-      expect(f.host.querySelector(".popup-content-body")!.textContent).toBe("自由\n回答");
+      expect(f.host.querySelector(".popup-content-body")!.textContent).toBe("自由\n登録");
     },
   );
   it("does not overwrite a newer popup after an old request resolves", async () => {
@@ -292,9 +292,9 @@ describe("owner popup content selector", () => {
     f.handlers.popupclose({ popup: f.popup });
     f.host.innerHTML = "別のポップアップ";
     resolve({
-      body: "自由\n回答",
+      body: "自由\n登録",
       free_text: "自由",
-      managed_markdown: "回答",
+      managed_markdown: "登録",
       sync_required: false,
     });
     await Promise.resolve();

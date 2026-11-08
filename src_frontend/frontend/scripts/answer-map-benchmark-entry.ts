@@ -48,7 +48,7 @@ async function initializeParent() {
     // 空の ID を指定すると、実際の編集画面はポップアップを開いたり本文を再取得したりせずに
     // ズーム 16 へ移動する。図形と描画の完了は実行側で検証する。
     if (coordinate) parentFrame.value.focusObject("shape", "", coordinate[1], coordinate[0]);
-    // 準備処理は回答地図を開く時間の計測に含めない。回答モーダルの計測中は、
+    // 準備処理は登録地図を開く時間の計測に含めない。登録モーダルの計測中は、
     // 実際の Pinia レコードと編集用 iframe を保持する。
     for (let index = 0; index < 12; index++) await new Promise(requestAnimationFrame);
     parentState.ready = true;

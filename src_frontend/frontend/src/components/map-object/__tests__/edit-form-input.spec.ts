@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import Modal from "../MapObjectEditModal.vue";
 import InputModal from "../MapObjectFormInputModal.vue";
+import AnswersModal from "../FormAnswersModal.vue";
 import Settings from "../MapObjectFormSettingsModal.vue";
 import Message from "@/components/common/MessageModal.vue";
 import apiClient from "@/axiosClient";
@@ -63,7 +64,11 @@ async function setup(kind: "marker" | "shape" = "marker", restricted = false) {
     },
     global: {
       plugins: [pinia],
-      stubs: { MapObjectFormInputModal: true, MapObjectFormSettingsModal: true },
+      stubs: {
+        MapObjectFormInputModal: true,
+        MapObjectFormSettingsModal: true,
+        FormAnswersModal: true,
+      },
     },
   });
   await flushPromises();
@@ -76,12 +81,12 @@ beforeEach(() => {
     .mockResolvedValue({ data: { form_schema: { fields: [{ id: "n" }] } } });
   vi.mocked(apiClient.put).mockReset().mockResolvedValue({});
 });
-describe("編集画面からのフォーム回答", () => {
+describe("編集画面からのフォーム登録", () => {
   it("通常編集の保存に失敗した場合はフォームを開かず、編集内容を保持する", async () => {
     const { w, markers } = await setup();
     vi.spyOn(markers, "updateMapObject").mockResolvedValueOnce(null);
     await w.get("textarea").setValue("未保存の内容");
-    await button(w, "フォームで回答を登録").trigger("click");
+    await button(w, "新しい登録を追加").trigger("click");
     w.findComponent(Message).vm.$emit("confirm");
     await flushPromises();
     expect(w.findComponent(InputModal).exists()).toBe(false);
@@ -95,16 +100,16 @@ describe("編集画面からのフォーム回答", () => {
     async (kind) => {
       const { w, markers, shapes } = await setup(kind);
       expect(button(w, "入力フォーム設定")).toBeTruthy();
-      await button(w, "フォームで回答を登録").trigger("click");
+      await button(w, "新しい登録を追加").trigger("click");
       expect(w.findComponent(InputModal).props("isOpen")).toBe(true);
       const object =
         kind === "marker"
-          ? { ...marker, detail: "本文\n回答追記" }
+          ? { ...marker, detail: "本文\n登録追記" }
           : {
               ...shape,
               geojson: {
                 ...shape.geojson,
-                properties: { ...shape.geojson.properties, memo: "メモ\n回答追記" },
+                properties: { ...shape.geojson.properties, memo: "メモ\n登録追記" },
               },
             };
       const notifications: unknown[] = [];
@@ -114,7 +119,7 @@ describe("編集画面からのフォーム回答", () => {
       );
       w.findComponent(InputModal).vm.$emit("saved", object);
       await flushPromises();
-      expect((w.get("textarea").element as HTMLTextAreaElement).value).toContain("回答追記");
+      expect((w.get("textarea").element as HTMLTextAreaElement).value).toContain("登録追記");
       expect(w.emitted("close")).toHaveLength(1);
       expect(w.emitted("updated")![0]![0]).toMatchObject({ objectType: kind, id: object.id });
       expect(targetStore.recordCache.records.get(object.id)).toMatchObject(object);
@@ -123,29 +128,29 @@ describe("編集画面からのフォーム回答", () => {
       await w.setProps({ isOpen: false });
       await w.setProps({ isOpen: true });
       await flushPromises();
-      await button(w, "+更新").trigger("click");
+      await button(w, "変更を保存").trigger("click");
       await flushPromises();
       const body = vi.mocked(apiClient.put).mock.calls.at(-1)![1] as any;
-      expect(kind === "marker" ? body.detail : body.geojson.properties.memo).toContain("回答追記");
+      expect(kind === "marker" ? body.detail : body.geojson.properties.memo).toContain("登録追記");
       expect(w.emitted("close")).toHaveLength(2);
       expect(
         kind === "marker"
           ? markers.getById("one")?.detail
           : shapes.getById("shape")?.geojson.properties.memo,
-      ).toContain("回答追記");
+      ).toContain("登録追記");
       w.unmount();
     },
   );
   it("未保存編集は確認し、キャンセルでは保持、保存成功後だけフォームを開く", async () => {
     const { w } = await setup();
     await w.get("textarea").setValue("編集中");
-    await button(w, "フォームで回答を登録").trigger("click");
+    await button(w, "新しい登録を追加").trigger("click");
     expect(w.findComponent(Message).props("isOpen")).toBe(true);
     expect(w.findComponent(InputModal).exists()).toBe(false);
     w.findComponent(Message).vm.$emit("close");
     await flushPromises();
     expect((w.get("textarea").element as HTMLTextAreaElement).value).toBe("編集中");
-    await button(w, "フォームで回答を登録").trigger("click");
+    await button(w, "新しい登録を追加").trigger("click");
     w.findComponent(Message).vm.$emit("confirm");
     await flushPromises();
     expect(apiClient.put).toHaveBeenCalledWith(
@@ -159,21 +164,99 @@ describe("編集画面からのフォーム回答", () => {
   it("フォーム未設定・取得失敗でも通常編集は使え、設定保存後にボタンを更新する", async () => {
     vi.mocked(apiClient.get).mockResolvedValueOnce({ data: { form_schema: { fields: [] } } });
     const { w } = await setup();
-    expect(button(w, "フォームで回答を登録")).toBeUndefined();
+    expect(button(w, "新しい登録を追加")).toBeUndefined();
     await button(w, "入力フォーム設定").trigger("click");
     w.findComponent(Settings).vm.$emit("saved");
     await flushPromises();
-    expect(button(w, "フォームで回答を登録")).toBeTruthy();
+    expect(button(w, "新しい登録を追加")).toBeTruthy();
     vi.mocked(apiClient.get).mockRejectedValueOnce(new Error("network"));
     await w.setProps({ isOpen: false });
     await w.setProps({ isOpen: true });
     await flushPromises();
-    expect(button(w, "フォームで回答を登録")).toBeUndefined();
-    await button(w, "+更新").trigger("click");
+    expect(button(w, "新しい登録を追加")).toBeUndefined();
+    await button(w, "変更を保存").trigger("click");
     await flushPromises();
     expect(w.emitted("close")).toHaveLength(1);
     w.unmount();
   });
+});
+
+describe("編集画面からの登録内容更新", () => {
+  it.each(["marker", "shape"] as const)(
+    "%s: フォーム設定がなくても対象の登録一覧を開き、閉じると通常編集へ戻る",
+    async (kind) => {
+      vi.mocked(apiClient.get).mockResolvedValue({ data: { form_schema: { fields: [] } } });
+      const { w } = await setup(kind);
+      expect(button(w, "新しい登録を追加")).toBeUndefined();
+      await button(w, "登録内容を確認・更新").trigger("click");
+      expect(w.getComponent(AnswersModal).props()).toMatchObject({
+        isOpen: true,
+        targetType: kind,
+        targetId: kind === "marker" ? "one" : "shape",
+      });
+      expect(w.get("[inert]").exists()).toBe(true);
+      expect(w.findComponent(InputModal).exists()).toBe(false);
+      w.getComponent(AnswersModal).vm.$emit("close");
+      await flushPromises();
+      expect(w.findComponent(AnswersModal).exists()).toBe(false);
+      expect(w.find("[inert]").exists()).toBe(false);
+      expect(w.emitted("close")).toBeUndefined();
+      w.unmount();
+    },
+  );
+  it("未保存内容を確認し、キャンセル・保存失敗では保持、保存成功後だけ登録一覧へ進む", async () => {
+    const { w, markers } = await setup();
+    const save = vi.spyOn(markers, "updateMapObject").mockResolvedValueOnce(null);
+    await w.get("textarea").setValue("保持する編集");
+    await button(w, "登録内容を確認・更新").trigger("click");
+    expect(w.getComponent(Message).props("message")).toContain("登録一覧");
+    expect(w.findComponent(AnswersModal).exists()).toBe(false);
+    w.getComponent(Message).vm.$emit("close");
+    await flushPromises();
+    expect(save).not.toHaveBeenCalled();
+    expect(w.get<HTMLTextAreaElement>("textarea").element.value).toBe("保持する編集");
+    await button(w, "登録内容を確認・更新").trigger("click");
+    w.getComponent(Message).vm.$emit("confirm");
+    await flushPromises();
+    expect(w.findComponent(AnswersModal).exists()).toBe(false);
+    expect(w.get<HTMLTextAreaElement>("textarea").element.value).toBe("保持する編集");
+    save.mockResolvedValueOnce({ ...marker, detail: "保持する編集" });
+    await button(w, "登録内容を確認・更新").trigger("click");
+    w.getComponent(Message).vm.$emit("confirm");
+    await flushPromises();
+    expect(w.getComponent(AnswersModal).props("targetId")).toBe("one");
+    expect(w.findComponent(InputModal).exists()).toBe(false);
+    expect(w.emitted("close")).toBeUndefined();
+    w.unmount();
+  });
+  it.each(["marker", "shape"] as const)(
+    "%s: 登録更新によるストア変更を通常編集にも反映し、閉鎖と対象変更で一覧を解除する",
+    async (kind) => {
+      const { w, markers, shapes } = await setup(kind);
+      await button(w, "登録内容を確認・更新").trigger("click");
+      if (kind === "marker") markers.upsertRecord({ ...marker, detail: "更新後の本文" });
+      else
+        shapes.upsertRecord({
+          ...shape,
+          geojson: {
+            ...shape.geojson,
+            properties: { ...shape.geojson.properties, memo: "更新後の本文" },
+          },
+        });
+      await flushPromises();
+      expect(w.get<HTMLTextAreaElement>("textarea").element.value).toBe("更新後の本文");
+      await w.setProps({ isOpen: false });
+      expect(w.findComponent(AnswersModal).exists()).toBe(false);
+      await w.setProps({ isOpen: true });
+      await flushPromises();
+      expect(w.findComponent(AnswersModal).exists()).toBe(false);
+      await button(w, "登録内容を確認・更新").trigger("click");
+      await w.setProps({ targetId: "other" });
+      await flushPromises();
+      expect(w.findComponent(AnswersModal).exists()).toBe(false);
+      w.unmount();
+    },
+  );
 });
 
 describe("レイヤの自由記述制限", () => {
@@ -195,7 +278,7 @@ describe("レイヤの自由記述制限", () => {
       if (kind === "shape")
         expect(w.get('input[type="color"]').attributes()).toHaveProperty("disabled");
       await w.get('input[type="text"]').setValue("名称だけ変更");
-      await button(w, "+更新").trigger("click");
+      await button(w, "変更を保存").trigger("click");
       await flushPromises();
       const payload = vi.mocked(apiClient.put).mock.calls.at(-1)![1] as any;
       expect(payload.name).toBe("名称だけ変更");
@@ -204,16 +287,16 @@ describe("レイヤの自由記述制限", () => {
       w.unmount();
     },
   );
-  it("制限中もフォーム回答を開ける", async () => {
+  it("制限中もフォーム登録を開ける", async () => {
     const { w } = await setup("marker", true);
-    await button(w, "フォームで回答を登録").trigger("click");
+    await button(w, "新しい登録を追加").trigger("click");
     expect(w.findComponent(InputModal).props("isOpen")).toBe(true);
     w.unmount();
   });
   it("内容が空でもマーカー名だけで更新できる", async () => {
     const { w } = await setup();
     await w.get("textarea").setValue("");
-    await button(w, "+更新").trigger("click");
+    await button(w, "変更を保存").trigger("click");
     await flushPromises();
     expect(apiClient.put).toHaveBeenCalledWith(
       "/marker/update/one",
@@ -248,7 +331,7 @@ describe("制限付きレイヤへの所属変更", () => {
     await destinations(w, true);
     await w.get("select").setValue("free");
     expect((w.get("textarea").element as HTMLTextAreaElement).readOnly).toBe(true);
-    await button(w, "+更新").trigger("click");
+    await button(w, "変更を保存").trigger("click");
     await flushPromises();
     expect(apiClient.put).toHaveBeenCalledWith(
       "/marker/update/one",
@@ -261,35 +344,35 @@ describe("制限付きレイヤへの所属変更", () => {
   });
 });
 
-describe("回答由来の本文と自由記述の分離", () => {
+describe("登録由来の本文と自由記述の分離", () => {
   it.each(["marker", "shape"] as const)(
-    "%s: 自由記述だけを編集し、回答部分と本文トークンを維持する",
+    "%s: 自由記述だけを編集し、登録部分と本文トークンを維持する",
     async (kind) => {
       vi.mocked(apiClient.get).mockImplementation(async (url) => ({
         data: String(url).endsWith("/body")
           ? {
-              body: "自由記述回答部分",
+              body: "自由記述登録部分",
               free_text: "自由記述",
               body_token: "body-token",
               sync_required: false,
-              managed_markdown: "回答部分",
+              managed_markdown: "登録部分",
               parts: [
                 { type: "text", text: "自由記述" },
-                { type: "answer", id: "answer", markdown: "回答部分" },
+                { type: "answer", id: "answer", markdown: "登録部分" },
               ],
             }
           : { form_schema: { fields: [{ id: "n" }] } },
       }));
       const { w } = await setup(kind);
       expect((w.get("textarea").element as HTMLTextAreaElement).value).toBe("自由記述");
-      expect(w.get(".managed-answers").text()).toContain("回答部分");
+      expect(w.get(".managed-answers").text()).toContain("登録部分");
       await w.get("textarea").setValue("変更後");
-      await button(w, "+更新").trigger("click");
+      await button(w, "変更を保存").trigger("click");
       await flushPromises();
       const body = vi.mocked(apiClient.put).mock.calls.at(-1)![1] as any;
       expect(body.free_text).toBe("変更後");
       expect(body.body_token).toBe("body-token");
-      expect(kind === "marker" ? body.detail : body.geojson.properties.memo).toBe("変更後回答部分");
+      expect(kind === "marker" ? body.detail : body.geojson.properties.memo).toBe("変更後登録部分");
       w.unmount();
     },
   );
@@ -301,7 +384,7 @@ describe("回答由来の本文と自由記述の分離", () => {
             free_text: "",
             body_token: "token",
             sync_required: true,
-            managed_markdown: "回答部分",
+            managed_markdown: "登録部分",
             parts: [],
           }
         : { form_schema: { fields: [] } },
@@ -317,6 +400,81 @@ describe("回答由来の本文と自由記述の分離", () => {
 });
 
 describe("通常編集の保存・削除・Markdown挿入", () => {
+  it("削除確認中は親を操作不可にし、対象切替で古い確認を無効にする", async () => {
+    const { w, markers } = await setup();
+    const remove = vi.spyOn(markers, "deleteMapObject").mockResolvedValue(true);
+    await w.get('button[title="マーカーを削除"]').trigger("click");
+    const confirmation = w.getComponent({ name: "ConfirmModal" });
+    expect(confirmation.props("isOpen")).toBe(true);
+    expect(w.get(".content-map-object-edit").attributes("inert")).toBeDefined();
+    confirmation.vm.$emit("cancel");
+    await flushPromises();
+    expect(w.get(".content-map-object-edit").attributes("inert")).toBeUndefined();
+    await w.get('button[title="マーカーを削除"]').trigger("click");
+    markers.mapObjectList.set("two", { ...marker, id: "two", marker_name: "次の施設" });
+    await w.setProps({ targetId: "two" });
+    await flushPromises();
+    expect(confirmation.props("isOpen")).toBe(false);
+    confirmation.vm.$emit("confirm");
+    await flushPromises();
+    expect(remove).not.toHaveBeenCalled();
+    expect(w.get<HTMLInputElement>('input[type="text"]').element.value).toBe("次の施設");
+    w.unmount();
+  });
+
+  it("削除中の二重送信と確認の解除を防ぎ、失敗時は編集内容を保持する", async () => {
+    const { w, markers } = await setup();
+    let finish!: (value: boolean) => void;
+    const remove = vi.spyOn(markers, "deleteMapObject").mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    await w.get("textarea").setValue("保持する内容");
+    await w.get('button[title="マーカーを削除"]').trigger("click");
+    const confirmation = w.getComponent({ name: "ConfirmModal" });
+    confirmation.vm.$emit("confirm");
+    await flushPromises();
+    confirmation.vm.$emit("confirm");
+    confirmation.vm.$emit("cancel");
+    await flushPromises();
+    expect(remove).toHaveBeenCalledExactlyOnceWith("one");
+    expect(confirmation.props("isOpen")).toBe(true);
+    expect(confirmation.props("message")).toContain("削除しています");
+    expect(w.get(".content-map-object-edit").attributes("inert")).toBeDefined();
+    finish(false);
+    await flushPromises();
+    expect(confirmation.props("isOpen")).toBe(false);
+    expect(w.get(".content-map-object-edit").attributes("inert")).toBeUndefined();
+    expect(w.get<HTMLTextAreaElement>("textarea").element.value).toBe("保持する内容");
+    expect(w.emitted("close")).toBeUndefined();
+    expect(w.emitted("message")!.flat().join()).toContain("削除できません");
+    w.unmount();
+  });
+
+  it("古い対象の削除完了で、新しい対象の編集画面を閉じない", async () => {
+    const { w, markers } = await setup();
+    let finish!: (value: boolean) => void;
+    vi.spyOn(markers, "deleteMapObject").mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    await w.get('button[title="マーカーを削除"]').trigger("click");
+    w.getComponent({ name: "ConfirmModal" }).vm.$emit("confirm");
+    await flushPromises();
+    markers.mapObjectList.set("two", { ...marker, id: "two", marker_name: "次の施設" });
+    await w.setProps({ targetId: "two" });
+    await flushPromises();
+    finish(true);
+    await flushPromises();
+    expect(w.emitted("deleted")).toEqual([["one"]]);
+    expect(w.emitted("close")).toBeUndefined();
+    expect(w.get<HTMLInputElement>('input[type="text"]').element.value).toBe("次の施設");
+    expect(w.get(".content-map-object-edit").attributes("inert")).toBeUndefined();
+    w.unmount();
+  });
+
   it("選択範囲にMarkdownを挿入し、カーソル位置と添付操作を保つ", async () => {
     const { w } = await setup();
     const textarea = w.get<HTMLTextAreaElement>("textarea").element;
@@ -355,7 +513,7 @@ describe("通常編集の保存・削除・Markdown挿入", () => {
   it("名前・所属レイヤがない更新を送信しない", async () => {
     const { w } = await setup();
     await w.get('input[type="text"]').setValue(" ");
-    await button(w, "+更新").trigger("click");
+    await button(w, "変更を保存").trigger("click");
     await flushPromises();
     expect(w.emitted("message")!.flat().join()).toContain("マーカー名");
     expect(apiClient.put).not.toHaveBeenCalled();
@@ -368,7 +526,7 @@ describe("通常編集の保存・削除・Markdown挿入", () => {
   it("図形更新失敗で編集を保持し、非折れ線のスタイルを保存する", async () => {
     const { w, shapes } = await setup("shape");
     const update = vi.spyOn(shapes, "updateShape").mockResolvedValueOnce(null);
-    await button(w, "+更新").trigger("click");
+    await button(w, "変更を保存").trigger("click");
     await flushPromises();
     expect(w.emitted("message")!.flat().join()).toContain("図形情報を更新できません");
     expect(w.emitted("close")).toBeUndefined();
@@ -395,7 +553,7 @@ describe("通常編集の保存・削除・Markdown挿入", () => {
     await w.setProps({ isOpen: false });
     await w.setProps({ isOpen: true });
     await flushPromises();
-    await button(w, "+更新").trigger("click");
+    await button(w, "変更を保存").trigger("click");
     await flushPromises();
     expect(update.mock.lastCall![3]!.properties.style).toMatchObject({ fillColor: "#123456" });
     expect(update.mock.lastCall![3]!.properties.style!.arrowType).toBeUndefined();
@@ -433,7 +591,7 @@ describe("編集ツールバーの挿入と図形スタイル", () => {
     await selects[0]!.setValue("dashed");
     await selects[1]!.setValue("both");
     await w.get('input[type="range"]').setValue("7");
-    await button(w, "+更新").trigger("click");
+    await button(w, "変更を保存").trigger("click");
     await flushPromises();
     expect(save.mock.lastCall![3]!.properties.style).toMatchObject({
       color: "#abcdef",
@@ -449,7 +607,7 @@ describe("編集ツールバーの挿入と図形スタイル", () => {
     await flushPromises();
     expect(w.emitted("message")).toContainEqual(["設定の通知"]);
     expect(w.getComponent(Settings).props("isOpen")).toBe(false);
-    await button(w, "フォームで回答を登録").trigger("click");
+    await button(w, "新しい登録を追加").trigger("click");
     w.getComponent(Message).vm.$emit("confirm");
     await flushPromises();
     w.getComponent(InputModal).vm.$emit("close");
@@ -472,7 +630,7 @@ describe("本文取得失敗と編集中の権限変更", () => {
       expect(text.element.value).toBe(kind === "marker" ? "本文" : "メモ");
       expect(text.element.readOnly).toBe(true);
       expect(w.text()).toContain("本文・メモを確認できませんでした");
-      expect(button(w, "+更新").attributes("disabled")).toBeDefined();
+      expect(button(w, "変更を保存").attributes("disabled")).toBeDefined();
       expect(w.get('button[title="ファイルの追加"]').attributes("disabled")).toBeDefined();
       await (w.vm as any).updateMapObject();
       expect(apiClient.put).not.toHaveBeenCalled();
@@ -488,7 +646,7 @@ describe("本文取得失敗と編集中の権限変更", () => {
     });
     const { w } = await setup();
     await w.get("textarea").setValue("編集後");
-    await button(w, "+更新").trigger("click");
+    await button(w, "変更を保存").trigger("click");
     await flushPromises();
     expect(apiClient.put).toHaveBeenCalledWith(
       "/marker/update/one",
@@ -503,7 +661,7 @@ describe("本文取得失敗と編集中の権限変更", () => {
       const { w, markers, shapes } = await setup(kind);
       await w.get("textarea").setValue("保持する未保存の入力");
       await w.setProps({ layerList: new Map([["layer", { ...layer, restrict_free_text: true }]]) });
-      await button(w, "+更新").trigger("click");
+      await button(w, "変更を保存").trigger("click");
       await flushPromises();
       expect(apiClient.put).not.toHaveBeenCalled();
       expect(w.emitted("close")).toBeUndefined();

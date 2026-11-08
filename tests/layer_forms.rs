@@ -156,6 +156,81 @@ async fn post_public(
         .status()
 }
 
+/// 共通フォームと対象別フォームで30項目を受理し、31項目の作成・更新は既存定義を変えず拒否する。
+#[tokio::test]
+async fn common_and_target_form_apis_accept_thirty_fields_and_reject_thirty_one() {
+    let pool = common::test_pool().await;
+    let user = test_user(&pool, "thirty-fields-owner").await;
+    let app = geocode_web_single::router::build_router(
+        pool.clone(),
+        geocode_web_single::build_tera_extension().unwrap(),
+        None,
+    );
+    let mut config_data = definition("30項目フォーム");
+    let fields: Vec<Value> = (0..30)
+        .map(|n| json!({"id":format!("field_{n}"),"label":format!("項目{n}"),"type":"text"}))
+        .collect();
+    config_data["form_schema"]["fields"] = json!(fields);
+    let saved = ok(
+        &app,
+        user,
+        "POST",
+        "/common-forms",
+        Some(config_data.clone()),
+    )
+    .await;
+    assert_eq!(saved["form_schema"]["fields"].as_array().unwrap().len(), 30);
+
+    let mut oversized = config_data.clone();
+    oversized["form_schema"]["fields"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"id":"field_30","label":"31項目目","type":"text"}));
+    let (status, error) = call(
+        &app,
+        Some(user),
+        "POST",
+        "/common-forms",
+        Some(oversized.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    let id = saved["id"].as_str().unwrap();
+    oversized["version"] = saved["version"].clone();
+    let (status, error) = call(
+        &app,
+        Some(user),
+        "PUT",
+        &format!("/common-forms/{id}"),
+        Some(oversized.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    let after = ok(&app, user, "GET", &format!("/common-forms/{id}"), None).await;
+    assert_eq!(after["version"], saved["version"]);
+    assert_eq!(after["form_schema"]["fields"].as_array().unwrap().len(), 30);
+
+    let group = layer(&app, user, "field-limit").await;
+    for (kind, target) in [
+        ("marker", marker(&app, user, group).await),
+        ("shape", shape(&app, user, group).await),
+    ] {
+        let saved = save_config(&app, user, kind, target, config_data.clone()).await;
+        assert_eq!(saved["form_schema"]["fields"].as_array().unwrap().len(), 30);
+        let (status, error) = call(
+            &app,
+            Some(user),
+            "PUT",
+            &format!("/{kind}/{target}/form"),
+            Some(oversized.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+        let after = config(&app, user, kind, target).await;
+        assert_eq!(after["form_schema"], saved["form_schema"]);
+    }
+}
+
 #[tokio::test]
 async fn managed_forms_apply_move_propagate_restrict_and_keep_history() {
     let pool = common::test_pool().await;

@@ -96,7 +96,7 @@ describe("answer presentation snapshots", () => {
     );
   });
   it("distinguishes legacy values, unknown keys and unsafe image links", () => {
-    const source = { ...answer(), form_snapshot: null, submitted_values: { legacy: "以前の回答" } };
+    const source = { ...answer(), form_snapshot: null, submitted_values: { legacy: "以前の登録" } };
     const presentation = new AnswerTablePresentation();
     presentation.setPage([source]);
     const fields = describeAnswerFields([
@@ -104,7 +104,7 @@ describe("answer presentation snapshots", () => {
     ]);
     expect(presentation.rows(fields)[0]).toMatchObject({
       canEdit: false,
-      cells: [{ label: "項目名不明の項目 1", text: "以前の回答" }],
+      cells: [{ label: "項目名不明の項目 1", text: "以前の登録" }],
     });
     const image = answer();
     image.form_snapshot!.form_schema.fields = [{ id: "photo", label: "画像", type: "image" }];

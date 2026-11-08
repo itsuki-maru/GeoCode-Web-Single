@@ -129,7 +129,7 @@ describe("保存した地図検索条件の定義", () => {
       }),
     ).toThrow("分類名・色");
   });
-  it("回答条件なしの範囲も保存でき、上限超過や版違いのデータは拒否する", () => {
+  it("登録条件なしの範囲も保存でき、上限超過や版違いのデータは拒否する", () => {
     expect(() =>
       validatePresetDraft({ kind: "filter", definition: { common_form_id: null, conditions: [] } }),
     ).not.toThrow();

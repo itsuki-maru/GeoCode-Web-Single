@@ -13,6 +13,7 @@ export interface FormAnswer {
   layer_name: string | null;
   create_at: string;
   edited_at?: string | null;
+  revision?: number;
   submitted_values: Record<string, unknown>;
   form_snapshot: {
     form_title: string;

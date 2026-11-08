@@ -559,7 +559,7 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
         (dom.window as any).__templateSmokeMarkerGroup ??
         (dom.window as any).__templateSmokeRuntime.visibleMarkerGroup;
       const input = document.querySelector<HTMLInputElement>(".marker-clustering-control input")!;
-      // 回答用エントリーは初期化後に対象に合わせて表示範囲を調整するため、この確認は
+      // 登録用エントリーは初期化後に対象に合わせて表示範囲を調整するため、この確認は
       // 初期の範囲調整に依存させず、ズームの境界から開始する。
       map.setZoom(9, { animate: false });
       const layerLabel = [...document.querySelectorAll("label")].find(
@@ -867,7 +867,7 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
   );
 
   it.each([false, true])(
-    "回答地図は背景だけを読み取り、操作後も通常地図の保存設定を変更しない（mobile=%s）",
+    "登録地図は背景だけを読み取り、操作後も通常地図の保存設定を変更しない（mobile=%s）",
     (mobileAnswerMap) => {
       const savedSettings = {
         "geocode-web:selected-tile-server-id": "2",
@@ -1848,7 +1848,7 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
             const body = JSON.parse(options.body);
             serverShape.geojson.geometry.coordinates = body.coordinates;
             serverShape.shape_type = body.shape_type;
-            serverShape.geojson.properties.memo = "最新の本文とフォーム回答";
+            serverShape.geojson.properties.memo = "最新の本文とフォーム登録";
           }
           return { ok: true, status: 200, json: async () => structuredClone(serverShape) };
         }),
@@ -1914,7 +1914,7 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
       })();`).runInContext(dom.getInternalVMContext());
       expect(await (dom.window as any).__deleteVertex).toMatchObject({
         vertices: 3,
-        memo: "最新の本文とフォーム回答",
+        memo: "最新の本文とフォーム登録",
         minimumRejected: true,
       });
       expect(requests.filter((r) => r.options?.method === "PUT")).toHaveLength(3);
@@ -1963,9 +1963,9 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
     },
   );
   it.each([pages[0], pages[1]])(
-    "$fileNameのポップアップが本番Markdown処理で自由入力とフォーム回答を切り替える",
+    "$fileNameのポップアップが本番Markdown処理で自由入力とフォーム登録を切り替える",
     async (page) => {
-      const body = "自由\n\n**回答**";
+      const body = "自由\n\n**登録**";
       const dom = smokeLoadPage({
         ...page,
         globals: {
@@ -1980,7 +1980,7 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
           json: async () => ({
             body,
             free_text: "自由",
-            managed_markdown: "**回答**",
+            managed_markdown: "**登録**",
             sync_required: false,
           }),
         })),
@@ -2001,8 +2001,35 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
       select.value = "answers";
       select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
       expect(dom.window.document.querySelector(".popup-content-body strong")!.textContent).toBe(
-        "回答",
+        "登録",
       );
+    },
+  );
+
+  it.each([pages[0], pages[1]])(
+    "$fileNameがJSON由来の未変換本文を安全化し、保存値を維持する",
+    (page) => {
+      const body =
+        '<a href="https://example.test/doc" target="named-report" rel="opener">資料</a><script>bad()</script><img src="/photo.png" onerror="bad()">';
+      const imported = JSON.parse(JSON.stringify({ ...markerRecords["marker-1"], detail: body }));
+      const dom = smokeLoadPage({
+        ...page,
+        globals: { ...page.globals, markersFromAxum: { "marker-1": imported } },
+      });
+      new Script(
+        'markers["marker-marker-1"].getPopup().setLatLng([35.68,139.76]).openOn(map);',
+      ).runInContext(dom.getInternalVMContext());
+      const link = dom.window.document.querySelector<HTMLAnchorElement>(".popup-content-body a")!;
+      expect(link.relList.contains("opener")).toBe(false);
+      expect(link.relList.contains("noopener")).toBe(true);
+      expect(link.relList.contains("noreferrer")).toBe(true);
+      const popup = dom.window.document.querySelector(".popup-content-body")!;
+      expect(popup.querySelector("script")).toBeNull();
+      expect(popup.querySelector("[onerror]")).toBeNull();
+      expect(imported.detail).toBe(body);
+      expect(
+        new Script('markersFromAxum["marker-1"].detail').runInContext(dom.getInternalVMContext()),
+      ).toBe(body);
     },
   );
 
@@ -2509,14 +2536,14 @@ describe.each(["map.html", "map-mobile.html"])("編集保存・削除・復元�
   it("フォーム由来の本文を保ち、自由記述と競合検出トークンを送信する", async () => {
     const info = {
       free_text: "古い自由記述",
-      body: "古い自由記述\n回答",
+      body: "古い自由記述\n登録",
       body_token: "token-1",
       sync_required: false,
       parts: [
         { type: "free", text: "古い自由記述" },
-        { type: "answer", markdown: "\n回答" },
+        { type: "answer", markdown: "\n登録" },
       ],
-      managed_markdown: "回答",
+      managed_markdown: "登録",
     };
     const { evaluate, transport, element } = await openMetadata({
       ok: true,
@@ -2524,7 +2551,7 @@ describe.each(["map.html", "map-mobile.html"])("編集保存・削除・復元�
     });
     expect(element<HTMLTextAreaElement>("shape-memo-editor-input").value).toBe("古い自由記述");
     expect(element("shape-memo-editor-input").parentElement!.textContent).toContain(
-      "フォーム回答からのメモ",
+      "フォーム登録からのメモ",
     );
     element<HTMLTextAreaElement>("shape-memo-editor-input").value = "新しい自由記述";
     element("shape-name-editor-save").click();
@@ -2532,7 +2559,7 @@ describe.each(["map.html", "map-mobile.html"])("編集保存・削除・復元�
     const data = JSON.parse(transport.mock.calls[1]![1].body);
     expect(data.free_text).toBe("新しい自由記述");
     expect(data.body_token).toBe("token-1");
-    expect(data.geojson.properties.memo).toBe("新しい自由記述\n回答");
+    expect(data.geojson.properties.memo).toBe("新しい自由記述\n登録");
   });
 
   it.each(["sync", "http", "network"])(
@@ -3460,7 +3487,7 @@ describe("読取地図の多数レイヤと本文取得", () => {
         ok: outcome !== "body-failed",
         json: async () => ({
           free_text: "自由本文",
-          managed_markdown: "回答",
+          managed_markdown: "登録",
           sync_required: false,
         }),
       });

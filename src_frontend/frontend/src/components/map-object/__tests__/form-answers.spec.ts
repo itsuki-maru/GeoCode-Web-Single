@@ -66,7 +66,7 @@ const select = (wrapper: ReturnType<typeof mount>, label: string) =>
     .findAll("label")
     .find((item) => item.text().startsWith(label))!
     .get("select");
-describe("回答条件の型変換と一覧復帰", () => {
+describe("登録条件の型変換と一覧復帰", () => {
   it("項目変更で値をリセットし、型別の条件と範囲上限を送る", async () => {
     const fields = [
       field,
@@ -168,7 +168,7 @@ it("CSVの実ダウンロードで401になっても適用済み条件のまま�
     )!;
   const query = form.get('input[name="query"]').element as HTMLInputElement;
   const originalQuery = query.value;
-  const frame = wrapper.get('iframe[title="回答CSVダウンロード"]').element as HTMLIFrameElement;
+  const frame = wrapper.get('iframe[title="登録CSVダウンロード"]').element as HTMLIFrameElement;
   const action = new URL(form.attributes("action")!);
   const sendError = () =>
     window.dispatchEvent(
@@ -197,7 +197,7 @@ it("CSVの実ダウンロードで401になっても適用済み条件のまま�
   expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(2);
   wrapper.unmount();
 });
-describe("回答一覧", () => {
+describe("登録一覧", () => {
   it("地図には未反映の変更を混ぜず、一覧の全ページ条件と検索基準日時を渡す", async () => {
     const wrapper = await open({ initialFormId: "common" });
     await select(wrapper, "表示モード").setValue("latest");
@@ -219,14 +219,14 @@ describe("回答一覧", () => {
         cursor: null,
       }),
     );
-    expect(wrapper.find('iframe[title="回答条件に一致する対象の地図"]').exists()).toBe(true);
+    expect(wrapper.find('iframe[title="登録条件に一致する対象の地図"]').exists()).toBe(true);
     const close = wrapper.get(".answer-map-overlay").get("button");
     await close.trigger("click");
     expect(wrapper.find(".answer-map-overlay").exists()).toBe(false);
     expect(wrapper.text()).toContain("60件");
     wrapper.unmount();
   });
-  it("該当回答がない場合は地図を開けない", async () => {
+  it("該当登録がない場合は地図を開けない", async () => {
     api.post.mockImplementation(async (url: string) => ({
       data: url.endsWith("options") ? options : { ...result, rows: [], total: 0 },
     }));
@@ -247,7 +247,7 @@ describe("回答一覧", () => {
     expect((button(wrapper, "地図で確認").element as HTMLButtonElement).disabled).toBe(false);
     await button(wrapper, "地図で確認").trigger("click");
     await flushPromises();
-    expect(wrapper.find('iframe[title="回答条件に一致する対象の地図"]').exists()).toBe(true);
+    expect(wrapper.find('iframe[title="登録条件に一致する対象の地図"]').exists()).toBe(true);
     wrapper.unmount();
   });
   it("多数の対象でも入力中の条件変更だけで地図を無効にしない", async () => {
@@ -299,7 +299,7 @@ describe("回答一覧", () => {
         .findAll(".search-grid > label")
         .map((label) => label.element.firstChild?.textContent?.trim()),
     ).toEqual(["共通フォームを選択", "適用元の版", "対象種別", "レイヤ"]);
-    expect(wrapper.text()).not.toMatch(/詳しい条件|回答日時・開始|回答日時・終了/);
+    expect(wrapper.text()).not.toMatch(/詳しい条件|登録日時・開始|登録日時・終了/);
     expect(wrapper.find(".search-grid input").exists()).toBe(false);
     expect(
       wrapper
@@ -345,7 +345,7 @@ describe("回答一覧", () => {
     expect(wrapper.findAll("td").some((td) => td.text() === "0")).toBe(true);
     wrapper.unmount();
   });
-  it("最新回答と数値条件をサーバーへ送り、同じ条件と基準時刻で次ページを取得する", async () => {
+  it("最新登録と数値条件をサーバーへ送り、同じ条件と基準時刻で次ページを取得する", async () => {
     const wrapper = await open({ initialFormId: "common" });
     await select(wrapper, "表示モード").setValue("latest");
     await button(wrapper, "条件を追加").trigger("click");
@@ -394,7 +394,7 @@ describe("回答一覧", () => {
     expect(request.cursor).toBeNull();
     wrapper.unmount();
   });
-  it("個別対象の履歴を開き、定義なしの回答を代替項目名で表示する", async () => {
+  it("個別対象の履歴を開き、定義なしの登録を代替項目名で表示する", async () => {
     api.post.mockImplementation(async (url: string) => ({
       data: url.endsWith("options")
         ? { ...options, fields: [] }
@@ -406,7 +406,7 @@ describe("回答一覧", () => {
                 form_snapshot: null,
                 source_form: null,
                 common_form_name: null,
-                submitted_values: { legacy: "旧回答" },
+                submitted_values: { legacy: "旧登録" },
               },
             ],
           },
@@ -421,7 +421,7 @@ describe("回答一覧", () => {
     expect(wrapper.get("dl").text()).toContain("項目名不明の項目 1");
     expect(wrapper.get("dl").text()).not.toContain("legacy");
     expect(wrapper.get(".management-info").attributes("open")).toBeUndefined();
-    expect(wrapper.text()).toContain("旧回答");
+    expect(wrapper.text()).toContain("旧登録");
     wrapper.unmount();
   });
   it("CSVの事前検証失敗を表示し、ダウンロードを開始しない", async () => {
@@ -511,7 +511,7 @@ it("CSVと地図それぞれの横に説明を置き、地図の対象範囲を�
       .map((b) => b.text()),
   ).toEqual(["CSV出力", "?", "地図で確認", "?"]);
   await w.get('[aria-label="地図で確認について"]').trigger("click");
-  expect(w.text()).toContain("個別フォームの回答条件は、一覧で指定してください");
+  expect(w.text()).toContain("個別フォームの登録条件は、一覧で指定してください");
   expect(w.get('[aria-label="一覧とCSVについて"]').attributes("aria-expanded")).toBe("false");
   await w.setProps({ isOpen: false });
   await w.setProps({ isOpen: true });
@@ -520,7 +520,7 @@ it("CSVと地図それぞれの横に説明を置き、地図の対象範囲を�
   w.unmount();
 });
 
-it("一覧と詳細の編集から同じ回答を開き、保存後は基準日時を更新して再取得する", async () => {
+it("一覧と詳細の編集から同じ登録を開き、保存後は基準日時を更新して再取得する", async () => {
   api.get.mockResolvedValue({
     data: { ...row.form_snapshot, revision: 1, values: row.submitted_values },
   });
@@ -538,7 +538,7 @@ it("一覧と詳細の編集から同じ回答を開き、保存後は基準日�
   wrapper.getComponent(Input).vm.$emit("close");
   await flushPromises();
   await button(wrapper, "詳細を見る").trigger("click");
-  await button(wrapper, "回答を編集").trigger("click");
+  await button(wrapper, "登録内容を編集").trigger("click");
   expect(wrapper.getComponent(Input).props("answerId")).toBe("answer");
   const object = { id: "target", detail: "更新後" };
   const listener = vi.fn();
@@ -548,7 +548,7 @@ it("一覧と詳細の編集から同じ回答を開き、保存後は基準日�
   expect(wrapper.findComponent(Input).exists()).toBe(false);
   expect(listener).toHaveBeenCalledOnce();
   expect(api.post.mock.calls.at(-1)![1]).not.toHaveProperty("as_of");
-  expect(wrapper.text()).toContain("回答を更新しました。");
+  expect(wrapper.text()).toContain("登録内容を更新しました。");
   window.removeEventListener("geocode-answer-updated", listener);
   wrapper.unmount();
 });
@@ -591,7 +591,7 @@ const deferredAnswer = <T>() => {
 };
 const searchProgress = () => document.body.querySelector<HTMLElement>(".answer-search-progress");
 
-describe("回答検索中の全画面スピナー", () => {
+describe("登録検索中の全画面スピナー", () => {
   it.each([
     { action: "更新", success: true },
     { action: "更新", success: false },
@@ -618,9 +618,9 @@ describe("回答検索中の全画面スピナー", () => {
       expect(overlay.style.display).not.toBe("none");
       expect(overlay.style.zIndex).toBe("120");
       expect(overlay.getAttribute("role")).toBe("status");
-      expect(overlay.getAttribute("aria-label")).toBe("回答を読み込んでいます…");
+      expect(overlay.getAttribute("aria-label")).toBe("登録データを読み込んでいます…");
       expect(overlay.querySelector("svg.spinner")).not.toBeNull();
-      expect(wrapper.text()).toContain("回答を読み込んでいます…");
+      expect(wrapper.text()).toContain("登録データを読み込んでいます…");
       expect(api.post.mock.calls.slice(before)).toEqual([
         [
           "/form-answers/search",
@@ -635,7 +635,7 @@ describe("回答検索中の全画面スピナー", () => {
       else pending.reject(new Error("search failed"));
       await flushPromises();
       expect(searchProgress()).toBeNull();
-      expect(wrapper.text()).toContain(success ? "40件" : "回答を読み込めませんでした。");
+      expect(wrapper.text()).toContain(success ? "40件" : "登録データを読み込めませんでした。");
       expect(api.post).toHaveBeenCalledTimes(before + 1);
     } finally {
       wrapper.unmount();
@@ -675,11 +675,11 @@ describe("回答検索中の全画面スピナー", () => {
         await flushPromises();
         expect(searchProgress()).toBe(overlay);
         expect(wrapper.text()).not.toContain("古い応答");
-        expect(wrapper.text()).not.toContain("回答を読み込めませんでした。");
-        current.resolve({ data: { ...result, rows: [{ ...row, target_name: "新しい回答" }] } });
+        expect(wrapper.text()).not.toContain("登録データを読み込めませんでした。");
+        current.resolve({ data: { ...result, rows: [{ ...row, target_name: "新しい登録" }] } });
         await flushPromises();
         expect(searchProgress()).toBeNull();
-        expect(wrapper.get("tbody").text()).toContain("新しい回答");
+        expect(wrapper.get("tbody").text()).toContain("新しい登録");
         expect(searches).toBe(2);
       } finally {
         wrapper.unmount();
@@ -734,9 +734,9 @@ describe("回答検索中の全画面スピナー", () => {
   });
 });
 
-describe("回答一覧の初期取得", () => {
+describe("登録一覧の初期取得", () => {
   it.each(["options", "search"])(
-    "%sが先に完了しても、並行取得した回答と項目が揃ってから表示する",
+    "%sが先に完了しても、並行取得した登録と項目が揃ってから表示する",
     async (first) => {
       const definitions = deferredAnswer<{ data: typeof options }>();
       const answers = deferredAnswer<{ data: typeof result }>();
@@ -795,14 +795,16 @@ describe("回答一覧の初期取得", () => {
       await flushPromises();
       expect(wrapper.findAll("tbody tr")).toHaveLength(0);
       expect(wrapper.text()).toContain(
-        failed === "options" ? "検索項目を読み込めませんでした。" : "回答を読み込めませんでした。",
+        failed === "options"
+          ? "検索項目を読み込めませんでした。"
+          : "登録データを読み込めませんでした。",
       );
       expect(button(wrapper, "更新").attributes("disabled")).toBeUndefined();
       wrapper.unmount();
     },
   );
 });
-describe("回答一覧の軽量表示と解放", () => {
+describe("登録一覧の軽量表示と解放", () => {
   afterEach(() => vi.unstubAllGlobals());
   const manyFields = Array.from({ length: 20 }, (_, index) => ({
     id: `field-${index}`,
@@ -974,7 +976,7 @@ it("保存後の再取得が閉じたセッションへ完了しても、新し�
       data: {
         ...result,
         editing_supported: true,
-        rows: [{ ...row, target_name: searches > 2 ? "再表示した回答" : "保存前" }],
+        rows: [{ ...row, target_name: searches > 2 ? "再表示した登録" : "保存前" }],
       },
     };
   });
@@ -983,7 +985,7 @@ it("保存後の再取得が閉じたセッションへ完了しても、新し�
   });
   const wrapper = await open();
   await button(wrapper, "詳細を見る").trigger("click");
-  await button(wrapper, "回答を編集").trigger("click");
+  await button(wrapper, "登録内容を編集").trigger("click");
   wrapper.getComponent(Input).vm.$emit("saved", { id: "target", detail: "保存済み" });
   await nextTick();
   await wrapper.setProps({ isOpen: false });
@@ -991,8 +993,41 @@ it("保存後の再取得が閉じたセッションへ完了しても、新し�
   await flushPromises();
   late.resolve({ data: result });
   await flushPromises();
-  expect(wrapper.get("tbody").text()).toContain("再表示した回答");
-  expect(wrapper.text()).not.toContain("回答を更新しました。");
+  expect(wrapper.get("tbody").text()).toContain("再表示した登録");
+  expect(wrapper.text()).not.toContain("登録内容を更新しました。");
   expect(wrapper.find(".answer-detail").exists()).toBe(false);
   wrapper.unmount();
+});
+
+it("一覧は文字プレビューを維持し、詳細ではテキスト項目だけMarkdownを描画する", async () => {
+  const markdownRow = {
+    ...row,
+    form_snapshot: {
+      ...row.form_snapshot,
+      form_schema: {
+        fields: [
+          { id: "text", label: "短文", type: "text" },
+          { id: "note", label: "記録", type: "textarea" },
+          { id: "choice", label: "選択", type: "select" },
+        ],
+      },
+    },
+    submitted_values: { text: "**重要**", note: "## 見出し\n\n- 点検", choice: "**選択肢**" },
+  };
+  api.post.mockImplementation(async (url: string) => ({
+    data: url.endsWith("options")
+      ? { ...options, fields: [{ id: "text", label: "短文", field_type: "text", choices: [] }] }
+      : { ...result, rows: [markdownRow], total: 1, next_cursor: null },
+  }));
+  const w = await open();
+  expect(w.get(".answer-value").text()).toBe("**重要**");
+  expect(w.find(".answer-value strong").exists()).toBe(false);
+  await button(w, "詳細を見る").trigger("click");
+  const detail = w.get(".answer-detail");
+  expect(detail.get(".form-value-markdown strong").text()).toBe("重要");
+  expect(detail.get(".form-value-markdown h2").text()).toBe("見出し");
+  expect(detail.get(".form-value-markdown li").text()).toBe("点検");
+  expect(detail.findAll(".form-value-markdown")).toHaveLength(2);
+  expect(detail.text()).toContain("**選択肢**");
+  w.unmount();
 });

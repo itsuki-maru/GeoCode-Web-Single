@@ -492,11 +492,25 @@ async fn owner_can_enable_form_and_public_user_can_only_append() {
     .expect("marker detail should be readable");
     assert!(detail.starts_with("既存本文"));
     assert!(detail.contains("## フォーム投稿: 現地報告"));
-    assert!(detail.contains("### コメント\n\n\\# 見出し"));
-    assert!(detail.contains("\\# 見出し"));
+    assert!(detail.contains("### コメント\n\n# 見出し"));
     assert!(detail.contains("2026-08-01"));
     assert!(!detail.contains("2026\\-08\\-01"));
-    assert!(!detail.contains("[危険](javascript:"));
+    // 公開投稿では危険なURLだけを除去し、通常のMarkdownとリンクのラベルを残す。
+    assert!(detail.contains("# 見出し 危険"));
+    assert!(!detail.contains("javascript:"));
+    let stored_values: Value = sqlx::query_scalar(
+        r#"
+        SELECT submitted_values
+        FROM marker_form_submission_model
+        WHERE marker_id = $1
+        "#,
+    )
+    .bind(&marker_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored_values["comment"], "# 見出し 危険");
+    assert!(detail.contains(stored_values["comment"].as_str().unwrap()));
 
     let submission_count: i64 = sqlx::query_scalar(
         r#"
@@ -1217,6 +1231,263 @@ async fn owner_request(
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     (status, serde_json::from_slice(&bytes).unwrap())
+}
+
+async fn public_request_with_cookie(
+    app: &Router,
+    actor: Option<Uuid>,
+    kind: &str,
+    id: Uuid,
+    submission: Value,
+) -> (StatusCode, Value) {
+    let (content_type, body) = multipart_body(&submission, None);
+    let prefix = if kind == "marker" {
+        "forms"
+    } else {
+        "shape-forms"
+    };
+    let mut request = Request::builder()
+        .method("POST")
+        .uri(format!("/{prefix}/{id}"))
+        .header(header::CONTENT_TYPE, content_type);
+    if let Some(actor) = actor {
+        request = request.header(
+            "cookie",
+            format!(
+                "access_token={}",
+                geocode_web_single::auth::create_token(&actor.to_string(), 30, "access_token", 0)
+                    .unwrap()
+            ),
+        );
+    }
+    let response = app
+        .clone()
+        .oneshot(request.body(Body::from(body)).unwrap())
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+
+/// 公開経路だけを安全化し、所有権を検証する内部の新規登録・編集は原文を保持する。
+#[tokio::test]
+async fn public_submissions_are_sanitized_but_authorized_owner_operations_preserve_markdown() {
+    let pool = common::test_pool().await;
+    let owner = owner_test_user(&pool, "public-sanitize-owner").await;
+    let other = owner_test_user(&pool, "public-sanitize-other").await;
+    let layer = owner_test_layer(&pool, &owner).await;
+    let marker = owner_test_marker(&pool, owner, layer).await;
+    let shape = owner_test_shape(&pool, owner, layer).await;
+    let app = geocode_web_single::router::build_router(
+        pool.clone(),
+        build_tera_extension().unwrap(),
+        None,
+    );
+    let attack = "## 点検\n\n**重要** と [資料](https://example.test/guide)\n\n<a href=\"https://example.test/\" target=\"_blank\" rel=\"opener\" onclick=\"bad()\">資料</a>\n\n[危険](javascript:alert%281%29)\n\n<script>bad()</script>";
+    for (kind, target) in [("marker", marker), ("shape", shape)] {
+        let config: MarkerFormConfigUpdate = serde_json::from_value(json!({
+            "enabled":true,"form_title":"公開点検","form_description":"説明","password_mode":"keep",
+            "form_schema":{"fields":[{"id":"note","type":"textarea","label":"記録","required":true,"max_length":5000}]}
+        })).unwrap();
+        let config = if kind == "marker" {
+            serde_json::to_value(
+                update_marker_form_config_handler(
+                    Extension(owner.to_string()),
+                    Extension(pool.clone()),
+                    Path(target.to_string()),
+                    Json(config),
+                )
+                .await
+                .unwrap()
+                .0,
+            )
+            .unwrap()
+        } else {
+            serde_json::to_value(
+                update_shape_form_config_handler(
+                    Extension(owner.to_string()),
+                    Extension(pool.clone()),
+                    Path(target.to_string()),
+                    Json(config),
+                )
+                .await
+                .unwrap()
+                .0,
+            )
+            .unwrap()
+        };
+        let public_id: Uuid = config["public_path"]
+            .as_str()
+            .unwrap()
+            .rsplit('/')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let query = format!(
+            r#"
+            SELECT id, submitted_values, rendered_markdown
+            FROM {kind}_form_submission_model
+            WHERE {kind}_id = $1
+            ORDER BY create_at DESC, id DESC
+            LIMIT 1
+            "#
+        );
+        let mut public_answer = None;
+        for actor in [None, Some(owner)] {
+            // 公開 API では Cookie や JSON の免除指定によって処理を迂回できない。
+            let (status, response) = public_request_with_cookie(
+                &app,
+                actor,
+                kind,
+                public_id,
+                json!({"values":{"note":attack},"skip_sanitize":true,"trusted":true}),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{response}");
+            let (id, values, markdown): (String, Value, String) = sqlx::query_as(&query)
+                .bind(target.to_string())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            public_answer = Some(id);
+            let saved = values["note"].as_str().unwrap();
+            assert!(saved.contains("## 点検"));
+            assert!(saved.contains("**重要** と [資料](https://example.test/guide)"));
+            assert!(saved.contains("rel=\"noopener noreferrer\""));
+            assert!(!saved.contains("rel=\"opener\""));
+            assert!(!saved.contains("onclick"));
+            assert!(!saved.contains("javascript:"));
+            assert!(!saved.contains("<script>"));
+            assert!(!saved.contains("bad()"));
+            assert!(markdown.contains(saved));
+            let body: String = if kind == "marker" {
+                sqlx::query_scalar(
+                    r#"
+                    SELECT detail
+                    FROM marker_info_model
+                    WHERE id = $1
+                    "#,
+                )
+                .bind(target.to_string())
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            } else {
+                sqlx::query_scalar(
+                    r#"
+                    SELECT json_extract(geojson, '$.properties.memo')
+                    FROM shape_model
+                    WHERE id = $1
+                    "#,
+                )
+                .bind(target.to_string())
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            };
+            assert!(body.contains(&markdown));
+        }
+        let (_, input) = owner_request(&app, Some(owner), kind, target, None, None).await;
+        let payload = json!({"config_token":input["config_token"],"values":{"note":attack}});
+        assert_eq!(
+            owner_request(&app, Some(other), kind, target, Some(payload.clone()), None)
+                .await
+                .0,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            owner_request(&app, None, kind, target, Some(payload.clone()), None)
+                .await
+                .0,
+            StatusCode::UNAUTHORIZED
+        );
+        let (status, result) =
+            owner_request(&app, Some(owner), kind, target, Some(payload), None).await;
+        assert_eq!(status, StatusCode::OK, "{result}");
+        let (_, values, markdown): (String, Value, String) = sqlx::query_as(&query)
+            .bind(target.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(values["note"], attack);
+        assert!(markdown.contains(attack));
+
+        // 過去の公開登録を所有者が編集する場合も、現在の認可済み経路を基準とする。
+        let id = public_answer.unwrap();
+        let (ct, data) = multipart_body(&json!({"revision":1,"values":{"note":attack}}), None);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/form-answers/{kind}/{id}"))
+                    .header(header::CONTENT_TYPE, ct)
+                    .header(
+                        "cookie",
+                        format!(
+                            "access_token={}",
+                            geocode_web_single::auth::create_token(
+                                &owner.to_string(),
+                                30,
+                                "access_token",
+                                0
+                            )
+                            .unwrap()
+                        ),
+                    )
+                    .body(Body::from(data))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let (values, markdown): (Value, String) = sqlx::query_as(&format!(
+            r#"
+            SELECT submitted_values, rendered_markdown
+            FROM {kind}_form_submission_model
+            WHERE id = $1
+            "#
+        ))
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(values["note"], attack);
+        assert!(markdown.contains(attack));
+
+        let (status, _) = public_request_with_cookie(
+            &app,
+            None,
+            kind,
+            public_id,
+            json!({"values":{"note":"<script>only_bad()</script>"}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = public_request_with_cookie(
+            &app,
+            None,
+            kind,
+            public_id,
+            json!({"values":{"note":"a".repeat(5001)}}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let count: i64 = sqlx::query_scalar(&format!(
+            r#"
+            SELECT count(*)
+            FROM {kind}_form_submission_model
+            WHERE {kind}_id = $1
+            "#
+        ))
+        .bind(target.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 3);
+    }
 }
 
 #[tokio::test]

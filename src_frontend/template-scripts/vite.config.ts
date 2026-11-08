@@ -13,6 +13,7 @@ const editorVirtualPrefix = "virtual:geocode-editor:";
 const templateScriptsDirectory = fileURLToPath(new URL("./", import.meta.url));
 
 export const editorCommonPrelude = `
+import { createMapXssOptions, sanitizeMapHtml } from "/src/map/common/markdown-sanitizer.ts";
 import { createPopupContentRuntime } from "/src/map/common/popup-content.ts";
 let popupContent;
 import { installAnswerColoring, isAnswerColoring } from "/src/map/answer-coloring.ts";
@@ -41,7 +42,7 @@ import { createShapeViewportRuntime } from "/src/map/common/shape-viewport.ts";
 import { createMapStorage, createTileChangeHandler } from "/src/map/common/storage.ts";
 
 function renderMapMarkdown(markdown, links) {
-  return renderProgressiveMarkdown(markdown, (html) => renderIframe(filterXSS(html, xssOptions)), links);
+  return renderProgressiveMarkdown(markdown, (html) => renderIframe(sanitizeMapHtml(html, filterXSS, xssOptions)), links);
 }
 
 const {
@@ -120,7 +121,7 @@ const {
   getMap: () => map,
   renderIframe,
   renderMarkdown: renderMapMarkdown,
-  sanitizeHtml: (html) => filterXSS(html, xssOptions),
+  sanitizeHtml: (html) => sanitizeMapHtml(html, filterXSS, xssOptions),
   setupDetailsLazyImages: (root) => setupDetailsLazyImages(root, renderMapMarkdown),
 });
 

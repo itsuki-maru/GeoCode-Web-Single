@@ -151,7 +151,7 @@ defineExpose({ mapObjectQueryFormData, onMapObjectSearch });
       <button
         @click="emit('exportJson')"
         class="btn-head-image"
-        title="JSONエクスポート&#10;レイヤ・フォーム・回答履歴を出力します。version 3形式（20MiBまで）です。画像は参照のみです。"
+        title="JSONエクスポート&#10;レイヤ・フォーム・登録履歴を出力します。version 3形式（20MiBまで）です。画像は参照のみです。"
       >
         <img :src="`${assetsUrl}download_24.png`" class="btn-img" alt="download_24.png" />
       </button>

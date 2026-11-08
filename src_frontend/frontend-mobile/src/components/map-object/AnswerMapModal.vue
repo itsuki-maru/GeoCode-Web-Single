@@ -806,7 +806,7 @@ const downloadCsv = async (request: Record<string, unknown>) => {
     if (!Number.isSafeInteger(data.count) || data.count < 0 || data.count > 10000)
       throw Error("Invalid CSV response");
     if (data.count === 0) {
-      filterError.value = "出力対象の回答がありません。地図を更新して確認してください。";
+      filterError.value = "出力対象の登録がありません。地図を更新して確認してください。";
       return;
     }
     if (!csvForm.value || !csvFrame.value) throw Error("Download frame unavailable");
@@ -975,7 +975,7 @@ onBeforeUnmount(() => {
     <div class="content-fullscreen-map" :inert="childModalOpen || undefined">
       <header>
         <strong>地図で分析・検索・出力</strong
-        ><span v-if="!loading && !error">{{ summary }}（一致回答{{ answerCount }}件）</span>
+        ><span v-if="!loading && !error">{{ summary }}（一致登録{{ answerCount }}件）</span>
         <button
           v-if="printEnabled"
           type="button"
@@ -1102,7 +1102,7 @@ onBeforeUnmount(() => {
                   <select
                     v-else-if="selected(row)?.field_type === 'checkbox'"
                     v-model="row.value"
-                    aria-label="回答値"
+                    aria-label="登録値"
                   >
                     <option value="true">はい</option>
                     <option value="false">いいえ</option>
@@ -1178,7 +1178,7 @@ onBeforeUnmount(() => {
           <iframe
             ref="frame"
             :name="frameName"
-            title="回答条件に一致する対象の地図"
+            title="登録条件に一致する対象の地図"
             :class="{ 'is-loading': loading || error }"
           />
           <div v-if="loading" class="map-state" role="status">
@@ -1213,7 +1213,7 @@ onBeforeUnmount(() => {
         v-if="printEnabled"
         ref="csvFrame"
         :name="csvFrameName"
-        title="回答地図CSVダウンロード"
+        title="登録地図CSVダウンロード"
         hidden
       />
       <form

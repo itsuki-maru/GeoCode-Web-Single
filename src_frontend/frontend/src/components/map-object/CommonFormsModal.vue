@@ -15,6 +15,7 @@ const forms = ref<{ id: string; version: number; form_title: string; form_descri
 const loading = ref(false);
 const busy = ref(false);
 const message = ref("");
+const resultMessage = ref("");
 const editorOpen = ref(false);
 const editingId = ref("");
 const deletingId = ref("");
@@ -39,6 +40,7 @@ watch(
   () => props.isOpen,
   (open) => {
     if (open) {
+      resultMessage.value = "";
       tab.value = "create";
       editorOpen.value = false;
       deletingId.value = "";
@@ -48,6 +50,8 @@ watch(
   },
 );
 const edit = (id = "") => {
+  message.value = "";
+  resultMessage.value = "";
   editingId.value = id;
   editorOpen.value = true;
 };
@@ -69,13 +73,13 @@ const remove = async () => {
 const saved = async () => {
   editorOpen.value = false;
   tab.value = "list";
+  resultMessage.value = "共通フォームを保存しました。";
   await load();
-  message.value = "共通フォームを保存しました。";
 };
 </script>
 <template>
   <BaseModal :isOpen="isOpen && !editorOpen" :zIndex="20" @close="emit('close')">
-    <div class="common-forms">
+    <div class="common-forms" :inert="!!resultMessage">
       <header>
         <h2 class="modal-h2">共通フォーム</h2>
         <button type="button" class="close-button btn-close" @click="emit('close')">閉じる</button>
@@ -86,11 +90,11 @@ const saved = async () => {
       </div>
       <p v-if="message" role="status">{{ message }}</p>
       <section v-if="tab === 'create'">
-        <p class="create-description">再利用・分析に使用するフォームの作成と回答履歴の一覧</p>
+        <p class="create-description">再利用・分析に使用するフォームの作成と登録履歴の一覧</p>
         <div class="create-actions">
           <button class="btn-close" @click="edit()">新しい共通フォームを作成</button>
           <button type="button" class="btn-close" @click="openAnswers()">
-            フォームからの回答一覧と分析
+            フォームからの登録一覧と分析
           </button>
         </div>
       </section>
@@ -104,7 +108,7 @@ const saved = async () => {
             ><span>第{{ form.version }}版</span>
             <p>{{ form.form_description }}</p>
             <button class="btn-close" type="button" :disabled="busy" @click="openAnswers(form.id)">
-              回答一覧
+              登録一覧
             </button>
             <button class="btn-close" :disabled="busy" @click="edit(form.id)">編集</button>
             <button class="btn-close" :disabled="busy" @click="deletingId = form.id">削除</button>
@@ -116,10 +120,16 @@ const saved = async () => {
   <MessageModal
     class="common-form-confirm"
     :isOpen="isOpen && !!deletingId"
-    message="共通フォームを削除しますか？適用済みのフォームと回答履歴は残ります。"
+    message="共通フォームを削除しますか？適用済みのフォームと登録履歴は残ります。"
     confirmLabel="削除"
     @close="deletingId = ''"
     @confirm="remove"
+  />
+  <MessageModal
+    class="common-form-save-result"
+    :isOpen="isOpen && !!resultMessage"
+    :message="resultMessage"
+    @close="resultMessage = ''"
   />
   <MapObjectFormSettingsModal
     :isOpen="isOpen && editorOpen"

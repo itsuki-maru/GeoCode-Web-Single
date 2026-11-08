@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import type { AnswerColumn, AnswerTableRow, FormAnswer } from "@/utils/answer-presentation";
-defineProps<{ rows: AnswerTableRow[]; columns: AnswerColumn[]; editingSupported: boolean }>();
-const emit = defineEmits<{ detail: [answer: FormAnswer]; edit: [answer: FormAnswer] }>();
+defineProps<{
+  rows: AnswerTableRow[];
+  columns: AnswerColumn[];
+  editingSupported: boolean;
+  deletionSupported?: boolean;
+}>();
+const emit = defineEmits<{
+  detail: [answer: FormAnswer];
+  edit: [answer: FormAnswer];
+  delete: [answer: FormAnswer];
+}>();
 </script>
 
 <template>
@@ -15,7 +24,12 @@ const emit = defineEmits<{ detail: [answer: FormAnswer]; edit: [answer: FormAnsw
           <th v-for="field in columns" :key="field.key">
             {{ field.displayLabel }}
           </th>
-          <th class="actions-column" :class="{ editable: editingSupported }">詳細</th>
+          <th
+            class="actions-column"
+            :class="{ editable: editingSupported, deletable: deletionSupported }"
+          >
+            操作
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -60,12 +74,22 @@ const emit = defineEmits<{ detail: [answer: FormAnswer]; edit: [answer: FormAnsw
                 :disabled="!row.canEdit"
                 :title="
                   row.answer.form_snapshot
-                    ? '回答を編集'
+                    ? '登録内容を編集'
                     : '投稿時のフォーム定義がないため編集できません'
                 "
                 @click="emit('edit', row.answer)"
               >
                 編集
+              </button>
+              <button
+                v-if="deletionSupported"
+                class="delete-button"
+                :disabled="
+                  !Number.isSafeInteger(row.answer.revision) || (row.answer.revision ?? 0) < 1
+                "
+                @click="emit('delete', row.answer)"
+              >
+                削除
               </button>
             </div>
           </td>
@@ -122,7 +146,7 @@ tbody tr:nth-child(2n) {
   background: #eee;
 }
 tbody tr:hover {
-  background: #69a5b8;
+  background: #e4f0f4;
 }
 small {
   display: block;
@@ -205,6 +229,12 @@ small {
   .actions-column.editable {
     width: 168px;
   }
+  .actions-column.deletable {
+    width: 168px;
+  }
+  .actions-column.editable.deletable {
+    width: 232px;
+  }
   .actions-column,
   .actions-cell {
     min-width: 0;
@@ -227,6 +257,11 @@ button {
   background: #5f5f5f;
   color: #fff;
   border-color: transparent;
+}
+.row-actions > .delete-button {
+  color: #fff;
+  background: #b42318;
+  border-color: #b42318;
 }
 @media (max-width: 700px) {
   .table-scroll {

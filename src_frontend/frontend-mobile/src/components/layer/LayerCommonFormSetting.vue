@@ -70,8 +70,8 @@ const getChange = () => {
       form_target_count: count,
     },
     message: form
-      ? `このレイヤのマーカー${binding.value.marker_count}件・図形${binding.value.shape_count}件のフォームを「${form.form_title}」に置き換えます。パスワードも共通フォームの設定（${form.is_password_protected ? "設定済み" : "未設定"}）に揃います。今後の作成・項目変更も自動反映します。回答履歴・本文・画像は残ります。変更しますか？`
-      : `このレイヤの${count}件のフォーム設定を解除し、公開URLを無効にします。回答履歴・本文・画像は残ります。解除前の個別設定は復元されません。変更しますか？`,
+      ? `このレイヤのマーカー${binding.value.marker_count}件・図形${binding.value.shape_count}件のフォームを「${form.form_title}」に置き換えます。パスワードも共通フォームの設定（${form.is_password_protected ? "設定済み" : "未設定"}）に揃います。今後の作成・項目変更も自動反映します。登録履歴・本文・画像は残ります。変更しますか？`
+      : `このレイヤの${count}件のフォーム設定を解除し、公開URLを無効にします。登録履歴・本文・画像は残ります。解除前の個別設定は復元されません。変更しますか？`,
   };
 };
 defineExpose({ getChange });

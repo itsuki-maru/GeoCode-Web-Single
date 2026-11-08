@@ -1,4 +1,4 @@
-/** 独立したマスクにより、凡例の切り替えで回答フィルターや検索の条件が解除されることを防ぐ。 */
+/** 独立したマスクにより、凡例の切り替えで登録フィルターや検索の条件が解除されることを防ぐ。 */
 export function createAnswerVisibility(rebuild: () => void) {
   let answers: Set<string> | null = null;
   let hidden = new Set<string>();
