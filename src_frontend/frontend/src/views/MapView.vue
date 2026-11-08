@@ -1517,7 +1517,7 @@ iframe {
   position: fixed;
   right: 2%;
   bottom: 7%;
-  z-index: 2;
+  z-index: 0;
   padding: 0.45em 0.8em;
   font-size: 0.85em;
 }

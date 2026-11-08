@@ -249,7 +249,7 @@ a {
 .other-function-btn-zone {
   display: flex;
   gap: 18px;
-  z-index: 5;
+  z-index: 0;
   position: fixed;
   top: 2.3%;
   right: 1%;
