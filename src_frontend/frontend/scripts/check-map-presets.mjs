@@ -119,7 +119,7 @@ try {
         const requestId = params.get("request_id");
         return route.fulfill({
           contentType: "text/html",
-          body: `<html lang="ja"><body style="background:#e5edf0;font-family:sans-serif">回答地図の通信fixture<script>
+          body: `<html lang="ja"><body style="background:#e5edf0;font-family:sans-serif">登録地図の通信fixture<script>
           const requestId=${JSON.stringify(requestId)};
           window.addEventListener('message', e=>{const d=e.data;if(d?.type==='answer-map-filter'){
             parent.postMessage({type:'fixture-applied',updateId:d.updateId,coloring:d.coloring},location.origin);

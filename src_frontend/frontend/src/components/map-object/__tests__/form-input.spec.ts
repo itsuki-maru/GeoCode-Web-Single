@@ -46,6 +46,41 @@ beforeEach(() => {
     .mockResolvedValue(new Blob(["image"], { type: "image/jpeg" }));
 });
 describe("所有者フォーム入力", () => {
+  it("ヘッダーから閉じることができ、閉じる操作は登録を送信しない", async () => {
+    const w = await mountModal();
+    await w.get(".desktop-data-header button").trigger("click");
+    expect(w.emitted("close")).toHaveLength(1);
+    expect(apiClient.post).not.toHaveBeenCalled();
+    w.unmount();
+  });
+
+  it("スクロール領域外の保存ボタンから、長い選択肢も含めてフォームを送信する", async () => {
+    const data = config();
+    const longChoice = "Inspection_record_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789_abcdefghijklmnop";
+    data.form_title = longChoice;
+    data.form_schema.fields.find((field) => field.id === "radio")!.choices = [longChoice];
+    vi.mocked(apiClient.get).mockResolvedValueOnce({ data });
+    const w = mount(Modal, {
+      attachTo: document.body,
+      props: { isOpen: true, targetType: "marker", targetId: "one" },
+    });
+    await flushPromises();
+    await w.get('input[type="radio"]').setValue(true);
+    const form = w.get("form").element;
+    const save = w.get(".desktop-data-footer button").element as HTMLButtonElement;
+    expect(save.form).toBe(form);
+    expect(form.contains(save)).toBe(false);
+    save.click();
+    await flushPromises();
+    expect(apiClient.post).toHaveBeenCalledTimes(1);
+    const sent = JSON.parse(
+      String((vi.mocked(apiClient.post).mock.lastCall![1] as FormData).get("submission")),
+    );
+    expect(sent.values.radio).toBe(longChoice);
+    expect(w.emitted("saved")).toHaveLength(1);
+    w.unmount();
+  });
+
   it("最新値・false・数値精度を保持し、構造化データと設定トークンを送る", async () => {
     const w = await mountModal();
     expect(apiClient.get).toHaveBeenCalledWith("/marker/one/form/input", expect.anything());

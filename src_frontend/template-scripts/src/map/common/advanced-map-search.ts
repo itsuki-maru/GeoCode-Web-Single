@@ -719,7 +719,7 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
     filterPane.append(
       element(
         "p",
-        "対象・共通フォームごとの最新回答を検索します。複数条件はすべて一致する回答が対象です。",
+        "対象・共通フォームごとの最新登録データを検索します。複数条件はすべて一致する登録が対象です。",
       ),
     );
     const formSelect = select(

@@ -1,4 +1,4 @@
-//! 回答検索と同じ条件で、所有する対象だけを読み取り専用地図へ渡す。
+//! 登録検索と同じ条件で、所有する対象だけを読み取り専用地図へ渡す。
 use super::admin::load_clustering_min_zoom;
 use super::form_answers::{AnswerQuery, build_query, validate};
 use crate::{
@@ -29,7 +29,7 @@ pub struct AnswerMapPrintRequest {
     pub request_id: String,
 }
 
-/// 印刷の枠だけを返す。対象データは回答地図の確定済みスナップショットから受け取る。
+/// 印刷の枠だけを返す。対象データは登録地図の確定済みスナップショットから受け取る。
 pub async fn answer_map_print_handler(
     Extension(_user): Extension<String>,
     Extension(tera): Extension<Arc<Mutex<Tera>>>,
@@ -120,7 +120,7 @@ pub async fn load_answer_map(
         .await?;
     if target_count == 0 {
         return Err(AppError::Validation(
-            "地図に表示する対象がありません。回答一覧を更新してください。".into(),
+            "地図に表示する対象がありません。登録一覧を更新してください。".into(),
         ));
     }
     let markers = build_query(user, q, at)

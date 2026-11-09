@@ -59,7 +59,7 @@ describe("frozen answer print snapshot", () => {
     const f = fixture();
     f.bootstrap.markers = {};
     f.bootstrap.popupBodies = { "shape:same": {
-      free_text: "自由𠮷\r\n", managed_markdown: "**全回答🙂**", sync_required: false,
+      free_text: "自由𠮷\r\n", managed_markdown: "**全登録🙂**", sync_required: false,
     } };
     f.bootstrap.normalBodyReferences = { version: 1, markers: [], shapes: ["same"] };
     f.bootstrap.answerPreview.targets = ["shape:same"];
@@ -77,7 +77,7 @@ describe("frozen answer print snapshot", () => {
       if (canonical.page !== "form-answer-map") throw Error("Wrong page");
       const snapshot = createAnswerPrintSnapshot(canonical, f.runtime, ["shape:same"]);
       expect(snapshot.bootstrap.shapes[0].geojson.properties).toEqual({
-        radius: 10, memo: "自由𠮷\r\n**全回答🙂**",
+        radius: 10, memo: "自由𠮷\r\n**全登録🙂**",
       });
       expect(snapshot.bootstrap).not.toHaveProperty("normalBodyReferences");
       expect(isAnswerPrintSnapshot(snapshot)).toBe(true);
@@ -144,7 +144,7 @@ describe("frozen answer print snapshot", () => {
   });
   it("freezes popup sections and analysis for only the selected objects", () => {
     const f = fixture();
-    const body = { free_text: "自由", managed_markdown: "回答", sync_required: false };
+    const body = { free_text: "自由", managed_markdown: "登録", sync_required: false };
     f.bootstrap.popupBodies = { "marker:same": body, "marker:excluded": body };
     (f.runtime as any).popupContent = {
       getAnalysis: () => ({ "marker:same": "分析値", "marker:excluded": "除外" }),
@@ -167,7 +167,7 @@ describe("frozen answer print snapshot", () => {
       ]),
     );
     const keys = Object.keys(f.bootstrap.markers).map((id) => `marker:${id}`);
-    const body = { free_text: "自由", managed_markdown: "回答", sync_required: false };
+    const body = { free_text: "自由", managed_markdown: "登録", sync_required: false };
     f.bootstrap.popupBodies = Object.fromEntries(keys.map((key) => [key, body]));
     f.bootstrap.popupAnalysis = Object.fromEntries(keys.map((key) => [key, "分析値"]));
     (f.runtime as any).popupContent = { getAnalysis: () => f.bootstrap.popupAnalysis };

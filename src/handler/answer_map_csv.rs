@@ -1,4 +1,4 @@
-//! 地図に反映済みの回答条件と表示対象に限定したCSV。列定義・出力処理は回答一覧と共通。
+//! 地図に反映済みの登録条件と表示対象に限定したCSV。列定義・出力処理は登録一覧と共通。
 use super::{
     answer_map_filter::{self, MapFilterRequest},
     form_answers::{self, ExportScope, FieldOption},
@@ -50,7 +50,7 @@ async fn prepare(
         .await?;
     if count > form_answers::EXPORT_LIMIT {
         return Err(AppError::Validation(
-            "CSVは10,000回答まで出力できます。地図の条件を絞り込んでください。".into(),
+            "CSVは10,000登録まで出力できます。地図の条件を絞り込んでください。".into(),
         ));
     }
     let fields =

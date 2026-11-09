@@ -118,7 +118,7 @@ const progressOverlay = () =>
   document.body.querySelector<HTMLElement>(
     '[role="status"][aria-label="地図の表示を更新しています"]',
   );
-describe("回答地図の非同期絞り込み", () => {
+describe("登録地図の非同期絞り込み", () => {
   it.each(["絞り込み", "色分け"])(
     "%sは地図の反映完了後だけ通知し、Escapeでは通知だけを閉じる",
     async (operation) => {
@@ -401,7 +401,7 @@ describe("回答地図の非同期絞り込み", () => {
     expect(w.get(".answer-map-overlay").attributes("data-modal-context")).toBe("answers");
     w.unmount();
   });
-  it("2万対象の初期化・絞り込み・色分けを維持し、CSVは回答数上限で検証する", async () => {
+  it("2万対象の初期化・絞り込み・色分けを維持し、CSVは登録数上限で検証する", async () => {
     const targets = Array.from({ length: 20_000 }, (_, n) => `shape:target-${n}`);
     post.mockResolvedValue({ data: result(targets) });
     const w = await open(true);
@@ -742,7 +742,7 @@ describe("回答地図の非同期絞り込み", () => {
     expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1);
     w.unmount();
   });
-  it("色分けは未反映の絞り込み編集を使わず、反映済み条件と同じ回答に適用する", async () => {
+  it("色分けは未反映の絞り込み編集を使わず、反映済み条件と同じ登録に適用する", async () => {
     const w = await open();
     await ready(w);
     const iframe = w.get("iframe").element as HTMLIFrameElement;
@@ -876,8 +876,8 @@ describe("回答地図の非同期絞り込み", () => {
     document.head.append(style);
     const w = await open(true);
     try {
-      const map = w.get('iframe[title="回答条件に一致する対象の地図"]').element;
-      const csv = w.get('iframe[title="回答地図CSVダウンロード"]').element;
+      const map = w.get('iframe[title="登録条件に一致する対象の地図"]').element;
+      const csv = w.get('iframe[title="登録地図CSVダウンロード"]').element;
       expect(getComputedStyle(map).display).toBe("block");
       expect(getComputedStyle(csv).display).toBe("none");
     } finally {
@@ -928,7 +928,7 @@ describe("回答地図の非同期絞り込み", () => {
       .find((f) => f.attributes("action")?.includes("map-csv-download"))!;
     const frozen = new FormData(form.element as HTMLFormElement).get("query");
     expect(JSON.parse(frozen as string)).toEqual(body);
-    const csvFrame = w.get('iframe[title="回答地図CSVダウンロード"]').element as HTMLIFrameElement;
+    const csvFrame = w.get('iframe[title="登録地図CSVダウンロード"]').element as HTMLIFrameElement;
     send(
       w,
       {
@@ -964,7 +964,7 @@ describe("回答地図の非同期絞り込み", () => {
     });
     await flushPromises();
     expect(post.mock.calls.at(-1)![1]).toMatchObject({ common_form_id: null, conditions: [] });
-    expect(w.text()).toContain("出力対象の回答がありません");
+    expect(w.text()).toContain("出力対象の登録がありません");
     expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(3);
     w.unmount();
   });
@@ -1014,7 +1014,7 @@ describe("回答地図の非同期絞り込み", () => {
     HTMLDialogElement.prototype.close = vi.fn();
     const w = await open(true);
     await ready(w);
-    const originalFrame = w.get('iframe[title="回答条件に一致する対象の地図"]')
+    const originalFrame = w.get('iframe[title="登録条件に一致する対象の地図"]')
       .element as HTMLIFrameElement;
     const postMessage = vi.spyOn(originalFrame.contentWindow!, "postMessage");
     await click(w, "地図を印刷");
@@ -1037,7 +1037,7 @@ describe("回答地図の非同期絞り込み", () => {
     await w.get(".print-header button").trigger("click");
     await flushPromises();
     expect(w.find("dialog").exists()).toBe(false);
-    expect(w.get('iframe[title="回答条件に一致する対象の地図"]').element).toBe(originalFrame);
+    expect(w.get('iframe[title="登録条件に一致する対象の地図"]').element).toBe(originalFrame);
     expect(w.text()).toContain("一致2件");
     w.unmount();
     const mobile = await open();
@@ -1110,7 +1110,7 @@ describe("回答地図の非同期絞り込み", () => {
     expect(w.text()).toContain("読み込んでいます");
     send(w, data);
     await flushPromises();
-    expect(w.text()).toContain("一致回答12件");
+    expect(w.text()).toContain("一致登録12件");
     expect(w.text()).toContain("1件を表示できませんでした");
     await click(w, "閉じる");
     expect(w.emitted("close")).toHaveLength(1);
@@ -1242,7 +1242,7 @@ describe("回答地図の非同期絞り込み", () => {
   });
 });
 
-describe("回答地図の復旧と出力境界", () => {
+describe("登録地図の復旧と出力境界", () => {
   it.each(["サーバーからの説明", { message: "説明メッセージ" }, { error: "検証エラー" }])(
     "APIエラーの安全な説明を表示して直前の地図を保つ: %s",
     async (data) => {
@@ -1375,7 +1375,7 @@ describe("回答地図の復旧と出力境界", () => {
   });
 });
 
-describe("回答地図の認証失敗と不正集計の保護", () => {
+describe("登録地図の認証失敗と不正集計の保護", () => {
   it("初回POSTの認証更新が失敗しても待機し続けず、元の要求を再試行できる", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
@@ -1400,7 +1400,7 @@ describe("回答地図の認証失敗と不正集計の保護", () => {
     });
     const w = await open();
     expect(w.text()).toContain("地図を読み込めませんでした");
-    expect(w.text()).not.toContain("一致回答2件");
+    expect(w.text()).not.toContain("一致登録2件");
     await click(w, "再試行");
     expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(2);
     w.unmount();

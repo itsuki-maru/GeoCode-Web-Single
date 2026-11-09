@@ -152,6 +152,7 @@ pub fn build_router(
             "/form-answers/{kind}/{answer_id}",
             get(crate::handler::marker_forms::answer_edit::get_handler)
                 .put(crate::handler::marker_forms::answer_edit::update_handler)
+                .delete(crate::handler::marker_forms::answer_edit::delete_handler)
                 .layer(DefaultBodyLimit::max(6 * 1024 * 1024)),
         )
         .route("/tile-overlays", get(tile_overlays::user_list))

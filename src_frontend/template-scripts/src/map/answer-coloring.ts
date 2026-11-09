@@ -60,7 +60,7 @@ export function isAnswerColoring(
 const clone = (state: AnswerColoring | null): AnswerColoring | null =>
   state ? JSON.parse(JSON.stringify(state)) : null;
 
-/** スタイルは回答用 iframe が管理し、永続化したレコードやポップアップは変更しない。 */
+/** スタイルは登録用 iframe が管理し、永続化したレコードやポップアップは変更しない。 */
 export function installAnswerColoring(
   runtime: any,
   leaflet: any,
@@ -182,7 +182,7 @@ export function installAnswerColoring(
     },
     apply(state: AnswerColoring | null) {
       if (disposed) throw new Error("色分け画面は終了しています。");
-      // 回答の対象範囲には無効な図形が残る場合がある。メッセージの検証ではその範囲を確認し、
+      // 登録の対象範囲には無効な図形が残る場合がある。メッセージの検証ではその範囲を確認し、
       // この制御処理では、対応するレイヤがない図形を単にスキップする。
       if (state !== null && !isAnswerColoring(state)) throw new Error("色分けの設定が不正です。");
       const next = clone(state);

@@ -1,4 +1,4 @@
-//! 通常地図の属性検索。現行の共通フォーム定義を許可リストにし、最新回答を検索する。
+//! 通常地図の属性検索。現行の共通フォーム定義を許可リストにし、最新登録を検索する。
 use super::form_answers::{AnswerCondition, AnswerQuery, build_query, validate};
 use crate::{error::AppError, model::MarkerFormSchema};
 use axum::{

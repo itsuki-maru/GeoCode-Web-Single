@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, shallowRef, toRef, watch } from "vue";
 import BaseModal from "@/components/common/BaseModal.vue";
+import MessageModal from "@/components/common/MessageModal.vue";
 import ProgressSpinner from "@/components/common/ProgressSpinner.vue";
 import MapObjectFormInputModal from "./MapObjectFormInputModal.vue";
 import type { MapObjectData, ShapeData } from "@/interface";
 import AnswerMapModal from "./AnswerMapModal.vue";
 import AnswerResultsTable from "./AnswerResultsTable.vue";
+import AnswerDeleteModal from "./AnswerDeleteModal.vue";
+import FormValueMarkdown from "./FormValueMarkdown.vue";
 import apiClient from "@/axiosClient";
 import { submitAuthenticatedForm } from "@/utils/authenticated-form";
 import { baseUrl } from "@/settingMobile";
@@ -34,6 +37,7 @@ interface Cursor {
 }
 interface Page {
   editing_supported?: boolean;
+  deletion_supported?: boolean;
   rows: Answer[];
   total: number;
   target_count?: number;
@@ -77,12 +81,11 @@ const page = ref(0);
 const detail = shallowRef<Answer | null>(null);
 const editing = shallowRef<Answer | null>(null),
   editingSupported = ref(false);
-watch(
-  () => [props.isOpen, props.targetId, props.targetType, props.initialFormId],
-  () => {
-    editing.value = null;
-  },
-);
+const deleting = shallowRef<Answer | null>(null),
+  deletionSupported = ref(false);
+const deleteSession = ref(0),
+  deletePending = ref(false);
+const deleteResultOpen = ref(false);
 const answerSaved = async (object: MapObjectData | ShapeData) => {
   const session = openSequence;
   const fromDetail = !!detail.value,
@@ -103,7 +106,42 @@ const answerSaved = async (object: MapObjectData | ShapeData) => {
     detail.value =
       rows.value.find((row) => row.id === answerId && row.target_type === answerKind) || null;
   mapOpen.value = false;
-  message.value = "回答を更新しました。";
+  message.value = "登録内容を更新しました。";
+};
+const openDelete = (answer: Answer) => {
+  if (
+    busy.value ||
+    !deletionSupported.value ||
+    !Number.isSafeInteger(answer.revision) ||
+    (answer.revision ?? 0) < 1
+  )
+    return;
+  deleteSession.value++;
+  deleting.value = answer;
+};
+const answerDeleted = async (selection: number) => {
+  if (selection !== deleteSession.value || !props.isOpen || disposed) return;
+  const session = openSequence;
+  deleting.value = null;
+  deleteResultOpen.value = true;
+  detail.value = null;
+  mapOpen.value = false;
+  mapQuery.value = null;
+  const request = { ...applied.value };
+  delete request.as_of;
+  applied.value = request;
+  cursors.value = [null];
+  const optionsReady = loadOptions();
+  rows.value = [];
+  total.value = 0;
+  nextCursor.value = null;
+  asOf.value = "";
+  const refreshed = await search(null, 0, false, optionsReady, true);
+  if (session !== openSequence || selection !== deleteSession.value || !props.isOpen || disposed)
+    return;
+  message.value = refreshed
+    ? ""
+    : "削除は完了していますが、一覧や検索項目を再取得できませんでした。再検索してください。";
 };
 const loading = ref(false);
 const optionsLoading = ref(false);
@@ -134,7 +172,9 @@ let disposed = false;
 let openSequence = 0;
 let searchSequence = 0;
 let optionsSequence = 0;
-const busy = computed(() => loading.value || optionsLoading.value || exporting.value);
+const busy = computed(
+  () => loading.value || optionsLoading.value || exporting.value || deletePending.value,
+);
 const {
   allColumns: resultColumns,
   columns,
@@ -163,7 +203,7 @@ const scope = () => ({
 const operatorOptions = (condition: Condition) => {
   const type = optionIndex.value.get(condition.key)?.field_type;
   const common = [
-    { value: "filled", label: "回答あり" },
+    { value: "filled", label: "登録あり" },
     { value: "empty", label: "未入力" },
     { value: "missing", label: "項目なし" },
   ];
@@ -240,6 +280,7 @@ const search = async (
   index = 0,
   fresh = true,
   initialOptions?: Promise<boolean>,
+  refreshFields = false,
 ) => {
   if (!props.isOpen || disposed) return false;
   const sequence = ++searchSequence;
@@ -257,12 +298,25 @@ const search = async (
     const result = response.data;
     rows.value = result.rows;
     editingSupported.value = result.editing_supported === true;
-    if (fresh) {
+    deletionSupported.value = result.deletion_supported === true;
+    if (
+      fresh ||
+      (refreshFields &&
+        request.common_form_id === scope().common_form_id &&
+        request.individual_only === scope().individual_only &&
+        request.target_id === scope().target_id &&
+        request.target_type === scope().target_type)
+    ) {
       const fieldsChanged =
         JSON.stringify(resultFields.value.map(fieldKey)) !==
         JSON.stringify(options.value.fields.map(fieldKey));
       resultFields.value = [...options.value.fields];
-      if (fieldsChanged) displayFields.value = resultFields.value.slice(0, 5).map(fieldKey);
+      if (fieldsChanged) {
+        const available = new Set(resultFields.value.map(fieldKey));
+        displayFields.value = fresh
+          ? resultFields.value.slice(0, 5).map(fieldKey)
+          : displayFields.value.filter((key) => available.has(key));
+      }
     }
     total.value = result.total;
     asOf.value = result.as_of;
@@ -279,7 +333,7 @@ const search = async (
       nextCursor.value = null;
       asOf.value = "";
       applied.value = null;
-      message.value = errorText(error, "回答を読み込めませんでした。");
+      message.value = errorText(error, "登録データを読み込めませんでした。");
     }
     return false;
   } finally {
@@ -322,6 +376,10 @@ const releaseAnswers = () => {
   detail.value = null;
   editing.value = null;
   editingSupported.value = false;
+  deleting.value = null;
+  deletionSupported.value = false;
+  deleteResultOpen.value = false;
+  deleteSession.value++;
   mapOpen.value = false;
   mapQuery.value = null;
   exportQuery.value = "";
@@ -337,10 +395,10 @@ onBeforeUnmount(() => {
   releaseAnswers();
 });
 watch(
-  () => props.isOpen,
-  async (open) => {
+  () => [props.isOpen, props.targetId, props.targetType, props.initialFormId] as const,
+  async ([open]) => {
+    releaseAnswers();
     if (!open) {
-      releaseAnswers();
       return;
     }
     const session = ++openSequence;
@@ -408,8 +466,9 @@ const exportCsv = async () => {
       :is-open="true"
       class="answer-search-progress"
       :style="{ zIndex: 120 }"
+      :inert="deleteResultOpen || undefined"
       role="status"
-      aria-label="回答を読み込んでいます…"
+      aria-label="登録データを読み込んでいます…"
     >
       <template #controls>
         <button type="button" class="progress-close-button" @click="emit('close')">閉じる</button>
@@ -424,20 +483,24 @@ const exportCsv = async () => {
     :closeOnOverlayClick="false"
     @close="emit('close')"
   >
-    <div v-if="isOpen" :inert="!!editing" class="answers-modal">
+    <div
+      v-if="isOpen"
+      :inert="!!editing || !!deleting || deletePending || deleteResultOpen || undefined"
+      class="answers-modal"
+    >
       <header>
-        <h2>回答一覧</h2>
+        <h2>登録一覧</h2>
         <button class="close-button" @click="emit('close')">閉じる</button>
       </header>
       <div class="answers-scroll">
         <p class="analysis-scope">
-          フォームから登録された回答を分析します（内部入力・外部公開フォームの両方）。本文・メモへの直接入力は含みません。
+          フォーム経由の登録内容を分析します（内部入力・外部公開フォームの両方）。本文・メモへの直接入力は含みません。
         </p>
         <div class="list-toolbar">
           <label
             >表示モード<select v-model="mode" :disabled="busy">
-              <option value="history">全回答</option>
-              <option value="latest">最新回答</option>
+              <option value="history">全登録</option>
+              <option value="latest">最新登録</option>
             </select></label
           >
           <div class="toolbar-actions">
@@ -450,7 +513,9 @@ const exportCsv = async () => {
           </div>
         </div>
         <p v-if="target" class="scope-note">
-          この対象の回答を表示しています：{{ rows[0]?.target_name || "選択中の地図オブジェクト" }}
+          この対象の登録データを表示しています：{{
+            rows[0]?.target_name || "選択中の地図オブジェクト"
+          }}
         </p>
         <p v-if="pending" role="status">
           条件が変更されています。「絞り込む」または「変更を反映」で一覧に反映します。
@@ -492,9 +557,9 @@ const exportCsv = async () => {
               >
             </div>
             <div class="condition-heading">
-              <strong>回答条件（すべてに一致）</strong>
+              <strong>登録条件（すべてに一致）</strong>
             </div>
-            <p v-if="!scoped">回答内容で絞り込むには、共通フォームを選んでください。</p>
+            <p v-if="!scoped">登録内容で絞り込むには、共通フォームを選んでください。</p>
             <div v-for="(condition, index) in conditions" :key="index" class="condition-row">
               <label
                 >項目<select v-model="condition.key" @change="resetCondition(condition)">
@@ -603,11 +668,11 @@ const exportCsv = async () => {
             一覧の全ページの該当対象を、重複を除いて地図に表示します。位置・名前などは現在の情報です。
           </p>
           <p>
-            共通フォームの回答は、地図内でも回答値で絞り込めます。個別フォームの回答条件は、一覧で指定してください。名前検索・レイヤ切替はどちらも利用できます。
+            共通フォームの登録は、地図内でも登録値で絞り込めます。個別フォームの登録条件は、一覧で指定してください。名前検索・レイヤ切替はどちらも利用できます。
           </p>
         </div>
         <div v-if="usageHelpOpen" class="usage-help">
-          <p>「最新回答」は、対象・フォームごとの最新1件を選んでから条件で絞り込みます。</p>
+          <p>「最新登録」は、対象・フォームごとの最新1件を選んでから条件で絞り込みます。</p>
           <p>
             CSVは一覧に反映済みの条件で全ページを出力します（最大10,000件）。対象名・レイヤ名は現在の情報です。
           </p>
@@ -623,17 +688,19 @@ const exportCsv = async () => {
             >
           </div>
         </details>
-        <p v-if="loading">回答を読み込んでいます…</p>
-        <p v-else-if="!rows.length">該当する回答はありません。</p>
+        <p v-if="loading">登録データを読み込んでいます…</p>
+        <p v-else-if="!rows.length">該当する登録はありません。</p>
         <AnswerResultsTable
           v-if="rows.length"
           :rows="tableRows"
           :columns="columns"
           :editingSupported="editingSupported"
+          :deletionSupported="deletionSupported"
           @detail="detail = $event"
           @edit="editing = $event"
+          @delete="openDelete"
         />
-        <nav v-if="rows.length" class="pagination" aria-label="回答のページ">
+        <nav v-if="rows.length" class="pagination" aria-label="登録のページ">
           <button
             :disabled="busy || !applied || page === 0"
             @click="search(cursors[page - 1], page - 1, false)"
@@ -651,12 +718,16 @@ const exportCsv = async () => {
     </div>
   </BaseModal>
   <BaseModal :isOpen="isOpen && !!detail" :zIndex="26" @close="detail = null">
-    <div v-if="isOpen && detail && detailView" :inert="!!editing" class="answer-detail">
+    <div
+      v-if="isOpen && detail && detailView"
+      :inert="!!editing || !!deleting || deletePending || deleteResultOpen || undefined"
+      class="answer-detail"
+    >
       <header>
-        <h2 class="modal-h2">回答の詳細</h2>
+        <h2 class="modal-h2">登録の詳細</h2>
         <button class="close-button" @click="detail = null">閉じる</button>
         <button v-if="editingSupported" :disabled="!detailView.canEdit" @click="editing = detail">
-          回答を編集
+          登録内容を編集
         </button>
       </header>
       <div class="answer-detail-scroll">
@@ -665,7 +736,7 @@ const exportCsv = async () => {
         <details class="management-info">
           <summary>管理用情報</summary>
           <p>対象ID：{{ detail.target_id }}</p>
-          <p>回答ID：{{ detail.id }}</p>
+          <p>登録ID：{{ detail.id }}</p>
           <ul>
             <li v-for="field in detailView.fields" :key="field.key">
               {{ field.displayLabel }}：{{ field.id }}
@@ -689,7 +760,10 @@ const exportCsv = async () => {
                   :src="field.imagePath && apiUrl(field.imagePath)"
                   :alt="field.label"
                   loading="lazy" /></a
-              ><span v-else class="preserve-lines">{{ field.text }}</span>
+              ><FormValueMarkdown
+                v-else-if="field.field_type === 'text' || field.field_type === 'textarea'"
+                :text="field.text"
+              /><span v-else class="preserve-lines">{{ field.text }}</span>
             </dd></template
           >
         </dl>
@@ -705,7 +779,22 @@ const exportCsv = async () => {
     @close="editing = null"
     @saved="answerSaved"
   />
-  <iframe ref="exportFrame" :name="downloadFrame" title="回答CSVダウンロード" hidden />
+  <AnswerDeleteModal
+    :answer="isOpen ? deleting : null"
+    :session="deleteSession"
+    @close="deleting = null"
+    @busy="deletePending = $event"
+    @deleted="answerDeleted"
+  />
+  <MessageModal
+    v-if="isOpen && deleteResultOpen"
+    class="answer-delete-result"
+    :isOpen="true"
+    :zIndex="130"
+    message="削除しました。"
+    @close="deleteResultOpen = false"
+  />
+  <iframe ref="exportFrame" :name="downloadFrame" title="登録CSVダウンロード" hidden />
   <AnswerMapModal
     class="answer-map-mobile-layout"
     :isOpen="isOpen && mapOpen"
@@ -889,7 +978,6 @@ button:disabled {
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .answer-detail-scroll {

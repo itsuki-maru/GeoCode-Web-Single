@@ -283,7 +283,7 @@ describe("印刷プレビューと実際のLeaflet", () => {
     await vi.waitFor(() => checkVisible(1));
   });
 
-  it("回答地図の凡例を分類ごとにまとめ、同分類のマーカー・図形を一括切替しても非選択レイヤを復活させない", async () => {
+  it("登録地図の凡例を分類ごとにまとめ、同分類のマーカー・図形を一括切替しても非選択レイヤを復活させない", async () => {
     const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
     bootstrap.page = "form-answer-map";
     bootstrap.markers = {

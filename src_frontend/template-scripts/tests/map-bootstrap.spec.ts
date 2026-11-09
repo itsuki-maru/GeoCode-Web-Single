@@ -44,12 +44,12 @@ function referencedData(): any {
         type: "Feature", properties: { radius: 12, normalBodyReferences: "user data" },
         geometry: { type: "Point", coordinates: [139, 35] },
       } },
-      { id: "fallback", name: "順序が異なる旧本文", geojson: { properties: { memo: "回答→自由" } } },
+      { id: "fallback", name: "順序が異なる旧本文", geojson: { properties: { memo: "登録→自由" } } },
     ],
     popupBodies: {
-      "marker:same": { free_text: "自由𠮷e\u0301\r\n\"\\</script>&", managed_markdown: "**回答🙂**\u2028\u2029", sync_required: false },
-      "shape:same": { free_text: "", managed_markdown: "全回答🗾\n", sync_required: true },
-      "shape:fallback": { free_text: "自由", managed_markdown: "回答", sync_required: true },
+      "marker:same": { free_text: "自由𠮷e\u0301\r\n\"\\</script>&", managed_markdown: "**登録🙂**\u2028\u2029", sync_required: false },
+      "shape:same": { free_text: "", managed_markdown: "全登録🗾\n", sync_required: true },
+      "shape:fallback": { free_text: "自由", managed_markdown: "登録", sync_required: true },
     },
     normalBodyReferences: { version: 1, markers: ["same"], shapes: ["same"] },
     answerPreview: {
@@ -201,7 +201,7 @@ describe("readMapBootstrap", () => {
   });
 
   it.each([
-    ["", "", false], ["", "回答", true], ["自由", "", false],
+    ["", "", false], ["", "登録", true], ["自由", "", false],
     ["e\u0301", "\u00e9🙂\r\n", true],
   ] as const)("restores exact empty/Unicode leaves (%j, %j)", (free, managed, sync) => {
     const data = referencedData();

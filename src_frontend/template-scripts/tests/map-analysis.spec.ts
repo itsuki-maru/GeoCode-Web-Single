@@ -77,7 +77,7 @@ describe("地図の共通分類処理", () => {
     expect(value.coloring?.targets).toEqual({ "marker:a": "first", "shape:b": "second" });
     expect(value.targets).toEqual([]); // 絞り込み条件がないため、この結果を地図の表示制限には使わない。
   });
-  it("同じ回答に絞り込み条件と分類条件の両方を適用し、小数の文字列を正確に保持する", async () => {
+  it("同じ登録に絞り込み条件と分類条件の両方を適用し、小数の文字列を正確に保持する", async () => {
     const filter = {
       common_form_id: "form",
       conditions: [{ field_id: "flag", field_type: "checkbox", op: "eq", value: false }],

@@ -166,7 +166,7 @@ const server = await createServer({
             res.end(await server.transformIndexHtml(req.url, html));
             return;
           }
-          // 回答地図の実コンポーネントに、確認用の地図から反映完了・失敗を返す。
+          // 登録地図の実コンポーネントに、確認用の地図から反映完了・失敗を返す。
           if (url.pathname === "/form-answers/map" && req.method === "POST") {
             let body = "";
             for await (const chunk of req) body += chunk;

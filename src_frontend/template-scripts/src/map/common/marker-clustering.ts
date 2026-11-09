@@ -29,7 +29,7 @@ interface MarkerClusteringOptions {
   minZoom?: number;
 }
 
-/** フィルター、編集、回答の色分けに使うマーカーグループの同一性を維持する。 */
+/** フィルター、編集、登録の色分けに使うマーカーグループの同一性を維持する。 */
 export function installMarkerClustering({
   leaflet,
   map,

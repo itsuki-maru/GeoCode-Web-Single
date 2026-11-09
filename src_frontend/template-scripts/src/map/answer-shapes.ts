@@ -1,4 +1,4 @@
-// 論理的な回答対象は、表示領域内のレイヤが存在するかどうかに依存させない。
+// 論理的な登録対象は、表示領域内のレイヤが存在するかどうかに依存させない。
 // レイヤへのフォールバックにより、旧来の分析処理や実行時の呼び出し元との互換性を保つ。
 export function hasRenderableAnswerShape(runtime: any, id: string): boolean {
   return runtime.shapeRenderer

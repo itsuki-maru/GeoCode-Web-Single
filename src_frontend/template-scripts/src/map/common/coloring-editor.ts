@@ -265,7 +265,7 @@ export function createColoringEditor(
                 c.value = v === "true";
               },
             );
-            value.setAttribute("aria-label", "色分けの回答値");
+            value.setAttribute("aria-label", "色分けの登録値");
             valueControls.append(value);
           } else
             for (const key of c.op === "between" ? ["value", "upper"] : ["value"]) {

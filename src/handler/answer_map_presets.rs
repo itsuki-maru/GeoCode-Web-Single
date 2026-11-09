@@ -1,4 +1,4 @@
-//! 回答地図のフィルターと色分けに使う、所有者専用の再利用可能な定義。
+//! 登録地図のフィルターと色分けに使う、所有者専用の再利用可能な定義。
 use super::{
     answer_map_filter::validate_numeric_condition,
     form_answers::{
@@ -130,7 +130,7 @@ fn supported(kind: &str) -> bool {
 }
 
 // 所有するフォームと、その過去の定義のみを解決する。論理削除されたフォームも
-// map-filter と同様に、既存の回答を説明する定義として利用できる。
+// map-filter と同様に、既存の登録を説明する定義として利用できる。
 async fn form_fields(
     tx: &mut Transaction<'_, Sqlite>,
     user: &str,

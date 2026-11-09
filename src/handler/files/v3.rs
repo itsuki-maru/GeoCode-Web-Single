@@ -351,7 +351,7 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
                 let id: String = row.try_get("id")?;
                 let key = target_keys
                     .get(&(kind.to_string(), id))
-                    .ok_or_else(|| invalid("回答の対象がありません。"))?
+                    .ok_or_else(|| invalid("登録の対象がありません。"))?
                     .clone();
                 let source_form = source(&row)?;
                 if let Some(s) = &source_form {
@@ -408,7 +408,7 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
                                     key: answer_keys
                                         .get(&(kind.to_string(), id.to_string()))
                                         .cloned()
-                                        .ok_or_else(|| invalid("本文の回答参照が不正です。"))?,
+                                        .ok_or_else(|| invalid("本文の登録参照が不正です。"))?,
                                 }
                             },
                         })
@@ -429,7 +429,7 @@ pub(super) async fn export(pool: &Pool, user: &str, layer: &str) -> Result<Strin
             budget.add(parts)?;
         }
     }
-    // 転送時に日時が共通のマイクロ秒精度に丸められても、マーカーと図形の回答を通じて
+    // 転送時に日時が共通のマイクロ秒精度に丸められても、マーカーと図形の登録を通じて
     // 一貫した優先順序を保つ。
     answer_order.sort_unstable();
     for (index, (_, _, _, position)) in answer_order.into_iter().enumerate() {

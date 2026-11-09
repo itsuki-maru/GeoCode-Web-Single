@@ -579,7 +579,7 @@ describe("selected layer startup", () => {
     await flushPromises();
     expect(frameComponent().props("inputPolicies")).toEqual({ master: false, a: false, b: false });
   });
-  it("回答編集の保存結果を表示中のオブジェクトと地図へ反映する", async () => {
+  it("登録編集の保存結果を表示中のオブジェクトと地図へ反映する", async () => {
     mountView();
     await flushPromises();
     const object = { ...marker("master"), detail: "修正後の本文" };
@@ -1592,7 +1592,7 @@ describe("通知の検証とアップロード状態の連携", () => {
   });
 });
 
-describe("アカウント設定・位置情報・回答更新の連携", () => {
+describe("アカウント設定・位置情報・登録更新の連携", () => {
   it("初期化後のプライバシー設定変更だけを利用者へ通知する", async () => {
     const privateMode = ref(false),
       initialized = ref(false),
@@ -1640,11 +1640,11 @@ describe("アカウント設定・位置情報・回答更新の連携", () => {
     expect(receive).toHaveBeenCalledExactlyOnceWith(position);
     expect(error).toHaveBeenCalledTimes(1);
   });
-  it("回答保存の図形差分を原本へ反映し、対象外IDの通知を無視する", async () => {
+  it("登録保存の図形差分を原本へ反映し、対象外IDの通知を無視する", async () => {
     await operationsReady();
     const record = {
       ...shape("a"),
-      name: "回答反映",
+      name: "登録反映",
       geojson: {
         type: "Feature",
         geometry: { type: "Point", coordinates: [139, 35] },
@@ -1653,7 +1653,7 @@ describe("アカウント設定・位置情報・回答更新の連携", () => {
     };
     window.dispatchEvent(new CustomEvent("geocode-answer-updated", { detail: record }));
     await flushPromises();
-    expect(useShapeStore().getById("a")?.name).toBe("回答反映");
+    expect(useShapeStore().getById("a")?.name).toBe("登録反映");
     window.dispatchEvent(
       new CustomEvent("geocode-answer-updated", { detail: { ...record, id: "missing" } }),
     );

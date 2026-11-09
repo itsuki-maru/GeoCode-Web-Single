@@ -23,7 +23,7 @@ const config = (sync = false) => ({
     sync_required: sync,
     body: "元の本文",
     body_token: "body-version",
-    managed_markdown: "回答部分",
+    managed_markdown: "登録部分",
   },
 });
 beforeEach(() => {
@@ -45,7 +45,25 @@ async function open() {
 }
 const payload = () =>
   JSON.parse((vi.mocked(api.put).mock.calls.at(-1)![1] as FormData).get("submission") as string);
-describe("既存回答の編集", () => {
+describe("既存登録内容の編集", () => {
+  it("固定フッターの更新ボタンが編集フォームを送信する", async () => {
+    const w = mount(Modal, {
+      attachTo: document.body,
+      props: { isOpen: true, targetType: "marker", targetId: "target", answerId: "answer" },
+    });
+    await flushPromises();
+    await w.get("#owner-form-n").setValue("123");
+    const save = w.get(".mobile-data-footer button").element as HTMLButtonElement;
+    expect(save.form).toBe(w.get("form").element);
+    expect(save.textContent).toContain("登録内容を更新");
+    save.click();
+    await flushPromises();
+    expect(payload().values.n).toBe("123");
+    expect(api.post).not.toHaveBeenCalled();
+    expect(w.emitted("saved")).toHaveLength(1);
+    w.unmount();
+  });
+
   it("投稿時の定義・版番号・数値精度・false・既存画像を維持してPUTする", async () => {
     const w = await open();
     expect(api.get).toHaveBeenCalledWith("/form-answers/marker/answer", expect.anything());
@@ -86,7 +104,7 @@ describe("既存回答の編集", () => {
     expect(payload().reconcile).toEqual({ free_text: "残す自由記述", token: "body-version" });
     w.unmount();
   });
-  it("画像を回答から外す操作は添付ファイルを送らず明示する", async () => {
+  it("画像を登録から外す操作は添付ファイルを送らず明示する", async () => {
     const w = await open();
     await w.get('[aria-label="写真の画像操作"]').setValue("remove");
     await w.get("form").trigger("submit");
@@ -112,7 +130,7 @@ describe("既存回答の編集", () => {
   });
 });
 
-describe("回答画像と本文確認の境界", () => {
+describe("登録画像と本文確認の境界", () => {
   it.each(["https://example.test/photo.png", "javascript:alert(1)", "not-a-url"])(
     "既存画像のURLを検証して安全な画像だけを表示する: %s",
     async (url) => {

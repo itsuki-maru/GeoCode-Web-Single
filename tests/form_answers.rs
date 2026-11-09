@@ -260,7 +260,7 @@ async fn owned_history_latest_typed_filters_and_csv_agree() {
     }
     let base = (Utc::now() - Duration::days(1)).naive_utc();
     let tie = Uuid::new_v4();
-    // 同じ回答ID・時刻でもマーカーと図形を別の行としてページングする。
+    // 同じ登録ID・時刻でもマーカーと図形を別の行としてページングする。
     for (kind, target, id, offset, source, definition, values) in [
         (
             "marker",
@@ -269,7 +269,7 @@ async fn owned_history_latest_typed_filters_and_csv_agree() {
             0,
             Some(json!({"id":form,"version":1})),
             Some(schema(false)),
-            json!({"n":5,"state":"要対応","flag":true,"date":"2026-01-01","note":"古い回答"}),
+            json!({"n":5,"state":"要対応","flag":true,"date":"2026-01-01","note":"古い登録"}),
         ),
         (
             "marker",
@@ -314,7 +314,7 @@ async fn owned_history_latest_typed_filters_and_csv_agree() {
             5,
             None,
             None,
-            json!({"n":"3","legacy":"旧回答"}),
+            json!({"n":"3","legacy":"旧登録"}),
         ),
         (
             "marker",
@@ -761,7 +761,7 @@ async fn csv_is_chunked_and_retains_a_read_snapshot_during_writes() {
             create_at,
             submitted_values,
             rendered_markdown
-        ) VALUES ($1, $2, '2026-01-02 00:00:00', '{"later":"後からの回答"}', '')
+        ) VALUES ($1, $2, '2026-01-02 00:00:00', '{"later":"後からの登録"}', '')
         "#,
     )
     .bind(Uuid::new_v4().to_string())
@@ -778,7 +778,7 @@ async fn csv_is_chunked_and_retains_a_read_snapshot_during_writes() {
     assert_eq!(chunks.len(), 3);
     let csv = String::from_utf8(chunks.iter().flat_map(|c| c.iter().copied()).collect()).unwrap();
     assert_eq!(csv.lines().count(), 202);
-    assert!(!csv.contains("後からの回答"));
+    assert!(!csv.contains("後からの登録"));
     assert_eq!(
         check_csv_handler(
             Extension(user.to_string()),
@@ -799,7 +799,7 @@ async fn csv_rejects_too_many_rows_and_columns() {
     let pool = common::test_pool().await;
     let user = test_user(&pool, "answer-limits").await;
     let layer = test_layer(&pool, &user).await;
-    let target = marker(&pool, user, layer, "大量回答").await;
+    let target = marker(&pool, user, layer, "大量登録").await;
     sqlx::query(
         r#"
         WITH RECURSIVE

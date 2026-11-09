@@ -278,7 +278,7 @@ async fn authenticated_crud_is_owner_only_and_existing_map_routes_still_work() {
         StatusCode::NOT_FOUND
     );
 
-    // 保存操作は元の回答・地図検索を変更しない。既存のHTTPルートから同じ回答を得られる。
+    // 保存操作は元の登録・地図検索を変更しない。既存のHTTPルートから同じ登録を得られる。
     let query = json!({"common_form_id":f.form,"mode":"history"});
     let (status, answers, _) = http(
         &app,

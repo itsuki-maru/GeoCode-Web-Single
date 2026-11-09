@@ -454,14 +454,14 @@ function openShapeNameEditor(layer) {
           note.className = "shape-name-editor-help";
           const title = document.createElement("p");
           title.textContent = info.sync_required
-            ? "本文・メモと回答の対応確認が必要です。回答一覧から編集してください。"
-            : "フォーム由来のメモは回答一覧から編集できます。";
+            ? "本文・メモと登録の対応確認が必要です。登録一覧から編集してください。"
+            : "フォーム由来のメモは登録一覧から編集できます。";
           note.append(title);
           if (info.managed_markdown) {
             const details = document.createElement("details"),
               summary = document.createElement("summary"),
               content = document.createElement("pre");
-            summary.textContent = "フォーム回答からのメモ";
+            summary.textContent = "フォーム登録からのメモ";
             content.textContent = info.managed_markdown;
             content.style.whiteSpace = "pre-wrap";
             content.style.maxHeight = "120px";

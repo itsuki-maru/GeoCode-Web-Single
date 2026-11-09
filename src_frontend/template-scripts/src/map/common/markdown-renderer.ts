@@ -1,4 +1,6 @@
 import { renderCameraImage } from "./mjpeg-camera";
+import { createMapXssOptions, type MapXssOptions } from "./markdown-sanitizer";
+export { createMapXssOptions, type MapXssOptions } from "./markdown-sanitizer";
 
 interface MarkdownImageToken {
   href: string;
@@ -30,13 +32,6 @@ interface MarkdownRendererOptions {
   marked: MarkedRendererNamespace;
 }
 
-export interface MapXssOptions {
-  onTag(tag: string, html: string): string | undefined;
-  stripIgnoreTag: boolean;
-  stripIgnoreTagBody: string[];
-  whiteList: Record<string, string[]>;
-}
-
 export function isRunningAsPwa(): boolean {
   if (window.matchMedia("(display-mode: standalone)").matches) return true;
   const extendedNavigator = navigator as Navigator & {
@@ -47,47 +42,6 @@ export function isRunningAsPwa(): boolean {
   const extendedWindow = window as Window & { opera?: string };
   const userAgent = navigator.userAgent || extendedNavigator.vendor || extendedWindow.opera || "";
   return /WebView|wv/.test(userAgent);
-}
-
-export function createMapXssOptions(): MapXssOptions {
-  return {
-    whiteList: {
-      h1: ["id", "class"],
-      h2: ["id", "class"],
-      h3: ["id"],
-      h4: ["id"],
-      h5: ["id"],
-      h6: ["id"],
-      pre: ["class"],
-      a: ["target", "rel", "href", "title", "class", "data-download-href"],
-      img: ["src", "alt", "class", "data-preview-src"],
-      video: ["src", "controls", "preload", "poster"],
-      p: [],
-      div: ["class", "data-progressive-content"],
-      span: [],
-      li: [],
-      strong: [],
-      ul: [],
-      ol: ["start"],
-      blockquote: [],
-      code: [],
-      table: [],
-      tbody: [],
-      th: [],
-      td: [],
-      tr: [],
-      details: ["class", "data-deferred-details"],
-      summary: [],
-      "app-youtube": ["video-id", "data-src"],
-      "app-camera": ["data-camera-src"],
-    },
-    onTag(tag) {
-      if (tag === "iframe") return "Not Allow iframe ";
-      return undefined;
-    },
-    stripIgnoreTag: true,
-    stripIgnoreTagBody: ["script"],
-  };
 }
 
 export function installMapMarkdownRenderer({

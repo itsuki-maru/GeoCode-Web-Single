@@ -227,7 +227,7 @@ pub(super) fn validate(p: &TransferPackage) -> Result<(), AppError> {
         target(&s.target)?;
         if !s.submitted_values.is_object() || s.source_order == 0 || !orders.insert(s.source_order)
         {
-            return Err(invalid("回答値または回答順が不正です。"));
+            return Err(invalid("登録値または登録順が不正です。"));
         }
         if let Some(f) = &s.source_form {
             source(f)?;
@@ -235,27 +235,27 @@ pub(super) fn validate(p: &TransferPackage) -> Result<(), AppError> {
         if let Some(snapshot) = &s.form_snapshot {
             let snapshot = snapshot
                 .as_object()
-                .ok_or_else(|| invalid("回答時の定義が不正です。"))?;
+                .ok_or_else(|| invalid("登録時の定義が不正です。"))?;
             if snapshot.keys().any(|k| {
                 !matches!(
                     k.as_str(),
                     "form_title" | "form_description" | "form_schema"
                 )
             }) {
-                return Err(invalid("回答時の定義に不明な情報があります。"));
+                return Err(invalid("登録時の定義に不明な情報があります。"));
             }
             definition(
                 snapshot
                     .get("form_title")
                     .and_then(Value::as_str)
-                    .ok_or_else(|| invalid("回答時のフォーム名がありません。"))?,
+                    .ok_or_else(|| invalid("登録時のフォーム名がありません。"))?,
                 snapshot
                     .get("form_description")
                     .and_then(Value::as_str)
-                    .ok_or_else(|| invalid("回答時の説明がありません。"))?,
+                    .ok_or_else(|| invalid("登録時の説明がありません。"))?,
                 snapshot
                     .get("form_schema")
-                    .ok_or_else(|| invalid("回答時の項目定義がありません。"))?,
+                    .ok_or_else(|| invalid("登録時の項目定義がありません。"))?,
             )?;
         }
     }
@@ -301,19 +301,19 @@ pub(super) fn validate(p: &TransferPackage) -> Result<(), AppError> {
                     BodyPart::Text { text } => rendered.push_str(text),
                     BodyPart::Answer { key } => {
                         if !used.insert(key.as_str()) {
-                            return Err(invalid("本文の回答参照が重複しています。"));
+                            return Err(invalid("本文の登録参照が重複しています。"));
                         }
                         rendered.push_str(
                             &answers
                                 .get(key.as_str())
-                                .ok_or_else(|| invalid("本文の回答参照が不正です。"))?
+                                .ok_or_else(|| invalid("本文の登録参照が不正です。"))?
                                 .rendered_markdown,
                         );
                     },
                 }
             }
             if used.len() != answers.len() || rendered != body {
-                return Err(invalid("本文・メモと回答の対応が一致しません。"));
+                return Err(invalid("本文・メモと登録の対応が一致しません。"));
             }
         }
     }

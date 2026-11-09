@@ -55,6 +55,91 @@ const click = async (wrapper: ReturnType<typeof mount>, text: string) => {
   await button!.trigger("click");
   await flushPromises();
 };
+describe("設定読み込みの対象切替と遅延応答", () => {
+  const deferred = () => {
+    let resolve!: (value: any) => void, reject!: (error: unknown) => void;
+    const promise = new Promise<any>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    return { promise, resolve, reject };
+  };
+  it.each(["success", "failure"])(
+    "閉じた旧フォームの%s応答で、新しく作成中のフォームを変更・閉鎖しない",
+    async (outcome) => {
+      const old = deferred();
+      api.get.mockImplementation(async (url: string) =>
+        url === "/common-forms/old" ? old.promise : { data: common },
+      );
+      const w = await open({ commonMode: true, commonId: "old", targetId: "" });
+      expect(w.find(".loading").exists()).toBe(true);
+      await w.setProps({ isOpen: false });
+      await w.setProps({ isOpen: true, commonId: "" });
+      await flushPromises();
+      expect(w.find(".loading").exists()).toBe(false);
+      await w.findAll('input[type="text"]')[0]!.setValue("作成中のフォーム");
+      await click(w, "項目を追加");
+      if (outcome === "success") old.resolve({ data: { ...common, form_title: "古い定義" } });
+      else old.reject(new Error("late failure"));
+      await flushPromises();
+      expect((w.findAll('input[type="text"]')[0]!.element as HTMLInputElement).value).toBe(
+        "作成中のフォーム",
+      );
+      expect(w.findAll(".field-card")).toHaveLength(1);
+      expect(w.emitted("close")).toBeUndefined();
+      expect(w.emitted("message")).toBeUndefined();
+      await click(w, "共通フォームを保存");
+      expect(api.request.mock.lastCall![0]).toMatchObject({
+        method: "post",
+        url: "/common-forms",
+        data: { form_title: "作成中のフォーム" },
+      });
+      w.unmount();
+    },
+  );
+  it("開いたまま対象を切り替えたとき、旧応答が新対象の読み込みを解除しない", async () => {
+    const old = deferred(),
+      next = deferred();
+    api.get.mockImplementation(async (url: string) =>
+      url === "/common-forms/old" ? old.promise : next.promise,
+    );
+    const w = await open({ commonMode: true, commonId: "old", targetId: "" });
+    await w.setProps({ commonId: "next" });
+    old.resolve({ data: { ...common, form_title: "古い定義" } });
+    await flushPromises();
+    expect(w.find(".loading").exists()).toBe(true);
+    expect(w.find(".form-content").exists()).toBe(false);
+    next.resolve({ data: { ...common, id: "next", form_title: "現在の定義" } });
+    await flushPromises();
+    expect(w.find(".loading").exists()).toBe(false);
+    expect((w.findAll('input[type="text"]')[0]!.element as HTMLInputElement).value).toBe(
+      "現在の定義",
+    );
+    expect(w.emitted("close")).toBeUndefined();
+    w.unmount();
+  });
+  it("旧対象の共通フォーム候補取得失敗を、新対象に通知しない", async () => {
+    const options = deferred();
+    api.get.mockImplementation(async (url: string) => {
+      if (url === "/common-forms") return options.promise;
+      return {
+        data: url === "/marker/next/form" ? { ...existing, managed_layer_id: "managed" } : existing,
+      };
+    });
+    const w = await open();
+    expect(api.get).toHaveBeenCalledWith("/common-forms");
+    await w.setProps({ targetId: "next" });
+    await flushPromises();
+    options.reject(new Error("old options failure"));
+    await flushPromises();
+    expect(w.find(".loading").exists()).toBe(false);
+    expect(w.emitted("message")).toBeUndefined();
+    expect(w.emitted("close")).toBeUndefined();
+    expect(w.text()).not.toContain("共通フォーム一覧を読み込めません");
+    w.unmount();
+  });
+});
+
 describe("共通フォームのコピー適用", () => {
   it.each(["marker", "shape"] as const)(
     "%sの公開設定を維持して項目IDと適用元を保存する",
@@ -116,6 +201,16 @@ describe("共通フォームのコピー適用", () => {
     await click(wrapper, "共通フォームを保存");
     expect(api.request.mock.calls[0][0]).toMatchObject({ method: "post", url: "/common-forms" });
     expect(wrapper.text()).toContain("保存できませんでした");
+    const dialogs = wrapper
+      .findAllComponents(MessageModal)
+      .filter((modal) => modal.props("isOpen"));
+    expect(dialogs).toHaveLength(1);
+    expect(dialogs[0]!.props("message")).toContain("保存できませんでした");
+    expect(wrapper.emitted("message")).toBeUndefined();
+    expect(wrapper.find('[role="status"]').text()).not.toContain("保存できませんでした");
+    dialogs[0]!.vm.$emit("close");
+    await flushPromises();
+    expect(dialogs[0]!.props("isOpen")).toBe(false);
     expect((title.element as HTMLInputElement).value).toBe("新規");
     expect(wrapper.emitted("saved")).toBeUndefined();
     wrapper.unmount();
@@ -130,7 +225,7 @@ describe("共通フォーム管理の確認操作", () => {
     await wrapper.get('input[value="list"]').setValue(true);
     await wrapper.get("article button:last-child").trigger("click");
     const dialog = wrapper.findAllComponents(MessageModal).find((modal) => modal.props("isOpen"))!;
-    expect(dialog.props("message")).toContain("適用済みのフォームと回答履歴は残ります");
+    expect(dialog.props("message")).toContain("適用済みのフォームと登録履歴は残ります");
     expect(api.delete).not.toHaveBeenCalled();
     await click(dialog, "閉じる");
     expect(api.delete).not.toHaveBeenCalled();
@@ -202,7 +297,7 @@ describe("レイヤ管理と共通パスワード", () => {
   });
 });
 
-it("回答一覧を開いている間だけ生成し、閉じる・再表示でインスタンスを作り直す", async () => {
+it("登録一覧を開いている間だけ生成し、閉じる・再表示でインスタンスを作り直す", async () => {
   const stub = {
     name: "FormAnswersModal",
     props: ["isOpen", "initialFormId"],
@@ -217,20 +312,20 @@ it("回答一覧を開いている間だけ生成し、閉じる・再表示で�
   await flushPromises();
   expect(wrapper.findComponent({ name: "FormAnswersModal" }).exists()).toBe(false);
   await wrapper.get('input[value="list"]').setValue(true);
-  await click(wrapper, "回答一覧");
+  await click(wrapper, "登録一覧");
   const first = wrapper.getComponent({ name: "FormAnswersModal" });
   expect(first.props("initialFormId")).toBe("template");
   first.vm.$emit("close");
   await flushPromises();
   expect(wrapper.findComponent({ name: "FormAnswersModal" }).exists()).toBe(false);
-  await click(wrapper, "回答一覧");
+  await click(wrapper, "登録一覧");
   expect(wrapper.getComponent({ name: "FormAnswersModal" }).vm).not.toBe(first.vm);
   await wrapper.setProps({ isOpen: false });
   expect(wrapper.findComponent({ name: "FormAnswersModal" }).exists()).toBe(false);
   wrapper.unmount();
 });
 
-it("個別対象の回答履歴も閉じたときに破棄する", async () => {
+it("個別対象の登録履歴も閉じたときに破棄する", async () => {
   const stub = {
     name: "FormAnswersModal",
     props: ["isOpen", "targetId", "targetType"],
@@ -244,7 +339,7 @@ it("個別対象の回答履歴も閉じたときに破棄する", async () => {
   await wrapper.setProps({ isOpen: true });
   await flushPromises();
   expect(wrapper.findComponent({ name: "FormAnswersModal" }).exists()).toBe(false);
-  await click(wrapper, "回答履歴を開く");
+  await click(wrapper, "登録履歴を開く");
   const answer = wrapper.getComponent({ name: "FormAnswersModal" });
   expect(answer.props()).toMatchObject({ isOpen: true, targetId: "target", targetType: "marker" });
   answer.vm.$emit("close");
@@ -411,8 +506,15 @@ describe("共通フォーム管理の再読込と編集結果", () => {
     await flushPromises();
     expect(w.text()).toContain("共通フォームを保存しました");
     expect(editor.props("isOpen")).toBe(false);
+    const result = w.findAllComponents(MessageModal).filter((modal) => modal.props("isOpen"));
+    expect(result).toHaveLength(1);
+    expect(result[0]!.props("message")).toBe("共通フォームを保存しました。");
+    expect(w.find('[role="status"]').exists()).toBe(false);
+    result[0]!.vm.$emit("close");
+    await flushPromises();
+    expect(result[0]!.props("isOpen")).toBe(false);
     await w.get('input[value="create"]').setValue(true);
-    await click(w, "フォームからの回答一覧と分析");
+    await click(w, "フォームからの登録一覧と分析");
     expect(w.getComponent({ name: "FormAnswersModal" }).props("initialFormId")).toBe("");
     await w.get("header .close-button").trigger("click");
     expect(w.emitted("close")).toHaveLength(1);
@@ -465,6 +567,78 @@ describe("共通フォーム管理の再読込と編集結果", () => {
     await click(w, "共通フォームを保存");
     expect(api.request).not.toHaveBeenCalled();
     expect(w.text()).toContain("反映先を確認できません");
+    w.unmount();
+  });
+});
+
+describe("入力項目の30件上限と追加操作", () => {
+  it("下部から30件目を追加して入力欄へ移動し、上下の追加を止めて保存できる", async () => {
+    const config = {
+      ...common,
+      form_schema: {
+        fields: Array.from({ length: 29 }, (_, index) => ({ ...field, id: `field_${index}` })),
+      },
+    };
+    api.get.mockResolvedValue({ data: config });
+    const w = mount(FormSettings, {
+      attachTo: document.body,
+      props: {
+        isOpen: false,
+        targetType: "marker",
+        targetId: "",
+        commonMode: true,
+        commonId: "template",
+      },
+    });
+    await w.setProps({ isOpen: true });
+    await flushPromises();
+    expect(w.get(".field-count").text()).toContain("29 / 30");
+    const scroll = vi.fn();
+    const previousScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollIntoView");
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scroll,
+    });
+    try {
+      await w.get(".field-add-bottom button").trigger("click");
+      await flushPromises();
+      const cards = w.findAll(".field-card");
+      expect(cards).toHaveLength(30);
+      const label = cards[29]!.get<HTMLInputElement>('input[type="text"]');
+      expect(document.activeElement).toBe(label.element);
+      expect(scroll).toHaveBeenCalledOnce();
+      expect(w.get(".field-count").text()).toContain("30 / 30");
+      const addButtons = w.findAll("button").filter((button) => button.text() === "項目を追加");
+      expect(addButtons).toHaveLength(2);
+      expect(addButtons.every((button) => button.attributes("disabled") !== undefined)).toBe(true);
+      await addButtons[1]!.trigger("click");
+      expect(w.findAll(".field-card")).toHaveLength(30);
+      await click(w, "共通フォームを保存");
+      expect(api.request.mock.lastCall![0].data.form_schema.fields).toHaveLength(30);
+    } finally {
+      if (previousScroll)
+        Object.defineProperty(HTMLElement.prototype, "scrollIntoView", previousScroll);
+      else delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+      w.unmount();
+    }
+  });
+
+  it("31件の定義は保存せず、モーダルで上限を案内する", async () => {
+    const config = {
+      ...common,
+      form_schema: {
+        fields: Array.from({ length: 31 }, (_, index) => ({ ...field, id: `field_${index}` })),
+      },
+    };
+    api.get.mockResolvedValue({ data: config });
+    const w = await open({ commonMode: true, commonId: "template", targetId: "" });
+    await click(w, "共通フォームを保存");
+    expect(api.request).not.toHaveBeenCalled();
+    const result = w.findAllComponents(MessageModal).filter((modal) => modal.props("isOpen"));
+    expect(result).toHaveLength(1);
+    expect(result[0]!.props("message")).toBe("入力項目は30件以内にしてください。");
+    expect(w.findAll(".field-card")).toHaveLength(31);
+    expect(w.emitted("message")).toBeUndefined();
     w.unmount();
   });
 });

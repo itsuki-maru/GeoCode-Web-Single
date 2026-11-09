@@ -17,10 +17,13 @@
   "dependencies": {
     "ace-builds": "^1.43.4",
     "axios": "^1.13.2",
+    "htmlparser2": "10.0.0",
+    "marked": "17.0.0",
     "pinia": "^3.0.4",
     "qrcode": "1.5.4",
     "vue": "^3.5.22",
-    "vue-router": "^4.6.3"
+    "vue-router": "^4.6.3",
+    "xss": "1.0.15"
   },
   "devDependencies": {
     "@tsconfig/node22": "^22.0.2",

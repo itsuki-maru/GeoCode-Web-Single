@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import "./form-modal-buttons.css";
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import FormAnswersModal from "./FormAnswersModal.vue";
 import MessageModal from "@/components/common/MessageModal.vue";
 import BaseModal from "@/components/common/BaseModal.vue";
@@ -68,7 +68,7 @@ const managedMessage =
   "このレイヤの地図オブジェクトには共通フォームが設定されています。個別のフォームにするには設定を解除するか、所属するレイヤを変更してください。";
 const saveConfirmation = computed(
   () =>
-    `共通フォームの変更を、管理中の${managedLayerCount.value}レイヤ・${managedTargetCount.value}対象へ反映します。${passwordMode.value !== "keep" ? `パスワードの変更は手動コピー適用先を含む${appliedTargetCount.value}対象へ反映します。` : ""}回答履歴・本文・画像は変更しません。保存しますか？`,
+    `共通フォームの変更を、管理中の${managedLayerCount.value}レイヤ・${managedTargetCount.value}対象へ反映します。${passwordMode.value !== "keep" ? `パスワードの変更は手動コピー適用先を含む${appliedTargetCount.value}対象へ反映します。` : ""}登録履歴・本文・画像は変更しません。保存しますか？`,
 );
 const sourceForm = ref<{ id: string; version: number } | null>(null);
 const commonForms = ref<FormConfig[]>([]);
@@ -86,7 +86,9 @@ const currentState = () => JSON.stringify([formTitle.value, formDescription.valu
 const enabled = ref(false);
 const formTitle = ref("");
 const formDescription = ref("");
+const MAX_FIELDS = 30;
 const fields = ref<FormField[]>([]);
+const fieldCards = ref<HTMLElement[]>([]);
 const fieldHelpOpen = ref(false);
 const publicPath = ref<string | null>(null);
 const isPasswordProtected = ref(false);
@@ -96,6 +98,11 @@ const loading = ref(false);
 const saving = ref(false);
 const applying = ref(false);
 const localMessage = ref("");
+const saveMessage = ref("");
+const showSaveMessage = (message: string) => {
+  localMessage.value = "";
+  saveMessage.value = message;
+};
 const notify = (message: string) => {
   localMessage.value = message;
   emit("message", message);
@@ -153,8 +160,13 @@ const applyConfig = (config: FormConfig): void => {
   initialState.value = currentState();
 };
 
+let configSequence = 0;
+const isCurrentConfig = (sequence: number) => sequence === configSequence && props.isOpen;
 const loadConfig = async (): Promise<void> => {
+  const sequence = ++configSequence;
+  loading.value = false;
   localMessage.value = "";
+  saveMessage.value = "";
   managedNoticeOpen.value = false;
   confirmSaveOpen.value = false;
   managedLayerId.value = null;
@@ -177,39 +189,50 @@ const loadConfig = async (): Promise<void> => {
   loading.value = true;
   try {
     const response = await apiClient.get<FormConfig>(formBaseUrl.value);
+    if (!isCurrentConfig(sequence)) return;
     applyConfig(response.data);
     managedNoticeOpen.value = !!managedLayerId.value;
     if (!props.commonMode && !managedLayerId.value) {
       try {
-        commonForms.value = (await apiClient.get<FormConfig[]>("/common-forms")).data;
+        const forms = (await apiClient.get<FormConfig[]>("/common-forms")).data;
+        if (!isCurrentConfig(sequence)) return;
+        commonForms.value = forms;
       } catch {
+        if (!isCurrentConfig(sequence)) return;
         notify("共通フォーム一覧を読み込めませんでした。画面を開き直してください。");
       }
     }
   } catch (error) {
+    if (!isCurrentConfig(sequence)) return;
     notify(errorMessage(error, "フォーム設定を読み込めませんでした。"));
     emit("close");
   } finally {
-    loading.value = false;
+    if (isCurrentConfig(sequence)) loading.value = false;
   }
 };
 
 watch(
-  () => props.isOpen,
-  (open) => {
+  () => [props.isOpen, props.commonMode, props.commonId, props.targetType, props.targetId] as const,
+  ([open]) => {
     if (open) {
       fieldHelpOpen.value = false;
       void loadConfig();
+    } else {
+      ++configSequence;
+      loading.value = false;
     }
   },
 );
+onBeforeUnmount(() => ++configSequence);
 
 const newFieldId = () =>
   `f_${Array.from(crypto.getRandomValues(new Uint32Array(4)), (value) => value.toString(16).padStart(8, "0")).join("")}`;
 
-const addField = (): void => {
+const addField = async (): Promise<void> => {
+  if (fields.value.length >= MAX_FIELDS) return;
+  const id = newFieldId();
   fields.value.push({
-    id: newFieldId(),
+    id,
     label: "新しい項目",
     type: "text",
     required: false,
@@ -217,6 +240,13 @@ const addField = (): void => {
     choices: [],
     choicesText: "",
   });
+  await nextTick();
+  if (!props.isOpen) return;
+  const card = fieldCards.value.find((card) => card.dataset.fieldId === id);
+  card?.scrollIntoView?.({ block: "nearest" });
+  const input = card?.querySelector<HTMLInputElement>('input[type="text"]');
+  input?.focus({ preventScroll: true });
+  input?.select();
 };
 
 const removeField = (index: number): void => {
@@ -250,6 +280,7 @@ const normalizeFields = (): FormField[] =>
 
 const validateBeforeSave = (): string | null => {
   if (!formTitle.value.trim()) return "フォーム名を入力してください。";
+  if (fields.value.length > MAX_FIELDS) return `入力項目は${MAX_FIELDS}件以内にしてください。`;
   if ((props.commonMode || enabled.value) && fields.value.length === 0)
     return "入力項目を追加してください。";
   if (fields.value.some((field) => !field.label.trim()))
@@ -301,7 +332,7 @@ const persist = async (): Promise<void> => {
   if (saving.value || applying.value) return;
   const validation = validateBeforeSave();
   if (validation) {
-    notify(validation);
+    showSaveMessage(validation);
     return;
   }
   saving.value = true;
@@ -323,16 +354,13 @@ const persist = async (): Promise<void> => {
       },
     });
     applyConfig(response.data);
+    if (!props.commonMode)
+      showSaveMessage(
+        enabled.value ? "入力フォームを保存して公開しました。" : "入力フォーム設定を保存しました。",
+      );
     emit("saved");
-    notify(
-      props.commonMode
-        ? "共通フォームを保存しました。"
-        : enabled.value
-          ? "入力フォームを保存して公開しました。"
-          : "入力フォーム設定を保存しました。",
-    );
   } catch (error) {
-    notify(
+    showSaveMessage(
       errorMessage(
         error,
         "保存できませんでした。別の画面で更新された場合は、開き直して再編集してください。",
@@ -347,7 +375,7 @@ const save = async (): Promise<void> => {
   if (saving.value || applying.value) return;
   const validation = validateBeforeSave();
   if (validation) {
-    notify(validation);
+    showSaveMessage(validation);
     return;
   }
   if (props.commonMode && props.commonId) {
@@ -355,7 +383,7 @@ const save = async (): Promise<void> => {
     try {
       const current = (await apiClient.get<FormConfig>(formBaseUrl.value)).data;
       if (current.version !== commonVersion.value) {
-        notify("別の画面で設定が更新されました。開き直して再編集してください。");
+        showSaveMessage("別の画面で設定が更新されました。開き直して再編集してください。");
         return;
       }
       managedLayerCount.value = current.managed_layer_count || 0;
@@ -369,7 +397,7 @@ const save = async (): Promise<void> => {
         return;
       }
     } catch (error) {
-      notify(errorMessage(error, "反映先を確認できませんでした。"));
+      showSaveMessage(errorMessage(error, "反映先を確認できませんでした。"));
       return;
     } finally {
       saving.value = false;
@@ -402,7 +430,7 @@ const rotateUrl = async (): Promise<void> => {
 
 <template>
   <BaseModal :isOpen="isOpen" :zIndex="20" :closeOnOverlayClick="false" @close="emit('close')">
-    <div class="form-settings">
+    <div class="form-settings" :inert="!!saveMessage">
       <header>
         <div>
           <h2>
@@ -445,10 +473,10 @@ const rotateUrl = async (): Promise<void> => {
               >
                 共通フォームを使用する
               </button>
-              <div class="answer-history-action" role="group" aria-label="フォームへの回答">
-                <span>フォームへの回答</span>
+              <div class="answer-history-action" role="group" aria-label="フォームへの登録">
+                <span>フォームへの登録</span>
                 <button class="btn-close" type="button" @click="answersOpen = true">
-                  回答履歴を開く
+                  登録履歴を開く
                 </button>
               </div>
             </div>
@@ -490,13 +518,29 @@ const rotateUrl = async (): Promise<void> => {
                   ?
                 </button>
               </h3>
-              <button class="btn-close" type="button" @click="addField">項目を追加</button>
+              <button
+                class="btn-close"
+                type="button"
+                :disabled="fields.length >= MAX_FIELDS"
+                @click="addField"
+              >
+                項目を追加
+              </button>
             </div>
+            <p class="field-count" role="status">
+              入力項目: {{ fields.length }} / {{ MAX_FIELDS }}
+            </p>
             <p v-if="fieldHelpOpen" class="field-help">
-              項目名の誤字修正や並べ替えは、そのまま編集できます。質問の内容を変える場合は、その項目を削除して追加し直してください。入力の種類を変更した場合も、過去の回答とは別の項目として扱われます。
+              項目名の誤字修正や並べ替えは、そのまま編集できます。質問の内容を変える場合は、その項目を削除して追加し直してください。入力の種類を変更した場合も、過去の登録とは別の項目として扱われます。
             </p>
             <p v-if="fields.length === 0" class="empty">入力項目はまだありません。</p>
-            <article v-for="(field, index) in fields" :key="field.id" class="field-card">
+            <article
+              v-for="(field, index) in fields"
+              :key="field.id"
+              ref="fieldCards"
+              :data-field-id="field.id"
+              class="field-card"
+            >
               <div class="field-card-heading">
                 <strong>項目 {{ index + 1 }}</strong>
                 <div>
@@ -539,6 +583,16 @@ const rotateUrl = async (): Promise<void> => {
                 <textarea v-model="field.choicesText" maxlength="3000"></textarea>
               </label>
             </article>
+            <div v-if="fields.length" class="field-add-bottom">
+              <button
+                class="btn-close"
+                type="button"
+                :disabled="fields.length >= MAX_FIELDS"
+                @click="addField"
+              >
+                項目を追加
+              </button>
+            </div>
           </section>
 
           <section v-if="!managedLayerId">
@@ -612,6 +666,12 @@ const rotateUrl = async (): Promise<void> => {
     confirmLabel="保存して反映する"
     @close="confirmSaveOpen = false"
     @confirm="persist"
+  />
+  <MessageModal
+    class="form-save-result"
+    :isOpen="isOpen && !!saveMessage"
+    :message="saveMessage"
+    @close="saveMessage = ''"
   />
 </template>
 
@@ -790,6 +850,14 @@ textarea {
   padding: 12px;
   border-radius: 8px;
   background: #eef1f5;
+}
+.field-count {
+  margin: 0;
+  color: #5c6778;
+}
+.field-add-bottom {
+  display: flex;
+  justify-content: flex-end;
 }
 .field-card {
   display: grid;

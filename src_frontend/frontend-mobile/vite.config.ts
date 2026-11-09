@@ -11,6 +11,7 @@ export default defineConfig({
   // プロジェクトルートの.envを取得
   envDir: "../../",
   resolve: {
+    dedupe: ["htmlparser2"],
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
     }

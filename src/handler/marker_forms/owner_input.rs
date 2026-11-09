@@ -1,4 +1,4 @@
-//! ログイン中の所有者によるフォーム回答。公開設定とは独立し、保存処理は公開フォームと共通。
+//! ログイン中の所有者によるフォーム登録。公開設定とは独立し、保存処理は公開フォームと共通。
 use super::*;
 use sha2::{Digest, Sha256};
 
@@ -51,7 +51,7 @@ async fn fetch(pool: &SqlitePool, user: &str, id: &str, shape: bool) -> Result<F
 async fn input(pool: &SqlitePool, user: &str, id: &str, shape: bool) -> Result<Response, AppError> {
     let form = fetch(pool, user, id, shape).await?;
     let (title, description, schema, source) = form.parts();
-    // 対象・適用元ごとの最新1回答だけを採用する。過去回答の合成や本文の推測はしない。
+    // 対象・適用元ごとの最新1登録だけを採用する。過去登録の合成や本文の推測はしない。
     let query = if shape {
         r#"
         SELECT submitted_values, form_snapshot FROM shape_form_submission_model
@@ -148,8 +148,14 @@ async fn submit(
     }
     validate_submission_keys(schema, &payload.values)?;
     validate_uploaded_image_keys(schema, &images)?;
-    let (values, markdown, prepared) =
-        build_submission(schema, &payload.values, &images, title).await?;
+    let (values, markdown, prepared) = build_submission(
+        schema,
+        &payload.values,
+        &images,
+        title,
+        SubmissionTrust::AuthorizedOwner,
+    )
+    .await?;
     let saved = match &form {
         Form::Marker(f) => persist_submission(pool, f, &values, &markdown, &prepared, true).await,
         Form::Shape(f) => {
@@ -165,7 +171,7 @@ async fn submit(
     };
     Ok((
         [(axum::http::header::CACHE_CONTROL, "no-store")],
-        Json(json!({"message":"フォームの回答を保存しました。", "object":object})),
+        Json(json!({"message":"フォームの登録内容を保存しました。", "object":object})),
     )
         .into_response())
 }

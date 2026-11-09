@@ -304,6 +304,7 @@ async fn full_search_page(f: &Fixture, q: &AnswerQuery) -> AnswerPage {
     };
     AnswerPage {
         editing_supported: true,
+        deletion_supported: true,
         rows,
         total,
         target_count,

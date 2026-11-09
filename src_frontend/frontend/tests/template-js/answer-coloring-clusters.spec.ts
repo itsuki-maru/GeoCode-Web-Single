@@ -38,7 +38,7 @@ beforeEach(() => {
     clientWidth: { configurable: true, value: 900 },
     clientHeight: { configurable: true, value: 640 },
   });
-  const fetchData = vi.fn().mockRejectedValue(new Error("回答地図の追加取得は禁止"));
+  const fetchData = vi.fn().mockRejectedValue(new Error("登録地図の追加取得は禁止"));
   vi.stubGlobal("fetch", fetchData);
 });
 afterEach(() => {
@@ -151,7 +151,7 @@ describe("実Leafletで色分け後も通常のクラスタースタイルを維
     }
   });
 
-  it("クラスタ解除・再クラスタ化でも分類色と回答・凡例の絞り込みを維持する", () => {
+  it("クラスタ解除・再クラスタ化でも分類色と登録・凡例の絞り込みを維持する", () => {
     const f = fixture(100);
     const runtime = initializeReadOnlyMapPage("form-answer-map");
     dispose = () => runtime.map.remove();
@@ -274,7 +274,7 @@ describe("実Leafletで色分け後も通常のクラスタースタイルを維
     },
   );
 
-  it("分類連動と回答条件で対象が減っても標準の件数区分を使い、除外対象を復活させない", () => {
+  it("分類連動と登録条件で対象が減っても標準の件数区分を使い、除外対象を復活させない", () => {
     const f = fixture(100);
     const runtime = initializeReadOnlyMapPage("form-answer-map");
     dispose = () => runtime.map.remove();

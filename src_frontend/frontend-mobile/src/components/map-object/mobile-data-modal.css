@@ -1,0 +1,126 @@
+body .mobile-data-modal.base-modal-overlay {
+  top: var(--mobile-modal-top, 0px);
+  height: var(--mobile-modal-height, 100dvh);
+  box-sizing: border-box;
+  padding: calc(12px + env(safe-area-inset-top, 0px)) calc(12px + env(safe-area-inset-right, 0px))
+    calc(12px + env(safe-area-inset-bottom, 0px)) calc(12px + env(safe-area-inset-left, 0px));
+  overflow: hidden;
+}
+
+body .mobile-data-modal.base-modal-overlay > .base-modal-content {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: min(100%, 640px);
+  min-width: 0;
+  max-width: 100%;
+  max-height: 100%;
+  padding: 0;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.mobile-data-panel {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: min(
+    860px,
+    calc(
+      var(--mobile-modal-height, 100dvh) - 24px - env(safe-area-inset-top, 0px) -
+        env(safe-area-inset-bottom, 0px)
+    )
+  );
+  max-height: 100%;
+  margin: 0;
+  overflow: hidden;
+  color: #172033;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+}
+
+.mobile-data-header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border-bottom: 1px solid #dde3ec;
+}
+
+.mobile-data-header > h2 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  color: #172033;
+  font-size: 20px;
+  line-height: 1.4;
+  text-align: left;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+
+.mobile-data-header > button {
+  flex: 0 0 auto;
+  min-height: 40px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.mobile-data-body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 16px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scroll-padding-block: 16px;
+  overflow-wrap: anywhere;
+}
+
+.mobile-data-footer {
+  display: flex;
+  flex-shrink: 0;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 12px 16px;
+  border-top: 1px solid #dde3ec;
+  background: #f5f5f5;
+}
+
+.mobile-data-footer > button {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  margin: 0;
+  font-size: 16px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.mobile-data-panel :is(input, textarea, select, button, fieldset) {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-height: 500px) {
+  .mobile-data-header,
+  .mobile-data-body {
+    padding: 12px;
+  }
+  .mobile-data-footer {
+    padding: 8px 12px;
+  }
+}

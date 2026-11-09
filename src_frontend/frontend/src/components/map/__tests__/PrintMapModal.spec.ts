@@ -20,7 +20,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("印刷モーダルの地図連携", () => {
-  it("回答地図は専用POSTを使用し、認証更新・要求ID・再試行を維持する", async () => {
+  it("登録地図は専用POSTを使用し、認証更新・要求ID・再試行を維持する", async () => {
     const snapshot = { state: { view: { zoom: 12 } }, bootstrap: { markers: { a: { id: "a" } } } };
     wrapper = mount(PrintMapModal, {
       props: {

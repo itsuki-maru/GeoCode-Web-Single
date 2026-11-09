@@ -90,7 +90,7 @@ export function serializeAnswerConditions(rows: AnswerConditionRow[], fields: An
   });
 }
 
-/** API の両条件配列は、最新の回答を選択した後に、同じ行に対して評価する。 */
+/** API の両条件配列は、最新の登録を選択した後に、同じ行に対して評価する。 */
 export function createColorRuleRequest(
   query: Record<string, unknown>,
   filter: AnswerMapFilter,

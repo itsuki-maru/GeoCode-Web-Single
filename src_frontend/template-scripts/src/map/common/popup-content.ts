@@ -50,7 +50,7 @@ export function createPopupContentRuntime(options: Options) {
     const html = `<div class="geocode-content-popup" data-content-key="${escapeHtml(key)}">
       <div class="popup-content-toolbar"><label>表示内容<select aria-label="表示内容">
         <option value="free" disabled>自由入力の内容</option>
-        <option value="answers" disabled>フォームからの回答</option>
+        <option value="answers" disabled>フォームからの登録</option>
         <option value="normal" selected>通常表示</option>
       </select></label></div><span class="popup-content-print-label">通常表示</span>
       <div class="popup-content-analysis"></div>
@@ -144,7 +144,7 @@ export function createPopupContentRuntime(options: Options) {
       }
       if (info.sync_required) {
         note.textContent =
-          "本文と回答の対応を確認できないため、通常表示のみ利用できます。回答一覧の編集から確認してください。";
+          "本文と登録の対応を確認できないため、通常表示のみ利用できます。登録一覧の編集から確認してください。";
         update();
         return;
       }
@@ -168,7 +168,7 @@ export function createPopupContentRuntime(options: Options) {
               ? options.renderMarkdown(markdown)
               : mode === "free"
                 ? "自由入力の内容はありません。"
-                : "フォームからの回答はありません。";
+                : "フォームからの登録はありません。";
             body.innerHTML = transientHtml;
           }
           displayedMode = mode;
@@ -176,7 +176,7 @@ export function createPopupContentRuntime(options: Options) {
         }
         note.textContent =
           mode === "answers" && options.answerMap
-            ? "この対象の回答をすべて表示します。絞り込み・分析に使用した回答だけには限定しません。"
+            ? "この対象の登録データをすべて表示します。絞り込み・分析に使用した登録だけには限定しません。"
             : "";
         printLabel.textContent = select.selectedOptions[0]?.textContent || "通常表示";
         update();

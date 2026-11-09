@@ -21,6 +21,78 @@ fn sql(s: &str) -> String {
 fn fixture() -> Value {
     serde_json::from_str(include_str!("fixtures/transfer_v3.json")).unwrap()
 }
+/// JSON経由の既存本文・登録値は公開投稿用の安全化を適用せず、別所有者への再転送でも原文を維持する。
+#[tokio::test]
+async fn json_import_and_reexport_preserve_legacy_markdown_without_public_post_sanitization() {
+    let pool = common::test_pool().await;
+    let first = common::create_test_user(&pool, "import-raw-markdown")
+        .await
+        .to_string();
+    let second = common::create_test_user(&pool, "copy-raw-markdown")
+        .await
+        .to_string();
+    let payload = "## 既存データ\n\n    indented code\n\n<a href=\"https://example.test/\" target=\"_blank\" rel=\"opener\" onclick=\"bad()\">資料</a>\n\n[旧リンク](javascript:alert%281%29)\n\n<script>bad()</script>";
+    let mut package = fixture();
+    package["markers"][1]["detail"] = json!(payload);
+    package["shapes"][0]["geojson"]["properties"]["memo"] = json!(payload);
+    package["submissions"][2]["submitted_values"]["manual"] = json!(payload);
+    package["submissions"][2]["rendered_markdown"] = json!(payload);
+    package["submissions"][4]["submitted_values"]["old"] = json!(payload);
+    package["submissions"][4]["rendered_markdown"] = json!(payload);
+    for owner in [&first, &second] {
+        let application = app(&pool, owner);
+        assert_eq!(upload(&application, &package).await, StatusCode::OK);
+        let marker = named_id(
+            &pool,
+            "marker_info_model",
+            "marker_name",
+            "手動コピー",
+            owner,
+        )
+        .await;
+        let shape = named_id(&pool, "shape_model", "name", "管理図形", owner).await;
+        for (kind, target, field) in [("marker", marker, "manual"), ("shape", shape, "old")] {
+            let (values, markdown): (Value, String) = sqlx::query_as(&format!(
+                r#"
+                SELECT submitted_values, rendered_markdown
+                FROM {kind}_form_submission_model
+                WHERE {kind}_id = $1 AND rendered_markdown = $2
+                "#
+            ))
+            .bind(dbid(&target))
+            .bind(payload)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(values[field], payload);
+            assert_eq!(markdown, payload);
+        }
+        package = export(&application, &master(&pool, owner).await, "").await;
+        let marker = package["markers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["marker_name"] == "手動コピー")
+            .unwrap();
+        let shape = package["shapes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == "管理図形")
+            .unwrap();
+        assert_eq!(marker["detail"], payload);
+        assert_eq!(shape["geojson"]["properties"]["memo"], payload);
+        assert_eq!(
+            package["submissions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|s| s["rendered_markdown"] == payload)
+                .count(),
+            2
+        );
+    }
+}
 fn app(pool: &Pool, user: &str) -> Router {
     Router::new()
         .route(

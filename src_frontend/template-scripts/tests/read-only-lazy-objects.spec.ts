@@ -447,7 +447,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
     expect(() => runtime!.getShareSnapshot()).toThrow("再チェック");
   });
 
-  it("遅延読み込みしたマーカーと図形にも色分けを適用し、未回答の対象を隠さずに印刷へ色分けを引き継ぐ", async () => {
+  it("遅延読み込みしたマーカーと図形にも色分けを適用し、未登録の対象を隠さずに印刷へ色分けを引き継ぐ", async () => {
     Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
       configurable: true,
       value() {
@@ -660,14 +660,14 @@ describe("lazy groups in the actual read-only map runtime", () => {
     { mobile: false, references: true },
     { mobile: true, references: true },
   ])(
-    "回答JSON blockは現在位置・全対象・Unicode本文の切替を維持する（%j）",
+    "登録JSON blockは現在位置・全対象・Unicode本文の切替を維持する（%j）",
     async ({ mobile, references }) => {
       const previousUrl = location.href;
       try {
         document.body.classList.remove("map-mobile-controls");
         history.replaceState({}, "", mobile ? "?map_ui=mobile" : "?");
         const free = "自由漢字𠮷 e\u0301";
-        const answers = "**回答🙂**";
+        const answers = "**登録🙂**";
         const body = `${free}\n\n${answers}`;
         const record = shape("a");
         const view = { latitude: 35.68, longitude: 139.76, zoom: 14 };
@@ -763,10 +763,10 @@ describe("lazy groups in the actual read-only map runtime", () => {
           const rendered = document.querySelector<HTMLElement>(".popup-content-body")!;
           if (mode === "free") expect(rendered.textContent?.trim()).toBe(free);
           if (mode === "answers")
-            expect(rendered.querySelector("strong")?.textContent).toBe("回答🙂");
+            expect(rendered.querySelector("strong")?.textContent).toBe("登録🙂");
           if (mode === "normal") {
             expect(rendered.textContent).toContain(free);
-            expect(rendered.querySelector("strong")?.textContent).toBe("回答🙂");
+            expect(rendered.querySelector("strong")?.textContent).toBe("登録🙂");
           }
         }
         runtime.shapeLayers["shape-s-a"].fire("click", {
@@ -852,7 +852,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
     expect(local.getVisibleShapeIds()).toEqual([]);
   });
 
-  it("回答地図は画面外の図形を生成せず、検索対象を保持して移動後に生成する", async () => {
+  it("登録地図は画面外の図形を生成せず、検索対象を保持して移動後に生成する", async () => {
     const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
     bootstrap.page = "form-answer-map";
     bootstrap.shapes = Array.from({ length: 80 }, (_, index) => {
@@ -947,7 +947,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
   });
 
   it.each(["map-anather", "form-answer-map", "temporary-map", "temporary-map-mobile"] as const)(
-    "%sは縮尺別の省略後も原本・回答対象を保持し、拡大後に同じ図形を再利用する",
+    "%sは縮尺別の省略後も原本・登録対象を保持し、拡大後に同じ図形を再利用する",
     async (page) => {
       const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
       const records = [
@@ -1084,7 +1084,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
   });
 
   it.each([false, true])(
-    "回答地図はトップ地図の中心とズームを引き継ぎ、手動で対象全体にも移動できる（mobile=%s）",
+    "登録地図はトップ地図の中心とズームを引き継ぎ、手動で対象全体にも移動できる（mobile=%s）",
     (mobile) => {
       const previousUrl = location.href;
       const previousClass = document.body.className;
@@ -1144,7 +1144,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
   );
 
   it.each([undefined, { latitude: 91, longitude: 139, zoom: 12 }])(
-    "引き継ぐ位置がないか不正な場合は回答対象全体に合わせる（view=%j）",
+    "引き継ぐ位置がないか不正な場合は登録対象全体に合わせる（view=%j）",
     (initialView) => {
       const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
       bootstrap.page = "form-answer-map";
@@ -1170,7 +1170,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
   );
 
   it.each([false, true])(
-    "回答地図の機能切替はモバイル呼び出しだけに表示する（mobile=%s）",
+    "登録地図の機能切替はモバイル呼び出しだけに表示する（mobile=%s）",
     (mobile) => {
       const previousUrl = location.href;
       const previousClass = document.body.className;
@@ -1242,7 +1242,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
       }
     },
   );
-  it("回答地図の検索・表示条件を固定して印刷し、レイヤ全選択でも対象外を取得しない", async () => {
+  it("登録地図の検索・表示条件を固定して印刷し、レイヤ全選択でも対象外を取得しない", async () => {
     const b = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
     b.page = "form-answer-map";
     b.markers = {
@@ -1275,7 +1275,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
           data: { requestId: "r", ...data },
         }),
       );
-    // プロトコルの現在の回答条件を初期化してから、表示中の部分集合を取得する。
+    // プロトコルの現在の登録条件を初期化してから、表示中の部分集合を取得する。
     send({
       type: "answer-map-filter",
       updateId: "u",
@@ -1311,7 +1311,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
     expect(JSON.stringify(localStorage)).toBe(saved);
     post.mockRestore();
   });
-  it("回答地図は該当対象だけを表示し、切替でも追加取得せず、保存設定を変更しない", async () => {
+  it("登録地図は該当対象だけを表示し、切替でも追加取得せず、保存設定を変更しない", async () => {
     const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as AnotherMapBootstrap;
     (bootstrap as any).page = "form-answer-map";
     bootstrap.answerPreview = {

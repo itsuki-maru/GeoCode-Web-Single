@@ -60,7 +60,7 @@ const setup = () => {
   };
   return { runtime, leaflet, data, marker, shape, cluster, visible, handlers };
 };
-describe("回答値の地図表示", () => {
+describe("登録値の地図表示", () => {
   it("未生成の図形を論理表示の件数へ含め、生成時に分析スタイルを適用する", () => {
     const s = setup();
     let created: ((layer: any, record: { id: string }) => void) | undefined;
@@ -87,7 +87,7 @@ describe("回答値の地図表示", () => {
     installAnswerAnalysis(s.runtime, s.data, s.leaflet, vi.fn());
     expect((s.runtime as any).popupContent.setAnalysis).toHaveBeenCalledWith(
       "shape:same",
-      expect.stringContaining("使用した回答"),
+      expect.stringContaining("使用した登録"),
     );
     expect(s.shape.shapeMemo).toBe("元のメモ");
     expect(s.marker.bindPopup).not.toHaveBeenCalled();

@@ -44,8 +44,8 @@ export function installAnswerAnalysis(
     const value = target.value;
     const text = `${data.field_label}: ${value ?? bucket.label}（${bucket.label}）`;
     const date = target.answered_at
-      ? `使用した回答: ${target.answered_at}`
-      : "選択フォームの該当回答なし";
+      ? `使用した登録: ${target.answered_at}`
+      : "選択フォームの該当登録なし";
     const html = `<section class="answer-analysis-value"><strong>${escapeHtml(text)}</strong><br>${escapeHtml(date)}</section>`;
     runtime.popupContent?.setAnalysis(key, html);
     if (!layer) return;
@@ -71,7 +71,7 @@ export function installAnswerAnalysis(
       runtime.shapeNameLabelManager?.invalidate(layer);
       const markdownEscape = (s: string) => s.replace(/[\\`*_{}[\]<>()#+\-.!|]/g, "\\$&");
       if (!runtime.popupContent)
-        layer.shapeMemo = `### 分析に使用した回答\n\n${markdownEscape(text)}\n\n${markdownEscape(date)}\n\n---\n\n${layer.shapeMemo || ""}`;
+        layer.shapeMemo = `### 分析に使用した登録\n\n${markdownEscape(text)}\n\n${markdownEscape(date)}\n\n---\n\n${layer.shapeMemo || ""}`;
     }
   };
   for (const key of Object.keys(data.targets)) {

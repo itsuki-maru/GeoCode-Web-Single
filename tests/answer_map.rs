@@ -83,8 +83,8 @@ async fn answer_map_transport_restores_stored_and_ambiguous_bodies_and_keeps_fal
     let user = common::create_test_user(&pool, "transport-owner").await;
     let layer = common::master_layer_id(&pool, &user).await;
     let free = "自由</ScRiPt>&\u{2028}\u{2029}漢字𠮷🙂e\u{301}\r\n".repeat(12);
-    let answer_a = "**回答A🙂**\n".repeat(12);
-    let answer_b = "**回答B𠮷**\n".repeat(12);
+    let answer_a = "**登録A🙂**\n".repeat(12);
+    let answer_b = "**登録B𠮷**\n".repeat(12);
     let at = chrono::NaiveDate::from_ymd_opt(2026, 10, 1)
         .unwrap()
         .and_hms_opt(0, 0, 0)
@@ -402,7 +402,7 @@ async fn insert_popup_case(
         .unwrap()
         .and_hms_opt(0, 0, 0)
         .unwrap();
-    // 逆順で挿入し、同時刻の順序が挿入順ではなく回答 ID で決まるようにする。
+    // 逆順で挿入し、同時刻の順序が挿入順ではなく登録 ID で決まるようにする。
     for i in (0..ids.len()).rev() {
         let snapshot = (!case.name.starts_with("legacy")).then(|| {
             json!({
@@ -664,7 +664,7 @@ async fn matches_all_pages_deduplicates_and_preserves_owner_and_latest_rules() {
     for (id, user, group, name) in [
         (ids[0], owner, layer, "該当A"),
         (ids[1], owner, layer, "該当B"),
-        (ids[2], owner, layer, "回答なし"),
+        (ids[2], owner, layer, "登録なし"),
         (ids[3], other, other_layer, "他人の対象"),
     ] {
         sqlx::query(
@@ -825,7 +825,7 @@ async fn matches_all_pages_deduplicates_and_preserves_owner_and_latest_rules() {
     assert!(html.contains("answerPreview"));
     assert!(html.contains("該当A"));
     assert!(!html.contains("他人の対象"));
-    assert!(!html.contains("回答なし"));
+    assert!(!html.contains("登録なし"));
     let normal = geocode_web_single::handler::map::map_another_get_handler(
         Extension(owner.to_string()),
         Extension(pool.clone()),
@@ -1045,7 +1045,7 @@ async fn twenty_thousand_targets_support_map_and_filter_without_truncation() {
     )
     .await
     .unwrap_err();
-    assert!(error.to_string().contains("CSVは10,000回答"), "{error:?}");
+    assert!(error.to_string().contains("CSVは10,000登録"), "{error:?}");
     request.conditions = serde_json::from_value(json!([
         {"field_id":"n","field_type":"number","op":"gte","value":10001}
     ]))
@@ -1100,8 +1100,8 @@ async fn popup_snapshots_separate_all_answers_and_keep_ambiguous_legacy_read_onl
                 35,
                 139,
                 '自由
-回答A
-回答B
+登録A
+登録B
 ',
                     CURRENT_TIMESTAMP,
                     CURRENT_TIMESTAMP
@@ -1138,12 +1138,12 @@ async fn popup_snapshots_separate_all_answers_and_keep_ambiguous_legacy_read_onl
         )
         "#,
     )
-        .bind(id.to_string()).bind(owner.to_string()).bind(layer.to_string()).bind(json!({"type":"Feature","properties":{"memo":"同じ回答\n同じ回答\n"},"geometry":{"type":"LineString","coordinates":[[139,35],[140,36]]}})).execute(&pool).await.unwrap();
+        .bind(id.to_string()).bind(owner.to_string()).bind(layer.to_string()).bind(json!({"type":"Feature","properties":{"memo":"同じ登録\n同じ登録\n"},"geometry":{"type":"LineString","coordinates":[[139,35],[140,36]]}})).execute(&pool).await.unwrap();
     let at = (Utc::now() - Duration::days(1)).naive_utc();
     for (kind, target, markdown, n) in [
-        ("marker", id, "回答A\n", 1),
-        ("marker", id, "回答B\n", 2),
-        ("shape", id, "同じ回答\n", 1),
+        ("marker", id, "登録A\n", 1),
+        ("marker", id, "登録B\n", 2),
+        ("shape", id, "同じ登録\n", 1),
         ("marker", foreign, "他人の秘密", 1),
     ] {
         sqlx::query(&format!(
@@ -1173,7 +1173,7 @@ async fn popup_snapshots_separate_all_answers_and_keep_ambiguous_legacy_read_onl
     let body = &data.popup_bodies[&format!("marker:{id}")];
     assert_eq!(data.answer_count, 1);
     assert_eq!(body["free_text"], "自由\n");
-    assert_eq!(body["managed_markdown"], "回答A\n回答B\n");
+    assert_eq!(body["managed_markdown"], "登録A\n登録B\n");
     assert_eq!(body["sync_required"], false);
     assert!(!data.popup_bodies.contains_key(&format!("marker:{foreign}")));
     let data = load_answer_map(&pool, &owner, &query(json!({})))
@@ -1198,7 +1198,7 @@ async fn popup_snapshots_separate_all_answers_and_keep_ambiguous_legacy_read_onl
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(row, ("自由\n回答A\n回答B\n".into(), true));
+    assert_eq!(row, ("自由\n登録A\n登録B\n".into(), true));
 }
 
 #[test]

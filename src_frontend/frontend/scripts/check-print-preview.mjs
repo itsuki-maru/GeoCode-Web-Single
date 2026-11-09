@@ -2,7 +2,7 @@
 // 事前に frontend で npm run build を実行する。Playwright は品質確認用の任意の依存パッケージ。
 // 実行例: node scripts/check-print-preview.mjs --browser=chrome --playwright-path=/path/to/playwright/index.mjs
 // ポップアップの内容は --popup=marker または --popup=shape、PDF 出力は --pdf=client を付けて確認する。
-// 回答地図の色分け・凡例は --coloring=true を付けて確認する。
+// 登録地図の色分け・凡例は --coloring=true を付けて確認する。
 // クラスタ表示の維持と印刷への引き継ぎは --clusters=true を付けて確認する。
 // ページ数と内容の確認: python scripts/check-print-preview-pdfs.py ../../dist/print-check/chrome
 import assert from "node:assert/strict";
@@ -162,7 +162,7 @@ const server = await createServer({
             );
             return;
           }
-          // 通常の印刷は選択された各レイヤを遅延読み込みする。回答印刷のスナップショットと同様に、
+          // 通常の印刷は選択された各レイヤを遅延読み込みする。登録印刷のスナップショットと同様に、
           // データベースを使わず、同じテスト用オブジェクトを返す。
           if (path === "/marker/read/all" || path === "/shapes") {
             const query = new URL(req.url, "http://localhost").searchParams;

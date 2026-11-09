@@ -62,7 +62,11 @@ const ID_RE = /^[\w-]{11}$/;
 // それぞれのトークンを生成
 const detailsToken = createNestedTokenizer("details", {
   renderDeferredBody: (text, links) =>
-    renderProgressiveMarkdown(text, (html) => renderIframe(filterXSS(html, xssOptions)), links),
+    renderProgressiveMarkdown(
+      text,
+      (html) => renderIframe(sanitizeMapHtml(html, filterXSS, xssOptions)),
+      links,
+    ),
 });
 const noteToken = createNestedTokenizer("note");
 const warningToken = createNestedTokenizer("warning");
@@ -184,45 +188,7 @@ marked.setOptions({ renderer });
 
 // detailsタグ内のimgタグとvideoタグ内のネットワークコンテンツを遅延読み込みさせる処理（画像を遅延読み込みで初期化）
 // XSSフィルタのカスタマイズ
-let xssOptions = {
-  whiteList: {
-    h1: ["id", "class"], // h1タグのid属性を許可 class属性を許可
-    h2: ["id", "class"], // h2タグのid属性を許可 class属性を許可
-    h3: ["id"], // h3タグのid属性を許可
-    h4: ["id"], // h4タグのid属性を許可
-    h5: ["id"], // h5タグのid属性を許可
-    h6: ["id"], // h6タグのid属性を許可
-    pre: ["class"],
-    a: ["target", "rel", "href", "title", "class", "data-download-href"],
-    img: ["src", "alt", "class", "data-preview-src"],
-    video: ["src", "controls", "preload", "poster"],
-    p: [],
-    div: ["class", "data-progressive-content"],
-    span: [],
-    li: [],
-    strong: [],
-    ul: [],
-    ol: ["start"],
-    li: [],
-    blockquote: [],
-    code: [],
-    table: [],
-    tbody: [],
-    th: [],
-    td: [],
-    tr: [],
-    details: ["class", "data-deferred-details"],
-    summary: [],
-    "app-youtube": ["video-id", "data-src"],
-    "app-camera": ["data-camera-src"],
-  },
-  // iframeの確認（念のため、iframeはここで不許可）
-  onTag(tag, html) {
-    if (tag === "iframe") return "Not Allow iframe ";
-  },
-  stripIgnoreTag: true,
-  stripIgnoreTagBody: ["script"],
-};
+const xssOptions = createMapXssOptions();
 
 // 保存位置を優先し、なければバックエンド指定の初期位置を使用する
 const lastMapView = loadLastMapView();
@@ -352,7 +318,7 @@ let markers = {};
 // Leaflet.markerclusterの使用
 popupContent = createPopupContentRuntime({
   map,
-  sanitizeHtml: (html) => filterXSS(html, xssOptions),
+  sanitizeHtml: (html) => sanitizeMapHtml(html, filterXSS, xssOptions),
   renderMarkdown: renderMapMarkdown,
   setupImages: setupDetailsLazyImages,
   loadBody: async (kind, id) => {

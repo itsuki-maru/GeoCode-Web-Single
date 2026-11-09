@@ -3,6 +3,10 @@ import {
   isAnswerColoring,
 } from "../../../../template-scripts/src/map/answer-coloring";
 import { createColorLegend } from "../../../../template-scripts/src/map/common/color-legend";
+import {
+  createMapXssOptions,
+  sanitizeMapHtml,
+} from "../../../../template-scripts/src/map/common/markdown-sanitizer";
 import { readFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,7 +64,13 @@ export function editorRuntimeSource(entryName: EditorEntryName): string {
 
 /** 本番と同じ共有スコープを維持し、変更していない各ファイルを個別に計測する。 */
 export function runEditorRuntime(context: Context, entryName: EditorEntryName) {
-  Object.assign(context, { createColorLegend, installAnswerColoring, isAnswerColoring });
+  Object.assign(context, {
+    createColorLegend,
+    installAnswerColoring,
+    isAnswerColoring,
+    createMapXssOptions,
+    sanitizeMapHtml,
+  });
   const prelude = editorCommonPrelude.replace(
     /^import \{ ([^}]+) \} from "[^"]+";$/gm,
     "const { $1 } = globalThis;",

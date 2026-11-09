@@ -1,4 +1,4 @@
-//! 回答地図の HTML 転送のみを圧縮し、データベースと読み取りモデルの本文は正規の表現を保つ。
+//! 登録地図の HTML 転送のみを圧縮し、データベースと読み取りモデルの本文は正規の表現を保つ。
 use serde_json::{Map, Value};
 use tera::Context;
 
@@ -210,7 +210,7 @@ mod tests {
     #[test]
     fn references_round_trip_markers_shapes_unicode_and_ambiguous_legacy_without_copying_popups() {
         let free = "自由</script>&\u{2028}\u{2029}𠮷e\u{301}\r\n".repeat(12);
-        let managed = "同じ回答🙂\n同じ回答🙂\n".repeat(12);
+        let managed = "同じ登録🙂\n同じ登録🙂\n".repeat(12);
         let body = format!("{free}{managed}");
         let mut canonical =
             context(Some(json!(body)), json!(free), json!(managed), true).into_json();

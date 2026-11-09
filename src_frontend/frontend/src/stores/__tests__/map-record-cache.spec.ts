@@ -395,7 +395,7 @@ describe("attribute and text search composition", () => {
       expectMatches();
       markers.setAttributeSearch(criteria, result(["one"], ["s1"]));
       expectMatches();
-      // 回答が変わっても、変更のないテキストを別の照合規則で再評価しない。
+      // 登録が変わっても、変更のないテキストを別の照合規則で再評価しない。
       markers.upsertRecord({ ...record, update_at: "2026-01-02T00:00:00" });
       shapes.upsertRecord({ ...figure, updated_at: "2026-01-02T00:00:00" });
       markers.refreshSearchResults(true);

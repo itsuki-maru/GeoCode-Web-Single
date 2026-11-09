@@ -7,7 +7,7 @@ import {
   isAnswerShapeVisible,
 } from "./answer-shapes";
 
-/** この専用 iframe だけが回答フィルターを受け付け、キャッシュ済みのレイヤは保持する。 */
+/** この専用 iframe だけが登録フィルターを受け付け、キャッシュ済みのレイヤは保持する。 */
 export function installAnswerFilter(
   runtime: any,
   preview: FormAnswerMapBootstrap["answerPreview"],

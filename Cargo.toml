@@ -48,6 +48,8 @@ sha2 = "0.10"
 hmac = "0.12"
 sha1 = "0.10"
 base64 = "0.22"
+pulldown-cmark = "0.13"
+ammonia = "4"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

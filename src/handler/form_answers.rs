@@ -1,4 +1,4 @@
-//! 所有者の構造化回答を、履歴・最新回答で検索し、同じ条件でCSVへ出力する。
+//! 所有者の構造化登録を、履歴・最新登録で検索し、同じ条件でCSVへ出力する。
 use crate::{error::AppError, model::MarkerFormField};
 use axum::{
     Json,
@@ -104,6 +104,7 @@ impl<'r> FromRow<'r, sqlx::sqlite::SqliteRow> for AnswerRow {
 #[derive(Serialize)]
 pub struct AnswerPage {
     pub editing_supported: bool,
+    pub deletion_supported: bool,
     pub rows: Vec<AnswerRow>,
     pub total: i64,
     pub target_count: i64,
@@ -201,11 +202,11 @@ pub(super) fn validate(query: &AnswerQuery) -> Result<(), AppError> {
         return Err(invalid("ページ情報が不正です。"));
     }
     if query.conditions.len() > 10 {
-        return Err(invalid("回答条件は10件以内にしてください。"));
+        return Err(invalid("登録条件は10件以内にしてください。"));
     }
     if !query.conditions.is_empty() && query.common_form_id.is_none() && query.target_id.is_none() {
         return Err(invalid(
-            "回答条件を使う場合は共通フォームまたは対象を選択してください。",
+            "登録条件を使う場合は共通フォームまたは対象を選択してください。",
         ));
     }
     for c in &query.conditions {
@@ -343,7 +344,7 @@ fn bound_value(b: &mut QueryBuilder<'_, Sqlite>, c: &AnswerCondition, value: &Va
     });
 }
 
-/// 最新回答の決定後に、版・期間・回答条件を適用する。
+/// 最新登録の決定後に、版・期間・登録条件を適用する。
 pub(super) fn build_query(
     user: &str,
     q: &AnswerQuery,
@@ -392,8 +393,8 @@ fn append_answer_source(
             SELECT
             "#,
         );
-        // 履歴の件数取得には回答 ID が不要なため、対象・作成日時のインデックスだけで
-        // 送信データを走査できる。最新回答の順位付けでは、引き続き ID で同順位を解消する。
+        // 履歴の件数取得には登録 ID が不要なため、対象・作成日時のインデックスだけで
+        // 送信データを走査できる。最新登録の順位付けでは、引き続き ID で同順位を解消する。
         if !matches!(projection, AnswerProjection::Count(q) if q.mode != "latest") {
             b.push("s.id, ");
         }
@@ -543,7 +544,7 @@ fn build_query_with_projection(
             "#,
         );
     } else {
-        // 履歴のフィルタリング前に、すべての回答に順位を付けたり、並べ替えたりする必要はない。
+        // 履歴のフィルタリング前に、すべての登録に順位を付けたり、並べ替えたりする必要はない。
         b.push(
             r#"
             ), filtered AS (
@@ -570,7 +571,7 @@ fn build_query_with_projection(
     b
 }
 
-/// 検証済み条件を同一回答へAND適用する。検索と回答地図で共用。
+/// 検証済み条件を同一登録へAND適用する。検索と登録地図で共用。
 pub(super) fn append_conditions(b: &mut QueryBuilder<'_, Sqlite>, conditions: &[AnswerCondition]) {
     for c in conditions {
         b.push(" AND (");
@@ -697,7 +698,7 @@ async fn selected_answer_rows(
     if keys.is_empty() {
         return Ok(vec![]);
     }
-    // ID にはすべてのフィルターと最新回答の選択結果がすでに反映されている。同じ読み取り
+    // ID にはすべてのフィルターと最新登録の選択結果がすでに反映されている。同じ読み取り
     // トランザクションと所有権の範囲内で、その限定された集合だけを解決する。
     let mut b = QueryBuilder::new(format!(
         r#"
@@ -754,6 +755,7 @@ pub async fn search_answers_handler(
     };
     Ok(Json(AnswerPage {
         editing_supported: true,
+        deletion_supported: true,
         rows,
         total,
         target_count,
@@ -1143,7 +1145,7 @@ fn row_csv(row: &AnswerRow, columns: &[FieldOption]) -> String {
             } else if empty {
                 "未入力"
             } else {
-                "回答あり"
+                "登録あり"
             },
             false,
         ));
@@ -1221,7 +1223,7 @@ pub(super) fn stream_csv(
     filename: &'static str,
 ) -> Result<Response, AppError> {
     let mut headers = [
-        "回答ID",
+        "登録ID",
         "投稿日時（UTC）",
         "対象種別",
         "対象ID",
@@ -1341,7 +1343,7 @@ mod tests {
     }
 
     fn field_source(rows: Value) -> QueryBuilder<'static, Sqlite> {
-        // 保存された回答の列を読む場合と同様に、テスト用レコードを一度だけデコードする。
+        // 保存された登録の列を読む場合と同様に、テスト用レコードを一度だけデコードする。
         // インライン化すると、展開するフィールドごとに大きなスナップショットを再解析してしまう。
         let mut b = QueryBuilder::new(
             r#"
@@ -1428,14 +1430,14 @@ mod tests {
             "marker",
             "2026-10-01 07:00:00",
             Value::Null,
-            json!({"legacy_one":"旧回答"}),
+            json!({"legacy_one":"旧登録"}),
         ));
         rows.push(field_record(
             1004,
             "shape",
             "2026-10-01 06:00:00",
             Value::Null,
-            json!({"legacy_two":"別の旧回答"}),
+            json!({"legacy_two":"別の旧登録"}),
         ));
         rows.push(field_record(
             1005,
@@ -1605,7 +1607,7 @@ mod tests {
                 "marker",
                 "2026-10-01 06:00:00",
                 Value::Null,
-                json!({"legacy":"旧回答"})
+                json!({"legacy":"旧登録"})
             )
         ]);
         let mut results = Vec::new();
@@ -1660,7 +1662,7 @@ mod tests {
                 .map(|n| {
                     let fields: Vec<_> = (0..5).map(|f| json!({
                     "id":format!("field_{f}"), "type":"text", "label":format!("項目{f}"),
-                    "choices": if distinct { vec![format!("回答{n}")] } else { vec!["共通".into()] }
+                    "choices": if distinct { vec![format!("登録{n}")] } else { vec!["共通".into()] }
                 })).collect();
                     field_record(
                         n + 1,
@@ -1782,7 +1784,7 @@ pub struct CsvDownload {
     pub query: String,
 }
 
-/// ネイティブダウンロード用。ブラウザで全回答をBlobに蓄積しない。
+/// ネイティブダウンロード用。ブラウザで全登録をBlobに蓄積しない。
 pub async fn download_answers_handler(
     Extension(user): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
