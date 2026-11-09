@@ -20,11 +20,10 @@ export interface ReadOnlyPrintSnapshot extends ShareMapSnapshot {
 type LegacyLayerRecord = Omit<LayerRecord, "marker_icon_id" | "marker_icon_filename"> &
   Partial<Pick<LayerRecord, "marker_icon_id" | "marker_icon_filename">>;
 
-export interface ReadOnlyPrintSource
-  extends Pick<
-    ReadOnlyPrintSnapshot,
-    "sourcePage" | "snapshotShare" | "markers" | "shapes" | "tileServers" | "tileOverlays"
-  > {
+export interface ReadOnlyPrintSource extends Pick<
+  ReadOnlyPrintSnapshot,
+  "sourcePage" | "snapshotShare" | "markers" | "shapes" | "tileServers" | "tileOverlays"
+> {
   layers: Record<string, LegacyLayerRecord>;
 }
 

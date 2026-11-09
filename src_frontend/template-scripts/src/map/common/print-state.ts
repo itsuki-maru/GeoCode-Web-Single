@@ -26,35 +26,35 @@ export function isPrintMapState(value: unknown): value is PrintMapState {
   const view = state.view;
   return Boolean(
     (state.coloring === undefined || isAnswerColoring(state.coloring)) &&
-      (state.objectQuery === undefined ||
-        (typeof state.objectQuery === "string" && state.objectQuery.length <= 10000)) &&
-      view &&
-      Number.isFinite(view.latitude) &&
-      Math.abs(view.latitude) <= 90 &&
-      Number.isFinite(view.longitude) &&
-      Math.abs(view.longitude) <= 180 &&
-      Number.isFinite(view.zoom) &&
-      view.zoom >= 0 &&
-      view.zoom <= 30 &&
-      typeof state.tileServerId === "string" &&
-      state.overlays &&
-      typeof state.overlays === "object" &&
-      !Array.isArray(state.overlays) &&
-      Object.values(state.overlays).every((visible) => typeof visible === "boolean") &&
-      (state.clusteringEnabled === undefined || typeof state.clusteringEnabled === "boolean") &&
-      (state.clusteringAllowed === undefined || typeof state.clusteringAllowed === "boolean") &&
-      (state.clusteringMinZoom === undefined || isClusteringMinZoom(state.clusteringMinZoom)) &&
-      typeof state.markersVisible === "boolean" &&
-      typeof state.shapesVisible === "boolean" &&
-      typeof state.shapeNamesVisible === "boolean" &&
-      [state.markerIds, state.shapeIds].every(
-        (ids) =>
-          ids === undefined ||
-          ids === null ||
-          (Array.isArray(ids) && ids.every((id) => typeof id === "string")),
-      ) &&
-      (state.layerIds === null ||
-        (Array.isArray(state.layerIds) && state.layerIds.every((id) => typeof id === "string"))),
+    (state.objectQuery === undefined ||
+      (typeof state.objectQuery === "string" && state.objectQuery.length <= 10000)) &&
+    view &&
+    Number.isFinite(view.latitude) &&
+    Math.abs(view.latitude) <= 90 &&
+    Number.isFinite(view.longitude) &&
+    Math.abs(view.longitude) <= 180 &&
+    Number.isFinite(view.zoom) &&
+    view.zoom >= 0 &&
+    view.zoom <= 30 &&
+    typeof state.tileServerId === "string" &&
+    state.overlays &&
+    typeof state.overlays === "object" &&
+    !Array.isArray(state.overlays) &&
+    Object.values(state.overlays).every((visible) => typeof visible === "boolean") &&
+    (state.clusteringEnabled === undefined || typeof state.clusteringEnabled === "boolean") &&
+    (state.clusteringAllowed === undefined || typeof state.clusteringAllowed === "boolean") &&
+    (state.clusteringMinZoom === undefined || isClusteringMinZoom(state.clusteringMinZoom)) &&
+    typeof state.markersVisible === "boolean" &&
+    typeof state.shapesVisible === "boolean" &&
+    typeof state.shapeNamesVisible === "boolean" &&
+    [state.markerIds, state.shapeIds].every(
+      (ids) =>
+        ids === undefined ||
+        ids === null ||
+        (Array.isArray(ids) && ids.every((id) => typeof id === "string")),
+    ) &&
+    (state.layerIds === null ||
+      (Array.isArray(state.layerIds) && state.layerIds.every((id) => typeof id === "string"))),
   );
 }
 

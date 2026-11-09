@@ -1,12 +1,5 @@
 export type MarkerFormFieldType =
-  | "checkbox"
-  | "date"
-  | "image"
-  | "number"
-  | "radio"
-  | "select"
-  | "text"
-  | "textarea";
+  "checkbox" | "date" | "image" | "number" | "radio" | "select" | "text" | "textarea";
 
 export interface MarkerFormField {
   choices: string[];

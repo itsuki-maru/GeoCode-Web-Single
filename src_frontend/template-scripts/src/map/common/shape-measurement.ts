@@ -53,11 +53,7 @@ interface ShapeMeasurementDependencies {
 }
 
 type MeasurementLabelVariant =
-  | "segment"
-  | "summary"
-  | "summary-circle"
-  | "summary-polyline"
-  | "summary-rectangle";
+  "segment" | "summary" | "summary-circle" | "summary-polyline" | "summary-rectangle";
 
 export function createShapeMeasurementRuntime({
   escapeHtml,

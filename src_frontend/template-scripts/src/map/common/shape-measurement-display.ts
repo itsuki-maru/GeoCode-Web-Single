@@ -41,11 +41,7 @@ interface MeasurementBounds {
 }
 
 type MeasurementLabelVariant =
-  | "segment"
-  | "summary"
-  | "summary-circle"
-  | "summary-polyline"
-  | "summary-rectangle";
+  "segment" | "summary" | "summary-circle" | "summary-polyline" | "summary-rectangle";
 
 interface ShapeMeasurementDisplayDependencies {
   calculateProjectedPolygonArea(latLngs: unknown): number;

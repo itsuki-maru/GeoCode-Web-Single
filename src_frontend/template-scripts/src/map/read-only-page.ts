@@ -87,10 +87,7 @@ import {
 } from "./common/visibility-controls";
 
 type ReadOnlyPageName =
-  | "map-anather"
-  | "form-answer-map"
-  | "temporary-map"
-  | "temporary-map-mobile";
+  "map-anather" | "form-answer-map" | "temporary-map" | "temporary-map-mobile";
 
 type DynamicRecord = Record<string, any>;
 

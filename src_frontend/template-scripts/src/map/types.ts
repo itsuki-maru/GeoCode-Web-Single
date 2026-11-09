@@ -97,14 +97,13 @@ export interface TemporaryMapBootstrap extends MapBootstrapBase {
   shapes: Record<string, ShapeRecord>;
 }
 
-export interface FormAnswerMapBootstrap
-  extends Omit<AnotherMapBootstrap, "page" | "answerPreview"> {
+export interface FormAnswerMapBootstrap extends Omit<
+  AnotherMapBootstrap,
+  "page" | "answerPreview"
+> {
   page: "form-answer-map";
   answerPreview: Exclude<AnotherMapBootstrap["answerPreview"], false | undefined>;
 }
 
 export type MapBootstrap =
-  | AnotherMapBootstrap
-  | FormAnswerMapBootstrap
-  | EditableMapBootstrap
-  | TemporaryMapBootstrap;
+  AnotherMapBootstrap | FormAnswerMapBootstrap | EditableMapBootstrap | TemporaryMapBootstrap;
