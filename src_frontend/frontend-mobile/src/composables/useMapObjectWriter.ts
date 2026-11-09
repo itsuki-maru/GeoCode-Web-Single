@@ -105,28 +105,28 @@ function markerRecord(value: unknown): value is MapObjectData {
   const record = value as MapObjectData | null;
   return Boolean(
     record &&
-      typeof record.id === "string" &&
-      typeof record.layer_id === "string" &&
-      typeof record.marker_name === "string" &&
-      typeof record.detail === "string" &&
-      typeof record.latitude === "number" &&
-      Number.isFinite(record.latitude) &&
-      typeof record.longitude === "number" &&
-      Number.isFinite(record.longitude) &&
-      typeof record.update_at === "string",
+    typeof record.id === "string" &&
+    typeof record.layer_id === "string" &&
+    typeof record.marker_name === "string" &&
+    typeof record.detail === "string" &&
+    typeof record.latitude === "number" &&
+    Number.isFinite(record.latitude) &&
+    typeof record.longitude === "number" &&
+    Number.isFinite(record.longitude) &&
+    typeof record.update_at === "string",
   );
 }
 function shapeRecord(value: unknown): value is ShapeData {
   const record = value as ShapeData | null;
   return Boolean(
     record &&
-      typeof record.id === "string" &&
-      typeof record.layer_id === "string" &&
-      typeof record.user_id === "string" &&
-      typeof record.shape_type === "string" &&
-      record.geojson &&
-      typeof record.created_at === "string" &&
-      typeof record.updated_at === "string",
+    typeof record.id === "string" &&
+    typeof record.layer_id === "string" &&
+    typeof record.user_id === "string" &&
+    typeof record.shape_type === "string" &&
+    record.geojson &&
+    typeof record.created_at === "string" &&
+    typeof record.updated_at === "string",
   );
 }
 

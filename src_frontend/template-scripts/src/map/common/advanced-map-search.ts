@@ -928,9 +928,9 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
       dialog.append(note);
     }
     dialog
-      .querySelectorAll<
-        HTMLButtonElement | HTMLSelectElement | HTMLInputElement
-      >("button,select,input")
+      .querySelectorAll<HTMLButtonElement | HTMLSelectElement | HTMLInputElement>(
+        "button,select,input",
+      )
       .forEach((b) => {
         if (b.textContent !== "閉じる") {
           b.dataset.busy = String(b.disabled);

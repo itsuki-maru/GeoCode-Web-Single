@@ -4,8 +4,8 @@ let externalShapeFilterIdSet = null;
 function isShapeVisibleForExternalFilter(layer) {
   return Boolean(
     layer &&
-      !layer.isDeletedShape &&
-      (!externalShapeFilterIdSet || externalShapeFilterIdSet.has(String(layer.shapeId))),
+    !layer.isDeletedShape &&
+    (!externalShapeFilterIdSet || externalShapeFilterIdSet.has(String(layer.shapeId))),
   );
 }
 

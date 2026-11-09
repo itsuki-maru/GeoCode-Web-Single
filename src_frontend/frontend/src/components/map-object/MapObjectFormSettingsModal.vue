@@ -7,14 +7,7 @@ import BaseModal from "@/components/common/BaseModal.vue";
 import apiClient from "@/axiosClient";
 
 type FieldType =
-  | "text"
-  | "textarea"
-  | "number"
-  | "date"
-  | "select"
-  | "radio"
-  | "checkbox"
-  | "image";
+  "text" | "textarea" | "number" | "date" | "select" | "radio" | "checkbox" | "image";
 
 interface FormField {
   id: string;

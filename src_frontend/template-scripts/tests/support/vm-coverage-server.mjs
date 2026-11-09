@@ -9,7 +9,7 @@ export class VmCoverageProvider extends V8CoverageProvider {
   constructor() {
     super();
     this.name = "custom";
-    if (this.version !== "4.1.11")
+    if (this.version !== "4.1.12")
       throw new Error("Revalidate VM coverage for this Vitest version");
   }
   async getSources(url, onTransform, functions = []) {

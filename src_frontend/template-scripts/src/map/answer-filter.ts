@@ -30,8 +30,8 @@ export function installAnswerFilter(
     const layer = runtime.markers[`marker-${id}`];
     return Boolean(
       layer &&
-        runtime.map.hasLayer(runtime.visibleMarkerGroup) &&
-        runtime.visibleMarkerGroup.hasLayer(layer),
+      runtime.map.hasLayer(runtime.visibleMarkerGroup) &&
+      runtime.visibleMarkerGroup.hasLayer(layer),
     );
   };
   const counts = () => ({

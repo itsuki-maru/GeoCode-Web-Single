@@ -594,8 +594,8 @@ async function handleCircleShapeDragEnd(event) {
 function canAddVertexToShape(layer) {
   return Boolean(
     layer?.shapeId &&
-      layer.isMeasurementLabel !== true &&
-      ["polygon", "polyline", "rectangle"].includes(layer.shapeType),
+    layer.isMeasurementLabel !== true &&
+    ["polygon", "polyline", "rectangle"].includes(layer.shapeType),
   );
 }
 

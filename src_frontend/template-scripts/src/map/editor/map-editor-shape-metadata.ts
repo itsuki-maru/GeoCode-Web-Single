@@ -128,9 +128,9 @@ function applyShapeRecord(layer, shapeRecord, syncRecord = true) {
 function isShapeVisibleForSearch(layer) {
   return Boolean(
     layer &&
-      !layer.isDeletedShape &&
-      (!externalShapeFilterIdSet || externalShapeFilterIdSet.has(String(layer.shapeId))) &&
-      matchesShapeSearch(layer.options?.shapeRecord, localMarkerSearchQuery),
+    !layer.isDeletedShape &&
+    (!externalShapeFilterIdSet || externalShapeFilterIdSet.has(String(layer.shapeId))) &&
+    matchesShapeSearch(layer.options?.shapeRecord, localMarkerSearchQuery),
   );
 }
 
@@ -166,10 +166,10 @@ function endSavingShape(id) {
 function isEditorShapeRecordVisible(record) {
   return Boolean(
     record &&
-      !deletedShapeIds.has(String(record.id)) &&
-      (is_master || record.layer_id === getCurrentShapeLayerId()) &&
-      (!externalShapeFilterIdSet || externalShapeFilterIdSet.has(String(record.id))) &&
-      (!editorEntryProfile.isMobile || matchesEditorShapeSearch(record)),
+    !deletedShapeIds.has(String(record.id)) &&
+    (is_master || record.layer_id === getCurrentShapeLayerId()) &&
+    (!externalShapeFilterIdSet || externalShapeFilterIdSet.has(String(record.id))) &&
+    (!editorEntryProfile.isMobile || matchesEditorShapeSearch(record)),
   );
 }
 
@@ -185,12 +185,12 @@ function initializeEditorShapeRendering() {
       savingShapeIds.has(String(id)) ||
       Boolean(
         layer &&
-          (layer === geometryEditingShapeLayer ||
-            layer === editingShapeLayer ||
-            layer === circleShapeDragState?.layer ||
-            layer.isDeletingShape ||
-            isEditorShapePopupOpen?.(layer) ||
-            measurementSelectedShapes.has(layer)),
+        (layer === geometryEditingShapeLayer ||
+          layer === editingShapeLayer ||
+          layer === circleShapeDragState?.layer ||
+          layer.isDeletingShape ||
+          isEditorShapePopupOpen?.(layer) ||
+          measurementSelectedShapes.has(layer)),
       ),
     createLayer: (record) => {
       const style = getShapeStyleFromGeoJson(record.shape_type, record.geojson);
