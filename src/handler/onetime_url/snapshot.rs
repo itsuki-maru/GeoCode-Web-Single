@@ -1,7 +1,10 @@
 //! 全画面地図が保持している対象と表示設定を、追加検索せず共有用に固定する。
 use crate::{
     error::AppError,
-    model::{LayerObjectFromRow, MarkerObjectFromRow, ShapeObject, TileServers},
+    model::{
+        LayerObjectFromRow, MarkerObjectFromRow, ShapeObject, TileServers,
+        is_valid_basemap_definition,
+    },
     shape_validation::validate_shape_geojson,
 };
 use serde::{Deserialize, Serialize};
@@ -142,7 +145,7 @@ pub(super) fn parse(value: Value, user: &str) -> Result<Snapshot, AppError> {
             "共有対象はマーカーと図形を合わせて10,000件以内にしてください。".into(),
         ));
     }
-    if input.version != 1
+    if !matches!(input.version, 1 | 2)
         || input.layers.len() > MAX_LAYERS
         || input.tile_servers.len() > 1000
         || input.tile_overlays.len() > 1000
@@ -339,13 +342,19 @@ pub(super) fn parse(value: Value, user: &str) -> Result<Snapshot, AppError> {
                 "max_zoom",
                 "create_at",
                 "updated_at",
+                "kind",
+                "style_url",
             ],
         )?;
         let id = value["id"].as_i64().ok_or_else(invalid)?;
         if key != id.to_string() {
             return Err(invalid());
         }
-        tile_servers.insert(key, public_tile_server(&value));
+        let tile = public_tile_server(&value, input.version)?;
+        if id == 1 && tile["kind"].as_str().is_some_and(|kind| kind != "raster") {
+            return Err(invalid());
+        }
+        tile_servers.insert(key, tile);
     }
     let mut overlay_ids = HashSet::new();
     let mut tile_overlays = Vec::new();
@@ -380,17 +389,41 @@ pub(super) fn parse(value: Value, user: &str) -> Result<Snapshot, AppError> {
         layers,
         markers,
         shapes,
-        metadata: json!({"version":1,"state":state,"tileServers":tile_servers,"tileOverlays":tile_overlays}),
+        metadata: json!({"version":input.version,"state":state,"tileServers":tile_servers,"tileOverlays":tile_overlays}),
     })
 }
 
-fn public_tile_server(value: &Value) -> Value {
-    json!({
+fn public_tile_server(value: &Value, version: u8) -> Result<Value, AppError> {
+    let kind = match value.get("kind") {
+        None => "raster",
+        Some(Value::String(kind)) => kind.as_str(),
+        _ => return Err(invalid()),
+    };
+    let style_url = value.get("style_url").filter(|value| !value.is_null());
+    if style_url.is_some_and(|value| !value.is_string())
+        || !is_valid_basemap_definition(kind, style_url.and_then(Value::as_str))
+        || (version == 1 && kind != "raster")
+    {
+        return Err(invalid());
+    }
+    let mut tile = json!({
         "id":value["id"], "layer_name":value["layer_name"], "label":value["label"],
         "url":value["url"], "attribution":value["attribution"],
         "include_foreign_tiles":value["include_foreign_tiles"],
         "min_zoom":value["min_zoom"], "max_zoom":value["max_zoom"],
-    })
+    });
+    if version == 2 {
+        tile["kind"] = json!(kind);
+        tile["style_url"] = style_url.cloned().unwrap_or(Value::Null);
+    }
+    Ok(tile)
+}
+
+fn tile_server_matches(captured: &Value, current: &Value, version: u8) -> bool {
+    matches!(
+        (public_tile_server(captured, version), public_tile_server(current, version)),
+        (Ok(captured), Ok(current)) if super::super::answer_sqlite::json_equal(&captured, &current)
+    )
 }
 
 fn public_tile_overlay(value: &Value) -> Value {
@@ -484,6 +517,8 @@ pub(super) async fn authorize(
             layer_name,
             label,
             url,
+            kind,
+            style_url,
             attribution,
             include_foreign_tiles,
             min_zoom,
@@ -495,12 +530,16 @@ pub(super) async fn authorize(
     )
     .fetch_all(&mut **tx)
     .await?;
+    let version = snapshot.metadata["version"].as_u64().ok_or_else(invalid)?;
+    if !matches!(version, 1 | 2) {
+        return Err(invalid());
+    }
     let servers: HashMap<_, _> = server_rows
         .into_iter()
         .map(|server| {
             let id = server.id.to_string();
             let value = serde_json::to_value(server).map_err(|_| AppError::InternalServerError)?;
-            Ok((id, public_tile_server(&value)))
+            Ok((id, value))
         })
         .collect::<Result<_, AppError>>()?;
     for (id, tile) in snapshot.metadata["tileServers"]
@@ -509,7 +548,7 @@ pub(super) async fn authorize(
     {
         if !servers
             .get(id)
-            .is_some_and(|current| super::super::answer_sqlite::json_equal(current, tile))
+            .is_some_and(|current| tile_server_matches(tile, current, version as u8))
         {
             return Err(AppError::Validation(
                 "背景地図の設定が変更されています。地図を開き直してください。".into(),
@@ -593,6 +632,147 @@ mod tests {
         let mut invalid = empty();
         invalid["state"]["markerIds"] = json!([Uuid::new_v4()]);
         assert!(parse(invalid, &Uuid::nil().to_string()).is_err());
+    }
+
+    fn vector_snapshot(style_url: Value) -> Value {
+        let mut snapshot = empty();
+        snapshot["version"] = json!(2);
+        snapshot["state"]["tileServerId"] = json!("2");
+        snapshot["tileServers"]["2"] = json!({
+            "id": 2, "kind": "vector", "style_url": style_url,
+            "url": "/tiles/{z}/{x}/{y}.png", "label": "vector"
+        });
+        snapshot
+    }
+
+    #[test]
+    // 共有v1の旧ラスタ互換性と、v2のベクタ定義保持を確認する。
+    fn versions_keep_raster_compatibility_and_preserve_vector_style_metadata() {
+        let v1 = parse(empty(), &Uuid::nil().to_string()).unwrap();
+        assert_eq!(v1.metadata["version"], 1);
+        assert!(v1.metadata["tileServers"]["1"].get("kind").is_none());
+        let mut v2 = empty();
+        v2["version"] = json!(2);
+        let v2 = parse(v2, &Uuid::nil().to_string()).unwrap();
+        assert_eq!(v2.metadata["version"], 2);
+        assert_eq!(v2.metadata["tileServers"]["1"]["kind"], "raster");
+        assert!(v2.metadata["tileServers"]["1"]["style_url"].is_null());
+        for style in [
+            "https://tiles.example/style.json",
+            "/assets/styles/map.json",
+        ] {
+            let parsed = parse(vector_snapshot(json!(style)), &Uuid::nil().to_string()).unwrap();
+            assert_eq!(parsed.metadata["version"], 2);
+            assert_eq!(parsed.metadata["tileServers"]["2"]["kind"], "vector");
+            assert_eq!(parsed.metadata["tileServers"]["2"]["style_url"], style);
+            assert_eq!(
+                parsed.metadata["tileServers"]["2"]["url"],
+                "/tiles/{z}/{x}/{y}.png"
+            );
+        }
+    }
+
+    #[test]
+    // 未知の形式・種別と、既定背景のベクタ化を拒否する。
+    fn snapshots_reject_unknown_versions_kinds_and_vector_default_background() {
+        for version in [0, 3, 255] {
+            let mut bad = empty();
+            bad["version"] = json!(version);
+            assert!(parse(bad, &Uuid::nil().to_string()).is_err());
+        }
+        for kind in [json!("unknown"), json!(null), json!(1)] {
+            let mut bad = vector_snapshot(json!("/styles/map.json"));
+            bad["tileServers"]["2"]["kind"] = kind;
+            assert!(parse(bad, &Uuid::nil().to_string()).is_err());
+        }
+        let mut default_vector = vector_snapshot(json!("/styles/map.json"));
+        default_vector["tileServers"]["1"] = default_vector["tileServers"]["2"].clone();
+        default_vector["tileServers"]["1"]["id"] = json!(1);
+        assert!(parse(default_vector, &Uuid::nil().to_string()).is_err());
+        let mut defaulted_v1 = empty();
+        defaulted_v1["tileServers"]["1"]["kind"] = json!("raster");
+        defaulted_v1["tileServers"]["1"]["style_url"] = Value::Null;
+        let defaulted_v1 = parse(defaulted_v1, &Uuid::nil().to_string()).unwrap();
+        assert!(
+            defaulted_v1.metadata["tileServers"]["1"]
+                .get("kind")
+                .is_none()
+        );
+        assert!(
+            defaulted_v1.metadata["tileServers"]["1"]
+                .get("style_url")
+                .is_none()
+        );
+        let mut vector_v1 = vector_snapshot(json!("/styles/map.json"));
+        vector_v1["version"] = json!(1);
+        assert!(parse(vector_v1, &Uuid::nil().to_string()).is_err());
+        let mut null_kind = empty();
+        null_kind["tileServers"]["1"]["kind"] = Value::Null;
+        assert!(parse(null_kind, &Uuid::nil().to_string()).is_err());
+        let mut raster_style = empty();
+        raster_style["version"] = json!(2);
+        raster_style["tileServers"]["1"]["style_url"] = json!("/styles/map.json");
+        assert!(parse(raster_style, &Uuid::nil().to_string()).is_err());
+    }
+
+    #[test]
+    // ベクタのスタイルURLを検証し、不正なURLや容量超過を拒否する。
+    fn vector_styles_require_safe_https_or_same_origin_absolute_paths() {
+        let invalid_styles = [
+            Value::Null,
+            json!(false),
+            json!(""),
+            json!("styles/map.json"),
+            json!("http://tiles.example/style.json"),
+            json!("https://user:password@tiles.example/style.json"),
+            json!("https://user@tiles.example/style.json"),
+            json!("https://tiles.example/style.json#fragment"),
+            json!("//tiles.example/style.json"),
+            json!("/\\tiles.example/style.json"),
+            json!("/styles/map.json#fragment"),
+            json!("/styles\\map.json"),
+            json!("/styles/\nmap.json"),
+            json!("https://tiles.example/\tstyle.json"),
+            json!(format!("/{}", "x".repeat(4096))),
+        ];
+        for style in invalid_styles {
+            assert!(
+                parse(vector_snapshot(style.clone()), &Uuid::nil().to_string()).is_err(),
+                "{style}"
+            );
+        }
+        let mut missing_style = vector_snapshot(Value::Null);
+        missing_style["tileServers"]["2"]
+            .as_object_mut()
+            .unwrap()
+            .remove("style_url");
+        assert!(parse(missing_style, &Uuid::nil().to_string()).is_err());
+        assert!(crate::model::is_valid_basemap_style_url(&format!(
+            "/{}",
+            "x".repeat(4095)
+        )));
+    }
+
+    #[test]
+    // 形式ごとに正規化した背景定義を照合し、設定変更を検出する。
+    fn authorization_compares_canonical_rendering_metadata_for_each_version() {
+        let legacy = json!({"id": 2, "url": "/tiles/{z}/{x}/{y}.png"});
+        let mut current = legacy.clone();
+        current["kind"] = json!("raster");
+        current["style_url"] = Value::Null;
+        current["created_at"] = json!("private database metadata");
+        assert!(tile_server_matches(&legacy, &current, 1));
+        assert!(tile_server_matches(&legacy, &current, 2));
+        current["kind"] = json!("vector");
+        current["style_url"] = json!("/styles/map.json");
+        assert!(!tile_server_matches(&legacy, &current, 1));
+        assert!(!tile_server_matches(&legacy, &current, 2));
+        let captured = current.clone();
+        assert!(tile_server_matches(&captured, &current, 2));
+        current["style_url"] = json!("/styles/changed.json");
+        assert!(!tile_server_matches(&captured, &current, 2));
+        current["style_url"] = Value::Null;
+        assert!(!tile_server_matches(&captured, &current, 2));
     }
 
     #[test]

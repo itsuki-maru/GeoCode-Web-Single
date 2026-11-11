@@ -2,6 +2,7 @@ import type { PrintMapState } from "./print-state";
 import { isPrintMapState } from "./print-state";
 import { action, node } from "./coloring-editor";
 import type { ShareMapSnapshot } from "./share-snapshot";
+import { ANSWER_PRINT_PREVIEW_TIMEOUT_MS, PRINT_REQUEST_TIMEOUT_MS } from "./map-timeouts";
 
 export const READ_ONLY_MAP_PRINT_PATH = "/assets/read-only-map-print.html";
 
@@ -38,7 +39,7 @@ export function requestMapPrintState(
     const timer = setTimeout(() => {
       cleanup();
       reject(Error("印刷プレビューを読み込めませんでした。現在の地図を取得できません。"));
-    }, 15000);
+    }, PRINT_REQUEST_TIMEOUT_MS);
     if (signal.aborted || !sourceWindow) {
       abort();
       return;
@@ -224,7 +225,7 @@ export function openMapPrintPreview(options: PrintPreviewOptions) {
     dialog.append(frame);
     timer = setTimeout(
       () => fail("印刷プレビューを読み込めませんでした。"),
-      options.answer ? 60000 : 15000,
+      options.answer ? ANSWER_PRINT_PREVIEW_TIMEOUT_MS : PRINT_REQUEST_TIMEOUT_MS,
     );
     void options
       .getState(signal)

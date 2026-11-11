@@ -22,6 +22,8 @@ pub mod middleware;
 pub mod model;
 pub mod router;
 pub mod shape_validation;
+pub mod tile_settings;
+pub mod tile_upstream;
 pub mod utils;
 
 use config::CONFIG;

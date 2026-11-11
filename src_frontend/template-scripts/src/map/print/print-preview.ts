@@ -1,11 +1,13 @@
 /// <reference types="vite/client" />
 import css from "./print-preview.css?inline";
 import { createPdfControls } from "./pdf-controls";
+import { MAPLIBRE_CANVAS_SELECTOR, prepareMaplibreCanvasPrint } from "./canvas-snapshot";
 import { initializeReadOnlyMapPage } from "../read-only-page";
 import { createLayerBulkToggleControl } from "../common/base";
 import { installAnswerColoring, type AnswerColoring } from "../answer-coloring";
 import { createAnswerPrintLegend } from "./answer-print-legend";
 import { readMapBootstrap } from "../bootstrap";
+import { getBasemapController } from "../common/basemap-controller";
 import type { AnotherMapBootstrap, TemporaryMapBootstrap } from "../types";
 import type { ReadOnlyPrintSnapshot } from "./read-only-print-snapshot";
 import {
@@ -95,20 +97,29 @@ export function createPrintPreview(
   const status = element<HTMLElement>("print-status");
   let disposed = false;
   let printing = false;
+  let canvasPrintController: AbortController | undefined;
+  let restoreCanvasPrint: (() => void) | undefined;
+  let canvasPrintInteraction: { element: HTMLElement; inert: boolean }[] = [];
   let moving = false;
   let pdfControls: ReturnType<typeof createPdfControls> | undefined;
   let lastChange = Date.now();
   let lastPending = Date.now();
+  let printRevision = 0;
   let failedTiles = new WeakSet<HTMLImageElement>();
   const watchedLayers = new Set<any>();
   const markChanged = () => {
     pdfControls?.invalidate();
     lastChange = Date.now();
     submit.disabled = true;
+    pdfControls?.refresh();
+  };
+  const markPrintChanged = () => {
+    printRevision++;
+    markChanged();
   };
   const resetWait = () => {
     lastPending = Date.now();
-    markChanged();
+    markPrintChanged();
   };
   const colorController =
     coloring || state.coloring ? installAnswerColoring(runtime, (window as any).L) : undefined;
@@ -151,6 +162,7 @@ export function createPrintPreview(
       : undefined;
   map.on("measurementselectionchange measurementlabelmove", resetWait);
   map.on("objectloadingchange", resetWait);
+  map.on("basemaploadingchange", resetWait);
   const popupImages = () =>
     [...mapElement.querySelectorAll<HTMLImageElement>(".leaflet-popup-pane img[src]")].filter(
       (img) => {
@@ -168,7 +180,7 @@ export function createPrintPreview(
   for (const event of ["load", "error", "toggle", "scroll", "change"])
     mapElement.addEventListener(event, popupChanged, true);
   const watchLayer = ({ layer }: { layer: any }) => {
-    markChanged();
+    markPrintChanged();
     if (!layer.on || watchedLayers.has(layer)) return;
     watchedLayers.add(layer);
     layer.on("loading load tileloadstart tileload tileerror", markChanged);
@@ -181,18 +193,28 @@ export function createPrintPreview(
   const tileLoaded = ({ tile }: { tile: HTMLImageElement }) => {
     if (tile) failedTiles.delete(tile);
   };
+  const stopWatchingLayer = (layer: any) => {
+    if (!watchedLayers.delete(layer)) return;
+    layer.off("loading load tileloadstart tileload tileerror", markChanged);
+    layer.off("tileerror", tileError);
+    layer.off("tileloadstart tileload", tileLoaded);
+  };
+  const unwatchLayer = ({ layer }: { layer: any }) => {
+    stopWatchingLayer(layer);
+    markPrintChanged();
+  };
   map.eachLayer((layer: any) => watchLayer({ layer }));
   map.on("layeradd", watchLayer);
-  map.on("layerremove", markChanged);
+  map.on("layerremove", unwatchLayer);
   map.on("overlayadd overlayremove", resetWait);
   const moveStart = () => {
     moving = true;
     lastPending = Date.now();
-    markChanged();
+    markPrintChanged();
   };
   const moveEnd = () => {
     moving = false;
-    markChanged();
+    markPrintChanged();
   };
   map.on("movestart zoomstart", moveStart);
   map.on("moveend zoomend", moveEnd);
@@ -223,7 +245,7 @@ export function createPrintPreview(
     map.setView(center, map.getZoom(), { animate: false });
     fitPaper();
     lastPending = Date.now();
-    markChanged();
+    markPrintChanged();
   };
   size.addEventListener("change", updatePaper);
   titleInput.addEventListener("input", updatePaper);
@@ -238,8 +260,11 @@ export function createPrintPreview(
 
   const readiness = () => {
     const objects = runtime.getObjectLoadStatus?.() ?? { loading: false, failed: false };
-    let loading = moving || objects.loading;
-    let failed = objects.failed;
+    const basemap = getBasemapController(map);
+    const basemapPending = basemap?.isPending() ?? false;
+    const basemapStatus = basemap?.getLayer()?.getPrintStatus?.();
+    let loading = moving || objects.loading || basemapPending || Boolean(basemapStatus?.loading);
+    let failed = objects.failed || Boolean(basemapStatus?.failed);
     map.eachLayer((layer: any) => {
       if (layer.isLoading?.()) loading = true;
       const state = layer.getPrintStatus?.();
@@ -258,11 +283,11 @@ export function createPrintPreview(
       if (!img.complete) loading = true;
       else if (img.naturalWidth === 0) failed = true;
     }
-    return { loading, failed, objects };
+    return { loading, failed, objects, basemapPending };
   };
   const refreshStatus = () => {
     if (disposed || printing) return;
-    const { loading, failed, objects } = readiness();
+    const { loading, failed, objects, basemapPending } = readiness();
     const legendOverflow = legend?.hasOverflow() ?? false;
     const settling = Date.now() - lastChange < 700;
     const timedOut = loading && Date.now() - lastPending > 30000;
@@ -273,6 +298,7 @@ export function createPrintPreview(
       legendOverflow ||
       objects.loading ||
       objects.failed ||
+      basemapPending ||
       moving ||
       (!timedOut && (loading || settling));
     submit.textContent =
@@ -284,17 +310,24 @@ export function createPrintPreview(
         ? "選択したグループのデータを取得できませんでした。再読み込みで再試行するか、該当グループのチェックを外してください。"
         : objects.loading
           ? "選択したグループのデータを読み込んでいます…"
-          : timedOut
-            ? "読み込みを完了できませんでした。再読み込みするか、現在の表示で印刷できます。"
-            : loading || settling
-              ? "地図を読み込んでいます…"
-              : failed
-                ? "地図画像の一部を表示できません。表示されている内容で印刷できます。必要に応じて再読み込みしてください。"
-                : "印刷準備完了";
+          : basemapPending
+            ? "背景地図を切り替えています…"
+            : timedOut
+              ? "読み込みを完了できませんでした。再読み込みするか、現在の表示で印刷できます。"
+              : loading || settling
+                ? "地図を読み込んでいます…"
+                : failed
+                  ? "地図画像の一部を表示できません。表示されている内容で印刷できます。必要に応じて再読み込みしてください。"
+                  : "印刷準備完了";
     pdfControls?.refresh();
   };
   const timer = window.setInterval(refreshStatus, 200);
   const resume = () => {
+    if (disposed) return;
+    restoreCanvasPrint?.();
+    restoreCanvasPrint = undefined;
+    for (const { element, inert } of canvasPrintInteraction) element.inert = inert;
+    canvasPrintInteraction = [];
     printing = false;
     document.body.classList.remove("print-preparing");
     map.fire("printresume");
@@ -306,17 +339,49 @@ export function createPrintPreview(
     document.body.classList.add("print-preparing");
     map.fire("printpause");
   };
-  submit.addEventListener("click", () => {
-    if (pdfControls?.busy()) return;
+  submit.addEventListener("click", async () => {
+    if (pdfControls?.busy() || canvasPrintController) return;
     refreshStatus();
     if (submit.disabled) return;
     pause();
     try {
+      if (mapElement.querySelector(MAPLIBRE_CANVAS_SELECTOR)) {
+        const revision = printRevision;
+        const capturedLayer = getBasemapController(map)?.getLayer();
+        canvasPrintInteraction = [viewport, element("print-settings")].map((element) => ({
+          element,
+          inert: element.inert,
+        }));
+        for (const { element } of canvasPrintInteraction) element.inert = true;
+        canvasPrintController = new AbortController();
+        restoreCanvasPrint = await prepareMaplibreCanvasPrint(
+          mapElement,
+          canvasPrintController.signal,
+        );
+        if (disposed) {
+          restoreCanvasPrint();
+          restoreCanvasPrint = undefined;
+          return;
+        }
+        // 画像のデコード待ちの間にも、背景の失敗・代替表示やスクリプトによる表示変更が起こり得る。
+        // MapLibreのidle/load通知だけでは、取得した表示状態を無効にしない。
+        const basemap = getBasemapController(map);
+        if (
+          revision !== printRevision ||
+          capturedLayer !== basemap?.getLayer() ||
+          basemap?.isPending()
+        ) {
+          status.textContent =
+            "画像の準備中に地図が変更されました。表示を確認してもう一度印刷してください。";
+          return;
+        }
+      }
       window.print();
     } catch {
-      status.textContent = "印刷画面を開けませんでした。もう一度お試しください。";
+      if (!disposed) status.textContent = "印刷画面を開けませんでした。もう一度お試しください。";
     } finally {
-      resume();
+      canvasPrintController = undefined;
+      if (!disposed) resume();
     }
   });
   pdfControls = createPdfControls({
@@ -363,7 +428,7 @@ export function createPrintPreview(
     for (const img of popupImages()) {
       if (img.complete && img.naturalWidth === 0) img.src = img.src;
     }
-    markChanged();
+    markPrintChanged();
     refreshStatus();
   });
   const keydown = (event: KeyboardEvent) => {
@@ -402,6 +467,10 @@ export function createPrintPreview(
   const dispose = () => {
     if (disposed) return;
     disposed = true;
+    canvasPrintController?.abort();
+    restoreCanvasPrint?.();
+    for (const { element, inert } of canvasPrintInteraction) element.inert = inert;
+    canvasPrintInteraction = [];
     legend?.dispose();
     colorController?.dispose();
     pdfControls?.dispose();
@@ -415,13 +484,15 @@ export function createPrintPreview(
     map.off("popupopen popupclose", resetWait);
     map.off("measurementselectionchange measurementlabelmove", resetWait);
     map.off("objectloadingchange", resetWait);
+    map.off("basemaploadingchange", resetWait);
+    map.off("layeradd", watchLayer);
+    map.off("layerremove", unwatchLayer);
+    map.off("overlayadd overlayremove", resetWait);
+    map.off("movestart zoomstart", moveStart);
+    map.off("moveend zoomend", moveEnd);
     for (const event of ["load", "error", "toggle", "scroll", "change"])
       mapElement.removeEventListener(event, popupChanged, true);
-    for (const layer of watchedLayers) {
-      layer.off("loading load tileloadstart tileload tileerror", markChanged);
-      layer.off("tileerror", tileError);
-      layer.off("tileloadstart tileload", tileLoaded);
-    }
+    for (const layer of [...watchedLayers]) stopWatchingLayer(layer);
     map.remove();
   };
   window.addEventListener("pagehide", dispose, { once: true });
@@ -447,7 +518,7 @@ export function createReadOnlySnapshotPrintPreview(
           isChecked: false,
           isMapUiHidden: false,
           shareSnapshot: snapshot.snapshotShare
-            ? { version: 1, state, tileServers, tileOverlays }
+            ? { version: snapshot.version, state, tileServers, tileOverlays }
             : null,
         };
   return createPrintPreview(state, close, snapshot.sourcePage, session, undefined, bootstrap);

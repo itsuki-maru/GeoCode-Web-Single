@@ -35,3 +35,6 @@ pub mod layer_forms;
 pub mod layer_input_policy;
 
 pub mod map_attribute_search;
+
+pub mod background_maps;
+pub mod tile_server_settings;

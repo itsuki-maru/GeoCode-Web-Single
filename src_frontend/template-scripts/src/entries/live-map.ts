@@ -4,6 +4,11 @@ import { CameraViewer } from "../live-map/camera";
 import { createLiveMapUiVisibilityControl } from "../live-map/ui-visibility";
 import { addLiveTileOverlayControl } from "../live-map/tile-overlays";
 import {
+  createBasemapController,
+  installBasemapController,
+} from "../map/common/basemap-controller";
+import { createMapMessageDialog } from "../map/common/map-message-dialog";
+import {
   createCollapsibleLayerControl,
   createCurrentLocationControl,
   createNameVisibilityControl,
@@ -31,21 +36,39 @@ const tileServers = bootstrap.tileServers as Record<string, any>;
 const tileServerEntries = Object.entries(tileServers);
 const defaultTileServerId = tileServers["1"] ? "1" : tileServerEntries[0]?.[0];
 const japanBounds = L.latLngBounds(L.latLng(20.25, 122.56), L.latLng(45.55, 153.59));
-let tileLayer: any = null;
+let basemapController: ReturnType<typeof createBasemapController> | null = null;
+let basemapErrorDialog: ReturnType<typeof createMapMessageDialog> | null = null;
 
-function selectTileServer(tileServerId: string): void {
-  const tileServer = tileServers[tileServerId];
-  if (!tileServer) return;
-  if (tileLayer) map.removeLayer(tileLayer);
-  map.setMaxBounds(tileServer.include_foreign_tiles ? null : japanBounds);
-  tileLayer = L.tileLayer(tileServer.url, {
-    attribution: tileServer.attribution,
-    minZoom: tileServer.min_zoom ?? 5,
-    maxZoom: tileServer.max_zoom ?? 18,
-  }).addTo(map);
+function syncBasemapSelection(id: string): void {
+  document.querySelectorAll<HTMLInputElement>(".live-tile-control .tile-radio").forEach((radio) => {
+    radio.checked = radio.value === id;
+  });
 }
 
-if (defaultTileServerId) selectTileServer(defaultTileServerId);
+function selectTileServer(tileServerId: string): void {
+  if (!basemapController) return;
+  void basemapController.select(tileServerId);
+  syncBasemapSelection(basemapController.getSelectedId());
+}
+
+if (defaultTileServerId) {
+  basemapController = createBasemapController({
+    leaflet: L,
+    map,
+    tileServers,
+    bounds: japanBounds,
+    initialId: defaultTileServerId,
+    onCommit: syncBasemapSelection,
+    onError: () => {
+      basemapErrorDialog ??= createMapMessageDialog();
+      basemapErrorDialog.show(
+        "背景地図を読み込めませんでした。現在の背景地図を維持します。",
+        "背景地図の読み込みエラー",
+      );
+    },
+  });
+  installBasemapController(map, basemapController);
+}
 
 let tileServerControl: any = null;
 if (tileServerEntries.length) {
@@ -62,7 +85,11 @@ if (tileServerEntries.length) {
         radio.name = "live-map-tile";
         radio.value = tileServerId;
         radio.id = `live-map-tile-${tileServerId}`;
-        radio.checked = tileServerId === defaultTileServerId;
+        radio.checked = tileServerId === basemapController?.getSelectedId();
+        radio.addEventListener("click", () => {
+          if (basemapController?.isPending() && tileServerId === basemapController.getSelectedId())
+            selectTileServer(tileServerId);
+        });
         radio.addEventListener("change", () => selectTileServer(tileServerId));
         const label = document.createElement("label");
         label.className = "tile-radio-label";
@@ -345,6 +372,8 @@ async function load(): Promise<void> {
 }
 
 window.addEventListener("pagehide", () => {
+  basemapController?.dispose();
+  basemapErrorDialog?.dispose();
   for (const popup of cameraPopups.values()) popup.camera?.close();
   if (timer !== null) window.clearTimeout(timer);
   if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame);

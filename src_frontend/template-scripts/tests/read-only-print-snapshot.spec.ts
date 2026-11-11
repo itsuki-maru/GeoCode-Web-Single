@@ -241,4 +241,75 @@ describe("read-only print snapshot", () => {
     source.markers.visible.detail = "界".repeat(Math.ceil(MAX_SHARE_BYTES / 3));
     expect(() => createReadOnlyPrintSnapshot(source, state, keys)).toThrow("32MiB超");
   });
+
+  it("v1のラスタ既定値を旧projectionへ戻し、v2ではベクタ定義を保持する", () => {
+    const { source, state, keys } = fixture();
+    const raster = {
+      ...source,
+      tileServers: {
+        "1": { ...source.tileServers["1"], kind: "raster" as const, style_url: null },
+      },
+    };
+    const legacy = createReadOnlyPrintSnapshot(raster, state, keys);
+    expect(legacy.version).toBe(1);
+    expect(legacy.tileServers["1"]).not.toHaveProperty("kind");
+    expect(legacy.tileServers["1"]).not.toHaveProperty("style_url");
+    const vector = {
+      ...raster,
+      tileServers: {
+        ...raster.tileServers,
+        "2": {
+          ...source.tileServers["1"],
+          id: 2,
+          kind: "vector" as const,
+          style_url: "https://styles.example.test/style.json",
+        },
+      },
+    };
+    const before = JSON.stringify(vector);
+    const snapshot = createReadOnlyPrintSnapshot(vector, state, keys);
+    expect(snapshot.version).toBe(2);
+    expect(snapshot.tileServers["2"]).toMatchObject({
+      kind: "vector",
+      style_url: "https://styles.example.test/style.json",
+    });
+    expect(snapshot.tileServers["2"]).not.toHaveProperty("authToken");
+    expect(isReadOnlyPrintSnapshot(JSON.parse(JSON.stringify(snapshot)))).toBe(true);
+    expect(JSON.stringify(vector)).toBe(before);
+    expect(isReadOnlyPrintSnapshot({ ...snapshot, version: 1 })).toBe(false);
+    expect(
+      isReadOnlyPrintSnapshot({
+        ...snapshot,
+        tileServers: {
+          ...snapshot.tileServers,
+          "2": { ...snapshot.tileServers["2"], kind: "unknown" },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isReadOnlyPrintSnapshot({
+        ...snapshot,
+        tileServers: {
+          ...snapshot.tileServers,
+          "2": { ...snapshot.tileServers["2"], style_url: "//untrusted.test/style.json" },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isReadOnlyPrintSnapshot({
+        ...snapshot,
+        tileServers: { ...snapshot.tileServers, "1": { ...snapshot.tileServers["2"], id: 1 } },
+      }),
+    ).toBe(false);
+  });
+
+  it("読取済みv2は全背景がラスタでも印刷snapshotでversionを維持する", () => {
+    const { source, state, keys } = fixture();
+    const snapshot = createReadOnlyPrintSnapshot({ ...source, version: 2 }, state, keys);
+    expect(snapshot.version).toBe(2);
+    expect(snapshot.tileServers["1"]).toMatchObject({ kind: "raster", style_url: null });
+    expect(isReadOnlyPrintSnapshot(snapshot)).toBe(true);
+    const roundTrip = createReadOnlyPrintSnapshot(snapshot, snapshot.state, keys);
+    expect(roundTrip).toEqual(snapshot);
+  });
 });

@@ -1678,6 +1678,7 @@ dependencies = [
  "redis",
  "reqwest",
  "rexif",
+ "ring",
  "roxmltree",
  "rust-embed",
  "serde",

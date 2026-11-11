@@ -1,5 +1,7 @@
 use crate::model::ApplicationInitSetup;
+use base64::{Engine, engine::general_purpose::STANDARD};
 use dirs::home_dir;
+use rand::RngCore;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fs;
@@ -76,6 +78,9 @@ struct ApplicationInitSetupPartial {
     http_image_allowed_origins: Option<String>,
     tile_server_base_url: Option<String>,
     tile_server_api_key: Option<String>,
+    vector_tile_allowed_origins: Option<String>,
+    tile_proxy_allowed_origins: Option<String>,
+    tile_settings_encryption_key: Option<String>,
     camera_sharing_enabled: Option<String>,
     camera_turn_provider: Option<String>,
     camera_stun_urls: Option<String>,
@@ -243,6 +248,9 @@ pub fn build_env_from_form(
         http_image_allowed_origins: String::new(),
         tile_server_base_url: None,
         tile_server_api_key: None,
+        vector_tile_allowed_origins: String::new(),
+        tile_proxy_allowed_origins: String::new(),
+        tile_settings_encryption_key: generate_tile_settings_key(),
         camera_sharing_enabled: None,
         camera_turn_provider: None,
         camera_stun_urls: None,
@@ -296,6 +304,9 @@ fn env_json_requires_migration(value: &serde_json::Value) -> bool {
         "http_image_allowed_origins",
         "tile_server_base_url",
         "tile_server_api_key",
+        "vector_tile_allowed_origins",
+        "tile_proxy_allowed_origins",
+        "tile_settings_encryption_key",
         "camera_sharing_enabled",
         "camera_turn_provider",
         "camera_stun_urls",
@@ -322,7 +333,17 @@ fn env_json_requires_migration(value: &serde_json::Value) -> bool {
         "live_map_password_window_minutes",
     ]
     .iter()
-    .any(|field| !object.contains_key(*field))
+    .any(|field| {
+        !object.contains_key(*field)
+            || (*field == "tile_settings_encryption_key" && object[*field].is_null())
+    })
+}
+
+/// タイル中継のAPIキーを暗号化する鍵を生成し、設定JSONへ永続化する。
+fn generate_tile_settings_key() -> String {
+    let mut key = [0_u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut key);
+    STANDARD.encode(key)
 }
 
 fn complete_env(
@@ -365,6 +386,38 @@ fn complete_env(
         |message| EnvJsonReadError::InvalidJson(format!("http_image_allowed_origins: {message}")),
     )?;
 
+    let vector_tile_allowed_origins = partial.vector_tile_allowed_origins.unwrap_or_default();
+    crate::config::parse_vector_tile_allowed_origins(Some(&vector_tile_allowed_origins)).map_err(
+        |message| EnvJsonReadError::InvalidJson(format!("vector_tile_allowed_origins: {message}")),
+    )?;
+    let tile_proxy_allowed_origins = partial.tile_proxy_allowed_origins.unwrap_or_default();
+    if !tile_proxy_allowed_origins
+        .split(',')
+        .map(str::trim)
+        .filter(|origin| !origin.is_empty())
+        .all(|origin| {
+            reqwest::Url::parse(origin).is_ok_and(|url| {
+                matches!(url.scheme(), "http" | "https")
+                    && url.origin().ascii_serialization() == origin
+            })
+        })
+    {
+        return Err(EnvJsonReadError::InvalidJson(
+            "tile_proxy_allowed_originsが不正です。".into(),
+        ));
+    }
+    let tile_settings_encryption_key = partial
+        .tile_settings_encryption_key
+        .unwrap_or_else(generate_tile_settings_key);
+    if !STANDARD
+        .decode(&tile_settings_encryption_key)
+        .is_ok_and(|key| key.len() == 32)
+    {
+        return Err(EnvJsonReadError::InvalidJson(
+            "tile_settings_encryption_keyは32バイトをBase64で指定してください。".into(),
+        ));
+    }
+
     // 任意項目は既存値を優先し、欠落している場合だけ現在の既定値で補完する。
     Ok(ApplicationInitSetup {
         service_name: partial.service_name.unwrap_or_else(|| app_title.clone()),
@@ -398,6 +451,9 @@ fn complete_env(
         http_image_allowed_origins,
         tile_server_base_url: partial.tile_server_base_url,
         tile_server_api_key: partial.tile_server_api_key,
+        vector_tile_allowed_origins,
+        tile_proxy_allowed_origins,
+        tile_settings_encryption_key,
         camera_sharing_enabled: partial.camera_sharing_enabled,
         camera_turn_provider: partial.camera_turn_provider,
         camera_stun_urls: partial.camera_stun_urls,
@@ -491,6 +547,63 @@ mod tests {
             "next_challenge_minutes": "10",
             "challenge_limit_time_failed_count": "3"
         })
+    }
+
+    #[test]
+    // 旧設定を補完した暗号鍵は再読込でも保持し、手動指定の配信元も検証する。
+    fn tile_settings_configuration_migrates_and_keeps_its_encryption_key() {
+        let setup_dir = test_setup_dir("tile-settings-migration");
+        write_env_json(&setup_dir, minimum_required_env_json());
+        let first = read_env_json(&setup_dir).unwrap();
+        assert_eq!(
+            STANDARD
+                .decode(&first.tile_settings_encryption_key)
+                .unwrap()
+                .len(),
+            32
+        );
+        let second = read_env_json(&setup_dir).unwrap();
+        assert_eq!(
+            first.tile_settings_encryption_key,
+            second.tile_settings_encryption_key
+        );
+        assert!(second.vector_tile_allowed_origins.is_empty());
+        assert!(second.tile_proxy_allowed_origins.is_empty());
+        let mut value = serde_json::to_value(&second).unwrap();
+        value["vector_tile_allowed_origins"] = json!("https://tiles.example");
+        value["tile_proxy_allowed_origins"] = json!("http://localhost:8080");
+        write_env_json(&setup_dir, value.clone());
+        let explicit = read_env_json(&setup_dir).unwrap();
+        assert_eq!(
+            explicit.vector_tile_allowed_origins,
+            "https://tiles.example"
+        );
+        assert_eq!(explicit.tile_proxy_allowed_origins, "http://localhost:8080");
+        assert_eq!(
+            explicit.tile_settings_encryption_key,
+            second.tile_settings_encryption_key
+        );
+        for (key, invalid) in [
+            ("vector_tile_allowed_origins", "http://tiles.example"),
+            ("tile_proxy_allowed_origins", "https://tiles.example/path"),
+            ("tile_settings_encryption_key", "invalid-key"),
+        ] {
+            let mut invalid_value = value.clone();
+            invalid_value[key] = json!(invalid);
+            write_env_json(&setup_dir, invalid_value);
+            assert!(read_env_json(&setup_dir).is_err());
+        }
+        // 明示nullでも生成した鍵を書き戻し、次回読込で同じ鍵を使用する。
+        value["tile_settings_encryption_key"] = serde_json::Value::Null;
+        write_env_json(&setup_dir, value);
+        let generated = read_env_json(&setup_dir).unwrap();
+        assert_eq!(
+            generated.tile_settings_encryption_key,
+            read_env_json(&setup_dir)
+                .unwrap()
+                .tile_settings_encryption_key
+        );
+        fs::remove_dir_all(setup_dir).unwrap();
     }
 
     #[test]

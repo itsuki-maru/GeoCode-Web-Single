@@ -73,6 +73,8 @@ profileは `isMobile` と操作文言を持ち、入力判定や保存後の更�
 
 Leafletの `L`、marked、filterXSS等はTera HTMLが先に読み込む。npm管理vendorを配布資材へコピーする処理はPC側 `scripts/copy-vendor-assets.mjs` が担当する。Panzoomはこのプロジェクトの依存。依存の具体的なバージョンは [package.json](package.json) とlockfileを参照。
 
+ベクタ背景を選ぶ場合だけMapLibre本体・CSS・Workerを読み込む。bridgeも既存の `window.L` を使用し、Workerは既存の `/assets/{uri}` に合わせた単一階層のJSとして配信する。`template-third-party-licenses.txt` はViteのモジュール一覧に加え、MapLibre本体・Workerの同梱source mapに現れる依存と実行時依存も収録する。依存や提供元のライセンス本文を取得できない場合はビルドを失敗させ、無言で省略しない。
+
 ## 4. 初期データ
 
 | データ                                  | 利用画面                   | 主な項目                                                                                              |

@@ -6,8 +6,16 @@ const dependencies = vi.hoisted(() => ({
   overlays: vi.fn(),
   focus: vi.fn(),
   sync: vi.fn(),
+  basemap: vi.fn(),
+  basemapMessage: { show: vi.fn(), dispose: vi.fn() },
   geoError: null as any,
   cameras: [] as any[],
+}));
+vi.mock("../src/map/common/basemap-layer", () => ({
+  createBasemapLayer: dependencies.basemap,
+}));
+vi.mock("../src/map/common/map-message-dialog", () => ({
+  createMapMessageDialog: () => dependencies.basemapMessage,
 }));
 vi.mock("../src/live-map/published-layers", () => ({
   addPublishedLayerControl: dependencies.published,
@@ -84,6 +92,17 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
   vi.spyOn(Math, "random").mockReturnValue(0.5);
   dependencies.cameras.length = 0;
+  dependencies.basemap.mockImplementation((leaflet: any, _map: any, record: any) => ({
+    layer: leaflet.tileLayer(record.url, {
+      attribution: record.attribution,
+      minZoom: record.min_zoom ?? 5,
+      maxZoom: record.max_zoom ?? 18,
+    }),
+    setVisible: vi.fn(),
+    dispose: vi.fn(),
+  }));
+  dependencies.basemapMessage.show.mockClear();
+  dependencies.basemapMessage.dispose.mockClear();
   handlers = [];
   const listen = window.addEventListener.bind(window);
   vi.spyOn(window, "addEventListener").mockImplementation(((
@@ -241,5 +260,108 @@ describe("live map polling and rendering", () => {
       ),
     ).toHaveLength(1);
     expect(dependencies.sync).toHaveBeenCalled();
+  });
+
+  it("keeps the committed radio and background until a vector loads, and restores them after failure", async () => {
+    let finishVector!: () => void;
+    let failVector!: (error: Error) => void;
+    const ready = new Promise<void>((resolve) => {
+      finishVector = resolve;
+    });
+    const failed = new Promise<void>((_resolve, reject) => {
+      failVector = reject;
+    });
+    const createRaster = dependencies.basemap.getMockImplementation()!;
+    dependencies.basemap.mockImplementation((leaflet: any, activeMap: any, record: any) =>
+      record.kind === "vector"
+        ? {
+            layer: leaflet.layerGroup(),
+            ready: record.style_url === "/vector.json" ? ready : failed,
+            setVisible: vi.fn(),
+            dispose: vi.fn(),
+          }
+        : createRaster(leaflet, activeMap, record),
+    );
+    await start(vi.fn().mockResolvedValue(response(snapshot([]))), {
+      tileServers: {
+        "1": { url: "/tile/{z}/{x}/{y}.png", label: "ラスタ" },
+        "2": {
+          kind: "vector",
+          style_url: "/vector.json",
+          label: "ベクタ",
+          include_foreign_tiles: true,
+        },
+        "3": { kind: "vector", style_url: "/broken.json", label: "失敗するベクタ" },
+      },
+    });
+    const { getBasemapController } = await import("../src/map/common/basemap-controller");
+    const controller = getBasemapController(map)!;
+    const oldLayer = controller.getLayer();
+    document.querySelector<HTMLInputElement>("#live-map-tile-2")!.click();
+    expect(controller.isPending()).toBe(true);
+    expect(controller.getSelectedId()).toBe("1");
+    expect(document.querySelector<HTMLInputElement>(".tile-radio:checked")!.value).toBe("1");
+    expect(map.hasLayer(oldLayer)).toBe(true);
+    expect(map.options.maxBounds).toBeTruthy();
+    finishVector();
+    await flush();
+    const vectorLayer = controller.getLayer();
+    expect(controller.getSelectedId()).toBe("2");
+    expect(document.querySelector<HTMLInputElement>(".tile-radio:checked")!.value).toBe("2");
+    expect(map.hasLayer(oldLayer)).toBe(false);
+    expect(map.options.maxBounds).toBeNull();
+
+    document.querySelector<HTMLInputElement>("#live-map-tile-3")!.click();
+    expect(document.querySelector<HTMLInputElement>(".tile-radio:checked")!.value).toBe("2");
+    failVector(new Error("network"));
+    await flush();
+    expect(controller.isPending()).toBe(false);
+    expect(controller.getSelectedId()).toBe("2");
+    expect(controller.getLayer()).toBe(vectorLayer);
+    expect(map.hasLayer(vectorLayer)).toBe(true);
+    expect(document.querySelector<HTMLInputElement>(".tile-radio:checked")!.value).toBe("2");
+    expect(dependencies.basemapMessage.show).toHaveBeenCalledWith(
+      expect.stringContaining("背景地図を読み込めません"),
+      "背景地図の読み込みエラー",
+    );
+    window.dispatchEvent(new Event("pagehide"));
+    expect(getBasemapController(map)).toBeUndefined();
+    expect(dependencies.basemapMessage.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("cancels a pending vector when the already-checked raster radio is clicked again", async () => {
+    let finishVector!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      finishVector = resolve;
+    });
+    const createRaster = dependencies.basemap.getMockImplementation()!;
+    dependencies.basemap.mockImplementation((leaflet: any, activeMap: any, record: any) =>
+      record.kind === "vector"
+        ? { layer: leaflet.layerGroup(), ready, setVisible: vi.fn(), dispose: vi.fn() }
+        : createRaster(leaflet, activeMap, record),
+    );
+    await start(vi.fn().mockResolvedValue(response(snapshot([]))), {
+      tileServers: {
+        "1": { url: "/tile/{z}/{x}/{y}.png", label: "ラスタ" },
+        "2": { kind: "vector", style_url: "/vector.json", label: "ベクタ" },
+      },
+    });
+    const { getBasemapController } = await import("../src/map/common/basemap-controller");
+    const controller = getBasemapController(map)!;
+    const initialLayer = controller.getLayer();
+    dependencies.basemap.mockClear();
+    document.querySelector<HTMLInputElement>("#live-map-tile-2")!.click();
+    expect(controller.isPending()).toBe(true);
+    expect(dependencies.basemap).toHaveBeenCalledOnce();
+    const waiting = controller.whenReady();
+    document.querySelector<HTMLInputElement>("#live-map-tile-1")!.click();
+    expect(controller.isPending()).toBe(false);
+    finishVector();
+    await waiting;
+    expect(controller.getLayer()).toBe(initialLayer);
+    expect(controller.getSelectedId()).toBe("1");
+    expect(document.querySelector<HTMLInputElement>(".tile-radio:checked")!.value).toBe("1");
+    expect(dependencies.basemap).toHaveBeenCalledOnce();
+    expect(dependencies.basemapMessage.show).not.toHaveBeenCalled();
   });
 });

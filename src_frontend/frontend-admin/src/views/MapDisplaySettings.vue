@@ -56,7 +56,6 @@ onMounted(load);
     <div class="page-heading">
       <h1 id="map-display-settings-title">地図表示設定</h1>
     </div>
-    <p v-if="busy" role="status">処理中…</p>
     <p v-if="error" role="alert">{{ error }}</p>
     <button v-if="error && !loaded" type="button" @click="load">設定を再読み込み</button>
     <form class="admin-card" @submit.prevent="save">

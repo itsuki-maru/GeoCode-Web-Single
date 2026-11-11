@@ -7,7 +7,9 @@ use geocode_web_single::{
     db::{check_and_insert_initial_data, setup_database_pool},
     init::{SetupForm, build_env_from_form, get_application_user_setup_path, read_env_json},
     model::ApplicationInitSetup,
-    router, utils,
+    router,
+    tile_settings::TileSettings,
+    utils,
 };
 use std::env;
 use std::sync::{Arc, Mutex};
@@ -95,6 +97,18 @@ unsafe fn apply_env_vars(env: &ApplicationInitSetup, server_addr: &str) {
         env::set_var(
             "TILE_SERVER_API_KEY",
             &env.tile_server_api_key.as_deref().unwrap_or(""),
+        );
+        env::set_var(
+            "VECTOR_TILE_ALLOWED_ORIGINS",
+            &env.vector_tile_allowed_origins,
+        );
+        env::set_var(
+            "TILE_PROXY_ALLOWED_ORIGINS",
+            &env.tile_proxy_allowed_origins,
+        );
+        env::set_var(
+            "TILE_SETTINGS_ENCRYPTION_KEY",
+            &env.tile_settings_encryption_key,
         );
         for (name, value) in [
             // 設定元はJSONだけ。未指定項目は削除し、外部環境変数を引き継がない。
@@ -232,7 +246,7 @@ async fn complete_setup(
 
     // axum ルーター
     let _camera_cleanup = geocode_web_single::handler::live_camera::start_cleanup(pool.clone());
-    let app_router = router::build_router(pool, tera, tile_cache);
+    let app_router = build_router_with_tile_settings(pool, tera, tile_cache).await?;
 
     // TCP バインド
     let listener = tokio::net::TcpListener::bind(SERVER_ADDR)
@@ -330,7 +344,13 @@ fn run_server_mode(bind_addr: String) {
         let tile_cache = setup_tile_cache().await;
 
         let _camera_cleanup = geocode_web_single::handler::live_camera::start_cleanup(pool.clone());
-        let app_router = router::build_router(pool, tera, tile_cache);
+        let app_router = match build_router_with_tile_settings(pool, tera, tile_cache).await {
+            Ok(router) => router,
+            Err(error) => {
+                tracing::error!(%error, "タイルサーバ設定を読み込めません。");
+                return;
+            },
+        };
 
         let listener = match tokio::net::TcpListener::bind(&bind_addr).await {
             Ok(l) => l,
@@ -451,7 +471,14 @@ fn main() {
 
                     let _camera_cleanup =
                         geocode_web_single::handler::live_camera::start_cleanup(pool.clone());
-                    let app_router = router::build_router(pool, tera, tile_cache);
+                    let app_router =
+                        match build_router_with_tile_settings(pool, tera, tile_cache).await {
+                            Ok(router) => router,
+                            Err(error) => {
+                                tracing::error!(%error, "タイルサーバ設定を読み込めません。");
+                                return;
+                            },
+                        };
 
                     let listener = match tokio::net::TcpListener::bind(SERVER_ADDR).await {
                         Ok(l) => l,
@@ -513,6 +540,37 @@ fn main() {
         .invoke_handler(tauri::generate_handler![complete_setup, open_url])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// 全起動経路で管理済み設定を読み込み、運転中も定期的に再取得する。
+async fn build_router_with_tile_settings(
+    pool: sqlx::SqlitePool,
+    tera: Arc<TokioMutex<tera::Tera>>,
+    tile_cache: Option<redis::aio::ConnectionManager>,
+) -> Result<axum::Router, String> {
+    let settings = Arc::new(TileSettings::from_env());
+    settings.refresh(&pool).await.map_err(|_| {
+        "タイルサーバ設定を読み込めません。DBの更新と暗号鍵を確認してください。".to_owned()
+    })?;
+    let refresh_settings = settings.clone();
+    let refresh_pool = pool.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            if refresh_pool.is_closed() {
+                break;
+            }
+            if refresh_settings.refresh(&refresh_pool).await.is_err() {
+                tracing::warn!("タイルサーバ設定を更新できません。直近の有効な設定を使います。");
+            }
+        }
+    });
+    Ok(router::build_router_with_tile_settings(
+        pool, tera, tile_cache, settings,
+    ))
 }
 
 async fn setup_tile_cache() -> Option<redis::aio::ConnectionManager> {

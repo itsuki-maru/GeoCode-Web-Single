@@ -150,9 +150,10 @@ describe("zoom-dependent shape visibility", () => {
     [5, 8],
     [10, 8],
     [10.999, 8],
-    [11, 6],
-    [13, 6],
-    [13.999, 6],
+    [11, 8],
+    [12, 8],
+    [13, 8],
+    [13.999, 8],
     [14, 4],
     [18, 4],
     [NaN, 4],
@@ -164,8 +165,9 @@ describe("zoom-dependent shape visibility", () => {
 
   it.each([
     [10, 8],
-    [11, 6],
-    [13, 6],
+    [11, 8],
+    [12, 8],
+    [13, 8],
     [14, 4],
   ])(
     "includes the exact pixel boundary at zoom %s without excluding records from logical results",
@@ -197,9 +199,9 @@ describe("zoom-dependent shape visibility", () => {
   it.each([0, 4, 6, 8, 12])("honors an explicit %s pixel override, including print", (minimum) => {
     const f = fixture({ minPixelSize: minimum });
     f.setBounds(localBounds);
-    f.setZoom(10);
+    f.setZoom(12);
     const sizes = [0.125, 3, 5, 7, 9, 13];
-    f.manager.replaceRecords(sizes.map((size) => linePixels(String(size), size, 10)));
+    f.manager.replaceRecords(sizes.map((size) => linePixels(String(size), size, 12)));
     f.manager.refresh();
     expect([...f.attached].map((layer) => layer.id)).toEqual(
       sizes.filter((size) => size >= minimum).map(String),
@@ -209,20 +211,27 @@ describe("zoom-dependent shape visibility", () => {
   it("restores detail after zooming and reuses cached layers when returning", async () => {
     const f = fixture();
     f.setBounds(localBounds);
-    f.manager.replaceRecords([linePixels("a", 7, 10), linePixels("b", 3, 10)]);
+    f.manager.replaceRecords([linePixels("a", 7, 12), linePixels("b", 3, 12)]);
     f.setZoom(14);
     f.manager.refresh();
     const layers = [f.manager.getLayer("a"), f.manager.getLayer("b")];
     f.setZoom(10);
     f.manager.refresh();
     expect(f.attached.size).toBe(0);
-    for (const zoom of [11, 14, 10, 14]) {
+    for (const [zoom, expectedIds] of [
+      [11, []],
+      [12, []],
+      [13, ["a"]],
+      [14, ["a", "b"]],
+      [12, []],
+      [14, ["a", "b"]],
+    ] as const) {
       f.emit("zoomstart");
       f.setZoom(zoom);
       f.emit("zoomend");
       f.flush();
       await f.manager.whenIdle();
-      expect([...f.attached].map((layer) => layer.id)).toEqual(zoom === 10 ? [] : ["a", "b"]);
+      expect([...f.attached].map((layer) => layer.id)).toEqual(expectedIds);
     }
     expect([f.manager.getLayer("a"), f.manager.getLayer("b")]).toEqual(layers);
     expect(f.create).toHaveBeenCalledTimes(2);
@@ -277,14 +286,14 @@ describe("zoom-dependent shape visibility", () => {
   it("keeps long crossing pipes and pinned small shapes while respecting logical filters", () => {
     const f = fixture();
     f.setBounds(localBounds);
-    f.setZoom(10);
+    f.setZoom(12);
     f.pinned.add("small");
     f.pinned.add("hidden");
     f.manager.replaceRecords([
       line("crossing", -2, 4),
-      linePixels("small", 1, 10, 2),
-      { ...linePixels("hidden", 1, 10), shown: false },
-      linePixels("omitted", 7, 10),
+      linePixels("small", 1, 12, 2),
+      { ...linePixels("hidden", 1, 12), shown: false },
+      linePixels("omitted", 7, 12),
     ]);
     f.manager.refresh();
     expect([...f.attached].map((layer) => layer.id)).toEqual(["small", "crossing"]);

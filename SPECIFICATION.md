@@ -117,6 +117,9 @@ PostgreSQL から SQLite を使用することによる差分吸収は **全て�
 - `ALLOW_ORIGINS`
 - `TILE_SERVER_BASE_URL`
 - `TILE_SERVER_API_KEY`
+- `VECTOR_TILE_ALLOWED_ORIGINS`
+- `TILE_PROXY_ALLOWED_ORIGINS`
+- `TILE_SETTINGS_ENCRYPTION_KEY`
 - `REDIS_URL`
 - `REDIS_CONNECT_TIMEOUT_SECONDS`
 - `TILE_CACHE_TTL_SECONDS`
@@ -165,6 +168,9 @@ Redisは現在位置共有機能の必須構成ではない。接続がない場
 - `allow_origins`
 - `tile_server_base_url`
 - `tile_server_api_key`
+- `vector_tile_allowed_origins`（既定空、HTTPSオリジンをカンマ区切りで指定）
+- `tile_proxy_allowed_origins`（既定空、HTTP・LANの中継先を許可する場合に指定）
+- `tile_settings_encryption_key`（項目省略・`null`の場合は生成して設定JSONへ保存。不正な文字列は起動時に拒否）
 - `redis_url`
 - `redis_connect_timeout_seconds`
 - `tile_cache_ttl_seconds`
@@ -298,7 +304,7 @@ JSON として不正な場合、または必須項目が欠落している場合
 - 作成日時
 - 通常共有とPC全画面地図の共有は、1ユーザーにつき共通の1枠を使用する
 
-レイヤ・マーカー・図形は既存のJSON TEXT欄へ保存し、`map_snapshot`には`{version:1,state,tileServers,tileOverlays}`のJSON文字列を保存する。表示状態には中心・ズーム・背景地図ID、タイルのON／OFF、グループ・対象ID、色分け結果、検索文字列、マーカー／図形／図形名表示、クラスタ設定を含める。レコード本体を重複保存しない。
+レイヤ・マーカー・図形は既存のJSON TEXT欄へ保存し、`map_snapshot`には`{version,state,tileServers,tileOverlays}`のJSON文字列を保存する。`version`は全背景がラスタなら`1`、保存する一覧にベクタを含む場合は`2`を使用し、背景ごとの`kind`・`style_url`を保持する。表示状態には中心・ズーム・背景地図ID、タイルのON／OFF、グループ・対象ID、色分け結果、検索文字列、マーカー／図形／図形名表示、クラスタ設定を含める。レコード本体を重複保存しない。
 
 起動時マイグレーション23でnullableな`map_snapshot TEXT`を自動追加する。SQLx用の`migrations/20261105120000_add_map_snapshot_to_temporary_urls.sql`も同じ列を定義する。既存共有の値は`NULL`のまま維持し、通常共有で更新した場合も`NULL`に戻す。実行時マイグレーションとSQLx用の移行定義を整合させ、通常利用DBをテスト準備先にしない。
 
@@ -499,6 +505,18 @@ JSON として不正な場合、または必須項目が欠落している場合
   - インポートされる各図形にも作成 API と同じ GeoJSON 検証を適用する
   - 不正な図形が1件でも含まれる場合は `400 Bad Request` とし、レイヤ、マーカー、図形を含むトランザクション全体をロールバックする
   - 旧形式のマーカー配列のみの JSON も読み込める
+
+### 9.4.1 背景地図とタイルサーバ設定
+
+- 起動時マイグレーション24で`tileserver_model`へ`kind`（既定`raster`）と`style_url`を追加する。既存のID・画像URL・日時・保存済み共有JSONを保持し、ID `1`を代替表示用のラスタとして確保する。
+- 通常・モバイル・別画面・共有・回答・ライブ地図は共通の背景定義取得と描画処理を使用する。ラスタは`url`の画像タイル、ベクタは`style_url`のスタイルに従ってMapLibreで描画する。ベクタ行も互換用の`url`を保持する。
+- `GET/POST /admin/background-maps`と`PUT /admin/background-maps/{id}`は管理者専用。表示名・識別名・画像URL・出典は255文字以内、スタイルURLはHTTPSまたは同一サイト絶対パスかつUTF-8で4096バイト以内。ズームは0〜22の整数で、未設定時は最小5・最大18として表示する。IDは編集で変更しない。
+- ベクタへの切替は準備完了後に確定し、失敗時は利用可能な現在の背景を維持する。連続切替は最後の選択を反映する。初期表示や表示中ベクタの利用不能時はID `1`のラスタへ代替する。共有・印刷には確定済みの背景IDを渡す。
+- 保存済み共有v1／v2は保存時の背景定義を復元する。表示状態を保存しない従来共有は現在のDB設定を読む。共有v2は種別・スタイルURLも保存する。外部スタイルやタイルの実体は閲覧時に取得する。
+- 起動時マイグレーション25で`tile_server_settings`を追加し、ラスタ中継先・暗号化したAPIキー・ベクタ配信元の許可を管理する。中継先の接続確認・保存、設定版による更新競合検出、設定版ごとのタイルキャッシュを使用する。
+- 初期設定は実行時設定JSONの`tile_server_base_url`・`tile_server_api_key`・`vector_tile_allowed_origins`から取得する。管理画面から適用した設定はDBへ保存し、「環境変数へ戻す」で実行時設定JSON由来の設定へ戻す。
+- 実行時設定JSONへ`tile_proxy_allowed_origins`と`tile_settings_encryption_key`も追加する。暗号鍵は初回セットアップ時に生成し、既存JSONで項目省略・`null`の場合も生成・保存する。空文字列を含む不正な鍵は起動時に拒否する。管理設定を復元するため、SQLite DBと設定JSONを合わせて保管する。Tauri・サーバー単体の全起動経路でDBの管理設定を読み込み、運転中も5秒間隔で再取得する。詳細は[タイル配信プロキシ](docs/TILE_PROXY.md#管理画面からの設定)を参照する。
+- ベクタ背景の印刷ではWebGLキャンバスを画像化し、印刷後に復元する。PDFは背景も含めた用紙全体を画像として保存する。
 
 ### 9.5 画像/PDF/動画管理
 
@@ -874,7 +892,7 @@ cargo test --lib middleware::security::tests
 
 ### 11.7 一時共有URL API
 
-`POST /onetimeurl/generate`は`minutes`、`layers`、`update_url`、任意の`share_password`・`include_shapes`・`include_tile_overlays`・`snapshot`を受け取る。`snapshot`未指定または`null`は従来の通常共有で、空の`layers`は拒否する。スナップショットは`{version:1,state,layers,markers,shapes,tileServers,tileOverlays}`とし、レイヤ・マーカーはIDをキーとするオブジェクト、図形は配列とする。外側の`layers`も同じグループID集合にする。
+`POST /onetimeurl/generate`は`minutes`、`layers`、`update_url`、任意の`share_password`・`include_shapes`・`include_tile_overlays`・`snapshot`を受け取る。`snapshot`未指定または`null`は従来の通常共有で、空の`layers`は拒否する。スナップショットは`{version,state,layers,markers,shapes,tileServers,tileOverlays}`とし、`version`は保存する背景一覧がすべてラスタなら`1`、ベクタを含む場合は`2`とする。レイヤ・マーカーはIDをキーとするオブジェクト、図形は配列とする。外側の`layers`も同じグループID集合にする。
 
 成功応答は`{id,url,expiration}`、`GET /onetimeurl/current`の応答はこれらと`is_password_protected`。現在URLの取得では対象データや表示設定全体を返さない。`DELETE /onetimeurl/delete/{id_url}`は認証ユーザーの共有枠を停止し、パスのIDで他ユーザーの共有を操作しない。公開閲覧とパスワード認証は`GET/POST /onetime/{url_id}`を使用する。
 

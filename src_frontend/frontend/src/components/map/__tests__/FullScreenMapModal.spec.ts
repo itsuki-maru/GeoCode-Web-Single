@@ -31,6 +31,28 @@ describe("全画面地図の共有要求", () => {
     expect(wrapper.get("iframe").element).toBe(frame);
   });
 
+  it("ベクタ背景を含むv2をメタデータごと親へ渡し、v1への偽装を拒否する", () => {
+    wrapper = mount(FullScreenMapModal, { props: { isOpen: true }, attachTo: document.body });
+    const frame = wrapper.get("iframe").element as HTMLIFrameElement;
+    const snapshot = shareSnapshotFixture();
+    snapshot.version = 2;
+    snapshot.state.tileServerId = "2";
+    snapshot.tileServers["2"] = {
+      ...snapshot.tileServers["1"]!,
+      id: 2,
+      kind: "vector",
+      style_url: "/assets/styles/vector.json",
+    };
+    send(frame.contentWindow, mapOrigin, { ...snapshot, version: 1 });
+    expect(wrapper.emitted("share")).toBeUndefined();
+    send(frame.contentWindow, mapOrigin, snapshot);
+    expect(wrapper.emitted("share")).toEqual([[snapshot]]);
+    expect((wrapper.emitted("share")![0]![0] as typeof snapshot).tileServers["2"]).toMatchObject({
+      kind: "vector",
+      style_url: "/assets/styles/vector.json",
+    });
+  });
+
   it("閉じた画面と再表示前のiframeから遅れて届く応答を破棄する", async () => {
     wrapper = mount(FullScreenMapModal, { props: { isOpen: true }, attachTo: document.body });
     const oldSource = (wrapper.get("iframe").element as HTMLIFrameElement).contentWindow;

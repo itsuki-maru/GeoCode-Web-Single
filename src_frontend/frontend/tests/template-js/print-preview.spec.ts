@@ -23,6 +23,7 @@ const state: PrintMapState = {
 let preview: ReturnType<typeof createPrintPreview> | undefined;
 let L: any;
 let fetchData: ReturnType<typeof vi.fn<typeof fetch>>;
+const originalImageDecode = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "decode");
 beforeEach(() => {
   vi.useFakeTimers();
   document.body.innerHTML = '<div id="map"></div>';
@@ -168,6 +169,9 @@ afterEach(() => {
   document.head.querySelectorAll("style").forEach((style) => style.remove());
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  if (originalImageDecode)
+    Object.defineProperty(HTMLImageElement.prototype, "decode", originalImageDecode);
+  else Reflect.deleteProperty(HTMLImageElement.prototype, "decode");
 });
 function checkbox(text: string) {
   const label = [...document.querySelectorAll("#print-settings label")].find(
@@ -199,7 +203,339 @@ async function finishObjectLoads() {
     }
   });
 }
+function addPrintCanvas(decode = vi.fn().mockResolvedValue(undefined)) {
+  // jsdom は inert の初期値を実装していないため、ブラウザーの既定値を明示する。
+  document.getElementById("print-viewport")!.inert = false;
+  const canvas = document.createElement("canvas");
+  canvas.dataset.geocodeMaplibreCanvas = "";
+  canvas.style.cssText = "position:absolute;width:900px;height:640px";
+  vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
+    left: 0,
+    top: 0,
+    right: 900,
+    bottom: 640,
+    width: 900,
+    height: 640,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  });
+  vi.spyOn(canvas, "toDataURL").mockReturnValue("data:image/png;base64,BACKGROUND");
+  Object.defineProperty(HTMLImageElement.prototype, "decode", {
+    value: decode,
+    configurable: true,
+  });
+  document.getElementById("map")!.append(canvas);
+  return canvas;
+}
+
+async function mockVectorBackgrounds(decode = vi.fn().mockResolvedValue(undefined)) {
+  const renderer = await import("../../../template-scripts/src/map/common/basemap-layer");
+  const createRaster = renderer.createBasemapLayer;
+  const vectors: { layer: any; canvas: HTMLCanvasElement }[] = [];
+  vi.spyOn(renderer, "createBasemapLayer").mockImplementation((leaflet, map, record, options) => {
+    if (record.kind !== "vector") return createRaster(leaflet, map, record, options);
+    const canvas = addPrintCanvas(decode);
+    const VectorLayer = L.Layer.extend({
+      options: { minZoom: record.min_zoom ?? 5, maxZoom: record.max_zoom ?? 18 },
+      onAdd() {
+        map.getPane("tilePane").append(canvas);
+        map._addZoomLimit(this);
+      },
+      onRemove() {
+        canvas.remove();
+        map._removeZoomLimit(this);
+      },
+      getPrintStatus: () => ({ loading: false, failed: false }),
+    });
+    const layer = new VectorLayer();
+    vectors.push({ layer, canvas });
+    return {
+      layer,
+      ready: Promise.resolve(),
+      setVisible: (visible) => {
+        canvas.style.opacity = visible ? "1" : "0";
+      },
+      // 破棄済みLayerのリスナーを観測可能にし、GLの解放は別に検証する。
+      dispose: () => {},
+    };
+  });
+  return vectors;
+}
+
 describe("印刷プレビューと実際のLeaflet", () => {
+  it.each(["印刷終了", "背景のload通知"])("%sの直後にPDFを無効にし、安定後に再び有効にする", async (change) => {
+    preview = createPrintPreview(state, vi.fn());
+    await finishObjectLoads();
+    finishImages();
+    if (change === "印刷終了") {
+      addPrintCanvas();
+      vi.spyOn(window, "print").mockImplementation(() => {
+        window.dispatchEvent(new Event("beforeprint"));
+        window.dispatchEvent(new Event("afterprint"));
+      });
+    }
+    await vi.advanceTimersByTimeAsync(1000);
+    const submit = document.getElementById("print-submit") as HTMLButtonElement;
+    const pdf = document.getElementById("pdf-export") as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+    expect(pdf.disabled).toBe(false);
+    if (change === "印刷終了") {
+      submit.click();
+      await vi.advanceTimersByTimeAsync(0);
+    } else {
+      let background: any;
+      preview.map.eachLayer((layer: any) => {
+        if (layer instanceof L.TileLayer) background = layer;
+      });
+      expect(background).toBeDefined();
+      background.fire("load");
+    }
+    // 200msごとの状態更新前にも、700msの安定待ちとボタン表示を一致させる。
+    expect(submit.disabled).toBe(true);
+    expect(pdf.disabled).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(submit.disabled).toBe(false);
+    expect(pdf.disabled).toBe(false);
+  });
+
+  it("ベクタ背景を画像化してから印刷し、終了後に元のcanvasと操作を復元する", async () => {
+    preview = createPrintPreview(state, vi.fn());
+    await finishObjectLoads();
+    finishImages();
+    const canvas = addPrintCanvas();
+    const print = vi.spyOn(window, "print").mockImplementation(() => {
+      expect(canvas.style.display).toBe("none");
+      expect(document.querySelector("[data-geocode-maplibre-print-image]")).not.toBeNull();
+      expect(document.getElementById("print-viewport")!.inert).toBe(true);
+      window.dispatchEvent(new Event("beforeprint"));
+      window.dispatchEvent(new Event("afterprint"));
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    document.getElementById("print-submit")!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(print).toHaveBeenCalledOnce();
+    expect(canvas.isConnected).toBe(true);
+    expect(canvas.style.display).toBe("");
+    expect(document.querySelector("[data-geocode-maplibre-print-image]")).toBeNull();
+    expect(document.getElementById("print-viewport")!.inert).toBe(false);
+    expect(document.body.classList.contains("print-preparing")).toBe(false);
+  });
+
+  it("背景の画像化に失敗した場合は印刷せず、操作とcanvasを復元する", async () => {
+    preview = createPrintPreview(state, vi.fn());
+    await finishObjectLoads();
+    finishImages();
+    const canvas = addPrintCanvas();
+    vi.mocked(canvas.toDataURL).mockReturnValue("data:,");
+    const print = vi.spyOn(window, "print").mockImplementation(() => {});
+    await vi.advanceTimersByTimeAsync(1000);
+    document.getElementById("print-submit")!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(print).not.toHaveBeenCalled();
+    expect(document.getElementById("print-status")!.textContent).toContain("印刷画面を開けません");
+    expect(canvas.style.display).toBe("");
+    expect(document.querySelector("[data-geocode-maplibre-print-image]")).toBeNull();
+    expect(document.getElementById("print-viewport")!.inert).toBe(false);
+    expect(document.body.classList.contains("print-preparing")).toBe(false);
+  });
+
+  it("画像の準備中に背景が故障してラスタへ代替すると印刷を中止し、新しい表示で再試行できる", async () => {
+    let finishDecode!: () => void;
+    const decode = vi.fn().mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishDecode = resolve;
+      }),
+    );
+    const vectors = await mockVectorBackgrounds(decode);
+    const messages = await import("../../../template-scripts/src/map/common/map-message-dialog");
+    vi.spyOn(messages, "createMapMessageDialog").mockReturnValue({
+      dialog: document.createElement("dialog"),
+      show: vi.fn(),
+      close: vi.fn(),
+      dispose: vi.fn(),
+    });
+    const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
+    Object.assign(bootstrap.tileServers["2"], { kind: "vector", style_url: "/styles/test.json" });
+    preview = createPrintPreview(state, vi.fn());
+    await finishObjectLoads();
+    finishImages();
+    const { layer: activeVector, canvas } = vectors[0]!;
+    const print = vi.spyOn(window, "print").mockImplementation(() => {});
+    await vi.advanceTimersByTimeAsync(1000);
+    document.getElementById("print-submit")!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(decode).toHaveBeenCalledOnce();
+    activeVector.fire("basemaperror", { error: new Error("WebGL context lost") });
+    expect((preview.map as any)._geocodeBasemap.getSelectedId()).toBe("1");
+    expect(canvas.isConnected).toBe(false);
+    finishDecode();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(print).not.toHaveBeenCalled();
+    expect(document.getElementById("print-status")!.textContent).toContain("地図が変更されました");
+    expect(document.querySelector("[data-geocode-maplibre-print-image]")).toBeNull();
+    expect(document.getElementById("print-viewport")!.inert).toBe(false);
+    expect(document.body.classList.contains("print-preparing")).toBe(false);
+    finishImages();
+    await vi.advanceTimersByTimeAsync(1000);
+    document.getElementById("print-submit")!.click();
+    // ラスタ経路は同期処理を保ち、キャンバスのデコードを繰り返さない。
+    expect(print).toHaveBeenCalledOnce();
+    expect(decode).toHaveBeenCalledOnce();
+  });
+
+  it("画像の準備中に表示位置が変わると旧画像では印刷せず、新しい表示で再試行できる", async () => {
+    preview = createPrintPreview(state, vi.fn());
+    await finishObjectLoads();
+    finishImages();
+    let finishDecode!: () => void;
+    const decode = vi
+      .fn()
+      .mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          finishDecode = resolve;
+        }),
+      )
+      .mockResolvedValue(undefined);
+    const canvas = addPrintCanvas(decode);
+    const print = vi.spyOn(window, "print").mockImplementation(() => {});
+    await vi.advanceTimersByTimeAsync(1000);
+    document.getElementById("print-submit")!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    preview.map.setView([35.69, 139.77], 13, { animate: false });
+    finishDecode();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(print).not.toHaveBeenCalled();
+    expect(canvas.style.display).toBe("");
+    expect(document.querySelector("[data-geocode-maplibre-print-image]")).toBeNull();
+    expect(document.getElementById("print-viewport")!.inert).toBe(false);
+    finishImages();
+    await vi.advanceTimersByTimeAsync(1000);
+    document.getElementById("print-submit")!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(print).toHaveBeenCalledOnce();
+    expect(decode).toHaveBeenCalledTimes(2);
+  });
+
+  it("画像準備中の描画完了通知だけでは同じ背景の印刷を中止しない", async () => {
+    preview = createPrintPreview(state, vi.fn());
+    await finishObjectLoads();
+    finishImages();
+    let finishDecode!: () => void;
+    const decode = vi.fn().mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishDecode = resolve;
+      }),
+    );
+    addPrintCanvas(decode);
+    const print = vi.spyOn(window, "print").mockImplementation(() => {});
+    await vi.advanceTimersByTimeAsync(1000);
+    document.getElementById("print-submit")!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    (preview.map as any)._geocodeBasemap.getLayer().fire("load");
+    finishDecode();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(print).toHaveBeenCalledOnce();
+    expect(document.querySelector("[data-geocode-maplibre-print-image]")).toBeNull();
+    expect(document.getElementById("print-viewport")!.inert).toBe(false);
+  });
+
+  it("背景画像の準備中は操作を止め、破棄時は待機を中止して一時画像を除去する", async () => {
+    preview = createPrintPreview(state, vi.fn());
+    await finishObjectLoads();
+    finishImages();
+    const decode = vi.fn().mockReturnValue(new Promise(() => {}));
+    const canvas = addPrintCanvas(decode);
+    const print = vi.spyOn(window, "print").mockImplementation(() => {});
+    await vi.advanceTimersByTimeAsync(1000);
+    const button = document.getElementById("print-submit")!;
+    button.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(decode).toHaveBeenCalledOnce();
+    expect(document.getElementById("print-viewport")!.inert).toBe(true);
+    expect(canvas.style.display).toBe("none");
+    button.click();
+    expect(decode).toHaveBeenCalledOnce();
+    const resume = vi.fn();
+    preview.map.on("printresume", resume);
+    preview.dispose();
+    const disposedStatus = document.getElementById("print-status")!.textContent;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(print).not.toHaveBeenCalled();
+    expect(resume).not.toHaveBeenCalled();
+    expect(document.getElementById("print-status")!.textContent).toBe(disposedStatus);
+    expect(canvas.style.display).toBe("");
+    expect(document.querySelector("[data-geocode-maplibre-print-image]")).toBeNull();
+    expect(document.getElementById("print-viewport")!.inert).toBe(false);
+    expect(document.body.classList.contains("print-preparing")).toBe(false);
+  });
+
+  it("20回の背景切替で旧背景の監視を残さず、遅い旧イベントは印刷待機を再開しない", async () => {
+    const vectors = await mockVectorBackgrounds();
+    const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
+    const base = bootstrap.tileServers["2"];
+    for (let id = 2; id <= 22; id++) {
+      bootstrap.tileServers[String(id)] = {
+        ...base,
+        id,
+        kind: "vector",
+        style_url: `/styles/${id}.json`,
+        layer_name: `vector-${id}`,
+      };
+    }
+    preview = createPrintPreview(state, vi.fn());
+    await finishObjectLoads();
+    const controller = (preview.map as any)._geocodeBasemap;
+    for (let id = 3; id <= 22; id++) expect(await controller.select(String(id))).toBe(true);
+    expect(vectors).toHaveLength(21);
+    expect(controller.getSelectedId()).toBe("22");
+    const retired = vectors.slice(0, -1);
+    for (const { layer, canvas } of retired) {
+      expect(layer.listens("load")).toBe(false);
+      expect(layer.listens("loading")).toBe(false);
+      expect(layer.listens("tileerror")).toBe(false);
+      expect(canvas.isConnected).toBe(false);
+    }
+    expect(vectors.at(-1)!.layer.listens("load")).toBe(true);
+    finishImages();
+    await vi.advanceTimersByTimeAsync(1000);
+    const button = document.getElementById("print-submit") as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    for (const { layer } of retired) layer.fire("load");
+    expect(button.disabled).toBe(false);
+    preview.dispose();
+    expect(vectors.every(({ layer }) => !layer.listens("load"))).toBe(true);
+  });
+
+  it("除去したグループの監視を外し、再表示すると一度だけ監視を再登録する", async () => {
+    preview = createPrintPreview(state, vi.fn());
+    await finishObjectLoads();
+    const group = L.layerGroup();
+    const on = vi.spyOn(group, "on");
+    group.addTo(preview.map);
+    expect(group.listens("load")).toBe(true);
+    preview.map.removeLayer(group);
+    expect(group.listens("load")).toBe(false);
+    group.addTo(preview.map);
+    expect(
+      on.mock.calls.filter(
+        ([events]) => events === "loading load tileloadstart tileload tileerror",
+      ),
+    ).toHaveLength(2);
+    finishImages();
+    await vi.advanceTimersByTimeAsync(1000);
+    const button = document.getElementById("print-submit") as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    group.fire("load");
+    expect(button.disabled).toBe(true);
+    preview.map.removeLayer(group);
+    finishImages();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(button.disabled).toBe(false);
+    group.fire("load");
+    expect(button.disabled).toBe(false);
+  });
+
   it.each([
     { markerIds: ["a"], shapeIds: ["shape-a"], markers: 1, shapes: 1 },
     { markerIds: ["a"], shapeIds: [], markers: 1, shapes: 0 },
@@ -682,6 +1018,34 @@ describe("印刷プレビューと実際のLeaflet", () => {
     expect(button.disabled).toBe(false);
     expect(button.textContent).toBe("印刷");
     expect((document.getElementById("print-retry") as HTMLButtonElement).hidden).toBe(true);
+  });
+
+  it("背景切替中はタイムアウト後も印刷とPDFを止め、確定後に描画完了を待つ", async () => {
+    preview = createPrintPreview(state, vi.fn());
+    await finishObjectLoads();
+    finishImages();
+    await vi.advanceTimersByTimeAsync(1000);
+    const controller = (preview.map as any)._geocodeBasemap;
+    const pending = vi.spyOn(controller, "isPending").mockReturnValue(true);
+    const active = controller.getLayer();
+    active.getPrintStatus = vi.fn(() => ({ loading: true, failed: false }));
+    preview.map.fire("basemaploadingchange");
+    await vi.advanceTimersByTimeAsync(31000);
+    const button = document.getElementById("print-submit") as HTMLButtonElement;
+    const pdf = document.getElementById("pdf-export") as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(pdf.disabled).toBe(true);
+    expect(document.getElementById("print-status")!.textContent).toContain("背景地図を切り替え");
+    pending.mockReturnValue(false);
+    preview.map.fire("basemaploadingchange");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(button.disabled).toBe(true);
+    expect(pdf.disabled).toBe(true);
+    active.getPrintStatus.mockReturnValue({ loading: false, failed: false });
+    active.fire("load");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(button.disabled).toBe(false);
+    expect(pdf.disabled).toBe(false);
   });
 
   it("グループの取得中・取得失敗時は出力を止め、再試行の成功後に印刷できる", async () => {

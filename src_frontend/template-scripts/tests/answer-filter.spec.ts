@@ -3,7 +3,7 @@ import { installAnswerFilter } from "../src/map/answer-filter";
 
 afterEach(() => vi.useRealTimers());
 
-function setup(targets = ["marker:id", "shape:id", "marker:invalid"]) {
+function setup(targets = ["marker:id", "shape:id", "marker:invalid"], bootstrap?: any) {
   const marker = { getLatLng: () => [35, 139] };
   const shape = { getLatLng: () => [36, 140] };
   const group = { hasLayer: vi.fn(() => true) };
@@ -29,7 +29,7 @@ function setup(targets = ["marker:id", "shape:id", "marker:invalid"]) {
     parentOrigin: location.origin,
     targets,
   } as any;
-  const result = installAnswerFilter(runtime, preview, { latLngBounds: () => bounds });
+  const result = installAnswerFilter(runtime, preview, { latLngBounds: () => bounds }, bootstrap);
   const send = (data: object, origin = location.origin, source = window.parent) =>
     window.dispatchEvent(
       new MessageEvent("message", {
@@ -42,6 +42,30 @@ function setup(targets = ["marker:id", "shape:id", "marker:invalid"]) {
 }
 
 describe("dedicated answer map filter", () => {
+  it("背景切替中の印刷要求を待ち、待機中に絞り込みが変わった場合は古い要求を拒否する", async () => {
+    let ready!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    const s = setup(undefined, {});
+    const whenReady = vi.fn(() => waiting);
+    Object.assign(s.runtime, { basemapController: { isPending: () => true, whenReady } });
+    s.send({ type: "answer-map-print-enable", enabled: true });
+    s.send({ targets: ["marker:id"] });
+    s.post.mockClear();
+    s.send({ type: "answer-map-print-request", printRequestId: "p", updateId: "u" });
+    expect(whenReady).toHaveBeenCalledOnce();
+    expect(s.post).not.toHaveBeenCalled();
+    s.send({ targets: ["shape:id"], updateId: "new" });
+    ready();
+    await Promise.resolve();
+    expect(s.post).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: "answer-map-print-error", printRequestId: "p" }),
+      location.origin,
+    );
+    s.handlers.unload();
+  });
+
   it("2万対象を省略せず絞り込みとCSV候補へ渡し、所属と重複を検証する", () => {
     const targets = Array.from({ length: 20_000 }, (_, n) => `shape:target-${n}`);
     const s = setup(targets);

@@ -1,0 +1,16 @@
+{
+  "name": "geocode-vector-basemap-prototype",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "serve": "node serve.mjs",
+    "check": "node verify.mjs",
+    "type-check": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@maplibre/maplibre-gl-leaflet": "0.1.4",
+    "maplibre-gl": "6.17.0",
+    "playwright": "1.56.1"
+  }
+}

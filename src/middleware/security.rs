@@ -1,10 +1,11 @@
-use crate::config::CONFIG;
+use crate::{config::CONFIG, tile_settings::TileSettings};
 use axum::{
     body::Body,
     extract::Request,
     http::{HeaderValue, Method, Response, StatusCode, header},
     middleware::Next,
 };
+use std::sync::Arc;
 
 const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://cloudflareinsights.com https://www.jma.go.jp; manifest-src 'self' https://geocode-web-mobile-app.pages.dev; frame-src 'self' https://www.youtube-nocookie.com; font-src 'self' data: https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'";
 
@@ -21,11 +22,39 @@ fn build_content_security_policy(origins: &[String]) -> HeaderValue {
     HeaderValue::from_str(&policy).expect("validated image origins must form a valid CSP header")
 }
 
+fn with_vector_tile_policy(policy: &HeaderValue, origins: &[String]) -> HeaderValue {
+    let mut value = policy.to_str().expect("valid CSP").to_owned();
+    if !origins.is_empty() {
+        value = value.replace(
+            "connect-src 'self' https://cloudflareinsights.com https://www.jma.go.jp;",
+            &format!(
+                "connect-src 'self' https://cloudflareinsights.com https://www.jma.go.jp {};",
+                origins.join(" ")
+            ),
+        );
+    }
+    value.push_str("; worker-src 'self'");
+    HeaderValue::from_str(&value).expect("validated vector origins must form a valid CSP header")
+}
+
 pub fn content_security_policy() -> &'static HeaderValue {
     static POLICY: once_cell::sync::Lazy<HeaderValue> = once_cell::sync::Lazy::new(|| {
-        build_content_security_policy(&CONFIG.http_image_allowed_origins)
+        content_security_policy_for_origins(
+            &CONFIG.http_image_allowed_origins,
+            &CONFIG.vector_tile_allowed_origins,
+        )
     });
     &POLICY
+}
+
+pub fn content_security_policy_for_origins(
+    image_origins: &[String],
+    vector_origins: &[String],
+) -> HeaderValue {
+    with_vector_tile_policy(
+        &build_content_security_policy(image_origins),
+        vector_origins,
+    )
 }
 
 pub async fn security_headers_and_origin(req: Request, next: Next) -> Response<Body> {
@@ -48,6 +77,10 @@ pub async fn security_headers_and_origin(req: Request, next: Next) -> Response<B
         }
     }
 
+    let tile_policy = req
+        .extensions()
+        .get::<Arc<TileSettings>>()
+        .map(|settings| settings.snapshot().vector_policy);
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
     headers.insert(
@@ -65,7 +98,7 @@ pub async fn security_headers_and_origin(req: Request, next: Next) -> Response<B
     );
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
-        content_security_policy().clone(),
+        tile_policy.unwrap_or_else(|| content_security_policy().clone()),
     );
     if CONFIG.secure_cookie {
         headers.insert(

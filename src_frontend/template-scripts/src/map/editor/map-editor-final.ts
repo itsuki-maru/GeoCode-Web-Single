@@ -394,8 +394,14 @@ if (!editorEntryProfile.isMobile && window.parent !== window) {
       )
         return;
       event.preventDefault();
-      if (!event.repeat && editorDataReady)
-        window.parent.postMessage({ type: "printOpen" }, printParentOrigin);
+      if (!event.repeat && editorDataReady) {
+        const openPrint = () => {
+          if (editorDataReady) window.parent.postMessage({ type: "printOpen" }, printParentOrigin);
+        };
+        const controller = getBasemapController(map);
+        if (controller?.isPending()) void controller.whenReady().then(openPrint);
+        else openPrint();
+      }
     });
   }
 }
@@ -507,36 +513,45 @@ window.addEventListener("message", function (event) {
           syncMarkerInputRestriction(marker, markersFromAxum[key.slice(7)]);
       }
     } else if (messageData.type === "printStateRequest" && !editorEntryProfile.isMobile) {
-      if (!editorDataReady) {
-        event.source.postMessage(
-          { type: "printStateResult", requestId: messageData.requestId, error: "map-data-loading" },
+      const controller = getBasemapController(map);
+      const replyPrintState = () => {
+        if (!editorDataReady) {
+          event.source.postMessage(
+            {
+              type: "printStateResult",
+              requestId: messageData.requestId,
+              error: "map-data-loading",
+            },
+            event.origin,
+          );
+          return;
+        }
+        const center = map.getCenter();
+        window.parent.postMessage(
+          {
+            type: "printStateResult",
+            requestId: messageData.requestId,
+            state: {
+              view: { latitude: center.lat, longitude: center.lng, zoom: map.getZoom() },
+              tileServerId: controller?.getSelectedId() || "1",
+              overlays: tileOverlayManager.getVisibility(),
+              layerIds: is_master ? null : [layer],
+              coloring: editorColoring.getState() || undefined,
+              clusteringEnabled: markerClustering.getEnabled(),
+              clusteringAllowed: markerClustering.isAllowed(),
+              clusteringMinZoom: markerClustering.minZoom,
+              markersVisible: map.hasLayer(markersClusterGroup),
+              shapesVisible: map.hasLayer(drawnShapesGroup),
+              shapeNamesVisible: map.hasLayer(shapeNameVisibilityLayer),
+              markerIds: externalMarkerFilterIds === null ? null : [...externalMarkerFilterIds],
+              shapeIds: externalShapeFilterIdSet === null ? null : [...externalShapeFilterIdSet],
+            },
+          },
           event.origin,
         );
-        return;
-      }
-      const center = map.getCenter();
-      window.parent.postMessage(
-        {
-          type: "printStateResult",
-          requestId: messageData.requestId,
-          state: {
-            view: { latitude: center.lat, longitude: center.lng, zoom: map.getZoom() },
-            tileServerId: document.querySelector(".tile-radio:checked")?.value || "1",
-            overlays: tileOverlayManager.getVisibility(),
-            layerIds: is_master ? null : [layer],
-            coloring: editorColoring.getState() || undefined,
-            clusteringEnabled: markerClustering.getEnabled(),
-            clusteringAllowed: markerClustering.isAllowed(),
-            clusteringMinZoom: markerClustering.minZoom,
-            markersVisible: map.hasLayer(markersClusterGroup),
-            shapesVisible: map.hasLayer(drawnShapesGroup),
-            shapeNamesVisible: map.hasLayer(shapeNameVisibilityLayer),
-            markerIds: externalMarkerFilterIds === null ? null : [...externalMarkerFilterIds],
-            shapeIds: externalShapeFilterIdSet === null ? null : [...externalShapeFilterIdSet],
-          },
-        },
-        event.origin,
-      );
+      };
+      if (controller?.isPending()) void controller.whenReady().then(replyPrintState);
+      else replyPrintState();
     } else if (messageData["type"] === "focus") {
       focusMapObject(
         messageData["objectType"],

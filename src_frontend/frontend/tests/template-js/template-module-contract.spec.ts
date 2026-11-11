@@ -125,13 +125,8 @@ describe("地図テンプレートのES Modules配信契約", () => {
     expect(controls).not.toContain("installPenPointerDrawingHandlers()");
   });
 
-  it("PowerShellビルドがVite成果物の階層を保って統合する", () => {
-    const builder = readRepositoryFile("src_frontend/scripts/frontends-builder.ps1");
-    expect(builder).toContain(
-      'Copy-Item -Path (Join-Path $templateScriptsDistDir "*") -Destination $movedDir -Recurse -Force',
-    );
-    expect(builder).not.toContain("Get-ChildItem -LiteralPath $templateScriptsDistDir -File");
-  });
+  // PowerShell配布の階層・資材・失敗時停止は、rootの
+  // tests/windows-frontend-build.test.mjsで実スクリプトを実行して検証する。
 
   it("UnixビルドがVite成果物の階層を保って統合する", () => {
     const builder = readRepositoryFile("src_frontend/scripts/frontends-builder.sh");

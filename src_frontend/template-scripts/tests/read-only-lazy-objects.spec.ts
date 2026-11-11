@@ -334,9 +334,13 @@ describe("lazy groups in the actual read-only map runtime", () => {
     },
   );
 
-  it.each([false, true])(
-    "共有地図の印刷（スナップショット共有 %s）には表示条件を満たす配信済みの地物だけを使う",
-    async (snapshotShare) => {
+  it.each([
+    { snapshotShare: false, version: 1 as const },
+    { snapshotShare: true, version: 1 as const },
+    { snapshotShare: true, version: 2 as const },
+  ])(
+    "共有地図の印刷（$snapshotShare、v$version）には表示条件を満たす配信済みの地物だけを使う",
+    async ({ snapshotShare, version }) => {
       Object.defineProperties(HTMLDialogElement.prototype, {
         showModal: {
           configurable: true,
@@ -352,7 +356,21 @@ describe("lazy groups in the actual read-only map runtime", () => {
         },
       });
       const base = window.__GEOCODE_MAP_BOOTSTRAP__ as AnotherMapBootstrap;
-      const tileServers = { "1": { ...base.tileServers["1"]!, min_zoom: 0, max_zoom: 18 } };
+      const tileServers = {
+        "1": { ...base.tileServers["1"]!, min_zoom: 0, max_zoom: 18 },
+        ...(version === 2
+          ? {
+              "2": {
+                ...base.tileServers["1"]!,
+                id: 2,
+                kind: "vector" as const,
+                style_url: "/assets/vector-style.json",
+                min_zoom: 0,
+                max_zoom: 18,
+              },
+            }
+          : {}),
+      };
       const state = {
         view: base.initialView,
         tileServerId: "1",
@@ -380,7 +398,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
         tileServers,
         markers: { "m-a": { ...marker("a"), marker_name: "残す地点" }, "m-b": marker("b") },
         shapes: { "s-a": { ...shape("a"), name: "残す図形" }, "s-b": shape("b") },
-        shareSnapshot: snapshotShare ? { version: 1, state, tileServers, tileOverlays: [] } : null,
+        shareSnapshot: snapshotShare ? { version, state, tileServers, tileOverlays: [] } : null,
       };
       runtime = initializeReadOnlyMapPage("temporary-map");
       const search = document.querySelector<HTMLInputElement>(".marker-search-input")!;
@@ -402,6 +420,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
       await vi.waitFor(() => expect(sent).toHaveBeenCalledOnce());
       const snapshot: ReadOnlyPrintSnapshot = sent.mock.calls[0]![0].snapshot;
       expect(snapshot.snapshotShare).toBe(snapshotShare);
+      expect(snapshot.version).toBe(version);
       expect(Object.keys(snapshot.markers)).toEqual(["m-a"]);
       expect(snapshot.shapes.map(({ id }) => id)).toEqual(["s-a"]);
       expect(snapshot.state.coloring?.rules.map(({ label }) => label) ?? []).toEqual(
@@ -416,6 +435,11 @@ describe("lazy groups in the actual read-only map runtime", () => {
         requestId: "test-print",
         parentOrigin: location.origin,
       });
+      if (snapshotShare) {
+        const bootstrap = (window as any).__GEOCODE_MAP_BOOTSTRAP__;
+        // 印刷側は引数のbootstrapを使用するため、元画面のsnapshotも変更しない。
+        expect(bootstrap.shareSnapshot.version).toBe(version);
+      }
       const bulk = document.querySelector<HTMLButtonElement>(
         "#print-layers .layer-bulk-toggle-control button",
       )!;
@@ -952,7 +976,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
       const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
       const records = [
         ["overview", 7, 10],
-        ["middle", 5, 11],
+        ["middle", 7, 13],
         ["tiny", 3, 14],
         ["large", 12, 10],
       ].map(([id, pixels, zoom]) => {
@@ -1019,6 +1043,7 @@ describe("lazy groups in the actual read-only map runtime", () => {
       const post = vi.spyOn(window.parent, "postMessage").mockImplementation(() => {});
       for (const [zoom, renderedCount] of [
         [11, 2],
+        [13, 2],
         [14, 3],
         [10, 1],
       ]) {

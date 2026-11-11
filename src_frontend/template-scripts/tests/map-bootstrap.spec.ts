@@ -92,6 +92,21 @@ describe("readMapBootstrap", () => {
     expect(readMapBootstrap()).toMatchObject({ page: "map-anather", isCluster: true });
   });
 
+  it("背景メタデータは旧省略値を保ち、未知種別と背景1のベクタを拒否する", () => {
+    const value = {
+      ...answerData(),
+      tileServers: { "1": {}, "2": { kind: "vector", style_url: "/assets/style.json" } },
+    };
+    window.__GEOCODE_MAP_BOOTSTRAP__ = value;
+    expect(readMapBootstrap()).toBe(value);
+    expect(value.tileServers["1"]).not.toHaveProperty("kind");
+    value.tileServers["2"].kind = "unknown";
+    expect(() => readMapBootstrap()).toThrow("Map bootstrap data is invalid");
+    value.tileServers["2"].kind = "vector";
+    Object.assign(value.tileServers["1"], value.tileServers["2"]);
+    expect(() => readMapBootstrap()).toThrow("Map bootstrap data is invalid");
+  });
+
   it.each(["temporary-map", "temporary-map-mobile"] as const)(
     "reads %s bootstrap data",
     (page) => {

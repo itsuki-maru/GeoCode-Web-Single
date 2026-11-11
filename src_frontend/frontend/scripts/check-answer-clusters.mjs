@@ -109,6 +109,11 @@ export async function checkAnswerClusters(args) {
         configureServer(vite) {
           vite.middlewares.use(async (req, res, next) => {
             const url = new URL(req.url, "http://localhost");
+            if (url.pathname === "/tile-proxy-revision.js") {
+              res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+              res.end("window.__GEOCODE_TILE_PROXY_REVISION__ = null;");
+              return;
+            }
             if (url.pathname === "/cluster-check.html") {
               const count = Number(url.searchParams.get("count") || "100");
               res.setHeader("Content-Type", "text/html; charset=utf-8");

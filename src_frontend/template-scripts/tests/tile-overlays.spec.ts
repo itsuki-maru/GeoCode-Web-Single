@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTileOverlayManager, type TileOverlayRecord } from "../src/map/common/tile-overlays";
 
 const tile = (id: string): TileOverlayRecord => ({
@@ -56,8 +56,25 @@ function setup(accountId?: string, initiallyVisible = true) {
   };
 }
 beforeEach(() => localStorage.clear());
+afterEach(() => {
+  delete window.__GEOCODE_TILE_PROXY_REVISION__;
+});
 
 describe("tile overlays", () => {
+  it("requests a versioned local proxy overlay while preserving its stored URL", () => {
+    const revision = "018f6ff0-08eb-7da6-8727-6531bc7b4414";
+    window.__GEOCODE_TILE_PROXY_REVISION__ = revision;
+    const local = Object.freeze({ ...tile("local"), url: "/tile/{z}/{x}/{y}.png" });
+    const external = tile("external");
+    const { manager, leaflet } = setup();
+    expect(manager.sync([local, external])).toBe(true);
+    expect(leaflet.tileLayer.mock.calls.map(([url]) => url)).toEqual([
+      external.url,
+      `${local.url}?v=${revision}`,
+    ]);
+    expect(local.url).toBe("/tile/{z}/{x}/{y}.png");
+  });
+
   it("applies inherited visibility before adding tiles and keeps later changes local", () => {
     localStorage.setItem("geocode-web:tile-overlay-visibility:owner", '{"a":false}');
     const page = setup();

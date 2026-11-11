@@ -3,7 +3,7 @@ use crate::error::AppError;
 use crate::model::{
     CreateUpdatedTemporaryUrlResponse, CurrentTemporaryUrlResponse, GenarateUrlPayload,
     LayerObjectFromRow, MapStateParams, MarkerObjectFromRow, OnetimePasswordForm, ShapeObject,
-    TemporaryUrl, TemporaryUrlFromDB, TileServers,
+    TemporaryUrl, TemporaryUrlFromDB,
 };
 use crate::utils::vec_to_hashmap;
 use axum::{
@@ -712,24 +712,7 @@ async fn render_temporary_map_page(
         context.insert("tileServers", &snapshot["tileServers"]);
         context.insert("tileOverlays", &snapshot["tileOverlays"]);
     } else {
-        let tile_servers = sqlx::query_as::<_, TileServers>(
-            r#"
-            SELECT
-                id,
-                layer_name,
-                label,
-                url,
-                attribution,
-                include_foreign_tiles,
-                min_zoom,
-                max_zoom,
-                create_at,
-                updated_at
-            FROM tileserver_model
-            "#,
-        )
-        .fetch_all(pool)
-        .await?;
+        let tile_servers = crate::db::load_tile_servers(pool).await?;
         let tile_servers = vec_to_hashmap(tile_servers, |server| server.id);
         context.insert("tileServers", &tile_servers);
         let tile_overlays = if temp_url.include_tile_overlays {

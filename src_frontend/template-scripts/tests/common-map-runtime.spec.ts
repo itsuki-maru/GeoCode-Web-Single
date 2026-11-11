@@ -117,23 +117,18 @@ describe("read-only map runtime", () => {
     expect(mock.disableClickPropagation).toHaveBeenCalledOnce();
 
     const controlElement = mock.disableClickPropagation.mock.calls[0]![0] as HTMLElement;
-    const radios = controlElement.querySelectorAll<HTMLInputElement>(
-      ".tile-radio",
-    );
+    const radios = controlElement.querySelectorAll<HTMLInputElement>(".tile-radio");
     expect(radios).toHaveLength(2);
     expect(radios[0]?.checked).toBe(true);
     expect(controlElement.innerHTML).toContain("Default &lt;map&gt;");
     radios[1]?.dispatchEvent(new Event("change"));
     expect(handleTileChange).toHaveBeenCalledOnce();
 
-    expect(mock.leaflet.tileLayer).toHaveBeenCalledWith(
-      tileServers["1"]!.url,
-      {
-        attribution: "Default attribution",
-        maxZoom: 18,
-        minZoom: 5,
-      },
-    );
+    expect(mock.leaflet.tileLayer).toHaveBeenCalledWith(tileServers["1"]!.url, {
+      attribution: "Default attribution",
+      maxZoom: 18,
+      minZoom: 5,
+    });
     expect(mock.tileLayer.addTo).toHaveBeenCalledWith(mock.map);
     expect(runtime).toMatchObject({
       bounds: mock.bounds,
@@ -157,6 +152,6 @@ describe("read-only map runtime", () => {
       zoom: 3,
     });
 
-    expect(mock.map.setMaxBounds).not.toHaveBeenCalled();
+    expect(mock.map.setMaxBounds).toHaveBeenCalledWith(null);
   });
 });

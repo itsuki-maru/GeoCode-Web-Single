@@ -150,6 +150,11 @@ const server = await createServer({
       configureServer(server) {
         server.middlewares.use(async (req, res, next) => {
           const path = new URL(req.url, "http://localhost").pathname;
+          if (path === "/tile-proxy-revision.js") {
+            res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+            res.end("window.__GEOCODE_TILE_PROXY_REVISION__ = null;");
+            return;
+          }
           if (path === "/print-check.html") {
             res.setHeader("Content-Type", "text/html; charset=utf-8");
             res.end(template);

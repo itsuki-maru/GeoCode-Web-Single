@@ -162,6 +162,8 @@ async fn fixture(pool: &SqlitePool) -> (String, String, String, String, Value) {
             layer_name,
             label,
             url,
+            kind,
+            style_url,
             attribution,
             include_foreign_tiles,
             min_zoom,
@@ -201,6 +203,147 @@ async fn fixture(pool: &SqlitePool) -> (String, String, String, String, Value) {
         "shapes":[],"tileServers":{tile_id:tile},"tileOverlays":[]
     });
     (user, layer, marker, excluded, snapshot)
+}
+
+async fn vector_tile(pool: &SqlitePool, style_url: &str) -> Value {
+    sqlx::query(
+        "INSERT INTO tileserver_model (
+            id, layer_name, label, url, attribution, include_foreign_tiles,
+            min_zoom, max_zoom, create_at, updated_at, kind, style_url
+         ) VALUES (
+            2, 'vector fixture', 'ベクタ地図', '/fallback/{z}/{x}/{y}.png',
+            'ベクタ出典', false, 0, 22, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+            'vector', $1
+         )",
+    )
+    .bind(style_url)
+    .execute(pool)
+    .await
+    .unwrap();
+    let tile = sqlx::query_as::<_, TileServers>(
+        "SELECT id, layer_name, label, url, kind, style_url, attribution,
+            include_foreign_tiles, min_zoom, max_zoom, create_at, updated_at
+         FROM tileserver_model WHERE id=2",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    serde_json::to_value(tile).unwrap()
+}
+
+#[tokio::test]
+async fn legacy_snapshot_strips_raster_defaults_and_ignores_unselected_vector_rows() {
+    let pool = common::test_pool().await;
+    let (user, layer, _, _, snapshot) = fixture(&pool).await;
+    vector_tile(&pool, "/styles/vector.json").await;
+    // 新しいbootstrap由来の冗長な既定値でも、保存するv1形式は従来のままにする。
+    assert_eq!(snapshot["tileServers"]["1"]["kind"], "raster");
+    assert!(snapshot["tileServers"]["1"]["style_url"].is_null());
+    let id = create(&pool, &user, payload(&layer, Some(snapshot), false))
+        .await
+        .id;
+    let data = saved(&pool, &user).await;
+    let metadata = &data["map_snapshot"];
+    assert_eq!(metadata["version"], 1);
+    assert!(metadata["tileServers"]["1"].get("kind").is_none());
+    assert!(metadata["tileServers"]["1"].get("style_url").is_none());
+    assert!(metadata["tileServers"].get("2").is_none());
+    assert_eq!(rendered(&pool, &id, false).await["snapshot"], *metadata);
+}
+
+#[tokio::test]
+async fn vector_snapshot_preserves_style_and_rejects_definition_changes_without_replacing_share() {
+    let pool = common::test_pool().await;
+    let (user, layer, _, _, mut snapshot) = fixture(&pool).await;
+    let tile = vector_tile(&pool, "/styles/captured.json").await;
+    snapshot["version"] = json!(2);
+    snapshot["state"]["tileServerId"] = json!("2");
+    snapshot["tileServers"]["2"] = tile;
+    let original = create(&pool, &user, payload(&layer, Some(snapshot.clone()), false)).await;
+    let before = saved(&pool, &user).await;
+    let metadata = &before["map_snapshot"];
+    assert_eq!(metadata["version"], 2);
+    assert_eq!(metadata["tileServers"]["1"]["kind"], "raster");
+    assert!(metadata["tileServers"]["1"]["style_url"].is_null());
+    assert_eq!(metadata["tileServers"]["2"]["kind"], "vector");
+    assert_eq!(
+        metadata["tileServers"]["2"]["style_url"],
+        "/styles/captured.json"
+    );
+    assert_eq!(
+        metadata["tileServers"]["2"]["url"],
+        "/fallback/{z}/{x}/{y}.png"
+    );
+
+    let mut changed_style = snapshot.clone();
+    changed_style["tileServers"]["2"]["style_url"] = json!("/styles/arbitrary.json");
+    let mut changed_kind = snapshot.clone();
+    changed_kind["tileServers"]["2"]["kind"] = json!("raster");
+    changed_kind["tileServers"]["2"]["style_url"] = Value::Null;
+    let mut unknown_kind = snapshot.clone();
+    unknown_kind["tileServers"]["2"]["kind"] = json!("unknown");
+    let mut unknown_version = snapshot.clone();
+    unknown_version["version"] = json!(3);
+    for bad in [changed_style, changed_kind, unknown_kind, unknown_version] {
+        assert!(
+            generate_url_handler(
+                Extension(user.clone()),
+                Extension(pool.clone()),
+                Json(payload(&layer, Some(bad), true)),
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(saved(&pool, &user).await, before);
+    }
+    sqlx::query("UPDATE tileserver_model SET style_url = '/styles/changed.json' WHERE id = 2")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        generate_url_handler(
+            Extension(user.clone()),
+            Extension(pool.clone()),
+            Json(payload(&layer, Some(snapshot), true)),
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(saved(&pool, &user).await, before);
+    // 保存済み共有は、後から変更・削除された配信設定を再認可せず表示する。
+    sqlx::query("DELETE FROM tileserver_model WHERE id = 2")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for mobile in [false, true] {
+        let output = rendered(&pool, &original.id, mobile).await;
+        assert_eq!(output["snapshot"], *metadata);
+        assert_eq!(output["tiles"]["2"]["style_url"], "/styles/captured.json");
+    }
+}
+
+#[tokio::test]
+async fn legacy_snapshot_cannot_authorize_vector_background_as_raster() {
+    let pool = common::test_pool().await;
+    let (user, layer, _, _, mut snapshot) = fixture(&pool).await;
+    create(&pool, &user, payload(&layer, Some(snapshot.clone()), false)).await;
+    let before = saved(&pool, &user).await;
+    let mut tile = vector_tile(&pool, "https://tiles.example/style.json").await;
+    // レンダラー属性を省略しても、DB上のvector定義とv1のraster定義は一致しない。
+    tile.as_object_mut().unwrap().remove("kind");
+    tile.as_object_mut().unwrap().remove("style_url");
+    snapshot["tileServers"]["2"] = tile;
+    snapshot["state"]["tileServerId"] = json!("2");
+    assert!(
+        generate_url_handler(
+            Extension(user.clone()),
+            Extension(pool.clone()),
+            Json(payload(&layer, Some(snapshot), true)),
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(saved(&pool, &user).await, before);
 }
 
 async fn rendered(pool: &SqlitePool, id: &str, mobile: bool) -> Value {

@@ -14,6 +14,7 @@ vi.mock("@/router", () => ({ default: { push: auth.push } }));
 vi.mock("@/setting", () => ({ baseUrl: "https://admin.example.test" }));
 import apiClient from "@/axiosClient";
 import TileOverlays from "@/views/TileOverlays.vue";
+import BackgroundMaps from "@/views/BackgroundMaps.vue";
 import ConfirmModal from "@/components/common/ConfirmModal.vue";
 
 const originalAdapter = apiClient.defaults.adapter;
@@ -324,5 +325,81 @@ describe("実Axiosを使うタイル管理の失敗と復旧", () => {
     expect(attempts).toBe(2);
     expect(auth.logout).not.toHaveBeenCalled();
     expect(auth.push).not.toHaveBeenCalled();
+  });
+});
+
+const background = {
+  id: 2,
+  layer_name: "vector-background",
+  label: "背景地図",
+  url: "/tile/{z}/{x}/{y}.png",
+  kind: "vector",
+  style_url: "/styles/v1.json",
+  attribution: "出典",
+  include_foreign_tiles: false,
+  min_zoom: null,
+  max_zoom: null,
+};
+async function openBackground() {
+  wrapper = mount(BackgroundMaps, { attachTo: document.body });
+  await flushPromises();
+  await wrapper.get("li button").trigger("click");
+  return wrapper;
+}
+
+describe("実Axiosを使う背景地図設定", () => {
+  it("保存中のトークン更新後も同じ入力を再送し、一度だけ成功を反映する", async () => {
+    const writes: unknown[] = [];
+    adapter.mockImplementation(async (config) => {
+      if (config.method === "get") return response(config, [background]);
+      if (path(config) === "/account/refresh") return response(config);
+      writes.push(JSON.parse(config.data));
+      if (writes.length === 1) throw httpError(config, 401, { error: "token_expired" });
+      return response(config, { ...background, ...JSON.parse(config.data) });
+    });
+    const w = await openBackground();
+    await w.get("#background-style-url").setValue("/styles/v2.json");
+    await w.get("form").trigger("submit");
+    await flushPromises();
+    expect(writes).toHaveLength(2);
+    expect(writes[0]).toEqual(writes[1]);
+    expect(writes[0]).toMatchObject({
+      style_url: "/styles/v2.json",
+      min_zoom: null,
+      max_zoom: null,
+    });
+    expect(
+      adapter.mock.calls.filter(([config]) => path(config) === "/account/refresh"),
+    ).toHaveLength(1);
+    expect(w.get("li").text()).toContain("/styles/v2.json");
+    expect(w.get('[role="status"]').text()).toContain("背景地図を保存しました");
+    expect(auth.logout).not.toHaveBeenCalled();
+    expect(auth.push).not.toHaveBeenCalled();
+  });
+
+  it("サーバーの入力エラーでは元の一覧と編集中の入力を維持し、再保存で回復する", async () => {
+    let attempts = 0;
+    adapter.mockImplementation(async (config) => {
+      if (config.method === "get") return response(config, [background]);
+      if (++attempts === 1) throw httpError(config, 400, { error: "private provider details" });
+      return response(config, { ...background, ...JSON.parse(config.data) });
+    });
+    const w = await openBackground();
+    await w.get("#background-style-url").setValue("/styles/retry.json");
+    await w.get("form").trigger("submit");
+    await flushPromises();
+    expect(attempts).toBe(1);
+    expect(w.get('[role="alert"]').text()).toContain("保存できませんでした");
+    expect(w.text()).not.toContain("private provider details");
+    expect(w.get<HTMLInputElement>("#background-style-url").element.value).toBe(
+      "/styles/retry.json",
+    );
+    expect(w.get("li").text()).toContain("/styles/v1.json");
+    expect(w.find('[role="status"]').exists()).toBe(false);
+    await w.get("form").trigger("submit");
+    await flushPromises();
+    expect(attempts).toBe(2);
+    expect(w.get("li").text()).toContain("/styles/retry.json");
+    expect(w.get('[role="status"]').text()).toContain("保存しました");
   });
 });
