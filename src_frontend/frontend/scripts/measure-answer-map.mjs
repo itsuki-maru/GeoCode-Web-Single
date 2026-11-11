@@ -436,6 +436,11 @@ const server = createServer(async (request, response) => {
     if (request.headers.host !== new URL(origin).host) return response.writeHead(403).end();
     const url = new URL(request.url, "http://localhost");
     if (request.headers.origin && request.headers.origin !== origin) return response.writeHead(403).end();
+    if (url.pathname === "/tile-proxy-revision.js") {
+      response.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
+      response.end("window.__GEOCODE_TILE_PROXY_REVISION__ = null;");
+      return;
+    }
     if (url.pathname === "/__bench-parent-records") {
       if (!parentRecordsBody || request.method !== "GET") return response.writeHead(404).end();
       response.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });

@@ -54,7 +54,7 @@ async fn migrations_create_schema_and_record_versions() {
     .fetch_one(&pool)
     .await
     .expect("migration count should be returned");
-    assert_eq!(migration_count, 23);
+    assert_eq!(migration_count, 25);
 
     let live_location_table_count: i64 = sqlx::query_scalar(
         r#"
@@ -185,7 +185,7 @@ async fn migrations_are_idempotent() {
     .fetch_one(&pool)
     .await
     .expect("migration count should be returned");
-    assert_eq!(migration_count, 23);
+    assert_eq!(migration_count, 25);
 }
 
 #[tokio::test]
@@ -267,7 +267,7 @@ async fn migrations_record_versions_for_existing_schema() {
     .await
     .expect("migration rows should be returned");
 
-    assert_eq!(rows.len(), 23);
+    assert_eq!(rows.len(), 25);
     assert_eq!(rows[0].get::<i64, _>("version"), 1);
     assert_eq!(rows[0].get::<String, _>("name"), "create_initial_schema");
     assert_eq!(rows[1].get::<i64, _>("version"), 2);
@@ -863,7 +863,7 @@ async fn common_form_upgrade_preserves_legacy_config_answers_and_markdown() {
         .fetch_one(&pool)
         .await
         .unwrap(),
-        23
+        25
     );
 }
 
@@ -1216,7 +1216,7 @@ async fn receipt_upgrade_from_version_twenty_preserves_data_and_is_repeatable() 
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(after.len(), 23);
+    assert_eq!(after.len(), 25);
     assert_eq!(&after[..20], before);
     let detail: String = sqlx::query_scalar(
         r#"
@@ -1359,7 +1359,7 @@ async fn receipt_upgrade_preserves_receipts_when_sql_was_applied_before_runtime_
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(total, 23);
+    assert_eq!(total, 25);
     let detail: String = sqlx::query_scalar(
         r#"
         SELECT
@@ -1949,7 +1949,7 @@ async fn saved_condition_upgrade_from_twenty_one_preserves_all_existing_data_and
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(migrations_after.len(), 23);
+    assert_eq!(migrations_after.len(), 25);
     assert_eq!(&migrations_after[..21], migrations_before);
     assert_eq!(migrations_after[21].0, 22);
     assert_eq!(existing_data_snapshot(&pool).await, before);
@@ -2025,7 +2025,7 @@ async fn saved_condition_upgrade_keeps_rows_when_sql_was_applied_before_runtime_
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(versions, (1..=23).collect::<Vec<_>>());
+    assert_eq!(versions, (1..=25).collect::<Vec<_>>());
 }
 
 #[tokio::test]
@@ -2158,4 +2158,84 @@ async fn 実行時とsqlxの共有スナップショット列定義が一致す�
         .await
         .unwrap();
     assert_eq!(runtime_schema, prepared_schema);
+}
+
+#[tokio::test]
+async fn 背景とタイル設定の更新で旧データを保持し_sql_先行適用と再実行に対応する() {
+    for sql_first in [false, true] {
+        let pool = common::test_pool().await;
+        sqlx::raw_sql(
+            r#"
+            DROP TABLE tile_server_settings;
+            ALTER TABLE tileserver_model DROP COLUMN style_url;
+            ALTER TABLE tileserver_model DROP COLUMN kind;
+            DELETE FROM schema_migrations WHERE version >= 24;
+            INSERT INTO tileserver_model
+                (id,layer_name,label,url,attribution,include_foreign_tiles,min_zoom,max_zoom,create_at,updated_at)
+            VALUES (1,'旧既定','旧既定','/old/{z}/{x}/{y}.png','旧出典',false,NULL,NULL,'2020-01-01','2020-01-02'),
+                   (17,'旧追加','旧追加','https://old.test/{z}/{x}/{y}.jpg','旧追加出典',true,0,19,'2020-02-01','2020-02-02');
+            INSERT INTO temporary_urls
+                (id,user_id,url,expiration,layers,markers,shapes,create_at,map_snapshot)
+            VALUES ('saved-share','old-owner','old-link','2099-01-01','{}','{}','{}','2020-01-01',
+                    '{"version":1,"tileServers":{"1":{"url":"/captured/{z}/{x}/{y}.png"}}}');
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let original: Vec<(i64, String, String, String, String, bool, Option<i64>, Option<i64>, String, String)> =
+            sqlx::query_as("SELECT id,layer_name,label,url,attribution,include_foreign_tiles,min_zoom,max_zoom,create_at,updated_at FROM tileserver_model ORDER BY id")
+                .fetch_all(&pool).await.unwrap();
+        let saved_share: (String, String) =
+            sqlx::query_as("SELECT url,map_snapshot FROM temporary_urls WHERE id='saved-share'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        if sql_first {
+            sqlx::raw_sql(include_str!(
+                "../migrations/20261111090000_add_background_tile_kind.sql"
+            ))
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::raw_sql(include_str!(
+                "../migrations/20261111100000_add_tile_server_settings.sql"
+            ))
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        run_migrations(&pool).await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let upgraded: Vec<(i64, String, String, String, String, bool, Option<i64>, Option<i64>, String, String)> =
+            sqlx::query_as("SELECT id,layer_name,label,url,attribution,include_foreign_tiles,min_zoom,max_zoom,create_at,updated_at FROM tileserver_model ORDER BY id")
+                .fetch_all(&pool).await.unwrap();
+        assert_eq!(upgraded, original);
+        let defaults: Vec<(String, Option<String>)> =
+            sqlx::query_as("SELECT kind,style_url FROM tileserver_model ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            defaults,
+            vec![("raster".into(), None), ("raster".into(), None)]
+        );
+        let restored_share: (String, String) =
+            sqlx::query_as("SELECT url,map_snapshot FROM temporary_urls WHERE id='saved-share'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(restored_share, saved_share);
+        let versions: Vec<i64> =
+            sqlx::query_scalar("SELECT version FROM schema_migrations ORDER BY version")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(versions, (1..=25).collect::<Vec<_>>());
+        let settings_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tile_server_settings")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(settings_rows, 0);
+    }
 }

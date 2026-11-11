@@ -376,9 +376,6 @@ onMounted(load);
                 位置共有を許可されたアカウントはありません。ユーザー管理から許可を設定してください。
               </td>
             </tr>
-            <tr v-if="isLoading && accounts.length === 0">
-              <td colspan="6" class="empty-state">アカウントを読み込んでいます…</td>
-            </tr>
           </tbody>
         </table>
       </div>
@@ -495,7 +492,7 @@ onMounted(load);
             :disabled="isSaving"
             @click="saveMap"
           >
-            {{ isSaving ? "保存中…" : hasCurrentMap ? "設定を更新" : "共有リンクを発行" }}
+            {{ hasCurrentMap ? "設定を更新" : "共有リンクを発行" }}
           </button>
         </div>
       </div>
@@ -514,9 +511,8 @@ onMounted(load);
       <p v-if="currentMap?.layers_configured_by_other">
         保存すると、別の管理者によるレイヤ設定を置き換えます。
       </p>
-      <p v-if="layerLoading" role="status">レイヤを読み込んでいます…</p>
-      <p v-else-if="layerError" role="alert">{{ layerError }}</p>
-      <div v-else class="table-scroll live-layer-table">
+      <p v-if="layerError" role="alert">{{ layerError }}</p>
+      <div v-else-if="!layerLoading" class="table-scroll live-layer-table">
         <table>
           <thead>
             <tr>

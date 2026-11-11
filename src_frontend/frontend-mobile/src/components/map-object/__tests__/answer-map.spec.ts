@@ -1315,6 +1315,10 @@ describe("登録地図の復旧と出力境界", () => {
       const w = await open(true);
       await ready(w);
       await click(w, label);
+      if (label === "地図を印刷") {
+        await vi.advanceTimersByTimeAsync(30000);
+        expect(w.text()).not.toContain("印刷対象を取得できません");
+      }
       await vi.advanceTimersByTimeAsync(15000);
       expect(w.text()).toContain(
         label === "CSV出力" ? "CSVの対象を取得できません" : "印刷対象を取得できません",

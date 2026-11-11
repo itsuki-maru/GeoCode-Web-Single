@@ -24,6 +24,7 @@ pub struct Config {
     pub allow_user_update_password: bool,
     pub allow_origins: String,
     pub http_image_allowed_origins: Vec<String>,
+    pub vector_tile_allowed_origins: Vec<String>,
     pub tile_server_base_url: Option<String>,
     pub tile_server_api_key: Option<String>,
     pub redis_url: Option<String>,
@@ -89,6 +90,10 @@ pub static CONFIG: Lazy<Config> = Lazy::new(|| Config {
         env::var("HTTP_IMAGE_ALLOWED_ORIGINS").ok().as_deref(),
     )
     .unwrap_or_else(|message| panic!("Invalid HTTP_IMAGE_ALLOWED_ORIGINS: {message}")),
+    vector_tile_allowed_origins: parse_vector_tile_allowed_origins(
+        env::var("VECTOR_TILE_ALLOWED_ORIGINS").ok().as_deref(),
+    )
+    .unwrap_or_else(|message| panic!("Invalid VECTOR_TILE_ALLOWED_ORIGINS: {message}")),
     tile_server_base_url: env::var("TILE_SERVER_BASE_URL").ok(),
     tile_server_api_key: env::var("TILE_SERVER_API_KEY").ok(),
     redis_url: env::var("REDIS_URL").ok(),
@@ -313,6 +318,88 @@ mod http_image_config_tests {
             "http://[::1]",
         ] {
             assert!(parse(Some(value)).is_err(), "accepted {value:?}");
+        }
+    }
+}
+
+pub(crate) fn parse_vector_tile_allowed_origins(
+    value: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let mut origins = Vec::new();
+    let value = value.unwrap_or("").trim();
+    if value.is_empty() {
+        return Ok(origins);
+    }
+    for (index, entry) in value.split(',').enumerate() {
+        let entry = entry.trim();
+        let invalid = || {
+            format!(
+                "entry {} must be an HTTPS origin without credentials, path, query or fragment",
+                index + 1
+            )
+        };
+        if entry.is_empty()
+            || entry.contains(['*', '\'', '"', '\\'])
+            || entry.chars().any(char::is_whitespace)
+        {
+            return Err(invalid());
+        }
+        let url = reqwest::Url::parse(entry).map_err(|_| invalid())?;
+        if url.scheme() != "https"
+            || !url.host_str().is_some_and(|host| {
+                host.bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b".-_:[]".contains(&byte))
+            })
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+            || url.path() != "/"
+        {
+            return Err(invalid());
+        }
+        let origin = url.origin().ascii_serialization();
+        if !origins.contains(&origin) {
+            origins.push(origin);
+        }
+    }
+    Ok(origins)
+}
+
+#[cfg(test)]
+mod vector_tile_config_tests {
+    use super::parse_vector_tile_allowed_origins as parse;
+    /// 許可一覧の省略・既定ポート・重複を正規化する。
+    #[test]
+    fn origins_are_optional_normalized_and_deduplicated() {
+        assert!(parse(None).unwrap().is_empty());
+        assert_eq!(
+            parse(Some(
+                " https://tiles.example:443/,https://tiles.example,https://fonts.example:8443 "
+            ))
+            .unwrap(),
+            vec!["https://tiles.example", "https://fonts.example:8443"]
+        );
+    }
+    /// ワイルドカードや不正URLによる接続許可の拡張を拒否する。
+    #[test]
+    fn origins_cannot_inject_directives_or_allow_unrestricted_connections() {
+        for input in [
+            "*",
+            "https:",
+            "http://tiles.example",
+            "https://*.example",
+            "https://user@tiles.example",
+            "https://tiles.example/a",
+            "https://tiles.example?q=1",
+            "https://tiles.example#x",
+            "https://tiles.example;worker-src",
+            "https://tiles.example%3bworker-src",
+            "https://tiles.example; connect-src *",
+            "https://tiles.exa\nmple",
+            "https://tiles.example,,https://fonts.example",
+        ] {
+            assert!(parse(Some(input)).is_err(), "{input:?}");
         }
     }
 }

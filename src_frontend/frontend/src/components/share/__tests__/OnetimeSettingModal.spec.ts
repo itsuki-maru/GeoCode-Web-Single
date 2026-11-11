@@ -205,6 +205,31 @@ describe("現在の地図のスナップショット共有", () => {
     w.unmount();
   });
 
+  it("v2の背景定義を固定し、選択中のベクタ背景とstyle URLをAPIへ送信する", async () => {
+    const snapshot = shareSnapshotFixture();
+    snapshot.version = 2;
+    snapshot.state.tileServerId = "2";
+    snapshot.tileServers["2"] = {
+      ...snapshot.tileServers["1"]!,
+      id: 2,
+      label: "ベクタ背景",
+      kind: "vector",
+      style_url: "https://styles.example.test/vector.json?key=public",
+    };
+    const expected = JSON.parse(JSON.stringify(snapshot));
+    const w = open(snapshot);
+    expect(w.get(".snapshot-summary").text()).toContain("ベクタ背景");
+    snapshot.tileServers["2"].style_url = "/assets/styles/changed.json";
+    await w.get(".dropdown-btn > button").trigger("click");
+    await flushPromises();
+    expect(apiClient.post).toHaveBeenCalledExactlyOnceWith(
+      expect.any(String),
+      expect.objectContaining({ snapshot: expected }),
+    );
+    expect(w.emitted("generated")).toHaveLength(1);
+    w.unmount();
+  });
+
   it("送信中の連打とスナップショットの差し替えで共有対象を変えない", async () => {
     let complete!: (value: any) => void;
     vi.mocked(apiClient.post).mockReturnValueOnce(

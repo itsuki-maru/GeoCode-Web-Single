@@ -54,6 +54,32 @@ const routeSettings: RouteRecordRaw[] = [
     },
   },
   {
+    path: "/background-maps",
+    name: "BackgroundMaps",
+    component: () => import("@/views/BackgroundMaps.vue"),
+    beforeEnter: async (_to, _from, next) => {
+      try {
+        await apiClient.get(getUserUrl);
+        next();
+      } catch {
+        next({ name: "login" });
+      }
+    },
+  },
+  {
+    path: "/tile-server-settings",
+    name: "TileServerSettings",
+    component: () => import("@/views/TileServerSettings.vue"),
+    beforeEnter: async (_to, _from, next) => {
+      try {
+        await apiClient.get(getUserUrl);
+        next();
+      } catch {
+        next({ name: "login" });
+      }
+    },
+  },
+  {
     path: "/tile-overlays",
     name: "TileOverlays",
     component: () => import("@/views/TileOverlays.vue"),

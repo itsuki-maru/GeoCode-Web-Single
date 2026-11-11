@@ -101,7 +101,6 @@ onMounted(load);
       {{ error }} <button :disabled="busy" @click="load">一覧を再読み込み</button>
     </p>
     <p v-if="message" role="status">{{ message }}</p>
-    <p v-if="busy" role="status">処理中…</p>
     <form @submit.prevent="save">
       <fieldset :disabled="busy">
         <legend>{{ editing ? "タイルを編集" : "タイルを登録" }}</legend>

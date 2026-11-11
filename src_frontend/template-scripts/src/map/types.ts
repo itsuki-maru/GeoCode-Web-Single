@@ -1,13 +1,5 @@
-export interface TileServerRecord {
-  attribution: string;
-  id: number;
-  include_foreign_tiles: boolean;
-  label: string;
-  layer_name: string;
-  max_zoom: number | null;
-  min_zoom: number | null;
-  url: string;
-}
+import type { TileServerRecord } from "./common/basemap-definition";
+export type { TileServerRecord } from "./common/basemap-definition";
 
 export interface LayerRecord {
   id: string;

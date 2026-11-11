@@ -7,6 +7,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import apiClient from "@/axiosClient";
 import { submitAuthenticatedForm } from "@/utils/authenticated-form";
 import { requestCurrentMapView } from "@/utils/map-view";
+import { PRINT_REQUEST_TIMEOUT_MS } from "../../../../template-scripts/src/map/common/map-timeouts";
 import PrintMapModal from "../map/PrintMapModal.vue";
 import ProgressSpinner from "../common/ProgressSpinner.vue";
 import MessageModal from "../common/MessageModal.vue";
@@ -892,7 +893,7 @@ const openPrint = () => {
   printTimer = setTimeout(() => {
     preparingPrint.value = false;
     filterError.value = "印刷対象を取得できませんでした。再試行してください。";
-  }, 15000);
+  }, PRINT_REQUEST_TIMEOUT_MS);
 };
 const onKey = (e: KeyboardEvent) => {
   if (props.isOpen && childModalOpen.value) {

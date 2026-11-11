@@ -76,11 +76,7 @@ import {
 import { createReadOnlyShapeRestorationRuntime } from "./common/shape-restoration";
 import { createShapeStyleCore } from "./common/shape-style";
 import { createShapeViewportRuntime } from "./common/shape-viewport";
-import {
-  createMapStorage,
-  createTileChangeHandler,
-  loadSelectedTileServerId,
-} from "./common/storage";
+import { createMapStorage, loadSelectedTileServerId } from "./common/storage";
 import {
   createMeasurementVisibilityControl,
   createTooltipVisibilityControl,
@@ -210,7 +206,7 @@ export function initializeReadOnlyMapPage(
   const sharedSnapshot = temporaryBootstrap?.shareSnapshot || null;
   const hasCapturedView = Boolean(sharedSnapshot || isSnapshotPrint);
   const initialState = printState ?? sharedSnapshot?.state;
-  const tileServers = bootstrap.tileServers;
+  const tileServers = sharedSnapshot?.tileServers ?? bootstrap.tileServers;
   const layers = bootstrap.layers;
   const markerRecords = bootstrap.markers;
   const shapeRecords = bootstrap.shapes;
@@ -260,26 +256,6 @@ export function initializeReadOnlyMapPage(
       links,
     );
 
-  let map: DynamicRecord;
-  let bounds: unknown;
-  let tileLayer: DynamicRecord;
-  const handleTileChange = createTileChangeHandler({
-    createTileLayer: (server) =>
-      L.tileLayer(server.url, {
-        attribution: server.attribution,
-        maxZoom: server.max_zoom ?? 18,
-        minZoom: server.min_zoom ?? 5,
-      }).addTo(map),
-    getBounds: () => bounds,
-    getMap: () => map,
-    getTileLayer: () => tileLayer,
-    saveSelectedTileServerId: storage.saveSelectedTileServerId,
-    setTileLayer: (nextLayer) => {
-      tileLayer = nextLayer;
-    },
-    tileServers,
-  });
-
   let registerHideableMapControl: ((control: object) => void) | undefined;
   let MapUiVisibilityToggleControl: (new () => object) | undefined;
   if (isMobile) {
@@ -302,17 +278,36 @@ export function initializeReadOnlyMapPage(
     initialState?.view ??
     answerMapView ??
     (isAnother ? (lastMapView ?? bootstrap.initialView) : temporaryBootstrap!.initialView);
+  const initialTileServerId = initialState
+    ? initialState.tileServerId
+    : isAnother
+      ? loadSelectedTileServerId(tileServers)
+      : "1";
+  let basemapMessages: ReturnType<typeof createMapMessageDialog> | undefined;
   const mapRuntime = createReadOnlyMapRuntime({
-    ...(hasCapturedView ? { initialTileServerId: initialState.tileServerId } : {}),
+    initialTileServerId,
     center: [initialView.latitude, initialView.longitude],
     escapeHtml,
-    handleTileChange,
     leaflet: L,
     onTileControlAdded: registerHideableMapControl,
+    saveSelectedTileServerId: storage.saveSelectedTileServerId,
+    onBasemapError: () => {
+      basemapMessages ??= createMapMessageDialog();
+      basemapMessages.show(
+        "背景地図を表示できませんでした。前の背景地図を表示しています。時間をおいて再試行してください。",
+        "背景地図の読み込みエラー",
+      );
+    },
     tileServers,
     zoom: initialView.zoom,
   });
-  map = mapRuntime.map as DynamicRecord;
+  const map = mapRuntime.map as DynamicRecord;
+  const basemapController = mapRuntime.basemapController;
+  let mapDisposed = false;
+  map.once("unload", () => {
+    mapDisposed = true;
+    basemapMessages?.dispose();
+  });
   const popupContent =
     isAnother && !isSnapshotPrint
       ? createPopupContentRuntime({
@@ -349,25 +344,6 @@ export function initializeReadOnlyMapPage(
   if (isMobileAnswerMap) map.addControl(new MapUiVisibilityToggleControl!());
   if (!isPrint) installMjpegCameras(map);
   if (persistSettings) observeMapView(map);
-  bounds = mapRuntime.bounds;
-  tileLayer = mapRuntime.tileLayer as DynamicRecord;
-  const initialTileServerId = initialState
-    ? initialState.tileServerId
-    : isAnother
-      ? loadSelectedTileServerId(tileServers)
-      : undefined;
-  if (!hasCapturedView && initialTileServerId && tileServers[initialTileServerId]) {
-    const radio = Array.from(document.querySelectorAll<HTMLInputElement>(".tile-radio")).find(
-      (input) => input.value === initialTileServerId,
-    );
-    if (radio) {
-      radio.checked = true;
-      radio.dispatchEvent(new Event("change"));
-    }
-    map.setView([initialView.latitude, initialView.longitude], initialView.zoom, {
-      animate: false,
-    });
-  }
 
   let isTooltipVisible = false;
   let isMeasurementVisible = false;
@@ -999,7 +975,7 @@ export function initializeReadOnlyMapPage(
     temporaryBootstrap?.isOverlayTile ?? true,
     isMobile ? { onControlAdded: registerHideableMapControl } : undefined,
   );
-  const tileOverlays = bootstrap.tileOverlays || [];
+  const tileOverlays = sharedSnapshot?.tileOverlays ?? bootstrap.tileOverlays ?? [];
   const initialTileVisibility =
     initialState?.overlays ??
     (isAnswerPreview && !isPrint && bootstrap.tileVisibilityAccountId
@@ -1093,6 +1069,8 @@ export function initializeReadOnlyMapPage(
   shapeRenderer.refresh();
 
   const requireCaptureReady = (action: "共有" | "印刷") => {
+    if (basemapController.isPending())
+      throw Error(`背景地図の切り替え完了後に${action}してください。`);
     const load = objectLoader?.getStatus();
     if (load?.loading || load?.failed || advancedSearch?.isBusy())
       throw Error(
@@ -1100,6 +1078,7 @@ export function initializeReadOnlyMapPage(
       );
   };
   const runtime = {
+    basemapController,
     setColoringController: (controller) => {
       coloringController = controller;
     },
@@ -1136,7 +1115,7 @@ export function initializeReadOnlyMapPage(
       const center = map.getCenter();
       return {
         view: { latitude: center.lat, longitude: center.lng, zoom: map.getZoom() },
-        tileServerId: document.querySelector<HTMLInputElement>(".tile-radio:checked")?.value || "1",
+        tileServerId: basemapController.getSelectedId(),
         overlays: tileOverlayManager.getVisibility(),
         coloring: coloringController?.getState() || undefined,
         objectQuery: shapeSearchQuery,
@@ -1243,8 +1222,12 @@ export function initializeReadOnlyMapPage(
     button.type = "button";
     button.className = "custom-control-button";
     button.textContent = "現在の地図を共有する";
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
+      if (button.disabled) return;
+      button.disabled = true;
       try {
+        if (basemapController.isPending()) await basemapController.whenReady();
+        if (mapDisposed) return;
         const targetOrigin = resolveShareParentOrigin(
           document.referrer,
           location.origin,
@@ -1258,6 +1241,8 @@ export function initializeReadOnlyMapPage(
           error instanceof Error ? error.message : "地図を取得できませんでした。",
           "共有エラー",
         );
+      } finally {
+        button.disabled = false;
       }
     });
     control.onAdd = () => {
@@ -1277,12 +1262,17 @@ export function initializeReadOnlyMapPage(
   ) {
     let printHost: ReturnType<typeof openMapPrintPreview> | undefined;
     let printMessages: ReturnType<typeof createMapMessageDialog> | undefined;
-    const openPrint = () => {
-      if (printHost || document.querySelector("dialog[open]")) return;
+    let preparingPrint = false;
+    const openPrint = async () => {
+      if (preparingPrint || printHost || document.querySelector("dialog[open]")) return;
+      preparingPrint = true;
       try {
+        if (basemapController.isPending()) await basemapController.whenReady();
+        if (mapDisposed) return;
         requireCaptureReady("印刷");
         const snapshot = createReadOnlyPrintSnapshot(
           {
+            version: sharedSnapshot?.version,
             sourcePage: expectedPage,
             snapshotShare: Boolean(sharedSnapshot),
             layers,
@@ -1308,6 +1298,8 @@ export function initializeReadOnlyMapPage(
           error instanceof Error ? error.message : "印刷用の地図を作成できませんでした。",
           "印刷エラー",
         );
+      } finally {
+        preparingPrint = false;
       }
     };
     const control = L.control({ position: "topleft" });

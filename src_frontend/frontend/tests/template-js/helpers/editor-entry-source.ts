@@ -4,6 +4,12 @@ import {
 } from "../../../../template-scripts/src/map/answer-coloring";
 import { createColorLegend } from "../../../../template-scripts/src/map/common/color-legend";
 import {
+  createBasemapController,
+  getBasemapController,
+  installBasemapController,
+} from "../../../../template-scripts/src/map/common/basemap-controller";
+import { createMapMessageDialog } from "../../../../template-scripts/src/map/common/map-message-dialog";
+import {
   createMapXssOptions,
   sanitizeMapHtml,
 } from "../../../../template-scripts/src/map/common/markdown-sanitizer";
@@ -66,6 +72,10 @@ export function editorRuntimeSource(entryName: EditorEntryName): string {
 export function runEditorRuntime(context: Context, entryName: EditorEntryName) {
   Object.assign(context, {
     createColorLegend,
+    createBasemapController,
+    getBasemapController,
+    installBasemapController,
+    createMapMessageDialog,
     installAnswerColoring,
     isAnswerColoring,
     createMapXssOptions,

@@ -1,4 +1,5 @@
 import type { TileServerRecord } from "../types";
+import { createBasemapController } from "./basemap-controller";
 
 type LeafletMap = {
   addControl(control: LeafletControl): void;
@@ -57,9 +58,11 @@ interface ReadOnlyMapRuntimeOptions {
   initialTileServerId?: string;
   center: [number, number];
   escapeHtml(value: unknown): string;
-  handleTileChange: EventListener;
+  handleTileChange?: EventListener;
   leaflet: LeafletNamespace;
   onTileControlAdded?: (control: LeafletControl) => void;
+  saveSelectedTileServerId?: (id: string) => void;
+  onBasemapError?: () => void;
   tileServers: Record<string, TileServerRecord>;
   zoom: number;
 }
@@ -74,6 +77,8 @@ export function createReadOnlyMapRuntime({
   handleTileChange,
   leaflet,
   onTileControlAdded,
+  saveSelectedTileServerId,
+  onBasemapError,
   tileServers,
   zoom,
 }: ReadOnlyMapRuntimeOptions) {
@@ -95,16 +100,25 @@ export function createReadOnlyMapRuntime({
   const northEast = leaflet.latLng(45.55, 153.59);
   const bounds = leaflet.latLngBounds(southWest, northEast);
 
-  if (!defaultTileServer.include_foreign_tiles) {
-    map.setMaxBounds(bounds);
-  }
-
   leaflet.control.attribution({ prefix: false }).addAttribution(LEAFLET_ATTRIBUTION).addTo(map);
+
+  let basemapController: ReturnType<typeof createBasemapController> | undefined;
+  let controlElement: HTMLElement | undefined;
+  const syncTileSelection = (id: string) => {
+    controlElement?.querySelectorAll<HTMLInputElement>(".tile-radio").forEach((radio) => {
+      radio.checked = radio.value === id;
+    });
+    controlElement?.setAttribute("aria-busy", String(basemapController?.isPending() ?? false));
+  };
+  const refreshTileSelection = () => {
+    if (basemapController) syncTileSelection(basemapController.getSelectedId());
+  };
 
   const TileControl = leaflet.Control.extend({
     options: { position: "topright" },
     onAdd() {
       const container = leaflet.DomUtil.create("div", "leaflet-bar leaflet-control");
+      controlElement = container;
       let radioHtml = '<div class="radio-zone"><form>';
 
       for (const [tileServerId, tileServer] of Object.entries(tileServers)) {
@@ -119,7 +133,23 @@ export function createReadOnlyMapRuntime({
       container.innerHTML = radioHtml;
 
       container.querySelectorAll(".tile-radio").forEach((radio) => {
-        radio.addEventListener("change", handleTileChange);
+        const selectTile = (event: Event) => {
+          const id = (event.target as HTMLInputElement).value;
+          if (basemapController) {
+            void basemapController.select(id).then(refreshTileSelection, refreshTileSelection);
+            refreshTileSelection();
+          }
+          handleTileChange?.(event);
+        };
+        radio.addEventListener("change", selectTile);
+        radio.addEventListener("click", (event) => {
+          // 確定IDのradioは切替中もcheckedのため、再選択ではchangeが発生しない。
+          if (
+            basemapController?.isPending() &&
+            (event.target as HTMLInputElement).value === basemapController.getSelectedId()
+          )
+            selectTile(event);
+        });
       });
       leaflet.DomEvent.disableClickPropagation(container);
       return container;
@@ -130,13 +160,27 @@ export function createReadOnlyMapRuntime({
   map.addControl(tileControl);
   onTileControlAdded?.(tileControl);
 
-  const tileLayer = leaflet
-    .tileLayer(defaultTileServer.url, {
-      minZoom: defaultTileServer.min_zoom ?? 5,
-      maxZoom: defaultTileServer.max_zoom ?? 18,
-      attribution: defaultTileServer.attribution,
-    })
-    .addTo(map);
+  basemapController = createBasemapController({
+    leaflet,
+    map,
+    tileServers,
+    bounds,
+    initialId: initialTileServerId,
+    saveSelectedTileServerId,
+    onCommit: (id) => syncTileSelection(id),
+    onError: onBasemapError,
+  });
+  const eventMap = map as LeafletMap & { on?(name: string, callback: () => void): void };
+  eventMap.on?.("basemaploadingchange", refreshTileSelection);
+  refreshTileSelection();
 
-  return { bounds, map, tileControl, tileLayer };
+  return {
+    bounds,
+    map,
+    tileControl,
+    basemapController,
+    get tileLayer() {
+      return basemapController.getLayer();
+    },
+  };
 }

@@ -2,6 +2,7 @@ import { formatTileAttribution } from "./tile-attribution";
 import { createTileVisibilityStorage } from "./tile-visibility-storage";
 import { isNowcastUrl } from "./nowcast-time";
 import { createNowcastLayer, type NowcastStatusOptions } from "./nowcast-layer";
+import { tileProxyRenderUrl } from "./tile-proxy-url";
 
 export interface TileOverlayRecord {
   id: string;
@@ -120,7 +121,7 @@ export function createTileOverlayManager(
               statusOptions,
             ));
           } else {
-            layer = leaflet.tileLayer(record.url, options);
+            layer = leaflet.tileLayer(tileProxyRenderUrl(record.url), options);
           }
           let lastError: number | undefined;
           layer.on("tileerror", (event: any) => {

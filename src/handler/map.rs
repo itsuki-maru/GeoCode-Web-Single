@@ -2,7 +2,7 @@ use super::admin::load_clustering_min_zoom;
 use crate::error::AppError;
 use crate::model::{
     LayerObject, MapAnotherWindowQueryParams, MapObjectQueryResponse, MapObjectQuerySearchParams,
-    MapReadQueryPrams, MarkerObject, ShapeObject, TileServers,
+    MapReadQueryPrams, MarkerObject, ShapeObject,
 };
 use crate::utils::{check_ismaster_handler, vec_to_hashmap};
 use axum::{
@@ -113,26 +113,7 @@ pub async fn map_get_handler(
     // User-Agentに"Mobile"が含まれているか確認
     let is_mobile = user_agent.map_or(false, |ua| ua.contains("Mobile"));
 
-    let tile_servers = query_as!(
-        TileServers,
-        r#"
-        SELECT
-            id,
-            layer_name,
-            label,
-            url,
-            attribution,
-            include_foreign_tiles,
-            min_zoom,
-            max_zoom,
-            create_at,
-            updated_at
-        FROM tileserver_model
-        "#
-    )
-    .fetch_all(&pool)
-    .await
-    .map_err(|e| {
+    let tile_servers = crate::db::load_tile_servers(&pool).await.map_err(|e| {
         tracing::error!(error = %e, "database error.");
         AppError::Sqlx(e)
     })?;
@@ -326,26 +307,7 @@ pub async fn map_another_get_handler(
     Query(params): Query<MapAnotherWindowQueryParams>,
 ) -> Result<impl IntoResponse, AppError> {
     // タイルサーバの一覧を取得
-    let tile_servers = query_as!(
-        TileServers,
-        r#"
-        SELECT
-            id,
-            layer_name,
-            label,
-            url,
-            attribution,
-            include_foreign_tiles,
-            min_zoom,
-            max_zoom,
-            create_at,
-            updated_at
-        FROM tileserver_model
-        "#
-    )
-    .fetch_all(&pool)
-    .await
-    .map_err(|e| {
+    let tile_servers = crate::db::load_tile_servers(&pool).await.map_err(|e| {
         tracing::error!(error = %e, "database error.");
         AppError::Sqlx(e)
     })?;

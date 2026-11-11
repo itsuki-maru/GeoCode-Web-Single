@@ -18,6 +18,7 @@ export function installAnswerFilter(
   let allowed = initial;
   let lastUpdate = "";
   let printEnabled = false;
+  let disposed = false;
   const isRenderable = (key: string) => {
     const [kind, id] = key.split(":");
     return kind === "marker"
@@ -57,7 +58,7 @@ export function installAnswerFilter(
     }
     if (bounds.isValid()) runtime.map.fitBounds(bounds, { padding: [32, 32], maxZoom: 16 });
   };
-  const onMessage = (event: MessageEvent) => {
+  const onMessage = async (event: MessageEvent) => {
     if (
       event.source !== window.parent ||
       event.origin !== preview.parentOrigin ||
@@ -92,6 +93,12 @@ export function installAnswerFilter(
       try {
         if (!printEnabled || !bootstrap || event.data.updateId !== lastUpdate)
           throw new Error("地図の更新完了後に再試行してください。");
+        if (runtime.basemapController?.isPending()) {
+          await runtime.basemapController.whenReady();
+          if (disposed) return;
+          if (!printEnabled || event.data.updateId !== lastUpdate)
+            throw new Error("地図の更新完了後に再試行してください。");
+        }
         const snapshot = createAnswerPrintSnapshot(bootstrap, runtime, visibleTargets());
         send("answer-map-print-state", { printRequestId, updateId: lastUpdate, snapshot });
       } catch (error) {
@@ -174,6 +181,7 @@ export function installAnswerFilter(
   runtime.map.on("layeradd layerremove overlayadd overlayremove answerfilterchange", update);
   runtime.map.on("shaperenderchange", update);
   runtime.map.on("unload", () => {
+    disposed = true;
     clearTimeout(timer);
     window.removeEventListener("keydown", onKey);
     window.removeEventListener("message", onMessage);

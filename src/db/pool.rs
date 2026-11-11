@@ -534,6 +534,29 @@ const MIGRATIONS: &[Migration] = &[
             "../../migrations/20261105120000_add_map_snapshot_to_temporary_urls.sql"
         )],
     },
+    Migration {
+        version: 24,
+        name: "add_background_tile_kind",
+        statements: &[
+            r#"ALTER TABLE tileserver_model
+    ADD COLUMN kind TEXT NOT NULL DEFAULT 'raster'
+    CHECK (kind IN ('raster', 'vector') AND (id <> 1 OR kind = 'raster'));"#,
+            r#"ALTER TABLE tileserver_model
+    ADD COLUMN style_url TEXT
+    CHECK (
+        (kind = 'raster' AND style_url IS NULL)
+        OR (kind = 'vector' AND style_url IS NOT NULL
+            AND length(trim(style_url)) > 0 AND length(CAST(style_url AS BLOB)) <= 4096)
+    );"#,
+        ],
+    },
+    Migration {
+        version: 25,
+        name: "add_tile_server_settings",
+        statements: &[include_str!(
+            "../../migrations/20261111100000_add_tile_server_settings.sql"
+        )],
+    },
 ];
 
 // データベース接続の確立
@@ -700,6 +723,22 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), Error> {
                     WHERE name = 'map_snapshot'
                     "#,
                 )
+                .fetch_one(&mut *tx)
+                .await?;
+                if exists > 0 {
+                    continue;
+                }
+            }
+            if migration.version == 24 {
+                let column = if statement.contains("ADD COLUMN kind ") {
+                    "kind"
+                } else {
+                    "style_url"
+                };
+                let exists: i64 = sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM pragma_table_info('tileserver_model') WHERE name=$1",
+                )
+                .bind(column)
                 .fetch_one(&mut *tx)
                 .await?;
                 if exists > 0 {

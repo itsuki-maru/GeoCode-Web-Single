@@ -4,7 +4,7 @@ use crate::handler::form_answers::{
     answer_options_handler, check_csv_handler, download_answers_handler, export_answers_handler,
     search_answers_handler,
 };
-use crate::handler::tile_overlays;
+use crate::handler::{background_maps, tile_overlays, tile_server_settings};
 use axum::{
     Router,
     extract::{DefaultBodyLimit, Extension},
@@ -82,7 +82,7 @@ use crate::handler::shapes::{
     create_shape_handler, delete_shape_handler, shapes_get_handler, update_shape_geometry_handler,
     update_shape_handler,
 };
-use crate::handler::tiles::proxy_tile_handler;
+use crate::handler::tiles::{proxy_tile_handler, tile_proxy_revision_script};
 use crate::handler::totp::{
     token_totp_handler, totp_disable_handler, totp_setup_handler, totp_verify_handler,
 };
@@ -92,10 +92,21 @@ use crate::middleware::{
     security::security_headers_and_origin,
 };
 
+use crate::tile_settings::TileSettings;
+
 pub fn build_router(
     pool: SqlitePool,
     tera: Arc<Mutex<Tera>>,
     tile_cache: Option<redis::aio::ConnectionManager>,
+) -> Router {
+    build_router_with_tile_settings(pool, tera, tile_cache, Arc::new(TileSettings::from_env()))
+}
+
+pub fn build_router_with_tile_settings(
+    pool: SqlitePool,
+    tera: Arc<Mutex<Tera>>,
+    tile_cache: Option<redis::aio::ConnectionManager>,
+    tile_settings: Arc<TileSettings>,
 ) -> Router {
     // タイルプロキシ用のクライアントを作成
     let tile_proxy_client = reqwest::Client::builder()
@@ -130,8 +141,28 @@ pub fn build_router(
         cors = cors.allow_origin(allowed_origins);
     }
 
+    let tile_settings_routes = Router::new()
+        .route(
+            "/admin/tile-server-settings",
+            get(tile_server_settings::get_settings),
+        )
+        .route(
+            "/admin/tile-server-settings/proxy",
+            put(tile_server_settings::update_proxy),
+        )
+        .route(
+            "/admin/tile-server-settings/proxy/check",
+            post(tile_server_settings::check_proxy),
+        )
+        .route(
+            "/admin/tile-server-settings/vector-origins",
+            put(tile_server_settings::update_vector_origins),
+        )
+        .layer(DefaultBodyLimit::max(16 * 1024));
+
     // アクセストークンによる認可を要する
     let mut secured_routes = Router::new()
+        .merge(tile_settings_routes)
         .route(
             "/admin/map-display-settings",
             get(get_map_display_settings).put(update_map_display_settings),
@@ -154,6 +185,14 @@ pub fn build_router(
                 .put(crate::handler::marker_forms::answer_edit::update_handler)
                 .delete(crate::handler::marker_forms::answer_edit::delete_handler)
                 .layer(DefaultBodyLimit::max(6 * 1024 * 1024)),
+        )
+        .route(
+            "/admin/background-maps",
+            get(background_maps::admin_list).post(background_maps::admin_create),
+        )
+        .route(
+            "/admin/background-maps/{id}",
+            put(background_maps::admin_update),
         )
         .route("/tile-overlays", get(tile_overlays::user_list))
         .route("/tile-overlays/{id}", put(tile_overlays::user_select))
@@ -288,6 +327,7 @@ pub fn build_router(
         )
         .route("/file/export/{layer_id}", get(export_json_handler))
         .route("/admin", get(admin_index_get_handler))
+        .route("/tile-server-settings", get(admin_index_get_handler))
         .route("/admin/users", get(get_users_handler))
         .route(
             "/admin/user/password-reset/{update_user_id}",
@@ -501,6 +541,7 @@ pub fn build_router(
         .merge(import_route)
         .merge(token_refresh_routes)
         .merge(flex_secured_routes)
+        .route("/tile-proxy-revision.js", get(tile_proxy_revision_script))
         .layer(cors)
         .layer(Extension(
             crate::handler::live_camera::CameraConfig::from_env(),
@@ -514,6 +555,7 @@ pub fn build_router(
         .layer(Extension(tera))
         .layer(middleware::from_fn(print_request_response))
         .layer(middleware::from_fn(security_headers_and_origin))
+        .layer(Extension(tile_settings))
         .layer(DefaultBodyLimit::max(105 * 1024 * 1024))
         .fallback(crate::custom_not_found_handler)
 }

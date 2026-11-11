@@ -11,10 +11,12 @@
     "format": "prettier --write src/"
   },
   "dependencies": {
+    "@maplibre/maplibre-gl-leaflet": "0.1.4",
     "@panzoom/panzoom": "4.6.2",
     "html2canvas": "1.4.1",
     "htmlparser2": "10.0.0",
-    "jspdf": "4.2.1"
+    "jspdf": "4.2.1",
+    "maplibre-gl": "6.17.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

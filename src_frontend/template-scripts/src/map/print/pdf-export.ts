@@ -1,6 +1,7 @@
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import { PRINT_PAPERS, type PrintPaper } from "../common/print-state";
+import { captureMaplibreCanvases, replaceMaplibreCanvasClones } from "./canvas-snapshot";
 
 const EXCLUDED =
   ".leaflet-control-zoom, .leaflet-popup-close-button, .measurement-selection-help, .measurement-selection-summary:not(.has-selection), .geocode-content-load-more, .geocode-content-load-all";
@@ -94,6 +95,8 @@ export async function generateMapPdf(
       rect.top < bounds.bottom
     );
   };
+  // WebGL は複製DOMへ描画状態を引き継げないため、描画済みの背景だけ先に画像化する。
+  const canvasImages = captureMaplibreCanvases(paper, signal, visible);
   const imgs = [...paper.querySelectorAll("img")];
   const sources = new Map<string, string>();
   // 順番に変換してメモリ使用量と通信数を抑え、同じタイルには変換済みデータを再利用する。
@@ -208,6 +211,15 @@ export async function generateMapPdf(
           img.style.height = `${svgNodes[index]!.height.baseVal.value}px`;
           svg.replaceWith(img);
         });
+        replaceMaplibreCanvasClones(clone, canvasImages);
+        // 用紙サイズ変更後にLeafletがペインを移動すると、html2canvasは内側の切り取り位置を誤る。
+        // 余白を含む背景画像の切り取りは、外側の地図コンテナーで維持する。
+        clone
+          .querySelectorAll<HTMLElement>("[data-geocode-maplibre-print-image]")
+          .forEach((image) => {
+            const container = image.closest<HTMLElement>(".leaflet-gl-layer.maplibregl-map");
+            if (container && clone.contains(container)) container.style.overflow = "visible";
+          });
         clone.querySelectorAll(EXCLUDED).forEach((node) => node.remove());
         clone
           .querySelectorAll<HTMLElement>(".geocode-content-popup .popup-content-toolbar")

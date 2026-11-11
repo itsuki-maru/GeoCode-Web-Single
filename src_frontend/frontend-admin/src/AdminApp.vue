@@ -21,6 +21,8 @@ const isLoginView = computed(() => route.name === "login");
         <nav v-if="!isLoginView" class="admin-nav" aria-label="管理メニュー">
           <RouterLink to="/users/list">ユーザー管理</RouterLink>
           <RouterLink to="/live-maps">位置共有マップ</RouterLink>
+          <RouterLink to="/background-maps">背景地図設定</RouterLink>
+          <RouterLink to="/tile-server-settings">タイルサーバ設定</RouterLink>
           <RouterLink to="/tile-overlays">タイル追加設定</RouterLink>
           <RouterLink to="/map-display-settings">地図表示設定</RouterLink>
         </nav>
@@ -34,6 +36,8 @@ const isLoginView = computed(() => route.name === "login");
 
 <style scoped>
 .admin-app {
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
 }
 .app-header {
@@ -46,23 +50,26 @@ const isLoginView = computed(() => route.name === "login");
   min-height: 70px;
   margin: 0 auto;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
+  column-gap: 24px;
 }
 .brand {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 6px 12px;
   min-width: 0;
+  max-width: 100%;
+  padding-block: 12px;
 }
 .brand-title {
-  overflow: hidden;
+  min-width: 0;
   font-size: clamp(1.3rem, 3vw, 1.8rem);
   font-weight: 700;
   letter-spacing: 0.03em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .admin-label {
   flex: 0 0 auto;
@@ -74,16 +81,21 @@ const isLoginView = computed(() => route.name === "login");
 }
 .admin-nav {
   display: flex;
+  max-width: 100%;
   align-self: stretch;
   gap: 6px;
+  overflow-x: auto;
 }
 .admin-nav a {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
+  min-height: 48px;
   padding: 0 14px;
   border-bottom: 3px solid transparent;
   color: #d8d8d8;
   font-weight: 600;
+  white-space: nowrap;
 }
 .admin-nav a:hover {
   color: #fff;
@@ -94,8 +106,11 @@ const isLoginView = computed(() => route.name === "login");
   border-bottom-color: #7ea2ef;
   color: #fff;
 }
+.admin-nav a:focus-visible {
+  outline-offset: -3px;
+}
 .main-content {
-  min-height: calc(100vh - 70px);
+  flex: 1;
 }
 .login-content {
   display: grid;
@@ -104,29 +119,14 @@ const isLoginView = computed(() => route.name === "login");
 
 @media (max-width: 700px) {
   .header-inner {
-    width: 100%;
-    min-height: auto;
-    align-items: stretch;
-    flex-direction: column;
-    gap: 0;
-    padding-top: 14px;
-  }
-  .brand {
-    width: min(100% - 24px, 1180px);
-    margin: 0 auto 10px;
+    width: calc(100% - 24px);
   }
   .admin-nav {
     width: 100%;
   }
   .admin-nav a {
-    flex: 1;
-    justify-content: center;
-    min-height: 48px;
-    padding: 0 8px;
+    padding-inline: 10px;
     font-size: 0.9rem;
-  }
-  .main-content {
-    min-height: calc(100vh - 118px);
   }
 }
 </style>

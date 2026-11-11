@@ -25,10 +25,7 @@ describe("live map layout", () => {
       resolve(process.cwd(), "../../src/templates/live-map.html"),
       "utf8",
     );
-    const script = readFileSync(
-      resolve(process.cwd(), "src/entries/live-map.ts"),
-      "utf8",
-    );
+    const script = readFileSync(resolve(process.cwd(), "src/entries/live-map.ts"), "utf8");
 
     expect(template).toContain('publicId: "{{ publicId }}"');
     expect(script).toContain("bootstrap.publicId");
@@ -37,14 +34,11 @@ describe("live map layout", () => {
   });
 
   it("provides tile switching and one Leaflet overlay per shared member", () => {
-    const script = readFileSync(
-      resolve(process.cwd(), "src/entries/live-map.ts"),
-      "utf8",
-    );
+    const script = readFileSync(resolve(process.cwd(), "src/entries/live-map.ts"), "utf8");
 
     expect(script).toContain("Object.entries(tileServers)");
     expect(script).toContain("selectTileServer");
-    expect(script).toContain("tileServer.include_foreign_tiles");
+    expect(script).toContain("createBasemapController");
     expect(script).toMatch(/L\.control\s*\.layers\(null,\s*null/);
     expect(script).toContain("collapsed: false");
     expect(script).toContain("createCollapsibleLayerControl");
@@ -54,10 +48,7 @@ describe("live map layout", () => {
   });
 
   it("adds viewer-location and shared-name controls", () => {
-    const script = readFileSync(
-      resolve(process.cwd(), "src/entries/live-map.ts"),
-      "utf8",
-    );
+    const script = readFileSync(resolve(process.cwd(), "src/entries/live-map.ts"), "utf8");
     const template = readFileSync(
       resolve(process.cwd(), "../../src/templates/live-map.html"),
       "utf8",
@@ -77,16 +68,17 @@ describe("live map layout", () => {
       resolve(process.cwd(), "../../src/templates/live-map.html"),
       "utf8",
     );
-    const script = readFileSync(
-      resolve(process.cwd(), "src/entries/live-map.ts"),
-      "utf8",
-    );
+    const script = readFileSync(resolve(process.cwd(), "src/entries/live-map.ts"), "utf8");
 
     expect(template).toMatch(/@media \(max-width: 700px\)[\s\S]*height:\s*100dvh/);
-    expect(template).toMatch(/#vehicle-list\s*\{[^}]*overflow-x:\s*auto;[^}]*scroll-snap-type:\s*x mandatory;/s);
+    expect(template).toMatch(
+      /#vehicle-list\s*\{[^}]*overflow-x:\s*auto;[^}]*scroll-snap-type:\s*x mandatory;/s,
+    );
     expect(template).toMatch(/\.vehicle\s*\{[^}]*scroll-snap-align:\s*start;/s);
     expect(template).toMatch(/#vehicle-list\s*\{[^}]*z-index:\s*1000;/s);
-    expect(template).toMatch(/#vehicle-list\s*\{[^}]*bottom:\s*calc\(56px \+ env\(safe-area-inset-bottom\)\);/s);
+    expect(template).toMatch(
+      /#vehicle-list\s*\{[^}]*bottom:\s*calc\(56px \+ env\(safe-area-inset-bottom\)\);/s,
+    );
     expect(template).not.toMatch(/\.leaflet-bottom\s*\{[^}]*bottom:/s);
     expect(template).toMatch(/@media \(max-width: 700px\)[\s\S]*header\s*\{\s*display:\s*none;/);
     expect(template).toContain(".live-layer-control-toggle");

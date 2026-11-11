@@ -223,12 +223,6 @@ const southWest = L.latLng(20.25, 122.56), // 最南端の座標
 const bounds = L.latLngBounds(southWest, northEast);
 enableTileServerSelectionPersistence();
 const initialTileServerId = getInitialTileServerId();
-const initialTileServer = tileServers[initialTileServerId];
-
-// 表示範囲の制限
-if (!initialTileServer["include_foreign_tiles"]) {
-  map.setMaxBounds(bounds);
-}
 
 // leafletのライセンスリンクを別タブで開く設定を付与して追加
 L.control
@@ -381,6 +375,7 @@ var TileControl = L.Control.extend({
     // タイルのイベントリスナーを追加
     const tileRadios = container.querySelectorAll(".tile-radio");
     tileRadios.forEach((radio) => {
+      radio.addEventListener("click", handleTileClick);
       radio.addEventListener("change", handleTileChange);
     });
 
@@ -395,12 +390,18 @@ const tileControl = new TileControl();
 map.addControl(tileControl);
 registerHideableMapControl(tileControl);
 
-// 初期タイルの設定
-var tileLayer = L.tileLayer(initialTileServer["url"], {
-  minZoom: initialTileServer["min_zoom"] ?? 5,
-  maxZoom: initialTileServer["max_zoom"] ?? 18,
-  attribution: initialTileServer["attribution"],
-}).addTo(map);
+// 確定した背景だけを選択状態と保存値へ反映する。
+const basemapController = createBasemapController({
+  leaflet: L,
+  map,
+  tileServers,
+  bounds,
+  initialId: initialTileServerId,
+  saveSelectedTileServerId,
+  onCommit: syncEditorBasemapSelection,
+  onError: showEditorBasemapError,
+});
+installBasemapController(map, basemapController);
 
 // 選択されたタイルサーバーに地図表示を切り替える関数
 // マーカーにIDを振るためのオブジェクト

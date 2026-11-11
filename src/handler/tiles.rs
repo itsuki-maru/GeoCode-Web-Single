@@ -1,8 +1,12 @@
 use crate::model::TilePathParams;
 use crate::{config::CONFIG, error::AppError};
+use crate::{
+    tile_settings::TileSettings,
+    tile_upstream::{fetch_managed_tile, validate_coordinates},
+};
 use axum::{
     body::Body,
-    extract::{Extension, Path, rejection::PathRejection},
+    extract::{Extension, Path, RawQuery, rejection::PathRejection},
     http::{
         HeaderName, Response, StatusCode,
         header::{CACHE_CONTROL, CONTENT_TYPE},
@@ -11,26 +15,65 @@ use axum::{
 };
 use redis::AsyncCommands;
 use reqwest::Client;
+use std::sync::Arc;
+use uuid::Uuid;
 
-const TILE_PROXY_MAX_ZOOM: u32 = 19;
 const TILE_PROXY_CACHE_CONTROL: &str = "public, max-age=604800, immutable";
+
+// 地図ページは、タイル要求の組み立てにこの公開値だけを使用する。
+pub async fn tile_proxy_revision_script(
+    Extension(settings): Extension<Arc<TileSettings>>,
+) -> impl IntoResponse {
+    let revision = settings.snapshot().proxy_revision;
+    (
+        [
+            (CONTENT_TYPE, "application/javascript; charset=utf-8"),
+            (CACHE_CONTROL, "no-store"),
+        ],
+        format!(
+            "window.__GEOCODE_TILE_PROXY_REVISION__ = {};\n",
+            serde_json::json!(revision)
+        ),
+    )
+}
 
 // タイルサーバ中継API
 pub async fn proxy_tile_handler(
     Extension(client): Extension<Client>,
     Extension(tile_cache): Extension<Option<redis::aio::ConnectionManager>>,
+    settings: Option<Extension<Arc<TileSettings>>>,
+    RawQuery(query): RawQuery,
     path: Result<Path<TilePathParams>, PathRejection>,
 ) -> Result<impl IntoResponse, AppError> {
     // タイル座標を検証
     let Path(TilePathParams { z, x, y_png }) = path.map_err(|_| AppError::NotFound)?;
     let y = parse_y_png(&y_png)?;
-    validate_tile_coordinates(z, x, y)?;
+    validate_coordinates(z, x, y)?;
 
-    let cache_key = build_tile_cache_key(&CONFIG.tile_cache_namespace, z, x, y);
+    // 要求の処理中に管理者が別の設定を適用した場合も、
+    // キャッシュ参照・取得・保存には同じ設定スナップショットを使用する。
+    let active = settings.map(|Extension(settings)| settings.snapshot());
+    let revision = active.as_ref().and_then(|settings| settings.proxy_revision);
+    let cache_key = cache_key_for_revision(&CONFIG.tile_cache_namespace, revision, z, x, y);
+    let cache_control = cache_control_for_revision(revision, query.as_deref());
     if let Some(tile_bytes) = get_cached_tile(tile_cache.as_ref(), &cache_key).await {
-        return build_tile_response(tile_bytes, "HIT");
+        return build_tile_response(tile_bytes, "HIT", cache_control);
     }
 
+    let tile_bytes = match active.and_then(|settings| settings.managed_upstream) {
+        Some(upstream) => fetch_managed_tile(&upstream, z, x, y).await?,
+        None => fetch_environment_tile(&client, z, x, y).await?,
+    };
+    set_cached_tile(tile_cache.as_ref(), &cache_key, &tile_bytes).await;
+    build_tile_response(tile_bytes, "MISS", cache_control)
+}
+
+async fn fetch_environment_tile(
+    client: &Client,
+    z: u32,
+    x: u32,
+    y: u32,
+) -> Result<Vec<u8>, AppError> {
     // タイルサーバのURLを構築
     let upstream_base_url = CONFIG.tile_server_base_url.as_deref().ok_or_else(|| {
         tracing::error!("TILE_SERVER_BASE_URL is not configured.");
@@ -74,22 +117,19 @@ pub async fn proxy_tile_handler(
         .bytes()
         .await
         .map_err(map_upstream_error)?;
-    let tile_bytes = tile_bytes.to_vec();
-
-    set_cached_tile(tile_cache.as_ref(), &cache_key, &tile_bytes).await;
-
-    build_tile_response(tile_bytes, "MISS")
+    Ok(tile_bytes.to_vec())
 }
 
 // タイルレスポンスを構築する
 fn build_tile_response(
     tile_bytes: Vec<u8>,
     cache_status: &'static str,
+    cache_control: &'static str,
 ) -> Result<Response<Body>, AppError> {
     Response::builder()
         .status(StatusCode::OK)
         .header(CONTENT_TYPE, "image/png")
-        .header(CACHE_CONTROL, TILE_PROXY_CACHE_CONTROL)
+        .header(CACHE_CONTROL, cache_control)
         .header(HeaderName::from_static("x-tile-cache"), cache_status)
         .body(Body::from(tile_bytes))
         .map_err(|_| AppError::InternalServerError)
@@ -101,20 +141,6 @@ fn parse_y_png(y_png: &str) -> Result<u32, AppError> {
     y.parse::<u32>().map_err(|_| AppError::NotFound)
 }
 
-// タイルの座標を検証する
-fn validate_tile_coordinates(z: u32, x: u32, y: u32) -> Result<(), AppError> {
-    if z > TILE_PROXY_MAX_ZOOM {
-        return Err(AppError::NotFound);
-    }
-
-    let upper_bound = 1u32 << z;
-    if x >= upper_bound || y >= upper_bound {
-        return Err(AppError::NotFound);
-    }
-
-    Ok(())
-}
-
 // タイルのURLを構築する
 fn build_upstream_tile_url(base_url: &str, z: u32, x: u32, y: u32) -> String {
     format!("{}/{}/{}/{}.png", base_url.trim_end_matches('/'), z, x, y)
@@ -123,6 +149,33 @@ fn build_upstream_tile_url(base_url: &str, z: u32, x: u32, y: u32) -> String {
 // タイルキャッシュのキーを構築する
 fn build_tile_cache_key(namespace: &str, z: u32, x: u32, y: u32) -> String {
     format!("tile:{}:{}:{}:{}", namespace, z, x, y)
+}
+
+fn cache_key_for_revision(
+    namespace: &str,
+    revision: Option<Uuid>,
+    z: u32,
+    x: u32,
+    y: u32,
+) -> String {
+    match revision {
+        Some(revision) => format!("tile:{namespace}:revision:{revision}:{z}:{x}:{y}"),
+        None => build_tile_cache_key(namespace, z, x, y),
+    }
+}
+
+fn cache_control_for_revision(revision: Option<Uuid>, query: Option<&str>) -> &'static str {
+    let requested =
+        query.and_then(|query| query.split('&').find_map(|item| item.strip_prefix("v=")));
+    match (revision, requested) {
+        (None, None) => TILE_PROXY_CACHE_CONTROL,
+        (Some(revision), Some(value)) if Uuid::parse_str(value).ok() == Some(revision) => {
+            TILE_PROXY_CACHE_CONTROL
+        },
+        // 旧形式のURLや旧版を持つタブにも現在の画像を返す。
+        // この応答はブラウザやCDNの長期キャッシュへ保存しない。
+        _ => "no-store",
+    }
 }
 
 async fn get_cached_tile(
@@ -179,16 +232,17 @@ fn map_upstream_error(error: reqwest::Error) -> AppError {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_tile_cache_key, build_upstream_tile_url, parse_y_png, validate_tile_coordinates,
+        TILE_PROXY_CACHE_CONTROL, build_tile_cache_key, build_upstream_tile_url,
+        cache_control_for_revision, cache_key_for_revision, parse_y_png, validate_coordinates,
     };
 
     #[test]
     fn validates_tile_coordinate_upper_bounds() {
-        assert!(validate_tile_coordinates(0, 0, 0).is_ok());
-        assert!(validate_tile_coordinates(19, (1 << 19) - 1, (1 << 19) - 1).is_ok());
-        assert!(validate_tile_coordinates(20, 0, 0).is_err());
-        assert!(validate_tile_coordinates(2, 4, 0).is_err());
-        assert!(validate_tile_coordinates(2, 0, 4).is_err());
+        assert!(validate_coordinates(0, 0, 0).is_ok());
+        assert!(validate_coordinates(19, (1 << 19) - 1, (1 << 19) - 1).is_ok());
+        assert!(validate_coordinates(20, 0, 0).is_err());
+        assert!(validate_coordinates(2, 4, 0).is_err());
+        assert!(validate_coordinates(2, 0, 4).is_err());
     }
 
     #[test]
@@ -209,6 +263,36 @@ mod tests {
         assert_eq!(
             build_tile_cache_key("default", 14, 14523, 6342),
             "tile:default:14:14523:6342"
+        );
+    }
+
+    /// 上流切替でキャッシュを分離し、有効な設定版と一致する要求だけを長期キャッシュする。
+    #[test]
+    fn switching_source_separates_cache_entries_and_only_caches_the_matching_revision() {
+        let current = uuid::Uuid::from_u128(1);
+        let previous = uuid::Uuid::from_u128(2);
+        let query = format!("v={current}");
+        assert_eq!(
+            cache_control_for_revision(None, None),
+            TILE_PROXY_CACHE_CONTROL
+        );
+        assert_eq!(
+            cache_control_for_revision(Some(current), Some(&query)),
+            TILE_PROXY_CACHE_CONTROL
+        );
+        assert_eq!(
+            cache_control_for_revision(Some(previous), Some(&query)),
+            "no-store"
+        );
+        assert_eq!(cache_control_for_revision(Some(current), None), "no-store");
+        assert_eq!(cache_control_for_revision(None, Some(&query)), "no-store");
+        assert_ne!(
+            cache_key_for_revision("maps", Some(current), 0, 0, 0),
+            cache_key_for_revision("maps", Some(previous), 0, 0, 0)
+        );
+        assert_ne!(
+            cache_key_for_revision("maps", Some(current), 0, 0, 0),
+            cache_key_for_revision("maps", None, 0, 0, 0)
         );
     }
 }

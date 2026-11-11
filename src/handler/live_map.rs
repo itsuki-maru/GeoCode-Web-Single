@@ -27,7 +27,7 @@ use crate::{
     model::{
         AdminLiveLocationRow, AdminLiveMapMember, AdminLiveMapSummary, CreateLiveMapPayload,
         CreateLiveMapResponse, LiveMapPasswordAction, LiveMapPasswordForm, PublicLiveMapInfo,
-        PublicLiveMapMember, PublicLiveMapPosition, PublicLiveMapSnapshot, TileServers,
+        PublicLiveMapMember, PublicLiveMapPosition, PublicLiveMapSnapshot,
         UpdateLiveLocationPermissionPayload,
     },
     utils::vec_to_hashmap,
@@ -741,25 +741,7 @@ async fn render_live_map(
     public_id: &str,
     is_check_overlay: bool,
 ) -> Result<Response, AppError> {
-    let tile_servers = sqlx::query_as::<_, TileServers>(
-        r#"
-        SELECT
-            id,
-            layer_name,
-            label,
-            url,
-            attribution,
-            include_foreign_tiles,
-            min_zoom,
-            max_zoom,
-            create_at,
-            updated_at
-        FROM tileserver_model
-        ORDER BY id
-        "#,
-    )
-    .fetch_all(pool)
-    .await?;
+    let tile_servers = crate::db::load_tile_servers(pool).await?;
     let tile_servers = vec_to_hashmap(tile_servers, |tile_server| tile_server.id);
     let mut context = Context::new();
     context.insert("publicId", &public_id);

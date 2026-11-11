@@ -1,8 +1,9 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { defineConfig, type Plugin } from "vite";
+import { createBundledNotices } from "./build-license-notices";
 
 import {
   editorEntrySources,
@@ -39,7 +40,9 @@ import { createShapeMeasurementRuntime } from "/src/map/common/shape-measurement
 import { SHAPE_MEMO_MAX_LENGTH, createShapeMemoRuntime, getShapeMemoFromGeoJson, normalizeShapeMemo, normalizeShapeName } from "/src/map/common/shape-memo.ts";
 import { SHAPE_ARROW_TYPE_OPTIONS, SHAPE_LINE_TYPE_OPTIONS, SHAPE_WEIGHT_MAX, SHAPE_WEIGHT_MIN, createShapeStyleCore } from "/src/map/common/shape-style.ts";
 import { createShapeViewportRuntime } from "/src/map/common/shape-viewport.ts";
-import { createMapStorage, createTileChangeHandler } from "/src/map/common/storage.ts";
+import { createMapStorage } from "/src/map/common/storage.ts";
+import { createBasemapController, getBasemapController, installBasemapController } from "/src/map/common/basemap-controller.ts";
+import { createMapMessageDialog } from "/src/map/common/map-message-dialog.ts";
 
 function renderMapMarkdown(markdown, links) {
   return renderProgressiveMarkdown(markdown, (html) => renderIframe(sanitizeMapHtml(html, filterXSS, xssOptions)), links);
@@ -62,19 +65,34 @@ const {
   saveUserLocationVisibility,
 } = createMapStorage(tileServers);
 
-const handleTileChange = createTileChangeHandler({
-  createTileLayer: (tileServer) => L.tileLayer(tileServer.url, {
-    minZoom: tileServer.min_zoom ?? 5,
-    maxZoom: tileServer.max_zoom ?? 18,
-    attribution: tileServer.attribution,
-  }).addTo(map),
-  getBounds: () => bounds,
-  getMap: () => map,
-  getTileLayer: () => tileLayer,
-  saveSelectedTileServerId,
-  setTileLayer: (nextTileLayer) => { tileLayer = nextTileLayer; },
-  tileServers,
-});
+function syncEditorBasemapSelection(id) {
+  document.querySelectorAll(".tile-radio").forEach((radio) => {
+    radio.checked = radio.value === id;
+  });
+}
+
+let editorBasemapErrorDialog;
+function showEditorBasemapError() {
+  if (!editorBasemapErrorDialog) {
+    editorBasemapErrorDialog = createMapMessageDialog();
+    map.on("unload", () => editorBasemapErrorDialog.dispose());
+  }
+  editorBasemapErrorDialog.show("背景地図を読み込めませんでした。現在の背景地図を維持します。", "背景地図の読み込みエラー");
+}
+
+function handleTileChange(event) {
+  const controller = getBasemapController(map);
+  const id = event.target?.value;
+  if (!controller || !id) return;
+  void controller.select(id);
+  syncEditorBasemapSelection(controller.getSelectedId());
+}
+
+function handleTileClick(event) {
+  const controller = getBasemapController(map);
+  if (controller?.isPending() && event.target?.value === controller.getSelectedId())
+    handleTileChange(event);
+}
 
 const {
   getDefaultShapeStyle,
@@ -248,30 +266,30 @@ function editorEntryPlugin(): Plugin {
 export default defineConfig({
   // 印刷時に遅延読み込みするチャンクも、配信されたentryと同じディレクトリから読む。
   base: "./",
+  resolve: {
+    alias: [{
+      find: /^leaflet$/,
+      replacement: resolve(templateScriptsDirectory, "src/map/common/vendor-leaflet.ts"),
+    }],
+  },
+  // /assets/{uri}は階層のないファイル名で配信するため、Workerも同じ配置にする。
+  worker: {
+    rollupOptions: {
+      output: {
+        entryFileNames: "template-[name]-[hash].js",
+        chunkFileNames: "template-[name]-[hash].js",
+        assetFileNames: "template-[name]-[hash][extname]",
+      },
+    },
+  },
   plugins: [editorEntryPlugin(), {
     name: "bundled-third-party-licenses",
     generateBundle() {
-      const notices = new Map<string, string>();
-      for (const id of this.getModuleIds()) {
-        if (!id.includes("node_modules") || id.startsWith("\0")) continue;
-        let directory = dirname(id.split("?")[0]!);
-        while (directory.includes("node_modules")) {
-          const manifest = resolve(directory, "package.json");
-          if (existsSync(manifest)) {
-            const pkg = JSON.parse(readFileSync(manifest, "utf8"));
-            if (pkg.name) {
-              if (!notices.has(pkg.name)) {
-                const files = readdirSync(directory).filter(name => /(^|[-_])(licen[cs]e|copying|notice)([._-]|$)/i.test(name));
-                if (!files.length) this.error(`License file missing for ${pkg.name}`);
-                notices.set(pkg.name, `${pkg.name} ${pkg.version}\n${files.map(name => readFileSync(resolve(directory, name), "utf8")).join("\n")}`);
-              }
-              break;
-            }
-          }
-          directory = dirname(directory);
-        }
-      }
-      this.emitFile({ type: "asset", fileName: "template-third-party-licenses.txt", source: [...notices.entries()].sort().map(([, text]) => text).join("\n\n--------------------\n\n") });
+      this.emitFile({
+        type: "asset",
+        fileName: "template-third-party-licenses.txt",
+        source: createBundledNotices(this.getModuleIds()),
+      });
     },
   }],
   build: {

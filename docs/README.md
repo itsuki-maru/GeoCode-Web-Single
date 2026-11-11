@@ -7,7 +7,7 @@ GeoCode-Web-Singleの主要機能について、利用手順、現在の処理�
 | 文書 | 内容 |
 |---|---|
 | [アカウントと認証](ACCOUNT_AUTHENTICATION.md) | ログイン、TOTP、認証更新、プライバシー |
-| [地図表示](MAP_VIEWING.md) | 通常地図、別画面、表示状態、共有への導線、外部サイト |
+| [地図表示](MAP_VIEWING.md) | 通常地図、別画面、背景タイルの取得・描画・切替フロー、表示状態、共有への導線、外部サイト |
 | [レイヤとマーカー](LAYERS_AND_MARKERS.md) | 作成・編集・削除、マーカーアイコン |
 | [図形と測定](SHAPES_AND_MEASUREMENT.md) | 描画、形状編集、スタイル、距離・面積 |
 | [検索とジオコーディング](SEARCH_AND_GEOCODING.md) | オブジェクト検索、住所・座標検索 |

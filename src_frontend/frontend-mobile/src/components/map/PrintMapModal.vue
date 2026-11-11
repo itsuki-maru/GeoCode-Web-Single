@@ -2,6 +2,10 @@
 import { onMounted, onBeforeUnmount, ref, nextTick } from "vue";
 import { mapAnatherLayerUrl } from "@/router/urls";
 import { submitAuthenticatedForm } from "@/utils/authenticated-form";
+import {
+  ANSWER_PRINT_PREVIEW_TIMEOUT_MS,
+  PRINT_REQUEST_TIMEOUT_MS,
+} from "../../../../template-scripts/src/map/common/map-timeouts";
 
 const props = defineProps<{
   layerIds: string[] | null;
@@ -58,7 +62,7 @@ const requestState = () => {
     window.clearTimeout(timer);
     timer = window.setTimeout(
       () => fail("印刷プレビューを読み込めませんでした。再試行してください。"),
-      60000,
+      ANSWER_PRINT_PREVIEW_TIMEOUT_MS,
     );
     void nextTick().then(() => {
       if (!nativeForm.value || !frame.value || sessionId.value !== attempt) return;
@@ -82,7 +86,7 @@ const requestState = () => {
   window.clearTimeout(timer);
   timer = window.setTimeout(
     () => fail("印刷プレビューを読み込めませんでした。再試行してください。"),
-    15000,
+    PRINT_REQUEST_TIMEOUT_MS,
   );
 };
 const receive = (event: MessageEvent) => {

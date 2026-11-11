@@ -247,8 +247,7 @@ function intersects(bounds: ShapeBounds, viewport: ShapeBounds): boolean {
 /** 小さな図形は、地図の拡大に応じて段階的に描画対象にする。 */
 export function getShapeMinPixelSizeForZoom(zoom: number): number {
   if (!Number.isFinite(zoom)) return 4;
-  if (zoom < 11) return 8;
-  if (zoom < 14) return 6;
+  if (zoom < 14) return 8;
   return 4;
 }
 

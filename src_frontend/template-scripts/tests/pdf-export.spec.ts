@@ -103,6 +103,66 @@ const generate = (controller = new AbortController(), format: any = "a4-portrait
   generateMapPdf(paper, format, "地図タイトル", controller.signal);
 
 describe("PDF export browser contracts", () => {
+  it("captures marked WebGL backgrounds without disturbing raster image indexes", async () => {
+    const raster = addImage();
+    const unrelated = document.createElement("canvas");
+    paper.append(unrelated);
+    const background = document.createElement("canvas");
+    background.dataset.geocodeMaplibreCanvas = "";
+    background.style.cssText = "position:absolute;width:400px;height:300px";
+    paper.append(background);
+    const result = await generate();
+    expect(result.type).toBe("application/pdf");
+    expect(clone.querySelectorAll("img")).toHaveLength(2);
+    expect(clone.querySelectorAll("canvas")).toHaveLength(1);
+    expect(clone.querySelector("[data-geocode-maplibre-print-image]")?.getAttribute("src")).toBe(
+      "data:image/png;base64,TEST",
+    );
+    expect(clone.querySelector<HTMLImageElement>("img")!.src).toBe("data:image/png;base64,TEST");
+    expect(loaded).toEqual([raster.src]);
+    expect(paper.contains(background)).toBe(true);
+    expect(paper.querySelectorAll("img")).toHaveLength(1);
+  });
+
+  it("rejects WebGL capture failure instead of silently exporting a blank background", async () => {
+    const background = document.createElement("canvas");
+    background.dataset.geocodeMaplibreCanvas = "";
+    paper.append(background);
+    vi.mocked(HTMLCanvasElement.prototype.toDataURL).mockReturnValue("data:,");
+    await expect(generate()).rejects.toThrow("背景地図を画像化できません");
+    expect(mocks.render).not.toHaveBeenCalled();
+  });
+
+  it("removes only the cloned MapLibre overflow clip after a translated paper resize", async () => {
+    const map = document.createElement("div");
+    map.id = "map";
+    map.style.overflow = "hidden";
+    const pane = document.createElement("div");
+    pane.style.transform = "translate3d(0px, 373px, 0px)";
+    const container = document.createElement("div");
+    container.className = "leaflet-gl-layer maplibregl-map";
+    container.style.cssText =
+      "position:relative;overflow:hidden;transform:translate3d(-100px, -500px, 0px)";
+    const canvas = document.createElement("canvas");
+    canvas.dataset.geocodeMaplibreCanvas = "";
+    canvas.style.cssText = "position:absolute;width:480px;height:720px";
+    container.append(canvas);
+    pane.append(container);
+    map.append(pane);
+    const unrelated = document.createElement("div");
+    unrelated.className = "maplibregl-map unrelated";
+    unrelated.style.overflow = "hidden";
+    map.append(unrelated);
+    paper.append(map);
+    const original = container.style.cssText;
+    await generate();
+    expect(clone.querySelector<HTMLElement>(".leaflet-gl-layer")!.style.overflow).toBe("visible");
+    expect(clone.querySelector<HTMLElement>("#map")!.style.overflow).toBe("hidden");
+    expect(clone.querySelector<HTMLElement>(".unrelated")!.style.overflow).toBe("hidden");
+    expect(container.style.cssText).toBe(original);
+    expect(paper.contains(canvas)).toBe(true);
+  });
+
   it("converts duplicate tiles once, excludes controls and preserves safe source links", async () => {
     addImage();
     addImage();

@@ -82,7 +82,7 @@ const loginPost = async (): Promise<void> => {
         </label>
 
         <button type="submit" class="button-primary login-button" :disabled="isSubmitting">
-          {{ isSubmitting ? "ログイン中…" : "ログイン" }}
+          ログイン
         </button>
       </form>
     </div>

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createShareMapSnapshot,
   isShareMapSnapshot,
+  isStoredShareMapSnapshot,
   type ShareMapSnapshot,
   resolveShareParentOrigin,
 } from "../src/map/common/share-snapshot";
@@ -122,6 +123,79 @@ describe("share snapshot data boundary", () => {
         state: { ...captured.state, overlays: { unknown: true } },
       }),
     ).toBe(false);
-    expect(isShareMapSnapshot({ ...captured, version: 2 })).toBe(false);
+    expect(isShareMapSnapshot({ ...captured, version: 3 })).toBe(false);
+  });
+
+  it("ラスタのみは新メタデータを除いて従来のv1を生成する", () => {
+    const data = fixture();
+    data.tileServers["1"] = {
+      ...data.tileServers["1"],
+      kind: "raster",
+      style_url: null,
+    };
+    const before = JSON.stringify(data);
+    const captured = createShareMapSnapshot(data, data.state, new Set(["marker:keep"]));
+    expect(captured.version).toBe(1);
+    expect(captured.tileServers["1"]).not.toHaveProperty("kind");
+    expect(captured.tileServers["1"]).not.toHaveProperty("style_url");
+    expect(isStoredShareMapSnapshot(JSON.parse(JSON.stringify(captured)))).toBe(true);
+    expect(JSON.stringify(data)).toBe(before);
+  });
+
+  it("未選択でも一覧にベクタ背景があればv2で種別とstyle URLを保持する", () => {
+    const data = fixture();
+    data.tileServers["2"] = {
+      ...data.tileServers["1"],
+      id: 2,
+      kind: "vector",
+      style_url: "/assets/vector-style.json",
+    };
+    const before = JSON.stringify(data);
+    const captured = createShareMapSnapshot(data, data.state, new Set(["marker:keep"]));
+    expect(captured.version).toBe(2);
+    expect(captured.state.tileServerId).toBe("1");
+    expect(captured.tileServers["1"]).toMatchObject({ kind: "raster", style_url: null });
+    expect(captured.tileServers["2"]).toMatchObject({
+      kind: "vector",
+      style_url: "/assets/vector-style.json",
+    });
+    expect(isShareMapSnapshot(JSON.parse(JSON.stringify(captured)))).toBe(true);
+    expect(JSON.stringify(data)).toBe(before);
+    expect(isShareMapSnapshot({ ...captured, version: 1 })).toBe(false);
+  });
+
+  it("旧v1の省略値と冗長なラスタ既定値を読み、未知種別・無効URL・背景1のベクタを拒否する", () => {
+    const data = fixture();
+    const captured = createShareMapSnapshot(data, data.state, new Set(["marker:keep"]));
+    const withTile = (version: number, patch: Record<string, unknown>) => ({
+      ...captured,
+      version,
+      tileServers: { "1": { ...captured.tileServers["1"], ...patch } },
+    });
+    expect(isShareMapSnapshot(withTile(1, { kind: "raster", style_url: null }))).toBe(true);
+    expect(isShareMapSnapshot(withTile(2, {}))).toBe(true);
+    expect(isShareMapSnapshot(withTile(2, { kind: "unknown" }))).toBe(false);
+    expect(isShareMapSnapshot(withTile(1, { style_url: "/style.json" }))).toBe(false);
+    expect(
+      isShareMapSnapshot(withTile(2, { kind: "vector", style_url: "/style.json" })),
+    ).toBe(false);
+    const vector = {
+      ...captured,
+      version: 2,
+      tileServers: {
+        ...captured.tileServers,
+        "2": { ...captured.tileServers["1"], id: 2, kind: "vector", style_url: "/style.json" },
+      },
+    };
+    expect(isShareMapSnapshot(vector)).toBe(true);
+    vector.tileServers["2"].style_url = "http://styles.example.test/style.json";
+    expect(isShareMapSnapshot(vector)).toBe(false);
+    expect(() =>
+      createShareMapSnapshot(
+        { ...data, tileServers: withTile(2, { kind: "unknown" }).tileServers as any },
+        data.state,
+        new Set(),
+      ),
+    ).toThrow("Background-map definition is invalid");
   });
 });

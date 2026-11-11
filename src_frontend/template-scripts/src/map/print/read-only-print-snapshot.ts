@@ -2,8 +2,10 @@ import { isAnswerColoring } from "../answer-coloring";
 import type { PrintMapState } from "../common/print-state";
 import {
   isStoredShareMapSnapshot,
+  legacyBasemapFields,
   MAX_SHARE_BYTES,
   MAX_SHARE_OBJECTS,
+  projectSnapshotBasemaps,
   type ShareMapSnapshot,
 } from "../common/share-snapshot";
 import { getShapeGeometryInfo } from "../common/shape-renderer";
@@ -24,6 +26,7 @@ export interface ReadOnlyPrintSource extends Pick<
   ReadOnlyPrintSnapshot,
   "sourcePage" | "snapshotShare" | "markers" | "shapes" | "tileServers" | "tileOverlays"
 > {
+  version?: 1 | 2;
   layers: Record<string, LegacyLayerRecord>;
 }
 
@@ -65,16 +68,7 @@ const layerFields = [
 ] as const;
 const markerFields = ["id", "layer_id", "marker_name", "detail", "latitude", "longitude"] as const;
 const shapeFields = ["id", "layer_id", "shape_type", "name", "user_id", "geojson"] as const;
-const tileFields = [
-  "id",
-  "layer_name",
-  "label",
-  "url",
-  "attribution",
-  "include_foreign_tiles",
-  "min_zoom",
-  "max_zoom",
-] as const;
+const tileFields = [...legacyBasemapFields, "kind", "style_url"] as const;
 const overlayFields = [
   "id",
   "name",
@@ -334,15 +328,12 @@ export function createReadOnlyPrintSnapshot(
         }
       : undefined;
   const snapshot: ReadOnlyPrintSnapshot = {
-    version: 1,
+    ...projectSnapshotBasemaps(source.tileServers, source.version),
     sourcePage: source.sourcePage,
     snapshotShare: source.snapshotShare,
     layers,
     markers,
     shapes,
-    tileServers: Object.fromEntries(
-      Object.entries(source.tileServers).map(([id, tile]) => [id, pick(tile, tileFields)]),
-    ),
     tileOverlays: source.tileOverlays.map((tile) => pick(tile, overlayFields)),
     state: {
       ...pick(state, stateFields),

@@ -203,7 +203,7 @@ void getCurrentUser();
         <p class="page-description">
           アカウントの作成、パスワード更新、ロック状態と位置共有権限を管理します。
         </p>
-        <p class="current-user">ログイン中: {{ currentUser || "取得中…" }}</p>
+        <p v-if="currentUser" class="current-user">ログイン中: {{ currentUser }}</p>
       </div>
       <button
         type="button"

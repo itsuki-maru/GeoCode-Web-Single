@@ -82,7 +82,7 @@
         const geometryZoom = test.kind === "zoom-policy" ? test.zoom : 14;
         // 期待される候補は、描画マネージャーやその診断情報に依存せず、
         // テストデータの形状と選択したポリシーから導出する。
-        const minimumAtZoom = (zoom) => policy.minPixelSize ?? (zoom < 11 ? 8 : zoom < 14 ? 6 : 4);
+        const minimumAtZoom = (zoom) => policy.minPixelSize ?? (zoom < 14 ? 8 : 4);
         const center = L.latLng(35.681, 139.7615),
           base = L.CRS.EPSG3857.latLngToPoint(center, geometryZoom),
           size = L.point(innerWidth, innerHeight);

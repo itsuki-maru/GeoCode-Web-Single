@@ -179,6 +179,8 @@ describe("印刷モーダルの地図連携", () => {
   );
   it("読み込みが停止した場合に再試行できる", async () => {
     wrapper = mount(PrintMapModal, { props: { layerIds: null }, attachTo: document.body });
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(wrapper.text()).toContain("準備しています");
     await vi.advanceTimersByTimeAsync(15000);
     expect(wrapper.text()).toContain("読み込めませんでした");
     const source = document.querySelector<HTMLIFrameElement>("#map-iframe")!;

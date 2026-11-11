@@ -10,12 +10,55 @@ pub struct TileServers {
     pub layer_name: String,
     pub label: String,
     pub url: String,
+    #[serde(default = "default_tile_kind")]
+    pub kind: String,
+    #[serde(default)]
+    pub style_url: Option<String>,
     pub attribution: String,
     pub include_foreign_tiles: bool,
     pub min_zoom: Option<i64>,
     pub max_zoom: Option<i64>,
     pub create_at: String,
     pub updated_at: String,
+}
+
+fn default_tile_kind() -> String {
+    "raster".into()
+}
+
+/// スタイルは公開可能な HTTPS URL または同一オリジンの絶対パスに限定する。
+pub fn is_valid_basemap_style_url(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > 4096
+        || value.chars().any(char::is_control)
+        || value.contains(['\\', '#'])
+    {
+        return false;
+    }
+    if value.starts_with('/') {
+        return !value.starts_with("//");
+    }
+    if !value
+        .get(..8)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"))
+    {
+        return false;
+    }
+    reqwest::Url::parse(value).is_ok_and(|url| {
+        url.scheme() == "https"
+            && url.host_str().is_some()
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.fragment().is_none()
+    })
+}
+
+pub fn is_valid_basemap_definition(kind: &str, style_url: Option<&str>) -> bool {
+    match kind {
+        "raster" => style_url.is_none(),
+        "vector" => style_url.is_some_and(is_valid_basemap_style_url),
+        _ => false,
+    }
 }
 
 // レイヤ情報取得クエリパラメータ

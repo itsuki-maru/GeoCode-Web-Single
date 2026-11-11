@@ -14,3 +14,5 @@ export const adminLiveMapsUrl = baseUrl + "/admin/live-maps";
 
 export const adminLiveMapLayersUrl = baseUrl + "/admin/live-map-layers";
 export const adminMapDisplaySettingsUrl = baseUrl + "/admin/map-display-settings";
+export const adminBackgroundMapsUrl = baseUrl + "/admin/background-maps";
+export const adminTileServerSettingsUrl = baseUrl + "/admin/tile-server-settings";

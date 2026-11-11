@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { openMapPrintPreview, READ_ONLY_MAP_PRINT_PATH } from "../src/map/common/map-print-host";
+import {
+  openMapPrintPreview,
+  READ_ONLY_MAP_PRINT_PATH,
+  requestMapPrintState,
+} from "../src/map/common/map-print-host";
 
 const snapshot = { state: { view: { zoom: 12 } }, bootstrap: { markers: { m: { id: "m" } } } };
 let host: ReturnType<typeof openMapPrintPreview> | undefined;
@@ -37,6 +41,36 @@ afterEach(() => {
 });
 
 describe("全画面地図の印刷ホスト", () => {
+  it("背景の30秒待機を許容し、印刷状態は45秒で取得を打ち切る", async () => {
+    const source = document.body.appendChild(document.createElement("iframe"));
+    source.src = "/map";
+    const error = vi.fn();
+    const result = requestMapPrintState(source, new AbortController().signal).catch(error);
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(error).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(15000);
+    await result;
+    expect(error).toHaveBeenCalledOnce();
+    expect(error.mock.calls[0]![0].message).toContain("現在の地図を取得できません");
+  });
+
+  it("通常プレビューも背景の準備待ちより長い45秒で打ち切る", async () => {
+    const getState = vi.fn().mockResolvedValue(snapshot);
+    host = openMapPrintPreview({
+      url: READ_ONLY_MAP_PRINT_PATH,
+      snapshot: true,
+      getState,
+      close: vi.fn(),
+    });
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(document.querySelector(".print-loading")?.textContent).toContain("準備しています");
+    expect(frame()).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(document.querySelector(".print-loading")?.textContent).toContain("読み込めませんでした");
+    expect(frame()).toBeNull();
+    expect(getState.mock.calls[0]![0].aborted).toBe(true);
+  });
+
   it("同一オリジンの現行セッションにだけ固定データと印刷操作を送る", async () => {
     const getState = vi.fn().mockResolvedValue(snapshot);
     const close = vi.fn();
