@@ -312,6 +312,7 @@ export function initializeReadOnlyMapPage(
     isAnother && !isSnapshotPrint
       ? createPopupContentRuntime({
           map,
+          limitMarkerHeight: expectedPage === "map-anather" && !isAnswerPreview && !isPrint,
           sanitizeHtml: (html) => sanitizeMapHtml(html, filterXSS, xssOptions),
           analysis: bootstrap.popupAnalysis,
           renderMarkdown: renderContentMarkdown,
@@ -667,8 +668,7 @@ export function initializeReadOnlyMapPage(
   shapeRenderer = createShapeRenderManager({
     map,
     records: getShapeRecords(shapeRecords),
-    // 印刷は用紙上の縮尺を使い、小図形の視認性抑止を適用しない。
-    minPixelSize: isPrint ? 0 : undefined,
+    // 印刷・PDFも通常地図と同じ縮尺別のサイズ省略を使う。
     isRecordVisible: isShapeRecordVisible,
     isPinned: (_id, layer) =>
       Boolean(layer && (selection.includes(layer) || memo.isShapePopupOpen(layer))),

@@ -59,6 +59,10 @@ PR CI では以下を確認する。
 - `cargo fmt --check`
 - `cargo test --locked`
 
+ローカル地図の描画・取り込み互換性は`node scripts/check-render-compatibility.mjs`でも検査する。通常コメント・Rustdocを除いた補助指紋、系列別の推移依存、旧道路の固定35画像、標準地図の初期基準7画像と互換性判断記録を照合する。指紋は描画世代の計算には使わない。道路8依存と標準地図10依存の認定を分離し、XML側だけの変更で道路認定を変えない。CI/releaseのRustは、実行構成の認定記録と同じ1.99.1へ固定する。
+
+releaseでは最適化構成の`render_golden`と`standard_tile_render`も実行し、Tauriのパッケージ作成後に実exeの`local-tiles build-info --json`が`execution.verified=true`と`standard_generation_verified=true`を返すことを確認する。`GEOCODE_TEST_CLI_EXE`に実exeを指定した`local_tile_standard_exe`で、CLI取り込み・事前生成・元入力削除後の生成とSDKとの画素一致も確認する。未認定・試験失敗のexeは配布物へ収集しない。認定構成を追加する場合は、固定画像・取り込み・世代管理の回帰後に`res/tile-render-execution.json`、互換性判断記録、toolchain指定をそろえて更新する。
+
 通常フロントエンドのテストは `../template-scripts/src` を直接読み込むため、`frontend` のmatrixジョブでも `template-scripts` の依存を `npm ci` で準備する。各ジョブの `node_modules` は独立しており、別の `template-scripts` ジョブでインストールしても共有されない。通常フロントエンドのnpmキャッシュキーには、両プロジェクトのlockファイルを含める。
 
 `cargo clippy` は既存警告の整理後に必須化する。導入時は `continue-on-error` ではなく、警告を解消してから必須チェックへ追加する。
@@ -101,10 +105,16 @@ npm test --prefix src_frontend/template-scripts
 ### 埋め込み用フロントエンド成果物の生成確認
 
 ```powershell
-./src_frontend/scripts/frontends-builder.ps1 -SkipCargoBuild
+node --test tests/frontend-compat.test.mjs tests/build-frontend-assets.test.mjs
+node scripts/check-frontend-compat.mjs
+./scripts/build-frontend-assets.ps1 -SkipCargoBuild -OutputRoot target/frontend-dist
+$env:GEOCODE_FRONTEND_DIST = (Resolve-Path target/frontend-dist).Path
+$env:TAURI_CONFIG = @{ build = @{ frontendDist = $env:GEOCODE_FRONTEND_DIST } } | ConvertTo-Json -Compress
 ```
 
-3 系統のフロントエンドをビルドし、Tauri / Rust 側に埋め込む `dist/` 成果物を生成できることを確認する。`-SkipCargoBuild` を付けることで、重い Rust release build は省略しつつ、HTML のパス調整、`index-mobile.html` / `index-admin.html` の生成、静的アセットの集約、`dist/templates` の配置までを検証する。
+共通フロント全体を固定したPostgreSQL基準と比較し、差分や余剰ファイルがあれば失敗させる。3系統のVueと地図テンプレート用ES Modulesは`target/frontend-dist`内だけでビルド・集約し、`GEOCODE_FRONTEND_DIST`でRustへ渡す。`-SkipCargoBuild`でRust release buildを省略する。既存のルート`dist/`や`src_frontend`各`dist/`を消さず、未管理の既存出力・リンクされたパスも上書きしない。
+
+CI/releaseでは`tests/fixtures/frontend-compat-baseline.json`のrepository・40桁commitを読み、別ディレクトリへcheckoutして`--source-root`でも照合する。元リポジトリがprivateの場合は、内容の読取権限だけを持つ`FRONTEND_SOURCE_TOKEN` secretを設定する。取得失敗時はjobを失敗させ、保存済みbaselineだけの成功へ切り替えない。Tauri自身の埋込先も`TAURI_CONFIG`または`--config`で隔離先へ指定する。
 
 ### Rust フォーマット確認
 

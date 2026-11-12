@@ -319,6 +319,7 @@ let markers = {};
 // Leaflet.markerclusterの使用
 popupContent = createPopupContentRuntime({
   map,
+  limitMarkerHeight: true,
   sanitizeHtml: (html) => sanitizeMapHtml(html, filterXSS, xssOptions),
   renderMarkdown: renderMapMarkdown,
   setupImages: setupDetailsLazyImages,

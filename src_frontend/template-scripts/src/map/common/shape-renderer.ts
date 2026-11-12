@@ -92,7 +92,7 @@ interface ShapeRenderOptions<TRecord extends ShapeRenderRecord, TLayer> {
   onLayerCreated?(layer: TLayer, record: TRecord): void;
   onLayerEvicted?(layer: TLayer, record: TRecord): void;
   onRefresh?(): void;
-  /** 明示的な値はズームポリシーより優先し、印刷用のゼロも有効とする。 */
+  /** 明示的な値はズームポリシーより優先し、サイズ省略を無効にするゼロも有効とする。 */
   minPixelSize?: number;
   collectDiagnostics?: boolean;
   padding?: number;

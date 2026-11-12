@@ -1,0 +1,57 @@
+{
+  "cases": [
+    {
+      "name": "city-z14",
+      "rgba_sha256": "d8d206ebb1d0ac1daed403fb54432da648d891f0ad64cd3770d636713c08a70e",
+      "x": 8192,
+      "y": 8192,
+      "z": 14
+    },
+    {
+      "name": "city-z16",
+      "rgba_sha256": "b3576b5b1db5505e0eac1e20edb5ed23e39296285acd01873d34e9fb96c0cbcd",
+      "x": 32768,
+      "y": 32768,
+      "z": 16
+    },
+    {
+      "name": "forest-farmland",
+      "rgba_sha256": "da2eb8c3e0c9cd4c0780653267ebb4977a373937cb5c98e4bac80634bc922633",
+      "x": 1024,
+      "y": 1024,
+      "z": 11
+    },
+    {
+      "name": "water-islands",
+      "rgba_sha256": "4c7899931fd67a802629b32591beb7e5a55aae6a9a1e8c1ca99f8cf7219d9ee0",
+      "x": 4096,
+      "y": 4096,
+      "z": 13
+    },
+    {
+      "name": "coast-world",
+      "rgba_sha256": "d937f68761f2fbc29dfb8c53eaed032a20e41e5ce6ba9cf4f05690692acecdc2",
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "name": "coast-regional",
+      "rgba_sha256": "d937f68761f2fbc29dfb8c53eaed032a20e41e5ce6ba9cf4f05690692acecdc2",
+      "x": 16,
+      "y": 16,
+      "z": 5
+    },
+    {
+      "name": "mountain-contours",
+      "rgba_sha256": "1e4166ace30a0c542bc0e3b3569fae120c1345af9d985a1686544b4dbef27830",
+      "x": 58072,
+      "y": 25958,
+      "z": 16
+    }
+  ],
+  "format": 1,
+  "purpose": "新機能の初期レビュー用基準。旧道路の固定35画像とは独立。",
+  "style_hash": "bc67b9d53caec7aeb16418bdb28c4c6b40c67d8442df822f1b953fabb86d943a",
+  "style_version": "standard-terrain-v1"
+}

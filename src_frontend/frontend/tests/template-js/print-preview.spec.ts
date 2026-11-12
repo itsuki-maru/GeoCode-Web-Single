@@ -656,7 +656,8 @@ describe("印刷プレビューと実際のLeaflet", () => {
         shape_type: "circle",
         geojson: {
           type: "Feature",
-          properties: { radius: 30 },
+          // ズーム12でも描画対象となる大きさにし、凡例による表示切替を検証する。
+          properties: { radius: 200 },
           geometry: { type: "Point", coordinates: [139.76, 35.68] },
         },
       },
@@ -699,6 +700,7 @@ describe("印刷プレビューと実際のLeaflet", () => {
     expect(markerA).toBeDefined();
     expect(markerB).toBeDefined();
     expect(markerC).toBeDefined();
+    expect(shape).toBeDefined();
     expect(map.hasLayer(markerC)).toBe(true);
     checkbox("施設").click();
     expect(map.hasLayer(markerC)).toBe(false);

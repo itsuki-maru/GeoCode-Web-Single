@@ -100,6 +100,7 @@ async fn create(
     generate_url_handler(
         Extension(user.to_string()),
         Extension(pool.clone()),
+        None,
         Json(payload(layers, password, update)),
     )
     .await
@@ -324,6 +325,7 @@ async fn shares_snapshot_only_owned_records_and_refresh_or_rotate_without_leakin
     let rotated = generate_url_handler(
         Extension(owner.to_string()),
         Extension(pool.clone()),
+        None,
         Json(request),
     )
     .await
@@ -355,6 +357,7 @@ async fn invalid_passwords_and_empty_layers_preserve_existing_share_and_password
         let response = generate_url_handler(
             Extension(owner.to_string()),
             Extension(pool.clone()),
+            None,
             Json(request),
         )
         .await
@@ -730,6 +733,7 @@ async fn storage_failures_are_reported_and_failed_updates_keep_the_existing_snap
             generate_url_handler(
                 Extension(owner.to_string()),
                 Extension(pool.clone()),
+                None,
                 Json(payload(vec![layer], None, false)),
             )
             .await
@@ -764,6 +768,7 @@ async fn storage_failures_are_reported_and_failed_updates_keep_the_existing_snap
         generate_url_handler(
             Extension(owner.to_string()),
             Extension(pool.clone()),
+            None,
             Json(payload(vec![layer], None, false)),
         )
         .await
@@ -797,6 +802,7 @@ async fn storage_failures_are_reported_and_failed_updates_keep_the_existing_snap
         generate_url_handler(
             Extension(owner.to_string()),
             Extension(pool.clone()),
+            None,
             Json(payload(vec![layer], None, true)),
         )
         .await

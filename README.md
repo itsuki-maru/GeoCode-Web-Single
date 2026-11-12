@@ -9,10 +9,11 @@
 - レイヤ（グループ）による情報整理
 - 浸水想定区域などの重ね合わせタイルの表示
 - 期限付き共有 URL の発行
+- OSM PBFの道路・建物・土地被覆と、DEMによる陰影・等高線のローカルタイル生成・配信
 
 Rust/Axum 製 API サーバーと Vue 3 製フロントエンドを Tauri 2 でラップし、SQLite データベースとともに Windows 向けアプリケーションとして配布します。
 
-> このプロジェクトは PostgreSQL をデータベースに使用したフル構成を Windows 環境で単一動作させることを目的に再構築したものです。（アプリケーション内で国土地理院が提供するタイルサーバを使用するため、インターネット環境が必要です。）同一端末内にタイルサーバを用意することで、完全オフライン使用も可能。
+> PostgreSQLを使用するGeoCode-Webを、Windows上でSQLiteとともに単一アプリとして動かす構成です。OSM PBFの地物と、事前に取得した標高・陸域データからタイルを生成し、別のタイルサーバーなしでオフラインの地図表示が可能です。国土地理院等の外部背景や住所検索などの外部機能には、それぞれ接続が必要です。
 
 **現時点では Windows のみサポートしています。** 配布形式は Windows NSIS インストーラ（`.exe`）、MSI インストーラ（`.msi`）、および cargo が生成する単体実行ファイル（`.exe`）です。
 
@@ -20,6 +21,7 @@ Rust/Axum 製 API サーバーと Vue 3 製フロントエンドを Tauri 2 で�
 
 - ユーザーガイド: [USER-GUIDE.md](https://project.geocode-web.com/USER-GUIDE.md)
 - 仕様書: [SPECIFICATION.md](SPECIFICATION.md)
+- ローカル地図: [PBF取り込み・保存先設定・オフライン利用](docs/LOCAL_TILES.md)
 - 気象庁ナウキャストの登録: [仕様書 9.10](SPECIFICATION.md#910-気象庁ナウキャスト)
 - 変更履歴: [CHANGELOG.md](CHANGELOG.md), [release_notes.md](release_notes.md)
 - コントリビューションガイド: [CONTRIBUTING.md](CONTRIBUTING.md)
@@ -321,8 +323,21 @@ User-Agent に `Mobile` が含まれるアクセスにはモバイル向け UI (
 ~/.geocode-web-single/
   ├── geocode-web-single.env.json   # 設定ファイル
   ├── geocode-web.sqlite            # SQLite DB
-  └── images/                       # アップロードファイル保存先
+  ├── images/                       # アップロードファイル保存先
+  └── tiles/                        # ローカル地図の利用時に作成
+      ├── catalog.sqlite            # 登録・描画世代・ジョブ履歴の専用DB
+      ├── datasets/                 # 取り込みで作る完成DB
+      ├── png/                      # 保存PNGと事前生成記録
+      └── work/                     # 取り込み作業領域
 ```
+
+同じexeの`local-tiles`コマンドで、PBF取り込み、完成DB登録、背景追加、事前生成を行う。`import --features standard-v2`では、建物・土地被覆・水域に加えて地名・主要なランドマーク名を持つ別完成DBを作る。`datasets prepare --style osm-like-v1`で道路・建物・文字・等高線・陰影・名称の言語を選び、同じDBから通常地図と地形付き地図を異なる描画世代として利用できる。通常地図は道路・建物・文字がon、等高線・陰影がoff、日本語優先となる。背景には`background add --render RENDER_ID --name 表示名`で別名を付けられる。
+
+取り込みの既定は従来の道路形式で、文字のない`standard-v1`も継続利用できる。既存DBへ名称だけを追加することはできないため、名称表示には元PBFから新しい`standard-v2` DBを作る。既存のDB・PNG・背景・履歴は保持する。`--elevation-input`の国土地理院FGD-GMLから陰影・等高線、`--landmask-input`の処理済みWGS84陸域から海陸を生成する。新形式の`--contour-data off`は等高線をDBへ収録しない指定、準備時の`--contours off`は収録済み等高線を表示しない指定となる。元データの準備と四国の実行例は[ローカル地図](docs/LOCAL_TILES.md)を参照する。表示はPostgreSQL版と共通の`src_frontend`・`src/templates`、背景設定と通常のXYZ URLを使い、文字を含む生成処理は本体内で動く。同梱フォントと生成認定は`local-tiles build-info --json`の`font`・`osm_generation_verified`で確認できる。
+
+国土地理院DEMの構成は`local-tiles elevation inspect --input PATH --json`で事前検査できる。JGD2000・JGD2011が混在する資料は、検査と取り込みへ`--elevation-datum-policy allow-jgd2000-2011`を付けて原座標・原標高で併用する。測地系や標高の補正は行わず、元CRSと採用状況を完成DBへ記録する。
+
+`geocode-web-single.env.json`の`tile_catalog_database_path`・`tile_dataset_path`・`tile_cache_path`・`tile_work_path`で、管理DB・完成DB・PNG・作業領域を個別指定できる。PNGだけ別ディスクへ配置でき、変更時に既存ファイルを自動移動しない。取り込み中の旧版は完了後に切り替える。操作・移設・バックアップは[ローカル地図](docs/LOCAL_TILES.md)を参照する。
 
 ## 起動方法
 
@@ -352,7 +367,7 @@ Ctrl+C でグレースフルシャットダウンする。
 
 ### 前提ツール
 
-- Rust stable
+- Rust 1.99.1（ローカル地図の認定構成。更新時は描画・取り込み回帰と認定記録を確認）
 - Node.js 20.x
 - npm
 - PowerShell 7 以上
@@ -404,8 +419,12 @@ npm ci --prefix src_frontend/frontend
 npm ci --prefix src_frontend/frontend-mobile
 npm ci --prefix src_frontend/frontend-admin
 npm ci --prefix src_frontend/template-scripts
-./src_frontend/scripts/frontends-builder.ps1 -SkipCargoBuild
+./scripts/build-frontend-assets.ps1 -SkipCargoBuild -OutputRoot target/frontend-dist
+$env:GEOCODE_FRONTEND_DIST = (Resolve-Path target/frontend-dist).Path
+$env:TAURI_CONFIG = @{ build = @{ frontendDist = $env:GEOCODE_FRONTEND_DIST } } | ConvertTo-Json -Compress
 ```
+
+SQLite版のビルド制御はルートの`scripts/build-frontend-assets.ps1`で行います。選択した`target/`配下だけで資材を作り、実行中アプリのルート`dist/`や各フロントの既存`dist/`は変更しません。既存の未管理ディレクトリは上書きせず、新しい`-OutputRoot`を指定する方式です。`GEOCODE_FRONTEND_DIST`はRust側、`TAURI_CONFIG`はTauri側へ同じ資材を渡す設定です。
 
 地図テンプレート用TypeScriptとフロントエンド全体のテスト:
 
@@ -424,8 +443,10 @@ cargo sqlx prepare
 
 ### 5. Tauri アプリのビルド
 
-```bash
-cargo tauri build
+```powershell
+@{ build = @{ frontendDist = $env:GEOCODE_FRONTEND_DIST } } |
+    ConvertTo-Json | Set-Content target/tauri-frontend-config.json -Encoding utf8
+cargo tauri build --config target/tauri-frontend-config.json
 ```
 
 Windows では Tauri の NSIS インストーラ（`.exe`）と MSI インストーラ（`.msi`）に加えて、`target/release/` 直下に cargo が生成する単体実行ファイル（`.exe`）も出力される。
@@ -437,7 +458,7 @@ GitHub Actions では [.github/workflows/release.yml](.github/workflows/release.
 - トリガーは `v*` タグ push、または `workflow_dispatch`
 - 実行環境は `windows-latest`
 - ルートに CI 用の `.env` を生成し、`sqlx-cli` で SQLite スキーマを作成する
-- `src_frontend/scripts/frontends-builder.ps1 -SkipCargoBuild` で3系統のVueフロントエンドと地図テンプレート用ES Modulesを `dist/` に集約する
+- `scripts/build-frontend-assets.ps1 -SkipCargoBuild -OutputRoot target/frontend-dist` で共通フロントを隔離ビルドし、埋込資材を集約する
 - `cargo tauri build` で Windows NSIS インストーラ、MSI インストーラ、単体実行ファイルを生成する
 - 生成したインストーラ（`.exe` / `.msi`）と cargo 生成の単体 `.exe` を収集し、SHA-256 チェックサム付きで GitHub Release の draft に添付する
 

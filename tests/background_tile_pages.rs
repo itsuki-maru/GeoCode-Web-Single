@@ -150,6 +150,7 @@ async fn nonsnapshot_share_pages_receive_current_background_metadata_on_desktop_
     let Json(created) = generate_url_handler(
         Extension(user),
         Extension(pool.clone()),
+        None,
         Json(GenarateUrlPayload {
             minutes: 60,
             layers: vec![layer],

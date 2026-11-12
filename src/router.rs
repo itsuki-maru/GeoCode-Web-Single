@@ -108,6 +108,17 @@ pub fn build_router_with_tile_settings(
     tile_cache: Option<redis::aio::ConnectionManager>,
     tile_settings: Arc<TileSettings>,
 ) -> Router {
+    let local_tiles = crate::local_tiles::LocalTiles::new(CONFIG.local_tiles.clone(), pool.clone());
+    build_router_with_local_tiles(pool, tera, tile_cache, tile_settings, local_tiles)
+}
+
+pub fn build_router_with_local_tiles(
+    pool: SqlitePool,
+    tera: Arc<Mutex<Tera>>,
+    tile_cache: Option<redis::aio::ConnectionManager>,
+    tile_settings: Arc<TileSettings>,
+    local_tiles: Arc<crate::local_tiles::LocalTiles>,
+) -> Router {
     // タイルプロキシ用のクライアントを作成
     let tile_proxy_client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
@@ -528,6 +539,10 @@ pub fn build_router_with_tile_settings(
             get(serve_marker_icon_file),
         )
         .route("/tile/{z}/{x}/{y_png}", get(proxy_tile_handler))
+        .route(
+            "/local-tiles/{dataset}/{profile}/{z}/{x}/{y_png}",
+            get(crate::handler::local_tiles::tile),
+        )
         .layer(FlexibleCookieValidator);
 
     // 最終的なAPIルート
@@ -556,6 +571,7 @@ pub fn build_router_with_tile_settings(
         .layer(middleware::from_fn(print_request_response))
         .layer(middleware::from_fn(security_headers_and_origin))
         .layer(Extension(tile_settings))
+        .layer(Extension(local_tiles))
         .layer(DefaultBodyLimit::max(105 * 1024 * 1024))
         .fallback(crate::custom_not_found_handler)
 }

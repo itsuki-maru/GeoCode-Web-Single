@@ -115,6 +115,7 @@ async fn create_share(
     generate_url_handler(
         Extension(owner.to_owned()),
         Extension(pool.clone()),
+        None,
         Json(payload(layer, snapshot, false)),
     )
     .await
@@ -235,6 +236,7 @@ async fn editing_a_managed_raster_preserves_archived_v1_url_and_definition() {
         Extension(admin.clone()),
         Extension(pool.clone()),
         Path(1),
+        None,
         Json(input(changed)),
     )
     .await
@@ -261,6 +263,7 @@ async fn editing_vector_style_or_kind_keeps_saved_v2_frozen_and_failed_updates_k
     let vector = admin_create(
         Extension(admin.clone()),
         Extension(pool.clone()),
+        None,
         Json(input(definition("vector", Some("/styles/captured.json")))),
     )
     .await
@@ -286,6 +289,7 @@ async fn editing_vector_style_or_kind_keeps_saved_v2_frozen_and_failed_updates_k
         Extension(admin.clone()),
         Extension(pool.clone()),
         Path(id),
+        None,
         Json(input(changed.clone())),
     )
     .await
@@ -300,6 +304,7 @@ async fn editing_vector_style_or_kind_keeps_saved_v2_frozen_and_failed_updates_k
         Extension(admin.clone()),
         Extension(pool.clone()),
         Path(id),
+        None,
         Json(input(invalid)),
     )
     .await
@@ -313,6 +318,7 @@ async fn editing_vector_style_or_kind_keeps_saved_v2_frozen_and_failed_updates_k
         generate_url_handler(
             Extension(owner.clone()),
             Extension(pool.clone()),
+            None,
             Json(payload(&layer, Some(captured), true)),
         )
         .await
@@ -326,6 +332,7 @@ async fn editing_vector_style_or_kind_keeps_saved_v2_frozen_and_failed_updates_k
                 Extension(admin.clone()),
                 Extension(pool.clone()),
                 Path(id),
+                None,
                 Json(input(definition("raster", None))),
             )
             .await
@@ -356,6 +363,7 @@ async fn legacy_share_without_a_snapshot_keeps_its_url_and_reads_current_managed
     let vector = admin_create(
         Extension(admin.clone()),
         Extension(pool.clone()),
+        None,
         Json(input(definition("vector", Some("/styles/latest.json")))),
     )
     .await
@@ -368,6 +376,7 @@ async fn legacy_share_without_a_snapshot_keeps_its_url_and_reads_current_managed
         Extension(admin.clone()),
         Extension(pool.clone()),
         Path(1),
+        None,
         Json(input(raster)),
     )
     .await
@@ -448,6 +457,7 @@ async fn registering_a_new_vector_preserves_existing_backgrounds_and_all_share_v
     let vector = admin_create(
         Extension(admin.clone()),
         Extension(pool.clone()),
+        None,
         Json(input(registration)),
     )
     .await
@@ -485,6 +495,7 @@ async fn registering_a_new_vector_preserves_existing_backgrounds_and_all_share_v
                 Extension(admin.clone()),
                 Extension(pool.clone()),
                 Path(vector_id),
+                None,
                 Json(input(raster_registration)),
             )
             .await

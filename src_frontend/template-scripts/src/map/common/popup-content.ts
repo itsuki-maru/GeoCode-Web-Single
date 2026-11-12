@@ -1,6 +1,6 @@
 import { escapeHtml } from "./marker";
 import { releaseDeferredDetails, disposeMapContent, registerProgressiveHtml } from "./content";
-import { updatePopupLayout } from "./popup-layout";
+import { installMarkerPopupHeightLimit, updatePopupLayout } from "./popup-layout";
 
 export interface PopupBody {
   body?: string;
@@ -13,7 +13,11 @@ type Content = { kind: "marker" | "shape"; id: string; name: string; body: strin
 type MarkdownReferences = Record<string, { href: string; title: string | null }>;
 type RenderMarkdown = (markdown: string, links?: MarkdownReferences) => string;
 interface Options {
-  map: { on(event: string, fn: (event: any) => void): void };
+  map: {
+    getContainer?(): HTMLElement;
+    on(event: string, fn: (event: any) => void): void;
+    off?(event: string, fn: (event: any) => void): void;
+  };
   renderMarkdown: RenderMarkdown;
   sanitizeHtml(html: string): string;
   setupImages(root: ParentNode, render?: RenderMarkdown): void;
@@ -21,6 +25,7 @@ interface Options {
   snapshot?: PopupBodies;
   analysis?: Record<string, string>;
   answerMap?: boolean;
+  limitMarkerHeight?: boolean;
 }
 
 export function isPopupBody(value: any): value is PopupBody {
@@ -36,6 +41,7 @@ export function isPopupBody(value: any): value is PopupBody {
 // 所有者用の五つの地図ページでのみ設定する。内容はページに既存の Markdown サニタイザーで描画し、
 // ツールバーはユーザーの Markdown の外側に構築する。
 export function createPopupContentRuntime(options: Options) {
+  if (options.limitMarkerHeight) installMarkerPopupHeightLimit(options.map);
   const contents = new Map<string, Content & { html: string }>();
   const analysis = new Map<string, string>(Object.entries(options.analysis || {}));
   const cache = new Map<string, { body: string; pending: Promise<PopupBody> }>();

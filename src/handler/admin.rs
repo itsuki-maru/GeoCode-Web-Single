@@ -11,7 +11,6 @@ use crate::model::{
     IsExists, IsSuperuser, ResponseUserData, ReturningId, SignupPayload, UpdateUserData,
 };
 use crate::utils::{validate_password, vec_to_hashmap};
-use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::query_as;
@@ -19,9 +18,7 @@ use sqlx::sqlite::SqlitePool;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-#[derive(RustEmbed)]
-#[folder = "dist/"]
-struct Asset;
+use crate::Asset;
 
 const CLUSTERING_MIN_ZOOM_KEY: &str = "clustering_min_zoom";
 const DEFAULT_CLUSTERING_MIN_ZOOM: i32 = 15;
@@ -132,7 +129,7 @@ pub async fn admin_index_get_handler(
     match Asset::get(html_file) {
         Some(content) => {
             let html_content = String::from_utf8(content.data.into_owned()).unwrap();
-            Ok(Html(html_content))
+            Ok(Html(crate::frontend_html::localize_manifest(&html_content)))
         },
         None => Err(AppError::NotFound),
     }

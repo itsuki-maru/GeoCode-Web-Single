@@ -615,6 +615,7 @@ async fn temporary_overlay_sharing_is_opt_in_and_query_only_controls_visibility(
         let Json(created) = generate_url_handler(
             Extension(owner.clone()),
             Extension(pool.clone()),
+            None,
             Json(
                 serde_json::from_value(json!({
                     "minutes": 60, "layers": [layer], "update_url": previous_id.is_some(),

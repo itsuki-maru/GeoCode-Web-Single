@@ -21,11 +21,8 @@ use tower_http::services::ServeFile;
 use crate::config::CONFIG;
 use crate::error::AppError;
 use crate::model::ThumbnailQueryParams;
-use rust_embed::RustEmbed;
 
-#[derive(RustEmbed)]
-#[folder = "dist/assets"]
-struct Asset;
+use crate::StaticAsset as Asset;
 
 // 静的な JavaScript・CSS・画像を返す。
 pub async fn serve_static_file(Path(uri): Path<String>) -> Result<Response<Body>, AppError> {
@@ -40,6 +37,8 @@ pub async fn serve_static_file(Path(uri): Path<String>) -> Result<Response<Body>
                     Some("jpg") | Some("jpeg") => "image/jpeg",
                     Some("svg") => "image/svg+xml",
                     Some("html") => "text/html",
+                    Some("json") => "application/json",
+                    Some("webmanifest") => "application/manifest+json",
                     // 他の拡張子があれば適宜追加
                     _ => "application/octet-stream", // 不明なファイルタイプ
                 };

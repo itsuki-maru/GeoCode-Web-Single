@@ -45,10 +45,15 @@ async fn create(
     user: &str,
     p: GenarateUrlPayload,
 ) -> CreateUpdatedTemporaryUrlResponse {
-    generate_url_handler(Extension(user.to_owned()), Extension(pool.clone()), Json(p))
-        .await
-        .unwrap()
-        .0
+    generate_url_handler(
+        Extension(user.to_owned()),
+        Extension(pool.clone()),
+        None,
+        Json(p),
+    )
+    .await
+    .unwrap()
+    .0
 }
 
 async fn saved(pool: &SqlitePool, user: &str) -> Value {
@@ -289,6 +294,7 @@ async fn vector_snapshot_preserves_style_and_rejects_definition_changes_without_
             generate_url_handler(
                 Extension(user.clone()),
                 Extension(pool.clone()),
+                None,
                 Json(payload(&layer, Some(bad), true)),
             )
             .await
@@ -304,6 +310,7 @@ async fn vector_snapshot_preserves_style_and_rejects_definition_changes_without_
         generate_url_handler(
             Extension(user.clone()),
             Extension(pool.clone()),
+            None,
             Json(payload(&layer, Some(snapshot), true)),
         )
         .await
@@ -338,6 +345,7 @@ async fn legacy_snapshot_cannot_authorize_vector_background_as_raster() {
         generate_url_handler(
             Extension(user.clone()),
             Extension(pool.clone()),
+            None,
             Json(payload(&layer, Some(snapshot), true)),
         )
         .await
@@ -547,6 +555,7 @@ async fn 他人の対象や除外情報や未管理タイルを拒否し既存�
             generate_url_handler(
                 Extension(user.to_owned()),
                 Extension(pool.clone()),
+                None,
                 Json(payload(&layer, Some(bad), false))
             )
             .await
@@ -587,9 +596,14 @@ async fn 空の地図を共有でき新規発行失敗でも以前の共有を�
     let mut p = payload(&layer, Some(snapshot.clone()), false);
     p.layers.clear();
     assert!(
-        generate_url_handler(Extension(user.to_owned()), Extension(pool.clone()), Json(p))
-            .await
-            .is_err()
+        generate_url_handler(
+            Extension(user.to_owned()),
+            Extension(pool.clone()),
+            None,
+            Json(p)
+        )
+        .await
+        .is_err()
     );
     assert_eq!(saved(&pool, &user).await, before);
     assert_eq!(saved(&pool, &user).await["id"], original.id.to_string());
@@ -617,9 +631,14 @@ async fn 空の地図を共有でき新規発行失敗でも以前の共有を�
     let mut p = payload(&layer, Some(snapshot), true);
     p.layers.clear();
     assert!(
-        generate_url_handler(Extension(user.clone()), Extension(pool.clone()), Json(p))
-            .await
-            .is_err()
+        generate_url_handler(
+            Extension(user.clone()),
+            Extension(pool.clone()),
+            None,
+            Json(p)
+        )
+        .await
+        .is_err()
     );
     assert_eq!(saved(&pool, &user).await, before);
 }
@@ -659,6 +678,7 @@ async fn 複数接続の通常共有とスナップショット共有と停止�
         generate_url_handler(
             Extension(user.to_owned()),
             Extension(pool.clone()),
+            None,
             Json(payload(&layer, Some(snapshot), false))
         ),
     );
@@ -884,6 +904,7 @@ async fn 元の図形と重ね合わせタイルが更新されても保存し�
         generate_url_handler(
             Extension(user.to_owned()),
             Extension(pool.clone()),
+            None,
             Json(payload(&layer, Some(tampered), true))
         )
         .await

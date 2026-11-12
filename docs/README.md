@@ -32,6 +32,7 @@ GeoCode-Web-Singleの主要機能について、利用手順、現在の処理�
 |---|---|
 | [重ね合わせタイル](TILE_OVERLAYS.md) | タイル登録、共有、気象庁ナウキャスト |
 | [タイル配信プロキシ](TILE_PROXY.md) | 上流APIキー、Redisキャッシュ |
+| [ローカル地図](LOCAL_TILES.md) | OSM PBF取り込み、地名・ランドマーク名、表示選択と描画世代、XYZ配信・事前生成、保存先とオフライン利用 |
 | [地図印刷・PDF出力](MAP_PRINTING.md) | PCの通常・全画面・回答・一時共有地図の操作、出力対象と検証 |
 | [管理者機能](ADMINISTRATION.md) | ユーザー管理、権限設定、管理機能への案内 |
 
@@ -40,6 +41,20 @@ GeoCode-Web-Singleの主要機能について、利用手順、現在の処理�
 ## 導入と保守
 
 サーバ構築・起動・ビルドは[ルートREADME](../README.md)、構成・DB・APIの全体像は[全体仕様](../SPECIFICATION.md)を参照する。フロントエンドの開発・配布は[フロントエンド全体構成](../src_frontend/SPECIFICATION.md)にまとめる。
+
+移植の段階と受入条件は[OSMタイル生成機能の本体移植計画](plans/OSM_TILE_INTEGRATION_PLAN.md)を参照する。現行の利用手順は[ローカル地図](LOCAL_TILES.md)を参照し、計画と実施済み検証を区別する。
+
+タイル管理情報は本体DBから独立したSQLiteへ保存する。[DB分離計画](plans/LOCAL_TILE_CATALOG_DB_SPLIT_PLAN.md)と[実装・検証記録](plans/LOCAL_TILE_CATALOG_DB_SPLIT_PROGRESS.md)を参照する。
+
+専用管理画面を本体CLIへ移した改修は、[CLI化とフロントエンド共通化計画](plans/LOCAL_TILE_CLI_AND_FRONTEND_COMPAT_PLAN.md)と[実装・検証記録](plans/LOCAL_TILE_CLI_PROGRESS.md)を参照する。PostgreSQL版との共通フロントを維持し、管理はコマンド、表示は共通の背景地図設定とXYZ配信を使う。
+
+コメントや描画に関係しない変更でタイル世代が変わる問題は、[描画世代識別の修正計画](plans/LOCAL_TILE_RENDER_IDENTITY_PLAN.md)と[実装・検証記録](plans/LOCAL_TILE_RENDER_IDENTITY_PROGRESS.md)を参照する。ビルド来歴・取り込み互換性・描画互換性を分離し、同じ描画契約のURLとPNGを継続利用する。
+
+道路から建物・土地被覆・水域・海陸・山の陰影・等高線へ拡張した内容は、[地物・標高地形の拡張計画](plans/LOCAL_TILE_FEATURE_EXPANSION_PLAN.md)と[実装・検証記録](plans/LOCAL_TILE_FEATURE_EXPANSION_PROGRESS.md)を参照する。新形式の別完成DBを作り、既存道路DB・PNG・履歴と共通フロントを維持する。現在の取り込み・切替方法は[ローカル地図](LOCAL_TILES.md)を参照する。
+
+JGD2000・JGD2011が混在する国土地理院DEMへの対応は、[混在DEMの取り込み計画](plans/LOCAL_TILE_MIXED_DEM_PLAN.md)と[実装・検証記録](plans/LOCAL_TILE_MIXED_DEM_PROGRESS.md)を参照する。原資料の経緯度・標高を保持する併用方針、事前検査、識別、検証、タイル資産の再作成範囲を定める。
+
+OSM標準風の配色・道路表現、地名・ランドマーク名、生成時の表示選択は、[計画](plans/LOCAL_TILE_OSM_STYLE_AND_LABEL_PLAN.md)と[実装・検証記録](plans/LOCAL_TILE_OSM_STYLE_AND_LABEL_PROGRESS.md)を参照する。`standard-v2`で名称・詳細属性を持つschema3の新完成DBを作り、同じDBから道路・建物・文字・等高線・陰影・言語を選んだ複数の描画世代を使える。既存の道路・地形DB、PNG・履歴とPostgreSQL版との共通フロントを維持する。現行コマンドと四国の取り込み・通常地図／地形付き地図の準備方法は[ローカル地図](LOCAL_TILES.md)を参照する。実資料や配布exeの実測結果は検証記録で確認する。
 
 機能文書は現行実装の説明とし、設定名・既定値・API・制限値を変更した際は関連文書も更新する。機能間で共通する内容は相互リンクで参照する。「レイヤ」はマーカー・図形のグループを指し、「重ね合わせタイル」と区別する。
 

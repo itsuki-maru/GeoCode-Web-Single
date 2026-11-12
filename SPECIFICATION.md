@@ -22,6 +22,8 @@ PostgreSQL から SQLite を使用することによる差分吸収は **全て�
 
 - PostgreSQL の JSONB が使えないため、本体は `serde_json::Value` を使用するところ、 String 型となる場合は、テキストから JSON へのパースはフロントではなく、バックエンドで行ってから返却するといったもの。
 
+この方針はPostgreSQL版と共通の機能に適用する。本体に組み込むローカルOSMタイル生成の管理はSingle版のCLIだけへ置き、表示には共通フロントと通常のXYZ背景を使用する。
+
 ## 2. システム構成
 
 ### 2.1 バックエンド
@@ -959,8 +961,8 @@ API エラーは原則 JSON で返る。
 
 - `npm ci` を `frontend`、`frontend-mobile`、`frontend-admin`、`template-scripts` で実行する
 - `frontend` と `template-scripts` のテスト、全4プロジェクトの型検査・ビルドを実行する
-- `src_frontend/scripts/frontends-builder.ps1 -SkipCargoBuild` でフロントエンド成果物を `dist/` に集約する
-- `cargo tauri build` で Windows インストーラを生成する
+- `scripts/build-frontend-assets.ps1 -SkipCargoBuild -OutputRoot target/frontend-dist` で、既存distを変更せず隔離したフロントエンド成果物を生成する
+- `GEOCODE_FRONTEND_DIST`とTauriの`build.frontendDist`を同じ隔離資材へ設定し、`cargo tauri build --config target/tauri-frontend-config.json`でWindowsインストーラを生成する
 - `target/release/bundle` 配下の `.exe` / `.msi` を成果物として収集する
 
 ### 15.4 リリース処理
@@ -1308,3 +1310,27 @@ PostgreSQL版の `6d8123a..abd2578`（フォーム改善からセキュリティ
 - 登録一覧APIは `deletion_supported: true` を返す。削除の確認画面で「閉じる」は取消、「削除」は実行する。成功時は「削除しました。」を表示し、一覧・件数・地図を更新する。削除ボタンは赤背景・白文字、登録一覧の行ホバーは専用の淡色とする。
 - PC・モバイルのマーカー・図形編集と登録入力のレイアウトを整理する。フッターとヘッダーを保ち、中央を縦スクロールさせ、長いURL・選択肢・日付入力などの横方向のはみ出しを防ぐ。項目追加ボタンは上下に配置し、共通フォームの作成成功・失敗はメッセージモーダルで通知する。
 - SQLiteのTEXT ID、JSON・日時・厳密数値比較、既存の書き込みトランザクションを維持する。DB・JSON形式を変更せず、新しいマイグレーションとSQLxメタデータの追加は不要。
+
+## ローカルOSMタイルの取り込みと生成
+
+OSM-Tile-Generatorの生成核を`src/tilegen/`へ移植し、本体の`src/local_tiles/`が保存・実行管理を担当する。独立SDKへのpath依存や外部生成CLIは使用しない。PBF取り込み、完成DB登録、事前生成、取消・状態照会は同じ本体exeの`local-tiles` CLIから行い、配信は通常のXYZエンドポイントで扱う。フロントとテンプレートはPostgreSQL版と共通にし、SQLite専用画面・管理HTTP APIを設けない。詳細な操作・設定は[ローカル地図](docs/LOCAL_TILES.md)を参照する。
+
+- XYZ、Web Mercator、256px不透明PNG、z0〜22。旧schema/geometry=1/1の`roads-v1`と道路取り込みの既定動作・画素・IDを維持する。旧道路のz0〜5は背景のみ。
+- `import --features standard-v1`はschema/geometry=2/2の別完成DBを作り、建物・中庭・土地被覆・水域・島・水路・鉄道を格納する。PBFはRelation→Way→Nodeの3走査とディスクstagingで処理し、欠損面を直線で補完しない。標準地図の描画契約v3は道路のv2から分離する。
+- 新完成DBは国土地理院FGD-GMLの標高チャンク・必要階層・20m等高線と、処理済みWGS84陸域面を内包できる。Horn方式の陰影とズーム別の等高線を本体内で合成する。DEMの欠損・水底を0mの陸地とせず、海陸処理範囲外を海と断定しない。地名・標高数値ラベル、3D建物、一般GeoTIFFは対象外。
+- 元PBF・DEM・陸域データは取り込み時だけ使用する。標高だけの更新も別完成DBへの再取り込みとし、既存完成DB・PNG・履歴へ追記・変換しない。管理DBのschema1・本体マイグレーション・共通フロントは変更しない。
+- `geocode-web-single.env.json`の`tile_catalog_database_path`・`tile_dataset_path`・`tile_cache_path`・`tile_work_path`で、管理DBファイル・完成DB・PNG・作業領域を独立して絶対パス指定する。既定は`~/.geocode-web-single/tiles/catalog.sqlite`と`tiles/{datasets,png,work}`。旧JSONは既定補完し、変更は全起動経路で再起動時に反映する。自動移動・既存画像保存先の変更は行わない。SQLite内部一時ファイルはOS標準tempを使用する。
+- 完成DBは不変・読み取り専用として使い、更新は別ファイルで完成させる。外部参照DBの登録は複製しない。PNGの公開直前ファイルはPNG側、完成直前DBはDB側と同じファイルシステムに置いて公開する。
+- 専用catalogの`local_tile_datasets`・`local_tile_render_profiles`・`local_tile_jobs`に、DB登録・描画世代・ジョブ状態を保持する。取り込みは途中再開せず、事前生成は世代・範囲・ズームが一致するmanifestと完成PNGを検査して再開する。取り込み受付はUUIDの`request_id`により、同じ要求の再送で同じジョブを返す。
+- ビルド来歴、取り込み互換性、描画互換性を分離する。新規dataset IDはPBF内容・取り込み契約・条件、render IDは保存済みdataset ID・描画契約から算出し、コメント・CLI・認証・製品版・非描画依存の更新では変えない。実スタイル値と明示的な互換性版、実形式・寸法・色解釈を固定形式でhash化する。全ソースhashは診断専用で、生成可否は共通のprofile互換性判定を使う。
+- catalog schema v1と旧完成DBのmetadataは変更しない。profileの`info_json`へ道路の契約v2または標準地図の契約v3を保存し、既存`build_id`は初回登録時の来歴として保持する。旧方式の初回切替だけ明示的に新世代を準備し、旧ID・PNG・manifest・背景・共有・履歴は保持する。同じ描画契約なら、異なるビルド来歴でもPNG・URL・事前生成再開を継続できる。
+- 実行構成は`res/tile-render-execution.json`で認定する。未認定のcompiler・CPU機能・flags・関連依存構成では新規生成等を503で停止し、照会と保存PNGは維持する。描画ソースのトークン指紋・関連推移依存・固定RGBA/PNGをCIで検査し、ソース指紋は描画世代へ混ぜない。
+- `GET /local-tiles/{dataset_id}/{render_id}/{z}/{x}/{y}.png`は匿名配信経路。キャッシュhitでは生成せず、missは同一keyのjobを共有する。成功は`image/png`・`X-Tile-Cache`と版付き長期cacheを返す。失敗は`no-store`とし、正常背景画像で代替保存しない。
+- 専用workerと有限queueを使い、sessionはworker専用で再利用し、contextはjobごとに作る。オンデマンドと事前生成で描画枠を共有し、個々のHTTP待機期限と共有生成job期限を分ける。実処理終了まで枠を保持し、全起動経路の終了時に取消とworker回収を行う。
+- 同じ保存先へのwriterはプロセス間lockにより単一ownerとする。取り込みと事前生成は各1実行、待機枠は共通。実行元不在を確認できたジョブだけを起動時に中断として復旧する。
+- CLIは既存JSONと本体DBだけを使用し、共通migration・初期ユーザー作成を実行しない。照会はowner・profile・job状態を変えず、writerは既存ownerと競合したら停止する。別CLIの取消だけは条件付き制御更新とし、実行元がtokenへ反映する。PNG容量は`cache scan`で明示集計する。
+- 背景は通常の同一オリジンラスタ定義として明示追加し、既存背景を自動置換しない。出典を共通地図・共有・印刷へ引き継ぐ。既存外部`/tile/`プロキシ、Redis、revision、z0〜19の契約を維持する。
+- 描画互換性を確認できない旧世代は保存済みPNGだけを配信し、missは410とする。利用停止済みも410。ビルド来歴だけが違う互換世代は同じURLへ生成できる。背景・保存済み共有が参照するデータセットの停止・清掃は拒否し、完成DBと元PBFをキャッシュ清掃で削除しない。
+- 完成DBと本体のローカル資材があれば、元PBFや外部タイルサーバーなしで表示・生成できる。外部背景・住所検索・気象タイル等は別の通信機能。ローカル生成から外部fallbackや自動取得を行わない。正式サポートはWindows 64bitを維持する。
+
+共通HTMLのmanifest参照はSQLiteバックエンドで同梱/assets/manifest*.jsonへ正規化する。フロント内へSQLite判定を加えず、リンク・画像・ユーザー内容は一括置換しない。

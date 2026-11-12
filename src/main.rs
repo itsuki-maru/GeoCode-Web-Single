@@ -49,9 +49,18 @@ const OPEN_EXTERNAL_SCRIPT: &str = r#"
 // axum シャットダウン信号を保持する Tauri 管理状態
 struct ShutdownState(Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>);
 
+#[derive(Default)]
+struct DesktopTileShutdown {
+    runtime: Mutex<Option<Arc<geocode_web_single::local_tiles::LocalTiles>>>,
+    phase: std::sync::atomic::AtomicU8,
+}
+
 /// 環境変数を設定する（unsafe: シングルスレッドの初期化フェーズ限定）。
 /// `server_addr` は ALLOW_ORIGINS に追加するバインドアドレス（例: "127.0.0.1:3000"）。
 unsafe fn apply_env_vars(env: &ApplicationInitSetup, server_addr: &str) {
+    unsafe {
+        geocode_web_single::local_tiles::config::apply_env(env);
+    }
     // Rust 2024: unsafe fn 内でも unsafe ブロックが必要
     unsafe {
         env::set_var(
@@ -199,6 +208,21 @@ fn init_tracing() {
     });
 }
 
+/// CLIの診断は標準エラーへ出し、標準出力のJSONと分離する。
+fn init_cli_tracing() {
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()),
+        )
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_ansi(false),
+        )
+        .try_init()
+        .ok();
+}
+
 /// 外部URLをデフォルトブラウザで開く Tauri コマンド。
 #[tauri::command]
 fn open_url(url: String) {
@@ -246,7 +270,8 @@ async fn complete_setup(
 
     // axum ルーター
     let _camera_cleanup = geocode_web_single::handler::live_camera::start_cleanup(pool.clone());
-    let app_router = build_router_with_tile_settings(pool, tera, tile_cache).await?;
+    let (app_router, local_tiles) = build_router_with_tile_settings(pool, tera, tile_cache).await?;
+    *app.state::<DesktopTileShutdown>().runtime.lock().unwrap() = Some(local_tiles.clone());
 
     // TCP バインド
     let listener = tokio::net::TcpListener::bind(SERVER_ADDR)
@@ -287,6 +312,7 @@ async fn complete_setup(
         axum::serve(listener, app_router)
             .with_graceful_shutdown(async move {
                 shutdown_rx.await.ok();
+                local_tiles.shutdown().await;
                 tracing::info!("==================== Server Shutdown ====================");
             })
             .await
@@ -344,7 +370,7 @@ fn run_server_mode(bind_addr: String) {
         let tile_cache = setup_tile_cache().await;
 
         let _camera_cleanup = geocode_web_single::handler::live_camera::start_cleanup(pool.clone());
-        let app_router = match build_router_with_tile_settings(pool, tera, tile_cache).await {
+        let (app_router, local_tiles) = match build_router_with_tile_settings(pool, tera, tile_cache).await {
             Ok(router) => router,
             Err(error) => {
                 tracing::error!(%error, "タイルサーバ設定を読み込めません。");
@@ -364,10 +390,11 @@ fn run_server_mode(bind_addr: String) {
         tracing::info!("Press Ctrl+C to stop the server.");
 
         axum::serve(listener, app_router)
-            .with_graceful_shutdown(async {
+            .with_graceful_shutdown(async move {
                 tokio::signal::ctrl_c()
                     .await
                     .expect("Failed to listen for Ctrl+C");
+                local_tiles.shutdown().await;
                 tracing::info!("==================== Server Shutdown ====================");
             })
             .await
@@ -376,24 +403,30 @@ fn run_server_mode(bind_addr: String) {
 }
 
 fn main() {
-    // CLI 引数解析
-    // `-s <IP>` が指定された場合はサーバー単体モードで起動する。
-    // <IP> はホストのみ（"0.0.0.0"）またはホスト:ポート（"0.0.0.0:3000"）を受け付ける。
-    // ポートが省略された場合はデフォルトの 3000 番を使用する。
-    let args: Vec<String> = std::env::args().collect();
-    if let Some(pos) = args.iter().position(|a| a == "-s") {
-        let ip_arg = args
-            .get(pos + 1)
-            .cloned()
-            .unwrap_or_else(|| "0.0.0.0".to_string());
-        // ポートが含まれていなければデフォルトポートを付与
-        let bind_addr = if ip_arg.contains(':') {
-            ip_arg
-        } else {
-            format!("{}:3000", ip_arg)
-        };
-        run_server_mode(bind_addr);
-        return;
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match geocode_web_single::launch::parse(&args) {
+        Ok(geocode_web_single::launch::LaunchMode::Desktop) => {},
+        Ok(geocode_web_single::launch::LaunchMode::Server(address)) => {
+            run_server_mode(address);
+            return;
+        },
+        Ok(geocode_web_single::launch::LaunchMode::LocalTiles(arguments)) => {
+            exit_cli(run_local_tiles_cli(&arguments));
+        },
+        Ok(geocode_web_single::launch::LaunchMode::Help) => {
+            #[cfg(windows)]
+            let _ = utils::ensure_cli_console();
+            println!(
+                "GeoCode-Web-Single\n引数なし: デスクトップ\n-s [IP:PORT]: サーバー\nlocal-tiles --help: ローカル地図の管理CLI"
+            );
+            exit_cli(0);
+        },
+        Err(message) => {
+            #[cfg(windows)]
+            let _ = utils::ensure_cli_console();
+            eprintln!("{message}");
+            exit_cli(2);
+        },
     }
 
     // ShutdownState を Arc で共有（on_window_event からも参照する）
@@ -402,6 +435,7 @@ fn main() {
 
     tauri::Builder::default()
         .manage(ShutdownState(shutdown_inner))
+        .manage(DesktopTileShutdown::default())
         // セットアップ画面用カスタムプロトコル（axum 未起動でも配信可能）
         .register_uri_scheme_protocol("app-setup", |_app, _req| {
             let html = include_str!("../setup/index.html");
@@ -453,6 +487,7 @@ fn main() {
                     *guard = Some(shutdown_tx);
                 }
 
+                let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let pool = match setup_database_pool().await {
                         Ok(pool) => pool,
@@ -471,7 +506,7 @@ fn main() {
 
                     let _camera_cleanup =
                         geocode_web_single::handler::live_camera::start_cleanup(pool.clone());
-                    let app_router =
+                    let (app_router, local_tiles) =
                         match build_router_with_tile_settings(pool, tera, tile_cache).await {
                             Ok(router) => router,
                             Err(error) => {
@@ -479,6 +514,12 @@ fn main() {
                                 return;
                             },
                         };
+
+                    *app_handle
+                        .state::<DesktopTileShutdown>()
+                        .runtime
+                        .lock()
+                        .unwrap() = Some(local_tiles.clone());
 
                     let listener = match tokio::net::TcpListener::bind(SERVER_ADDR).await {
                         Ok(l) => l,
@@ -496,6 +537,7 @@ fn main() {
                     axum::serve(listener, app_router)
                         .with_graceful_shutdown(async move {
                             shutdown_rx.await.ok();
+                            local_tiles.shutdown().await;
                             tracing::info!(
                                 "==================== Server Shutdown ===================="
                             );
@@ -538,8 +580,197 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![complete_setup, open_url])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                use std::sync::atomic::Ordering;
+                let state = app.state::<DesktopTileShutdown>();
+                match state.phase.load(Ordering::Acquire) {
+                    2 => {},
+                    1 => api.prevent_exit(),
+                    _ => {
+                        let local_tiles = state.runtime.lock().unwrap().clone();
+                        if let Some(local_tiles) = local_tiles {
+                            api.prevent_exit();
+                            state.phase.store(1, Ordering::Release);
+                            let app = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                local_tiles.shutdown().await;
+                                app.state::<DesktopTileShutdown>()
+                                    .phase
+                                    .store(2, Ordering::Release);
+                                app.exit(0);
+                            });
+                        }
+                    },
+                }
+            }
+        });
+}
+
+fn exit_cli(code: i32) -> ! {
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    std::process::exit(code)
+}
+
+fn run_local_tiles_cli(arguments: &[String]) -> i32 {
+    use geocode_web_single::local_tiles::cli::{self, CliError, Command};
+    #[cfg(windows)]
+    if let Err(message) = utils::ensure_cli_console() {
+        eprintln!("{message}");
+        return 1;
+    }
+    let json = arguments.iter().any(|value| value == "--json");
+    init_cli_tracing();
+    let invocation = match cli::parse(arguments) {
+        Ok(value) => value,
+        Err(error) => return cli::report_error(&error, json),
+    };
+    if matches!(&invocation.command, Command::Help) {
+        println!("{}", cli::help_text());
+        return 0;
+    }
+    if matches!(&invocation.command, Command::BuildInfo) {
+        return cli::print_build_info(invocation.json);
+    }
+    if matches!(&invocation.command, Command::ElevationInspect { .. }) {
+        let runtime = match tokio::runtime::Runtime::new() {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                return cli::report_error(&CliError::new(1, error.to_string()), json);
+            },
+        };
+        return runtime.block_on(cli::print_elevation_inspection(&invocation));
+    }
+    let settings_path = match invocation.config_path.clone() {
+        Some(path) => path,
+        None => match dirs::home_dir() {
+            Some(home) => home.join(".geocode-web-single/geocode-web-single.env.json"),
+            None => {
+                return cli::report_error(
+                    &CliError {
+                        exit_code: 1,
+                        message: "ホームディレクトリを取得できません。".into(),
+                    },
+                    json,
+                );
+            },
+        },
+    };
+    let settings = match geocode_web_single::init::read_env_json_readonly(&settings_path) {
+        Ok(settings) => settings,
+        Err(error) => {
+            return cli::report_error(
+                &CliError {
+                    exit_code: 1,
+                    message: format!("{error}。既存の設定JSONを--configで指定してください。"),
+                },
+                json,
+            );
+        },
+    };
+    let config =
+        match geocode_web_single::local_tiles::config::LocalTileConfig::from_setup(&settings) {
+            Ok(value) => value,
+            Err(message) => {
+                return cli::report_error(
+                    &CliError {
+                        exit_code: 2,
+                        message,
+                    },
+                    json,
+                );
+            },
+        };
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(value) => value,
+        Err(error) => {
+            return cli::report_error(
+                &CliError {
+                    exit_code: 1,
+                    message: error.to_string(),
+                },
+                json,
+            );
+        },
+    };
+    runtime.block_on(async move {
+        let pool = if invocation.requires_database() {
+            match open_existing_cli_database(&settings.database_url, invocation.is_writer()).await {
+                Ok(value) => Some(value),
+                Err(message) => {
+                    return cli::report_error(
+                        &CliError {
+                            exit_code: 1,
+                            message,
+                        },
+                        json,
+                    );
+                },
+            }
+        } else {
+            None
+        };
+        let code = cli::run(invocation, config, pool.clone()).await;
+        if let Some(pool) = pool {
+            // SQLxの終了と返却が競合して残った接続も回収する。
+            loop {
+                pool.close().await;
+                if pool.size() == 0 {
+                    break;
+                }
+            }
+        }
+        code
+    })
+}
+
+async fn open_existing_cli_database(
+    database_url: &str,
+    writable: bool,
+) -> Result<sqlx::SqlitePool, String> {
+    use sqlx::{
+        ConnectOptions,
+        sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+    };
+    use std::str::FromStr;
+    let options =
+        SqliteConnectOptions::from_str(database_url).map_err(|error| error.to_string())?;
+    let memory = options
+        .clone()
+        .filename("geocode-cli-mode-probe")
+        .to_url_lossy()
+        .query_pairs()
+        .any(|(key, value)| key == "mode" && value == "memory");
+    if memory || !options.get_filename().is_file() {
+        return Err(
+            "CLIにはセットアップ済みの本体DBファイルが必要です。新規DBやmigrationは作成しません。"
+                .into(),
+        );
+    }
+    let pool = SqlitePoolOptions::new()
+        .max_connections(4)
+        .connect_with(
+            options
+                .read_only(!writable)
+                .create_if_missing(false)
+                .busy_timeout(Duration::from_secs(5)),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    if let Err(error) = geocode_web_single::db::pool::validate_existing_schema(&pool).await {
+        loop {
+            pool.close().await;
+            if pool.size() == 0 {
+                break;
+            }
+        }
+        return Err(error.to_string());
+    }
+    Ok(pool)
 }
 
 /// 全起動経路で管理済み設定を読み込み、運転中も定期的に再取得する。
@@ -547,7 +778,18 @@ async fn build_router_with_tile_settings(
     pool: sqlx::SqlitePool,
     tera: Arc<TokioMutex<tera::Tera>>,
     tile_cache: Option<redis::aio::ConnectionManager>,
-) -> Result<axum::Router, String> {
+) -> Result<
+    (
+        axum::Router,
+        Arc<geocode_web_single::local_tiles::LocalTiles>,
+    ),
+    String,
+> {
+    let local_tiles =
+        geocode_web_single::local_tiles::LocalTiles::new(CONFIG.local_tiles.clone(), pool.clone());
+    if let Err(error) = local_tiles.initialize().await {
+        tracing::warn!(reason=%error.message, "ローカル地図を初期化できません。本体の他機能は継続します。");
+    }
     let settings = Arc::new(TileSettings::from_env());
     settings.refresh(&pool).await.map_err(|_| {
         "タイルサーバ設定を読み込めません。DBの更新と暗号鍵を確認してください。".to_owned()
@@ -568,8 +810,15 @@ async fn build_router_with_tile_settings(
             }
         }
     });
-    Ok(router::build_router_with_tile_settings(
-        pool, tera, tile_cache, settings,
+    Ok((
+        router::build_router_with_local_tiles(
+            pool,
+            tera,
+            tile_cache,
+            settings,
+            local_tiles.clone(),
+        ),
+        local_tiles,
     ))
 }
 

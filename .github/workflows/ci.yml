@@ -100,6 +100,10 @@ jobs:
   rust:
     name: Rust format, test, and integration build
     runs-on: windows-latest
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
 
     steps:
       - name: Checkout
@@ -116,13 +120,46 @@ jobs:
             src_frontend/frontend-mobile/package-lock.json
             src_frontend/template-scripts/package-lock.json
 
+      - name: Read pinned frontend source
+        id: frontend-source
+        shell: pwsh
+        run: |
+          $baseline = Get-Content tests/fixtures/frontend-compat-baseline.json -Raw | ConvertFrom-Json
+          if ($baseline.repository -notmatch '^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$' -or $baseline.source_ref -notmatch '^[a-f0-9]{40}$') {
+            throw 'Invalid pinned frontend source'
+          }
+          "repository=$($baseline.repository)" | Add-Content -Path $env:GITHUB_OUTPUT -Encoding utf8
+          "ref=$($baseline.source_ref)" | Add-Content -Path $env:GITHUB_OUTPUT -Encoding utf8
+
+      - name: Checkout pinned PostgreSQL frontend source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.frontend-source.outputs.repository }}
+          ref: ${{ steps.frontend-source.outputs.ref }}
+          path: .frontend-source
+          token: ${{ secrets.FRONTEND_SOURCE_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Check shared frontend compatibility
+        run: node scripts/check-frontend-compat.mjs --source-root .frontend-source
+
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.1"
 
       - name: Cache Rust build
         uses: swatinem/rust-cache@v2
         with:
           workspaces: . -> target
+
+      - name: Check rendering compatibility review
+        shell: pwsh
+        run: |
+          cargo test --locked --manifest-path scripts/render-compatibility/Cargo.toml --target-dir target/render-identity-verification/tools
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/check-render-compatibility.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Generate CI .env
         shell: pwsh
@@ -154,7 +191,14 @@ jobs:
 
       - name: Build embedded frontend assets
         shell: pwsh
-        run: ./src_frontend/scripts/frontends-builder.ps1 -SkipCargoBuild
+        run: |
+          node --test tests/frontend-compat.test.mjs tests/build-frontend-assets.test.mjs
+          node scripts/check-frontend-compat.mjs
+          ./scripts/build-frontend-assets.ps1 -SkipCargoBuild -OutputRoot target/frontend-dist
+          $assets = (Resolve-Path target/frontend-dist).Path
+          "GEOCODE_FRONTEND_DIST=$assets" | Add-Content -Path $env:GITHUB_ENV -Encoding utf8
+          $tauri = @{ build = @{ frontendDist = $assets } } | ConvertTo-Json -Compress
+          "TAURI_CONFIG=$tauri" | Add-Content -Path $env:GITHUB_ENV -Encoding utf8
 
       - name: Validate embedded template assets
         shell: pwsh
@@ -170,15 +214,15 @@ jobs:
             "template-manifest.json"
           )
           foreach ($asset in $requiredAssets) {
-            if (-Not (Test-Path "dist/assets/$asset")) {
+            if (-Not (Test-Path "target/frontend-dist/assets/$asset")) {
               throw "Required template asset was not generated: $asset"
             }
           }
-          if (Get-ChildItem "dist/assets" -File -Filter "map-common-*.js") {
+          if (Get-ChildItem "target/frontend-dist/assets" -File -Filter "map-common-*.js") {
             throw "Removed compatibility scripts were included in dist/assets"
           }
-          if (Get-ChildItem "dist/templates" -File | Where-Object Extension -ne ".html") {
-            throw "dist/templates contains a non-HTML file"
+          if (Get-ChildItem "target/frontend-dist/templates" -File | Where-Object Extension -ne ".html") {
+            throw "target/frontend-dist/templates contains a non-HTML file"
           }
 
       - name: Check Rust formatting

@@ -1,213 +1,115 @@
-# 依存関係を更新するかのフラグオプション`-d`を引数で受け取る
-Param(
-    [switch]$d
-)
+# ロックファイルのフィンガープリントが同じでも、-d 指定時は依存関係をインストールする。
+Param([switch]$d)
 
-$dependsDeleteFlag = $false
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
 
-if ($d) {
-    $dependsDeleteFlag = $true
-}
+$originalLocation = Get-Location
+$rootDir = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
+$frontendRoot = Join-Path $rootDir 'src_frontend'
+$mainOutput = Join-Path $frontendRoot 'main/dist'
+$distribution = Join-Path $rootDir 'dist'
 
-# パスを確認して存在すれば削除する関数
-Function CheckExistsPath($checkPath) {
-    if (Test-Path $checkPath) {
-        Remove-Item -Recurse -Force $checkPath
+function Assert-WorkspacePath([string]$Path) {
+    $full = [IO.Path]::GetFullPath($Path)
+    $prefix = $rootDir.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    if (-not $full.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Build output is outside the project: $full"
     }
+    # 再帰的な削除やコピーを始める前に、パス内のジャンクションとシンボリックリンクを拒否する。
+    $cursor = $full
+    while ($cursor -ne $rootDir) {
+        if (Test-Path -LiteralPath $cursor) {
+            $item = Get-Item -LiteralPath $cursor -Force
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "Build path must not be a junction or symlink: $cursor"
+            }
+        }
+        $cursor = Split-Path -Path $cursor -Parent
+        if (-not $cursor) { throw "Invalid build path: $full" }
+    }
+    return $full
 }
 
-# このPowerShellファイルのディレクトリ
-$scriptDir = $PSScriptRoot
-$projectDir = Split-Path -Path $scriptDir -Parent # src_frontend
-
-# frontendディレクトリ
-$frontendDir = Join-Path -Path $projectDir -ChildPath "frontend"
-$frontendDistDir = Join-Path -Path $frontendDir -ChildPath "dist"
-
-# frontend-adminディレクトリ
-$frontendAdminDir = Join-Path -Path $projectDir -ChildPath "frontend-admin"
-$frontendAdminDistDir = Join-Path -Path $frontendAdminDir -ChildPath "dist"
-
-# frontend-mobileディレクトリ
-$frontendMobileDir = Join-Path -Path $projectDir -ChildPath "frontend-mobile"
-$frontendMobileDistDir = Join-Path -Path $frontendMobileDir -ChildPath "dist"
-
-# templates ディレクトリ
-$rootDir = Split-Path -Path $projectDir -Parent
-$rustTemplatesDir = Join-Path -Path $rootDir -ChildPath "src/templates"
-
-# Teraテンプレートから読み込むTypeScript/ES Modules
-$templateScriptsDir = Join-Path -Path $projectDir -ChildPath "template-scripts"
-$templateScriptsDistDir = Join-Path -Path $templateScriptsDir -ChildPath "dist"
-
-# 最終的なフロントエンド成果物の配布用ディレクトリ
-$prepareDistributionDir = Split-Path -Path $projectDir -Parent
-$distributionDir = Join-Path -Path $prepareDistributionDir -ChildPath "dist"
-
-# mainディレクトリ
-$mainDir = Join-Path -Path $projectDir -ChildPath "main"
-
-$faviconDir = Join-Path -Path $mainDir -ChildPath "dist/favicon.ico"
-$mainDistDir = Join-Path -Path $mainDir -ChildPath "dist"
-$pngFiles = Join-Path -Path $mainDir -ChildPath "dist/*.png"
-$jsFiles = Join-Path -Path $mainDir -ChildPath "dist/*.js"
-$mjsFiles = Join-Path -Path $mainDir -ChildPath "dist/*.mjs"
-$cssFiles = Join-Path -Path $mainDir -ChildPath "dist/*.css"
-$jsonFiles = Join-Path -Path $mainDir -ChildPath "dist/*.json"
-$svgFiles = Join-Path -Path $mainDir -ChildPath "dist/*.svg"
-$movedDir = Join-Path -Path $mainDir -ChildPath "dist/assets/"
-
-# 前回のビルドファイルが存在する場合は削除
-foreach ($checkPath in $mainDistDir, $frontendDistDir, $frontendMobileDistDir, $frontendAdminDistDir, $templateScriptsDistDir, $distributionDir) {
-    CheckExistsPath $checkPath
+function Remove-BuildOutput([string]$Path) {
+    $full = Assert-WorkspacePath $Path
+    if ($full -notin @($mainOutput, $distribution)) { throw "Unexpected build output: $full" }
+    if (Test-Path -LiteralPath $full) { Remove-Item -LiteralPath $full -Recurse -Force }
 }
 
-#################### frontendの処理 ####################
-Set-Location $frontendDir
-
-$nodeModules = Join-Path -Path $frontendDir -ChildPath  "node_modules"
-
-# 依存関係を更新する場合の処理
-if ($dependsDeleteFlag) {
-    CheckExistsPath $nodeModules
+function Invoke-BuildCommand([string]$Command, [string[]]$Arguments) {
+    & $Command @Arguments
+    if ($LASTEXITCODE -ne 0) { throw "$Command $($Arguments -join ' ') failed (exit $LASTEXITCODE)." }
 }
 
-# node_modulesが存在しなければnpm installを実行
-if (-Not (Test-Path $nodeModules)) {
-    npm install
+function Get-DependencyFingerprint([string]$Directory) {
+    $hashes = foreach ($name in @('package.json', 'package-lock.json', '.npmrc')) {
+        $path = Join-Path $Directory $name
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            "$name=$((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash)"
+        } elseif ($name -ne '.npmrc') {
+            throw "Dependency manifest is missing: $path"
+        }
+    }
+    return $hashes -join [Environment]::NewLine
 }
 
-# ビルド
-npm run build
+try {
+    foreach ($name in @('frontend', 'frontend-mobile', 'frontend-admin', 'template-scripts')) {
+        $directory = Assert-WorkspacePath (Join-Path $frontendRoot $name)
+        # Vite自身がdist/を削除するため、npmを実行する前にリンクされた出力先を拒否する。
+        $projectOutput = Assert-WorkspacePath (Join-Path $directory 'dist')
+        Set-Location -LiteralPath $directory
+        $fingerprint = Get-DependencyFingerprint $directory
+        $modules = Assert-WorkspacePath (Join-Path $directory 'node_modules')
+        $stamp = Join-Path $modules '.geocode-build-dependencies'
+        $installed = if (Test-Path -LiteralPath $stamp -PathType Leaf) { [IO.File]::ReadAllText($stamp) } else { '' }
+        if ($d -or -not (Test-Path -LiteralPath $modules -PathType Container) -or $installed -cne $fingerprint) {
+            Invoke-BuildCommand 'npm' @('ci')
+            [IO.File]::WriteAllText($stamp, $fingerprint, [Text.UTF8Encoding]::new($false))
+        }
+        Invoke-BuildCommand 'npm' @('run', 'build')
+        $required = if ($name -eq 'template-scripts') { 'template-manifest.json' } else { 'index.html' }
+        if (-not (Test-Path -LiteralPath (Join-Path $projectOutput $required) -PathType Leaf)) {
+            throw "Build output is missing: $name/dist/$required"
+        }
+    }
 
-# HTMLファイルパス
-$targetHtml = Join-Path -Path $frontendDir -ChildPath "dist/index.html"
-
-# favicon.icoのパス変更
-(Get-Content -Path $targetHtml) | ForEach-Object {
-    $_ -replace 'href="./favicon.ico"', 'href="/assets/favicon.ico"'
-} | Set-Content -Path $targetHtml
-
-# manifest-tab.jsonのパス変更
-(Get-Content -Path $targetHtml) | ForEach-Object {
-    $_ -replace 'href="./manifest-tab.json"', 'href="/assets/manifest-tab.json"'
-} | Set-Content -Path $targetHtml
-
-# apple-touch-icon.pngのパス変更
-(Get-Content -Path $targetHtml) | ForEach-Object {
-    $_ -replace 'href="./apple-touch-icon.png"', 'href="/assets/apple-touch-icon.png"'
-} | Set-Content -Path $targetHtml
-
-############### frontend-mobileの処理 ###############
-
-Set-Location $frontendMobileDir
-
-$nodeModules = Join-Path -Path $frontendMobileDir -ChildPath  "node_modules"
-
-# 依存関係を更新する場合の処理
-if ($dependsDeleteFlag) {
-    CheckExistsPath $nodeModules
+    # 4構成すべてのビルドが成功してから配布し、失敗時は前回の出力を保持する。
+    Remove-BuildOutput $mainOutput
+    $assets = Join-Path $mainOutput 'assets'
+    New-Item -ItemType Directory -Path $assets -Force | Out-Null
+    foreach ($name in @('frontend', 'frontend-mobile', 'frontend-admin')) {
+        $source = Join-Path $frontendRoot "$name/dist"
+        Get-ChildItem -LiteralPath $source -Force | Where-Object Name -ne 'index.html' | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination $mainOutput -Recurse -Force
+        }
+        $page = switch ($name) {
+            'frontend' { 'index.html' }
+            'frontend-mobile' { 'index-mobile.html' }
+            'frontend-admin' { 'index-admin.html' }
+        }
+        $html = [IO.File]::ReadAllText((Join-Path $source 'index.html'))
+        foreach ($file in @('favicon.ico', 'manifest.json', 'manifest-tab.json', 'apple-touch-icon.png')) {
+            $html = $html.Replace(('href="./' + $file + '"'), ('href="/assets/' + $file + '"'))
+        }
+        [IO.File]::WriteAllText((Join-Path $mainOutput $page), $html, [Text.UTF8Encoding]::new($false))
+    }
+    Get-ChildItem -LiteralPath $mainOutput -File | Where-Object {
+        $_.Extension -in @('.js', '.mjs', '.css', '.svg', '.png', '.json', '.ico')
+    } | ForEach-Object { Move-Item -LiteralPath $_.FullName -Destination $assets -Force }
+    Get-ChildItem -LiteralPath (Join-Path $frontendRoot 'template-scripts/dist') -Force | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $assets -Recurse -Force
+    }
+    $templates = Join-Path $mainOutput 'templates'
+    New-Item -ItemType Directory -Path $templates -Force | Out-Null
+    Get-ChildItem -LiteralPath (Join-Path $rootDir 'src/templates') -File -Filter '*.html' | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $templates -Force
+    }
+    Remove-BuildOutput $distribution
+    Copy-Item -LiteralPath $mainOutput -Destination $distribution -Recurse -Force
+    Set-Location -LiteralPath $rootDir
+    Invoke-BuildCommand 'cargo' @('build', '--release')
+} finally {
+    Set-Location -LiteralPath $originalLocation
 }
-
-# node_modulesが存在しなければnpm installを実行
-if (-Not (Test-Path $nodeModules)) {
-    npm install
-}
-
-# ビルド
-npm run build
-# HTMLファイルパス
-$targetHtml = Join-Path -Path $frontendMobileDir -ChildPath "dist/index.html"
-
-# favicon.icoのパス変更
-(Get-Content -Path $targetHtml) | ForEach-Object {
-    $_ -replace 'href="./favicon.ico"', 'href="/assets/favicon.ico"'
-} | Set-Content -Path $targetHtml
-
-# manifest.jsonのパス変更
-(Get-Content -Path $targetHtml) | ForEach-Object {
-    $_ -replace 'href="./manifest.json"', 'href="/assets/manifest.json"'
-} | Set-Content -Path $targetHtml
-
-# apple-touch-icon.pngのパス変更
-(Get-Content -Path $targetHtml) | ForEach-Object {
-    $_ -replace 'href="./apple-touch-icon.png"', 'href="/assets/apple-touch-icon.png"'
-} | Set-Content -Path $targetHtml
-
-Rename-Item -Path $targetHtml -NewName "index-mobile.html"
-
-
-############### frontend-adminの処理 ###############
-
-Set-Location $frontendAdminDir
-
-$nodeModules = Join-Path -Path $frontendAdminDir -ChildPath  "node_modules"
-
-# 依存関係を更新する場合の処理
-if ($dependsDeleteFlag) {
-    CheckExistsPath $nodeModules
-}
-
-# node_modulesが存在しなければnpm installを実行
-if (-Not (Test-Path $nodeModules)) {
-    npm install
-}
-
-# ビルド
-npm run build
-# HTMLファイルパス
-$targetHtml = Join-Path -Path $frontendAdminDir -ChildPath "dist/index.html"
-
-# favicon.icoのパス変更
-(Get-Content -Path $targetHtml) | ForEach-Object {
-    $_ -replace 'href="./favicon.ico"', 'href="/assets/favicon.ico"'
-} | Set-Content -Path $targetHtml
-
-Rename-Item -Path $targetHtml -NewName "index-admin.html"
-
-############### template-scriptsの処理 ###############
-
-Set-Location $templateScriptsDir
-$nodeModules = Join-Path -Path $templateScriptsDir -ChildPath "node_modules"
-
-if ($dependsDeleteFlag) {
-    CheckExistsPath $nodeModules
-}
-
-if (-Not (Test-Path $nodeModules)) {
-    npm install
-}
-
-npm run build
-
-############### mainの処理 ###############
-
-Set-Location $mainDir
-# frontend/distとfrontend-admin/distとfrontend-mobile/dist配下のファイルをmainディレクトリにコピー
-Copy-Item -Path $frontendDistDir -Destination "./" -Recurse -Force
-Copy-Item -Path $frontendAdminDistDir -Destination "./" -Recurse -Force
-Copy-Item -Path $frontendMobileDistDir -Destination "./" -Recurse -Force
-
-# 静的ファイルを配置移動
-Move-Item -Path $faviconDir -Destination $movedDir
-Move-Item -Path $pngFiles -Destination $movedDir
-Move-Item -Path $jsFiles -Destination $movedDir
-Move-Item -Path $mjsFiles -Destination $movedDir
-Move-Item -Path $cssFiles -Destination $movedDir
-Move-Item -Path $jsonFiles -Destination $movedDir
-Move-Item -Path $svgFiles -Destination $movedDir
-Copy-Item -Path (Join-Path $templateScriptsDistDir "*") -Destination $movedDir -Recurse -Force
-
-# 最終的なフロントエンド成果物の配置ディレクトリを作成
-New-Item -Type Directory $distributionDir
-Set-Location $mainDistDir
-Copy-Item -Path "./*" -Destination $distributionDir -Recurse -Force
-$distributionTemplatesDir = Join-Path -Path $distributionDir -ChildPath "templates"
-New-Item -Type Directory $distributionTemplatesDir
-Get-ChildItem -LiteralPath $rustTemplatesDir -File -Filter "*.html" | ForEach-Object {
-    Copy-Item -LiteralPath $_.FullName -Destination $distributionTemplatesDir -Force
-}
-
-# プロジェクトディレクトリに移動し、Rustをコンパイル
-Set-Location $prepareDistributionDir
-cargo build --release

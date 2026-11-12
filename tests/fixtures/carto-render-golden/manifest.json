@@ -1,0 +1,23 @@
+{
+  "cases": [
+    {
+      "name": "city-z14",
+      "rgba_sha256": "a1d47f8cbb2b8b5d8f89c6f14405cf591a047148571c3d9763743c129ecb34c0",
+      "x": 8192,
+      "y": 8192,
+      "z": 14
+    },
+    {
+      "name": "city-z16",
+      "rgba_sha256": "89d47826895c2b54e3fdf65261ad2e7bf83c45af05ce1219183e9f48b15defd0",
+      "x": 32768,
+      "y": 32768,
+      "z": 16
+    }
+  ],
+  "font_sha256": "68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5",
+  "format": 1,
+  "purpose": "名称と新配色の固定画像。従来の道路35枚・標準7枚とは別に確認する。",
+  "style_hash": "641cbe79a1ba6b6ea3796625049d8997e102e7db18f6b9daa2c147f58e7a940c",
+  "style_version": "osm-like-v1"
+}

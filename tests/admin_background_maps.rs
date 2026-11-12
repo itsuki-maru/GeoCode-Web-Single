@@ -42,6 +42,7 @@ async fn create(pool: &SqlitePool, user: &str, value: Value) -> TileServers {
     admin_create(
         Extension(user.to_owned()),
         Extension(pool.clone()),
+        None,
         input(value),
     )
     .await
@@ -86,6 +87,7 @@ async fn 旧ラスタ要求の既定値と未設定ズームを登録と編集�
         Extension(admin.clone()),
         Extension(pool.clone()),
         Path(tile.id),
+        None,
         input(original),
     )
     .await
@@ -130,6 +132,7 @@ async fn ベクタとラスタの編集で背景_id_と作成日時を保持す�
         Extension(admin.clone()),
         Extension(pool.clone()),
         Path(tile.id),
+        None,
         input(value.clone()),
     )
     .await
@@ -147,6 +150,7 @@ async fn ベクタとラスタの編集で背景_id_と作成日時を保持す�
         Extension(admin.clone()),
         Extension(pool.clone()),
         Path(tile.id),
+        None,
         input(value),
     )
     .await
@@ -187,6 +191,7 @@ async fn 有効な管理者だけが背景設定を取得更新できる() {
             admin_create(
                 Extension(actor.clone()),
                 Extension(pool.clone()),
+                None,
                 input(definition("不許可"))
             )
             .await,
@@ -197,6 +202,7 @@ async fn 有効な管理者だけが背景設定を取得更新できる() {
                 Extension(actor.clone()),
                 Extension(pool.clone()),
                 Path(1),
+                None,
                 input(definition("不許可"))
             )
             .await,
@@ -264,6 +270,7 @@ async fn 不正入力と既定背景のベクタ化で保存済み設定を変�
             Extension(admin.clone()),
             Extension(pool.clone()),
             Path(tile.id),
+            None,
             input(value),
         )
         .await
@@ -281,6 +288,7 @@ async fn 不正入力と既定背景のベクタ化で保存済み設定を変�
             Extension(admin.clone()),
             Extension(pool.clone()),
             Path(1),
+            None,
             input(vector("既定背景"))
         )
         .await,
@@ -291,6 +299,7 @@ async fn 不正入力と既定背景のベクタ化で保存済み設定を変�
             Extension(admin.clone()),
             Extension(pool.clone()),
             Path(9999),
+            None,
             input(definition("存在しない"))
         )
         .await,
@@ -307,6 +316,7 @@ async fn 既定ラスタ欠落と重複識別名を拒否し旧行を保持す�
         admin_create(
             Extension(admin.clone()),
             Extension(pool.clone()),
+            None,
             input(vector("先行ベクタ"))
         )
         .await,
@@ -321,6 +331,7 @@ async fn 既定ラスタ欠落と重複識別名を拒否し旧行を保持す�
         admin_create(
             Extension(admin.clone()),
             Extension(pool.clone()),
+            None,
             input(definition("同じ背景名"))
         )
         .await,
@@ -331,6 +342,7 @@ async fn 既定ラスタ欠落と重複識別名を拒否し旧行を保持す�
             Extension(admin.clone()),
             Extension(pool.clone()),
             Path(second.id),
+            None,
             input(definition("同じ背景名"))
         )
         .await,
@@ -350,6 +362,7 @@ async fn 既定ラスタ欠落と重複識別名を拒否し旧行を保持す�
         Extension(admin.clone()),
         Extension(pool.clone()),
         Path(second.id),
+        None,
         input(renamed_label),
     )
     .await
@@ -366,6 +379,7 @@ async fn 既定ラスタ欠落と重複識別名を拒否し旧行を保持す�
             Extension(admin.clone()),
             Extension(pool.clone()),
             Path(second.id),
+            None,
             input(vector("同じ背景名"))
         )
         .await,
@@ -388,11 +402,13 @@ async fn 手入力_id_と並行登録が既存背景_id_を再利用しない() 
         admin_create(
             Extension(admin.clone()),
             Extension(pool.clone()),
+            None,
             input(definition("並行A"))
         ),
         admin_create(
             Extension(admin.clone()),
             Extension(pool.clone()),
+            None,
             input(definition("並行B"))
         ),
     );
@@ -411,11 +427,13 @@ async fn 手入力_id_と並行登録が既存背景_id_を再利用しない() 
         admin_create(
             Extension(admin.clone()),
             Extension(pool.clone()),
+            None,
             input(definition("並行重複"))
         ),
         admin_create(
             Extension(admin.clone()),
             Extension(pool.clone()),
+            None,
             input(definition("並行重複"))
         ),
     );
@@ -452,6 +470,7 @@ async fn 新規変更した出典を安全化し未変更の旧_html_を保持�
         Extension(admin.clone()),
         Extension(pool.clone()),
         Path(tile.id),
+        None,
         input(value.clone()),
     )
     .await
@@ -472,6 +491,7 @@ async fn 新規変更した出典を安全化し未変更の旧_html_を保持�
         Extension(admin.clone()),
         Extension(pool.clone()),
         Path(tile.id),
+        None,
         input(value),
     )
     .await
@@ -486,6 +506,7 @@ async fn 新規変更した出典を安全化し未変更の旧_html_を保持�
         admin_create(
             Extension(admin.clone()),
             Extension(pool.clone()),
+            None,
             input(expanded.clone())
         )
         .await,
@@ -496,6 +517,7 @@ async fn 新規変更した出典を安全化し未変更の旧_html_を保持�
             Extension(admin.clone()),
             Extension(pool.clone()),
             Path(tile.id),
+            None,
             input(expanded)
         )
         .await,

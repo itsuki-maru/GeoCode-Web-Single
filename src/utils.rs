@@ -140,6 +140,43 @@ pub fn ensure_console() {
     }
 }
 
+/// GUI版と同じexeのCLIで、呼出元のパイプ・ファイル出力を保持する。
+#[cfg(windows)]
+pub fn ensure_cli_console() -> Result<(), String> {
+    use windows::Win32::{
+        Foundation::{HANDLE, INVALID_HANDLE_VALUE},
+        System::Console::{
+            ATTACH_PARENT_PROCESS, AllocConsole, AttachConsole, GetConsoleCP, GetStdHandle,
+            STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
+        },
+    };
+    if cfg!(debug_assertions) {
+        return Ok(());
+    }
+    unsafe {
+        let valid = |handle: HANDLE| !handle.is_invalid() && handle != INVALID_HANDLE_VALUE;
+        let handles = [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE].map(|kind| {
+            (
+                kind,
+                GetStdHandle(kind).ok().filter(|handle| valid(*handle)),
+            )
+        });
+        let attached = GetConsoleCP() != 0 || AttachConsole(ATTACH_PARENT_PROCESS).is_ok();
+        // 両出力がリダイレクト済みでも、親コンソールがあれば接続してCtrl+Cを受ける。
+        // 親コンソールのない自動実行では、出力パイプがあれば新しいウィンドウを作らない。
+        if !attached && !(handles[1].1.is_some() && handles[2].1.is_some()) {
+            AllocConsole().map_err(|error| format!("CLI用consoleを利用できません: {error}"))?;
+        }
+        for (kind, handle) in handles {
+            if let Some(handle) = handle {
+                SetStdHandle(kind, handle)
+                    .map_err(|error| format!("標準入出力を復元できません: {error}"))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::validate_username;

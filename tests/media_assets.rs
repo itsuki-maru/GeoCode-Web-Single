@@ -132,8 +132,10 @@ async fn image_upload_creates_a_thumbnail_and_enforces_read_and_delete_ownership
     let other = common::create_test_user(&pool, "media-other").await;
     let app = app(&pool);
     let response = upload(&app, owner, "image", "photo.png", &png(800, 400), None).await;
-    assert_eq!(response.status(), StatusCode::OK);
-    let saved = json(response).await;
+    let status = response.status();
+    let body = bytes(response).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let saved: Value = serde_json::from_slice(&body).unwrap();
     let filename = saved["uuid_filename"].as_str().unwrap();
     let id = saved["new_image_id"].as_str().unwrap();
     assert_eq!(saved["filename"], "photo.png");

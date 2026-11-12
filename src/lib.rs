@@ -4,7 +4,6 @@ use axum::{
     http::{HeaderMap, Request, Response, StatusCode, header::CONTENT_TYPE},
     response::{Html, IntoResponse, Redirect},
 };
-use rust_embed::RustEmbed;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tera::Tera;
@@ -14,29 +13,27 @@ pub mod auth;
 pub mod config;
 pub mod db;
 pub mod error;
+mod frontend_html;
 pub mod geocoding;
 pub mod handler;
 pub mod image;
 pub mod init;
+pub mod launch;
+pub mod local_tiles;
 pub mod middleware;
 pub mod model;
 pub mod router;
 pub mod shape_validation;
 pub mod tile_settings;
 pub mod tile_upstream;
+pub mod tilegen;
 pub mod utils;
 
 use config::CONFIG;
 use error::AppError;
 use model::{AppInit, MessageApi};
 
-#[derive(RustEmbed)]
-#[folder = "dist/"]
-struct Asset;
-
-#[derive(RustEmbed)]
-#[folder = "dist/templates/"]
-struct Templates;
+include!(concat!(env!("OUT_DIR"), "/embedded_assets.rs"));
 
 // ルートへのアクセスは /index にリダイレクト
 pub async fn root_handler() -> impl IntoResponse {
@@ -74,7 +71,7 @@ pub async fn index_handler(headers: HeaderMap) -> Result<Html<String>, AppError>
     match Asset::get(render_html) {
         Some(content) => {
             let html_content = String::from_utf8(content.data.into_owned()).unwrap();
-            Ok(Html(html_content))
+            Ok(Html(frontend_html::localize_manifest(&html_content)))
         },
         None => Err(AppError::NotFound),
     }
@@ -123,7 +120,7 @@ pub fn build_tera_from_embed() -> anyhow::Result<Tera> {
         }
         if let Some(file) = Templates::get(path_str) {
             let content = std::str::from_utf8(file.data.as_ref())?;
-            tera.add_raw_template(path_str, content)?;
+            tera.add_raw_template(path_str, &frontend_html::localize_manifest(content))?;
         }
     }
     Ok(tera)

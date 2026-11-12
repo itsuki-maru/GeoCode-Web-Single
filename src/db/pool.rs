@@ -678,6 +678,25 @@ pub async fn create_user_with_master_layer(
     Ok(returning_user_id)
 }
 
+/// CLIでは初期化・migrationをせず、既存本体DBがこの版のschemaかを検査する。
+pub async fn validate_existing_schema(pool: &SqlitePool) -> Result<(), Error> {
+    let rows: Vec<(i64, String)> =
+        sqlx::query_as("SELECT version,name FROM schema_migrations ORDER BY version")
+            .fetch_all(pool)
+            .await?;
+    if rows.len() != MIGRATIONS.len()
+        || MIGRATIONS
+            .iter()
+            .zip(rows.iter())
+            .any(|(expected, actual)| expected.version != actual.0 || expected.name != actual.1)
+    {
+        return Err(Error::Protocol(
+            "本体DBのschemaがこのアプリの適用済み構成と一致しません。通常起動で更新を確認してください。".into(),
+        ));
+    }
+    Ok(())
+}
+
 // データベースのマイグレーション
 pub async fn run_migrations(pool: &SqlitePool) -> Result<(), Error> {
     let mut tx = pool.begin().await?;

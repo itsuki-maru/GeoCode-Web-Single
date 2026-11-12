@@ -72,13 +72,46 @@ jobs:
             src_frontend/frontend-mobile/package-lock.json
             src_frontend/template-scripts/package-lock.json
 
+      - name: Read pinned frontend source
+        id: frontend-source
+        shell: pwsh
+        run: |
+          $baseline = Get-Content tests/fixtures/frontend-compat-baseline.json -Raw | ConvertFrom-Json
+          if ($baseline.repository -notmatch '^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$' -or $baseline.source_ref -notmatch '^[a-f0-9]{40}$') {
+            throw 'Invalid pinned frontend source'
+          }
+          "repository=$($baseline.repository)" | Add-Content -Path $env:GITHUB_OUTPUT -Encoding utf8
+          "ref=$($baseline.source_ref)" | Add-Content -Path $env:GITHUB_OUTPUT -Encoding utf8
+
+      - name: Checkout pinned PostgreSQL frontend source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.frontend-source.outputs.repository }}
+          ref: ${{ steps.frontend-source.outputs.ref }}
+          path: .frontend-source
+          token: ${{ secrets.FRONTEND_SOURCE_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Check shared frontend compatibility
+        run: node scripts/check-frontend-compat.mjs --source-root .frontend-source
+
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.1"
 
       - name: Cache Rust build
         uses: swatinem/rust-cache@v2
         with:
           workspaces: . -> target
+
+      - name: Check rendering compatibility review
+        shell: pwsh
+        run: |
+          cargo test --locked --manifest-path scripts/render-compatibility/Cargo.toml --target-dir target/render-identity-verification/tools
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/check-render-compatibility.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Install frontend dependencies
         shell: pwsh
@@ -118,11 +151,38 @@ jobs:
 
       - name: Build frontend bundles
         shell: pwsh
-        run: ./src_frontend/scripts/frontends-builder.ps1 -SkipCargoBuild
+        run: |
+          node --test tests/frontend-compat.test.mjs tests/build-frontend-assets.test.mjs
+          node scripts/check-frontend-compat.mjs
+          ./scripts/build-frontend-assets.ps1 -SkipCargoBuild -OutputRoot target/frontend-dist
+          $assets = (Resolve-Path target/frontend-dist).Path
+          "GEOCODE_FRONTEND_DIST=$assets" | Add-Content -Path $env:GITHUB_ENV -Encoding utf8
+          $tauri = @{ build = @{ frontendDist = $assets } } | ConvertTo-Json -Compress
+          "TAURI_CONFIG=$tauri" | Add-Content -Path $env:GITHUB_ENV -Encoding utf8
+          $tauri | Set-Content target/tauri-frontend-config.json -Encoding utf8
+
+      - name: Verify fixed render reference in release mode
+        shell: pwsh
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: cargo test --locked --release --test render_golden --test standard_tile_render
 
       - name: Build Tauri app
         shell: pwsh
-        run: cargo tauri build
+        run: cargo tauri build --config target/tauri-frontend-config.json
+
+      - name: Verify packaged render execution
+        shell: pwsh
+        run: |
+          $binary = (Resolve-Path target/release/geocode_web_single.exe).Path
+          $buildInfo = & $binary local-tiles build-info --json | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw '配布用exeのビルド情報を取得できません。' }
+          if (-not $buildInfo.execution.verified) { throw "描画実行構成が未認定です: $($buildInfo.execution.reason)" }
+          if (-not $buildInfo.standard_generation_verified) { throw '標準地図・地形の実行構成が未認定です。' }
+          $buildInfo | ConvertTo-Json -Depth 5
+          $env:GEOCODE_TEST_CLI_EXE = $binary
+          cargo test --locked --test local_tile_standard_exe
+          if ($LASTEXITCODE -ne 0) { throw '配布用exeの標準地図CLI試験に失敗しました。' }
 
       - name: Collect artifacts
         shell: pwsh

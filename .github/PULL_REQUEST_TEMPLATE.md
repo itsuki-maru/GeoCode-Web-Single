@@ -15,13 +15,16 @@
 
 - [ ] `cargo fmt --check`
 - [ ] `cargo test`
+- [ ] `node scripts/check-render-compatibility.mjs`（描画・取り込み関連の変更時は互換性判断も記録）
 - [ ] `npm run type-check --prefix src_frontend/frontend`
 - [ ] `npm run type-check --prefix src_frontend/frontend-mobile`
 - [ ] `npm run type-check --prefix src_frontend/frontend-admin`
 - [ ] `npm run test:run --prefix src_frontend/frontend`
 - [ ] `npm test --prefix src_frontend/template-scripts`
 - [ ] `npm run build --prefix src_frontend/template-scripts`
-- [ ] `./src_frontend/scripts/frontends-builder.ps1 -SkipCargoBuild`
+- [ ] `node --test tests/frontend-compat.test.mjs tests/build-frontend-assets.test.mjs`
+- [ ] `node scripts/check-frontend-compat.mjs`
+- [ ] `./scripts/build-frontend-assets.ps1 -SkipCargoBuild -OutputRoot target/frontend-dist`
 
 ## 補足
 

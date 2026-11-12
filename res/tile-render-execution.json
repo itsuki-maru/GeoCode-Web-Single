@@ -1,0 +1,134 @@
+{
+  "format": 1,
+  "series": "roads-soft-math-raster-v1",
+  "description": "固定基準画像と投影・LOD回帰で認定するWindows x64の取り込み・描画構成。ビルド来歴と世代は独立する。",
+  "compilers": [
+    "rustc 1.99.1 (58cf8f9c3 2026-10-13)"
+  ],
+  "targets": [
+    "x86_64-pc-windows-msvc"
+  ],
+  "opt_levels": [
+    "0",
+    "3"
+  ],
+  "target_feature_sets": [
+    [
+      "cmpxchg16b",
+      "fxsr",
+      "sse",
+      "sse2",
+      "sse3"
+    ]
+  ],
+  "rustflag_sets": [
+    []
+  ],
+  "application_feature_sets": [
+    []
+  ],
+  "dependency_roots": [
+    "tiny-skia",
+    "libm",
+    "rusqlite",
+    "serde_json",
+    "sha2",
+    "osmpbfreader",
+    "protobuf",
+    "flate2"
+  ],
+  "dependency_fingerprint": "16bf2db4fbd38a2f1ec8c7474417cfe6259260d0a329c778ae3298038587d393",
+  "validation_reference": "tests/fixtures/render-golden/manifest.json",
+  "standard": {
+    "format": 1,
+    "series": "standard-terrain-soft-math-v1",
+    "description": "標準地図の依存と数値演算・描画を道路系列から独立して認定する。初期基準画像と回帰試験の確認後に認定指紋を記録する。",
+    "compilers": [
+      "rustc 1.99.1 (58cf8f9c3 2026-10-13)"
+    ],
+    "targets": [
+      "x86_64-pc-windows-msvc"
+    ],
+    "opt_levels": [
+      "0",
+      "3"
+    ],
+    "target_feature_sets": [
+      [
+        "cmpxchg16b",
+        "fxsr",
+        "sse",
+        "sse2",
+        "sse3"
+      ]
+    ],
+    "rustflag_sets": [
+      []
+    ],
+    "application_feature_sets": [
+      []
+    ],
+    "dependency_roots": [
+      "tiny-skia",
+      "libm",
+      "rusqlite",
+      "serde_json",
+      "sha2",
+      "osmpbfreader",
+      "protobuf",
+      "flate2",
+      "quick-xml",
+      "crc32fast"
+    ],
+    "dependency_fingerprint": "25aee49415e65c6138f92d6f4bbd7a22cabb78dcdbf2c737ffd6ab9716039a7b",
+    "validation_reference": "tests/fixtures/standard-render-golden/manifest.json"
+  },
+  "osm": {
+    "format": 1,
+    "series": "osm-label-soft-math-v1",
+    "description": "固定フォント・名称配置・OSM標準風描画を独立して確認するWindows x64系列。",
+    "compilers": [
+      "rustc 1.99.1 (58cf8f9c3 2026-10-13)"
+    ],
+    "targets": [
+      "x86_64-pc-windows-msvc"
+    ],
+    "opt_levels": [
+      "0",
+      "3"
+    ],
+    "target_feature_sets": [
+      [
+        "cmpxchg16b",
+        "fxsr",
+        "sse",
+        "sse2",
+        "sse3"
+      ]
+    ],
+    "rustflag_sets": [
+      []
+    ],
+    "application_feature_sets": [
+      []
+    ],
+    "dependency_roots": [
+      "tiny-skia",
+      "libm",
+      "rusqlite",
+      "serde_json",
+      "sha2",
+      "osmpbfreader",
+      "protobuf",
+      "flate2",
+      "quick-xml",
+      "crc32fast",
+      "harfrust",
+      "skrifa",
+      "unicode-segmentation"
+    ],
+    "dependency_fingerprint": "fdf90ae30e8419244f78a245df266233ad81fc13d543f0efa83f5b66c9f57013",
+    "validation_reference": "tests/fixtures/carto-render-golden/manifest.json",
+    "font_sha256": "68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5"
+  }
+}

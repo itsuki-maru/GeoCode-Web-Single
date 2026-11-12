@@ -1330,6 +1330,7 @@ async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
         generate_url_handler(
             Extension(user_id.clone()),
             Extension(pool.clone()),
+            None,
             Json(GenarateUrlPayload {
                 minutes: 10,
                 layers: Vec::new(),
@@ -1348,6 +1349,7 @@ async fn onetime_url_handlers_cover_generate_current_render_and_invalidate() {
     let Json(created) = generate_url_handler(
         Extension(user_id.clone()),
         Extension(pool.clone()),
+        None,
         Json(GenarateUrlPayload {
             minutes: 10,
             layers: vec![layer_id],

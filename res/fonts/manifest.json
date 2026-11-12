@@ -1,0 +1,11 @@
+{
+  "family": "Noto Sans CJK JP",
+  "version": "2.004",
+  "file": "NotoSansCJKjp-Regular.otf",
+  "sha256": "68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5",
+  "source": "https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf",
+  "copyright": "© 2014-2021 Adobe (http://www.adobe.com/).",
+  "license": "SIL Open Font License 1.1",
+  "license_file": "OFL.txt",
+  "license_source": "https://github.com/notofonts/noto-cjk/blob/main/Sans/LICENSE"
+}

@@ -2239,3 +2239,43 @@ async fn 背景とタイル設定の更新で旧データを保持し_sql_先行
         assert_eq!(settings_rows, 0);
     }
 }
+
+#[tokio::test]
+async fn application_migrations_never_create_tile_catalog_tables() {
+    let pool = memory_pool().await;
+    run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO tileserver_model (id,layer_name,label,url,attribution,include_foreign_tiles,min_zoom,max_zoom,create_at,updated_at)
+         VALUES (42,'Existing background','existing','/tile/{z}/{x}/{y}.png','Existing attribution',FALSE,0,19,'2026-11-11','2026-11-11')",
+    ).execute(&pool).await.unwrap();
+    run_migrations(&pool).await.unwrap();
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_schema WHERE type='table' AND name LIKE 'local_tile_%'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(
+        tables.is_empty(),
+        "Tile tables must belong to the separate catalog: {tables:?}"
+    );
+    let versions: Vec<i64> =
+        sqlx::query_scalar("SELECT version FROM schema_migrations ORDER BY version")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(versions, (1..=25).collect::<Vec<_>>());
+    let existing: (String, String) =
+        sqlx::query_as("SELECT url,attribution FROM tileserver_model WHERE id=42")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        existing,
+        (
+            "/tile/{z}/{x}/{y}.png".into(),
+            "Existing attribution".into()
+        )
+    );
+    pool.close().await;
+}
