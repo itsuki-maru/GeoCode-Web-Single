@@ -33,6 +33,7 @@ GeoCode-Web-Singleの主要機能について、利用手順、現在の処理�
 | [重ね合わせタイル](TILE_OVERLAYS.md) | タイル登録、共有、気象庁ナウキャスト |
 | [タイル配信プロキシ](TILE_PROXY.md) | 上流APIキー、Redisキャッシュ |
 | [ローカル地図](LOCAL_TILES.md) | OSM PBF取り込み、地名・ランドマーク名、表示選択と描画世代、XYZ配信・事前生成、保存先とオフライン利用 |
+| [全国の名称付き地図の導入](JAPAN_LOCAL_TILES_SETUP.md) | 初回起動前からのセットアップ、全国データ取得・再取り込みのPowerShellスクリプト、背景登録とオフライン確認 |
 | [地図印刷・PDF出力](MAP_PRINTING.md) | PCの通常・全画面・回答・一時共有地図の操作、出力対象と検証 |
 | [管理者機能](ADMINISTRATION.md) | ユーザー管理、権限設定、管理機能への案内 |
 

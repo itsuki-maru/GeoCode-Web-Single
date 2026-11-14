@@ -337,6 +337,8 @@ User-Agent に `Mobile` が含まれるアクセスにはモバイル向け UI (
 
 国土地理院DEMの構成は`local-tiles elevation inspect --input PATH --json`で事前検査できる。JGD2000・JGD2011が混在する資料は、検査と取り込みへ`--elevation-datum-policy allow-jgd2000-2011`を付けて原座標・原標高で併用する。測地系や標高の補正は行わず、元CRSと採用状況を完成DBへ記録する。
 
+全国の地名・ランドマーク名付き地図を初めて導入する場合は、[初回セットアップからの手順書](docs/JAPAN_LOCAL_TILES_SETUP.md)と[PowerShellスクリプト](scripts/setup-japan-local-tiles.ps1)を利用できる。全国PBF・陸域資料の取得、事前確認、名称付き再取り込み、背景登録に対応し、DEMを省略した通常地図から始められる。
+
 `geocode-web-single.env.json`の`tile_catalog_database_path`・`tile_dataset_path`・`tile_cache_path`・`tile_work_path`で、管理DB・完成DB・PNG・作業領域を個別指定できる。PNGだけ別ディスクへ配置でき、変更時に既存ファイルを自動移動しない。取り込み中の旧版は完了後に切り替える。操作・移設・バックアップは[ローカル地図](docs/LOCAL_TILES.md)を参照する。
 
 ## 起動方法
