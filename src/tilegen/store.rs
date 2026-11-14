@@ -170,9 +170,9 @@ impl Store {
             return Ok(Vec::new());
         }
         let style = Style::roads_v1();
-        // 任意のカバリングインデックスにより、ズーム6の広域属性検索で
+        // 任意のカバリングインデックスにより、属性検索ではズームにかかわらず
         // 元の形状BLOBを含む地物行へアクセスすることを避ける。
-        let query = if zoom == 6 && self.has_render_attributes_index {
+        let query = if self.has_render_attributes_index {
             "SELECT f.feature_id,f.osm_way_id,f.road_class,f.is_link,
                     f.effective_layer,f.structure_rank
              FROM feature_rtree r JOIN features f INDEXED BY feature_render_attributes
@@ -669,7 +669,8 @@ mod tests {
     }
 
     #[test]
-    fn zoom6_covering_index_preserves_legacy_candidates_and_rtree_boundaries() -> Result<()> {
+    fn covering_index_preserves_legacy_candidates_and_rtree_boundaries_at_all_zooms() -> Result<()>
+    {
         let windows = [
             Rect {
                 min_x: 0.45,
@@ -705,7 +706,7 @@ mod tests {
              WHERE r.min_x<=?1 AND r.max_x>=?2 AND r.min_y<=?3 AND r.max_y>=?4",
             )?;
             for bbox in windows {
-                for zoom in [6, 7, 10, 14, 18] {
+                for zoom in 6..=22 {
                     let mut rows =
                         legacy.query(params![bbox.max_x, bbox.min_x, bbox.max_y, bbox.min_y])?;
                     let mut expected = BTreeMap::new();
@@ -753,7 +754,7 @@ mod tests {
     }
 
     #[test]
-    fn zoom6_covering_index_still_rejects_corrupt_hidden_road_attributes() -> Result<()> {
+    fn covering_index_still_rejects_corrupt_hidden_road_attributes() -> Result<()> {
         for indexed in [false, true] {
             for update in [
                 "UPDATE features SET road_class=999 WHERE feature_id=60",
@@ -772,7 +773,7 @@ mod tests {
                     min_y: 0.45,
                     max_y: 0.55,
                 };
-                for zoom in [6, 14] {
+                for zoom in 6..=22 {
                     assert!(
                         store.query_candidates(bbox, zoom).is_err(),
                         "ignored {update} at zoom {zoom}"

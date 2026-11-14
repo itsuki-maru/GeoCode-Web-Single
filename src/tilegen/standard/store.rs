@@ -385,8 +385,8 @@ const RENDER_KINDS: [FeatureKind; 16] = [
     FeatureKind::Railway,
     FeatureKind::Contour,
 ];
-// 256pxではz7、512pxの比較窓ではz8程度から、非表示地物の本体参照が支配的になる。
-const BROAD_RENDER_QUERY_WIDTH: f64 = 1.0 / 128.0;
+// 256pxではz9、512pxの比較窓ではz10程度まで、非表示の建物の本体参照を避ける。
+const BROAD_RENDER_QUERY_WIDTH: f64 = 1.0 / 512.0;
 
 fn broad_render_query(b: Rect) -> bool {
     (b.max_x - b.min_x).max(b.max_y - b.min_y) >= BROAD_RENDER_QUERY_WIDTH
@@ -471,7 +471,8 @@ fn render_feature_sql(conn: &Connection, b: Rect, kinds: &[i64], pass: u8) -> Re
         let quoted_index = index.replace('"', "\"\"");
         (
             format!("WITH visible_ids AS MATERIALIZED (SELECT id FROM standard_features INDEXED BY \"{quoted_index}\" WHERE {kind_filter}), "),
-            "visible_ids v CROSS JOIN standard_features f CROSS JOIN standard_rtree r WHERE f.id=v.id AND r.id=v.id AND".to_owned(),
+            // 範囲外のidはR-treeだけで除外し、大きな形状を含む本体行を読まない。
+            "visible_ids v CROSS JOIN standard_rtree r CROSS JOIN standard_features f WHERE r.id=v.id AND f.id=v.id AND".to_owned(),
         )
     } else {
         (
@@ -495,6 +496,14 @@ fn render_feature_sql(conn: &Connection, b: Rect, kinds: &[i64], pass: u8) -> Re
           ORDER BY phase,layer,structure,kind,osm_type,osm_id,role,id"
     ))
 }
+
+// 縮約形状がある場合は、大きな原形状を含む本体行を再読しない。
+// UNION ALLの左側を先に評価し、LIMIT 1で従来のcoalesceと同じ優先順位にする。
+const RENDER_GEOMETRY_SQL: &str = "SELECT length(geometry),geometry FROM standard_geometry_lod
+       WHERE feature_id=?2 AND zoom=?1 AND geometry IS NOT NULL
+     UNION ALL
+     SELECT length(geometry),geometry FROM standard_features WHERE id=?2
+     LIMIT 1";
 
 /// 描画段階の中を従来と同じ順序で走査し、形状は1地物ずつ読み出す。
 /// 全件を返すAPIの件数・合計容量制限を、広域タイルの地物省略には使わない。
@@ -527,11 +536,7 @@ pub(crate) fn visit_render_features(
     let sql = render_feature_sql(conn, b, &kinds, pass)?;
     let mut candidates = conn.prepare(&sql)?;
     let mut rows = candidates.query(params![b.max_x, b.min_x, b.max_y, b.min_y, zoom, pass,])?;
-    let mut geometry = conn.prepare(
-        "SELECT length(coalesce(l.geometry,f.geometry)),coalesce(l.geometry,f.geometry)
-         FROM standard_features f LEFT JOIN standard_geometry_lod l ON l.feature_id=f.id AND l.zoom=?
-         WHERE f.id=?",
-    )?;
+    let mut geometry = conn.prepare(RENDER_GEOMETRY_SQL)?;
     while let Some(row) = rows.next()? {
         context.check()?;
         let mut shape_rows = geometry.query(params![zoom, row.get::<_, i64>(0)?])?;
@@ -1248,6 +1253,76 @@ mod tests {
     }
 
     #[test]
+    fn 縮約形状の優先読取は旧coalesceの選択と欠損時の原形状を保持する() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        insert_feature(&conn, &feature()).unwrap();
+        let id: i64 = conn
+            .query_row("SELECT id FROM standard_features", [], |row| row.get(0))
+            .unwrap();
+        // 外部形式のNULL行でも従来のcoalesceと同じく原形状を使う。
+        conn.execute_batch(
+            "ALTER TABLE standard_geometry_lod RENAME TO original_lod;
+             CREATE TABLE standard_geometry_lod(feature_id INTEGER,zoom INTEGER,geometry BLOB,
+                 PRIMARY KEY(feature_id,zoom)) WITHOUT ROWID;
+             INSERT INTO standard_geometry_lod SELECT * FROM original_lod;
+             DROP TABLE original_lod;",
+        )
+        .unwrap();
+        let mut different_lod = feature();
+        if let Geometry::Polygon(parts) = &mut different_lod.geometry {
+            parts[0].outer[1].x -= 0.05;
+        }
+        conn.execute(
+            "UPDATE standard_geometry_lod SET geometry=? WHERE zoom=9",
+            [encode(&different_lod.geometry).unwrap().0],
+        )
+        .unwrap();
+        let compare = || {
+            for zoom in 0..=22 {
+                let old: (i64, Vec<u8>) = conn.query_row(
+                    "SELECT length(coalesce(l.geometry,f.geometry)),coalesce(l.geometry,f.geometry)
+                     FROM standard_features f LEFT JOIN standard_geometry_lod l
+                     ON l.feature_id=f.id AND l.zoom=?1 WHERE f.id=?2",
+                    params![zoom, id], |row| Ok((row.get(0)?, row.get(1)?)),
+                ).unwrap();
+                let actual: (i64, Vec<u8>) = conn
+                    .query_row(RENDER_GEOMETRY_SQL, params![zoom, id], |row| {
+                        Ok((row.get(0)?, row.get(1)?))
+                    })
+                    .unwrap();
+                assert_eq!(actual, old, "z{zoom}");
+            }
+        };
+        compare();
+        conn.execute("DELETE FROM standard_geometry_lod WHERE zoom=6", [])
+            .unwrap();
+        conn.execute(
+            "UPDATE standard_geometry_lod SET geometry=NULL WHERE zoom=7",
+            [],
+        )
+        .unwrap();
+        compare();
+        conn.execute(
+            "UPDATE standard_geometry_lod SET geometry=x'' WHERE zoom=8",
+            [],
+        )
+        .unwrap();
+        compare();
+        let error = visit_render_features(
+            &conn,
+            Rect::new(0.0, 1.0, 0.0, 1.0).unwrap(),
+            8,
+            0,
+            None,
+            &crate::tilegen::operation::OperationContext::default(),
+            |_| panic!("壊れたLODを原形状へのfallbackで隠さない"),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("形状BLOB"));
+    }
+
+    #[test]
     fn 逐次地物の順序と表示選択は従来の描画段階に一致する() {
         use crate::tilegen::{operation::OperationContext, render_spec::RenderSpec};
 
@@ -1331,7 +1406,7 @@ mod tests {
                 }
                 for bounds in [
                     Rect::new(0.0, 1.0, 0.0, 1.0).unwrap(),
-                    Rect::new(0.499, 0.501, 0.499, 0.501).unwrap(),
+                    Rect::new(0.4995, 0.5005, 0.4995, 0.5005).unwrap(),
                 ] {
                     let mut actual = Vec::new();
                     for pass in 0..=4 {
@@ -1406,7 +1481,14 @@ mod tests {
             plan.contains("MATERIALIZE visible_ids") && plan.contains("COVERING INDEX"),
             "{plan}"
         );
-        let narrow = Rect::new(0.499, 0.501, 0.499, 0.501).unwrap();
+        assert!(
+            plan.find("SCAN r VIRTUAL TABLE").unwrap() < plan.find("SEARCH f").unwrap(),
+            "範囲外のidを本体参照より先に除外する: {plan}"
+        );
+        assert!(broad_render_query(
+            Rect::new(0.5, 0.5 + 1.0 / 512.0, 0.5, 0.5 + 1.0 / 512.0).unwrap()
+        ));
+        let narrow = Rect::new(0.4995, 0.5005, 0.4995, 0.5005).unwrap();
         let sql = render_feature_sql(&conn, narrow, &render_kinds(0, 0, None), 0).unwrap();
         assert!(!sql.contains("MATERIALIZED"));
         assert!(render_kinds(0, 1, None).is_empty());

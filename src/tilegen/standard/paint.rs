@@ -29,6 +29,8 @@ const MAX_TOTAL_POINTS: usize = 2_000_000;
 const MAX_CROSSINGS: usize = 4_000_000;
 const MAX_WORK: usize = 80_000_000;
 const LINE_CIRCLE_POINTS: usize = 32;
+const ROAD_GEOMETRY_CACHE_BYTES: usize = 8 * 1024 * 1024;
+const ROAD_GEOMETRY_CACHE_ENTRIES: usize = 32_768;
 const QUERY_MARGIN: f64 = 12.0;
 const EARTH_CIRCUMFERENCE: f64 = 40_075_016.685_578_49;
 const SHADE_STRENGTH: f64 = 0.22;
@@ -529,11 +531,60 @@ struct Raster<'a> {
     road_vertices: u64,
     landmask: Option<Mask>,
     carto: bool,
+    spare_mask: Option<Mask>,
+    polygon_rows: Vec<Vec<f64>>,
+    polygon_rows_capacity: usize,
+    stroke_spans: Vec<(f64, f64)>,
 }
 
 struct Mask {
     samples: Vec<u16>,
     bounds: Option<(usize, usize, usize, usize)>,
+    // 海陸の範囲でboundsを狭めても、再利用前には元の書込範囲を消去する。
+    dirty_bounds: Option<(usize, usize, usize, usize)>,
+}
+
+// 各layerの外縁描画で読んだ先頭の形状だけを、内側の描画まで保持する。
+// 一度でも収まらなければ以後は追加せず、同じ添字で再利用できるprefixに限定する。
+struct RoadGeometryPrefix {
+    points: Vec<Vec<Point>>,
+    used_bytes: usize,
+    max_bytes: usize,
+    full: bool,
+}
+
+impl RoadGeometryPrefix {
+    fn new(candidates: usize, max_bytes: usize) -> Self {
+        let capacity = candidates
+            .min(ROAD_GEOMETRY_CACHE_ENTRIES)
+            .min(max_bytes / size_of::<Vec<Point>>());
+        let points = Vec::with_capacity(capacity);
+        let used_bytes = points.capacity() * size_of::<Vec<Point>>();
+        Self {
+            points,
+            used_bytes,
+            max_bytes,
+            full: capacity == 0,
+        }
+    }
+
+    fn retain(&mut self, points: Vec<Point>) {
+        if self.full {
+            return;
+        }
+        let bytes = points
+            .capacity()
+            .checked_mul(size_of::<Point>())
+            .and_then(|bytes| self.used_bytes.checked_add(bytes));
+        if self.points.len() == self.points.capacity()
+            || bytes.is_none_or(|bytes| bytes > self.max_bytes)
+        {
+            self.full = true;
+            return;
+        }
+        self.used_bytes = bytes.unwrap();
+        self.points.push(points);
+    }
 }
 
 impl Mask {
@@ -541,13 +592,26 @@ impl Mask {
         Self {
             samples: vec![0; window.width * window.height],
             bounds: None,
+            dirty_bounds: None,
         }
+    }
+    fn reset(&mut self, width: usize) {
+        if let Some((left, right, top, bottom)) = self.dirty_bounds.take() {
+            for row in top..bottom {
+                self.samples[row * width + left..row * width + right].fill(0);
+            }
+        }
+        self.bounds = None;
     }
     fn include(&mut self, left: usize, right: usize, row: usize) {
         if left >= right {
             return;
         }
         self.bounds = Some(match self.bounds {
+            None => (left, right, row, row + 1),
+            Some((x0, x1, y0, y1)) => (x0.min(left), x1.max(right), y0.min(row), y1.max(row + 1)),
+        });
+        self.dirty_bounds = Some(match self.dirty_bounds {
             None => (left, right, row, row + 1),
             Some((x0, x1, y0, y1)) => (x0.min(left), x1.max(right), y0.min(row), y1.max(row + 1)),
         });
@@ -568,7 +632,25 @@ impl<'a> Raster<'a> {
             road_vertices: 0,
             landmask: None,
             carto: false,
+            spare_mask: None,
+            polygon_rows: Vec::new(),
+            polygon_rows_capacity: 0,
+            stroke_spans: Vec::new(),
         })
+    }
+
+    fn take_mask(&mut self) -> Mask {
+        match self.spare_mask.take() {
+            Some(mut mask) => {
+                mask.reset(self.window.width);
+                mask
+            },
+            None => Mask::new(self.window),
+        }
+    }
+
+    fn recycle_mask(&mut self, mask: Mask) {
+        self.spare_mask = Some(mask);
     }
 
     fn charge(&mut self, work: usize) -> Result<()> {
@@ -629,8 +711,9 @@ impl<'a> Raster<'a> {
                     }
                 }
                 self.blend(&mask, style.color)?;
+                self.recycle_mask(mask);
                 if feature.kind == FeatureKind::Building {
-                    let mut outline = Mask::new(self.window);
+                    let mut outline = self.take_mask();
                     for ring in rings {
                         self.stroke_mask(ring, f64::from(style.width), &mut outline)?;
                     }
@@ -642,6 +725,7 @@ impl<'a> Raster<'a> {
                             BUILDING_OUTLINE
                         },
                     )?;
+                    self.recycle_mask(outline);
                 }
             },
             Geometry::Line(points) => {
@@ -655,9 +739,10 @@ impl<'a> Raster<'a> {
                     },
                     _ => f64::from(style.width),
                 };
-                let mut mask = Mask::new(self.window);
+                let mut mask = self.take_mask();
                 self.stroke_mask(points, width, &mut mask)?;
                 self.blend(&mask, style.color)?;
+                self.recycle_mask(mask);
             },
         }
         Ok(())
@@ -670,8 +755,19 @@ impl<'a> Raster<'a> {
         zoom: u8,
         structure: u8,
     ) -> Result<()> {
+        self.roads_with_cache_budget(store, roads, zoom, structure, ROAD_GEOMETRY_CACHE_BYTES)
+    }
+
+    fn roads_with_cache_budget(
+        &mut self,
+        store: &Store,
+        roads: &[FeatureKey],
+        zoom: u8,
+        structure: u8,
+        cache_bytes: usize,
+    ) -> Result<()> {
         if self.carto {
-            return self.carto_roads(store, roads, zoom, structure);
+            return self.carto_roads(store, roads, zoom, structure, cache_bytes);
         }
         let style = Style::roads_v1();
         let selected = roads
@@ -685,11 +781,13 @@ impl<'a> Raster<'a> {
             while end < selected.len() && selected[end].attributes.effective_layer == layer {
                 end += 1;
             }
-            for casing in [true, false] {
-                for road in &selected[first..end] {
-                    self.context.check()?;
-                    let points = store.load_geometry(road.feature_id, zoom)?;
-                    self.road_vertices = self
+            self.road_geometry_layer(
+                store,
+                &selected[first..end],
+                zoom,
+                cache_bytes,
+                |raster, road, points, casing| {
+                    raster.road_vertices = raster
                         .road_vertices
                         .checked_add(points.len() as u64)
                         .context("道路の読込点数が上限を超えました")?;
@@ -702,9 +800,9 @@ impl<'a> Raster<'a> {
                     } else {
                         style.width(road.attributes, zoom)
                     });
-                    let mut mask = Mask::new(self.window);
-                    self.stroke_mask(&points, width, &mut mask)?;
-                    self.blend(
+                    let mut mask = raster.take_mask();
+                    raster.stroke_mask(points, width, &mut mask)?;
+                    raster.blend(
                         &mask,
                         if structure == 0 && !casing {
                             TUNNEL
@@ -712,16 +810,49 @@ impl<'a> Raster<'a> {
                             style.color(road.attributes, casing)
                         },
                     )?;
+                    raster.recycle_mask(mask);
+                    Ok(())
+                },
+            )?;
+            first = end;
+        }
+        Ok(())
+    }
+
+    fn road_geometry_layer(
+        &mut self,
+        store: &Store,
+        roads: &[&FeatureKey],
+        zoom: u8,
+        cache_bytes: usize,
+        mut draw: impl FnMut(&mut Self, &FeatureKey, &[Point], bool) -> Result<()>,
+    ) -> Result<()> {
+        let mut cache = RoadGeometryPrefix::new(roads.len(), cache_bytes);
+        for casing in [true, false] {
+            for (index, road) in roads.iter().enumerate() {
+                self.context.check()?;
+                if !casing && let Some(points) = cache.points.get(index) {
+                    draw(self, road, points, casing)?;
+                } else {
+                    let points = store.load_geometry(road.feature_id, zoom)?;
+                    draw(self, road, &points, casing)?;
+                    if casing {
+                        cache.retain(points);
+                    }
                 }
             }
-            first = end;
         }
         Ok(())
     }
 
     fn polygon_mask(&mut self, rings: &[&[Point]]) -> Result<Mask> {
         self.context.check()?;
-        let mut rows = vec![Vec::<f64>::new(); self.window.height * SAMPLES];
+        let mut rows = std::mem::take(&mut self.polygon_rows);
+        if rows.is_empty() {
+            rows.resize_with(self.window.height * SAMPLES, Vec::new);
+        }
+        let mut retained_capacity = std::mem::take(&mut self.polygon_rows_capacity);
+        let (mut first_row, mut last_row) = (rows.len(), 0);
         let mut crossings = 0_usize;
         for ring in rings {
             ensure!(
@@ -733,11 +864,16 @@ impl<'a> Raster<'a> {
                     self.context.check()?;
                 }
                 let (a, b) = (self.window.pixel(pair[0])?, self.window.pixel(pair[1])?);
-                self.edge_crossings(a, b, &mut rows, &mut crossings)?;
+                let (first, last) =
+                    self.edge_crossings(a, b, &mut rows, &mut crossings, &mut retained_capacity)?;
+                if first < last {
+                    first_row = first_row.min(first);
+                    last_row = last_row.max(last);
+                }
             }
         }
-        let mut mask = Mask::new(self.window);
-        for (row, xs) in rows.iter_mut().enumerate() {
+        let mut mask = self.take_mask();
+        for (row, xs) in rows.iter_mut().enumerate().take(last_row).skip(first_row) {
             // 交点がない行には被覆標本がなく、描画・整列・演算量の課金も不要。
             // 広域の微小面ごとに画面全行を課金すると、実際に塗る標本が少なくても
             // 累計上限へ達する。交点・区間・塗りの実処理に対する上限は維持する。
@@ -751,6 +887,20 @@ impl<'a> Raster<'a> {
                 self.fill_interval(&mut mask, row, interval[0], interval[1])?;
             }
         }
+        // 行ごとの最大容量が別々の地物から累積しないよう、保持容量にも上限を置く。
+        // 1面の交点数上限は従来どおりedge_crossingsで適用する。
+        if retained_capacity > MAX_CROSSINGS {
+            for row in &mut rows {
+                *row = Vec::new();
+            }
+            retained_capacity = 0;
+        } else if first_row < last_row {
+            for row in &mut rows[first_row..last_row] {
+                row.clear();
+            }
+        }
+        self.polygon_rows = rows;
+        self.polygon_rows_capacity = retained_capacity;
         Ok(mask)
     }
 
@@ -760,6 +910,7 @@ impl<'a> Raster<'a> {
         roads: &[FeatureKey],
         zoom: u8,
         structure: u8,
+        cache_bytes: usize,
     ) -> Result<()> {
         let selected = roads
             .iter()
@@ -772,31 +923,35 @@ impl<'a> Raster<'a> {
             while end < selected.len() && selected[end].attributes.effective_layer == layer {
                 end += 1;
             }
-            for casing in [true, false] {
-                for road in &selected[first..end] {
-                    self.context.check()?;
-                    let points = store.load_geometry(road.feature_id, zoom)?;
+            self.road_geometry_layer(
+                store,
+                &selected[first..end],
+                zoom,
+                cache_bytes,
+                |raster, road, points, casing| {
                     ensure!(
                         points.len() <= MAX_TOTAL_POINTS,
                         "道路の頂点数上限を超えました"
                     );
-                    self.road_vertices = self
+                    raster.road_vertices = raster
                         .road_vertices
                         .checked_add(points.len() as u64)
                         .context("道路の読込点数が上限を超えました")?;
                     let width = carto_style::road_width(road.attributes, zoom, casing);
-                    let mut mask = Mask::new(self.window);
+                    let mut mask = raster.take_mask();
                     if let Some((on, off)) = carto_style::road_dash(road.attributes, zoom, casing) {
-                        self.dashed_stroke_mask(&points, width, on, off, &mut mask)?;
+                        raster.dashed_stroke_mask(points, width, on, off, &mut mask)?;
                     } else {
-                        self.stroke_mask(&points, width, &mut mask)?;
+                        raster.stroke_mask(points, width, &mut mask)?;
                     }
-                    self.blend(
+                    raster.blend(
                         &mask,
                         carto_style::road_color(road.attributes, zoom, casing),
                     )?;
-                }
-            }
+                    raster.recycle_mask(mask);
+                    Ok(())
+                },
+            )?;
             first = end;
         }
         Ok(())
@@ -861,9 +1016,10 @@ impl<'a> Raster<'a> {
         b: Point,
         rows: &mut [Vec<f64>],
         crossings: &mut usize,
-    ) -> Result<()> {
+        retained_capacity: &mut usize,
+    ) -> Result<(usize, usize)> {
         if a.y == b.y {
-            return Ok(());
+            return Ok((0, 0));
         }
         let (a, b) = if a.y < b.y { (a, b) } else { (b, a) };
         let base = self.window.origin_y * SAMPLES as i64;
@@ -883,9 +1039,11 @@ impl<'a> Raster<'a> {
             let y = self.window.origin_y as f64 + (row as f64 + 0.5) / SAMPLES as f64;
             let x = a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x);
             ensure!(x.is_finite(), "面の交点座標が不正です");
+            let capacity = xs.capacity();
             xs.push(x);
+            *retained_capacity = retained_capacity.saturating_add(xs.capacity() - capacity);
         }
-        Ok(())
+        Ok((start, end))
     }
 
     fn fill_interval(&mut self, mask: &mut Mask, row: usize, start: f64, end: f64) -> Result<()> {
@@ -925,7 +1083,9 @@ impl<'a> Raster<'a> {
         if start == end {
             return Ok(());
         }
-        let mut spans = vec![(f64::INFINITY, f64::NEG_INFINITY); end - start];
+        let mut spans = std::mem::take(&mut self.stroke_spans);
+        spans.clear();
+        spans.resize(end - start, (f64::INFINITY, f64::NEG_INFINITY));
         let mut crossing_work = 0_usize;
         for (index, pair) in points.windows(2).enumerate() {
             if index != 0 && index.is_multiple_of(128) {
@@ -964,11 +1124,12 @@ impl<'a> Raster<'a> {
                 .checked_add(crossing_work)
                 .context("凸面の処理量が上限を超えました")?,
         )?;
-        for (offset, (left, right)) in spans.into_iter().enumerate() {
+        for (offset, &(left, right)) in spans.iter().enumerate() {
             if left < right {
                 self.fill_interval(mask, start + offset, left, right)?;
             }
         }
+        self.stroke_spans = spans;
         Ok(())
     }
 
@@ -1029,15 +1190,14 @@ impl<'a> Raster<'a> {
                 continue;
             }
             let center = self.window.pixel(*point)?;
-            let mut vertices = Vec::with_capacity(LINE_CIRCLE_POINTS + 1);
-            for step in 0..LINE_CIRCLE_POINTS {
-                let angle = (step as f64 / LINE_CIRCLE_POINTS as f64) * std::f64::consts::TAU;
-                vertices.push(round_pixel(Point {
-                    x: center.x + radius * libm::cos(angle),
-                    y: center.y + radius * libm::sin(angle),
-                }));
+            let mut vertices = [center; LINE_CIRCLE_POINTS + 1];
+            for (step, direction) in line_circle_directions().iter().enumerate() {
+                vertices[step] = round_pixel(Point {
+                    x: center.x + radius * direction.x,
+                    y: center.y + radius * direction.y,
+                });
             }
-            vertices.push(vertices[0]);
+            vertices[LINE_CIRCLE_POINTS] = vertices[0];
             self.pixel_polygon_union(&vertices, mask)?;
         }
         Ok(())
@@ -1116,6 +1276,20 @@ fn round_pixel(point: Point) -> Point {
     }
 }
 
+fn line_circle_directions() -> &'static [Point; LINE_CIRCLE_POINTS] {
+    static DIRECTIONS: std::sync::OnceLock<[Point; LINE_CIRCLE_POINTS]> =
+        std::sync::OnceLock::new();
+    DIRECTIONS.get_or_init(|| {
+        std::array::from_fn(|step| {
+            let angle = (step as f64 / LINE_CIRCLE_POINTS as f64) * std::f64::consts::TAU;
+            Point {
+                x: libm::cos(angle),
+                y: libm::sin(angle),
+            }
+        })
+    })
+}
+
 fn clip_segment_parameters(a: Point, b: Point, bounds: Rect) -> Option<(f64, f64)> {
     let mut left = 0.0_f64;
     let mut right = 1.0_f64;
@@ -1175,6 +1349,365 @@ mod tests {
             point(x, y + h),
             point(x, y),
         ]
+    }
+
+    // 各面で全走査行と被覆領域を新規確保していた処理を、再利用の参照にする。
+    fn reference_polygon_mask_fresh(raster: &mut Raster<'_>, rings: &[&[Point]]) -> Mask {
+        let mut rows = vec![Vec::<f64>::new(); raster.window.height * SAMPLES];
+        let (mut crossings, mut capacity) = (0, 0);
+        for ring in rings {
+            for pair in ring.windows(2) {
+                let (a, b) = (
+                    raster.window.pixel(pair[0]).unwrap(),
+                    raster.window.pixel(pair[1]).unwrap(),
+                );
+                raster
+                    .edge_crossings(a, b, &mut rows, &mut crossings, &mut capacity)
+                    .unwrap();
+            }
+        }
+        let mut mask = Mask::new(raster.window);
+        for (row, xs) in rows.iter_mut().enumerate() {
+            if xs.is_empty() {
+                continue;
+            }
+            raster.charge(xs.len() + 1).unwrap();
+            xs.sort_unstable_by(f64::total_cmp);
+            assert!(xs.len().is_multiple_of(2));
+            for interval in xs.chunks_exact(2) {
+                raster
+                    .fill_interval(&mut mask, row, interval[0], interval[1])
+                    .unwrap();
+            }
+        }
+        mask
+    }
+
+    fn reference_stroke_mask(
+        raster: &mut Raster<'_>,
+        points: &[Point],
+        width: f64,
+        mask: &mut Mask,
+    ) {
+        let radius = width / 2.0;
+        let bounds = raster
+            .window
+            .bounds()
+            .expand((radius + 1.0) / raster.window.scale);
+        for pair in points.windows(2) {
+            let (a, b) = (
+                raster.window.pixel(pair[0]).unwrap(),
+                raster.window.pixel(pair[1]).unwrap(),
+            );
+            if !Rect::from_points(pair).unwrap().intersects(bounds) {
+                continue;
+            }
+            let (dx, dy) = (b.x - a.x, b.y - a.y);
+            let length = libm::sqrt(dx * dx + dy * dy);
+            if length == 0.0 {
+                continue;
+            }
+            let (nx, ny) = (-dy / length * radius, dx / length * radius);
+            let vertices = [
+                point(a.x + nx, a.y + ny),
+                point(b.x + nx, b.y + ny),
+                point(b.x - nx, b.y - ny),
+                point(a.x - nx, a.y - ny),
+                point(a.x + nx, a.y + ny),
+            ]
+            .map(round_pixel);
+            raster.pixel_polygon_union(&vertices, mask).unwrap();
+        }
+        for &point in points {
+            if !bounds.contains(point) {
+                continue;
+            }
+            let center = raster.window.pixel(point).unwrap();
+            // 旧処理と同じく、各丸端で角度と三角関数を毎回計算する。
+            let mut vertices = Vec::with_capacity(LINE_CIRCLE_POINTS + 1);
+            for step in 0..LINE_CIRCLE_POINTS {
+                let angle = (step as f64 / LINE_CIRCLE_POINTS as f64) * std::f64::consts::TAU;
+                vertices.push(round_pixel(Point {
+                    x: center.x + radius * libm::cos(angle),
+                    y: center.y + radius * libm::sin(angle),
+                }));
+            }
+            vertices.push(vertices[0]);
+            raster.pixel_polygon_union(&vertices, mask).unwrap();
+        }
+    }
+
+    #[test]
+    fn 単位円の共有は旧三角関数の全ビットと線の全被覆を保持する() {
+        for (step, direction) in line_circle_directions().iter().enumerate() {
+            let angle = (step as f64 / LINE_CIRCLE_POINTS as f64) * std::f64::consts::TAU;
+            assert_eq!(direction.x.to_bits(), libm::cos(angle).to_bits());
+            assert_eq!(direction.y.to_bits(), libm::sin(angle).to_bits());
+        }
+        let context = context();
+        for (z, x, y) in [(0, 0, 0), (7, 110, 51), (22, 3675841, 1655789)] {
+            let window = Window::new(TileId::new(z, x, y).unwrap(), 256, 256).unwrap();
+            let world = |x: f64, y: f64| Point {
+                x: ((window.origin_x as f64 + x) / window.scale).clamp(0.0, 1.0),
+                y: ((window.origin_y as f64 + y) / window.scale).clamp(0.0, 1.0),
+            };
+            for width in [0.5, 1.0, 2.6, 7.5, 32.0] {
+                let line = [
+                    world(-2.0, 0.125),
+                    world(17.875, 20.125),
+                    world(17.875, 20.125),
+                    world(255.875, 256.125),
+                    world(280.0, 128.0),
+                ];
+                let mut actual = Raster::new(window, BACKGROUND, &context).unwrap();
+                let mut reference = Raster::new(window, BACKGROUND, &context).unwrap();
+                let (mut mask, mut old) = (Mask::new(window), Mask::new(window));
+                actual.stroke_mask(&line, width, &mut mask).unwrap();
+                reference_stroke_mask(&mut reference, &line, width, &mut old);
+                assert_eq!(mask.samples, old.samples, "z={z},width={width}");
+                assert_eq!(mask.bounds, old.bounds);
+                assert_eq!(actual.work, reference.work);
+            }
+        }
+    }
+
+    #[test]
+    fn 道路形状の有界再利用は無効時と満杯時も画素と演算量と読込点数を保持する() {
+        use crate::tilegen::{store, style::RoadClass};
+        use rusqlite::{Connection, params};
+        use std::collections::BTreeMap;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("roads.sqlite");
+        let connection = Connection::open(&path).unwrap();
+        store::initialize(&connection).unwrap();
+        let window = Window::new(TileId::new(14, 8192, 8192).unwrap(), 64, 64).unwrap();
+        let world = |x, y| Point {
+            x: (window.origin_x as f64 + x) / window.scale,
+            y: (window.origin_y as f64 + y) / window.scale,
+        };
+        let mut roads = Vec::new();
+        for structure in 0..=2 {
+            for (index, road_class) in RoadClass::ALL.into_iter().enumerate() {
+                let id = roads.len() as i64 + 1;
+                let attributes = crate::tilegen::style::RoadAttributes {
+                    road_class,
+                    is_link: index.is_multiple_of(3),
+                    effective_layer: (index % 2) as i16,
+                    structure_rank: structure,
+                };
+                let offset = index as f64 * 2.0 + f64::from(structure);
+                let points = [
+                    world(-2.0, 8.0 + offset),
+                    world(20.0, 40.0 - offset),
+                    world(40.0, 20.0 + offset),
+                    world(67.0, 55.0 - offset),
+                ];
+                let bounds = Rect::from_points(&points).unwrap();
+                let geometry = store::encode_points(&points).unwrap();
+                connection
+                    .execute(
+                        "INSERT INTO features VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,4,?11)",
+                        params![
+                            id,
+                            id + 100,
+                            road_class as i64,
+                            attributes.is_link,
+                            attributes.effective_layer,
+                            structure,
+                            bounds.min_x,
+                            bounds.max_x,
+                            bounds.min_y,
+                            bounds.max_y,
+                            &geometry
+                        ],
+                    )
+                    .unwrap();
+                connection
+                    .execute(
+                        "INSERT INTO feature_rtree VALUES(?1,?2,?3,?4,?5)",
+                        params![id, bounds.min_x, bounds.max_x, bounds.min_y, bounds.max_y],
+                    )
+                    .unwrap();
+                for zoom in 6..=15 {
+                    connection
+                        .execute(
+                            "INSERT INTO geometry_lod VALUES(?1,?2,4,?3)",
+                            params![id, zoom, &geometry],
+                        )
+                        .unwrap();
+                }
+                roads.push(FeatureKey {
+                    feature_id: id,
+                    osm_way_id: id + 100,
+                    attributes,
+                });
+            }
+        }
+        let count = roads.len() as u64;
+        let metadata = store::StoreMetadata {
+            schema_version: 1,
+            geometry_version: 1,
+            importer_version: "test".into(),
+            import_rules_hash: "test".into(),
+            dataset_id: "test".into(),
+            source_sha256: "test".into(),
+            source_bytes: 0,
+            source_timestamp: None,
+            created_unix_seconds: 0,
+            coordinate_system: "web-mercator-normalized-f64".into(),
+            bbox: Rect::new(0.0, 1.0, 0.0, 1.0).unwrap(),
+            feature_count: count,
+            original_point_count: count * 4,
+            lod_point_counts: (6..=15).map(|zoom| (zoom, count * 4)).collect(),
+            missing_nodes_policy: "error".into(),
+            excluded_way_count: 0,
+            skipped_missing_way_count: 0,
+            degenerate_way_count: 0,
+            clamped_node_count: 0,
+            highway_counts: BTreeMap::new(),
+            complete: true,
+        };
+        store::finish(&connection, &metadata).unwrap();
+        drop(connection);
+        let store = Store::open(&path).unwrap();
+        roads.sort_unstable_by_key(|road| {
+            (
+                road.attributes.effective_layer,
+                road.attributes.structure_rank,
+                road.attributes.road_class.priority(),
+                road.osm_way_id,
+                road.feature_id,
+            )
+        });
+        let context = context();
+        for carto in [false, true] {
+            let mut expected = None;
+            for budget in [0, 160, ROAD_GEOMETRY_CACHE_BYTES] {
+                let mut raster = Raster::new(window, BACKGROUND, &context).unwrap();
+                raster.carto = carto;
+                for structure in 0..=2 {
+                    raster
+                        .roads_with_cache_budget(&store, &roads, 14, structure, budget)
+                        .unwrap();
+                }
+                assert_eq!(raster.road_vertices, count * 4 * 2);
+                let result = (
+                    raster.pixmap.data().to_vec(),
+                    raster.work,
+                    raster.road_vertices,
+                );
+                match &expected {
+                    None => expected = Some(result),
+                    Some(expected) => {
+                        assert_eq!(&result, expected, "carto={carto},budget={budget}")
+                    },
+                }
+            }
+        }
+        // 容量を超えた後の小さな形状も保持せず、先頭だけを同じ添字で参照する。
+        let mut cache = RoadGeometryPrefix::new(4, 160);
+        cache.retain(vec![point(0.1, 0.2); 4]);
+        cache.retain(vec![point(0.3, 0.4); 4]);
+        cache.retain(vec![point(0.5, 0.6); 2]);
+        assert_eq!(cache.points.len(), 1);
+        assert!(cache.used_bytes <= 160);
+        assert!(cache.full);
+        // 欠落形状は先頭の読取時に失敗し、cache有効時も成功へ変えない。
+        let invalid = FeatureKey {
+            feature_id: 999,
+            osm_way_id: 999,
+            attributes: roads[0].attributes,
+        };
+        for budget in [0, ROAD_GEOMETRY_CACHE_BYTES] {
+            let mut raster = Raster::new(window, BACKGROUND, &context).unwrap();
+            assert!(
+                raster
+                    .roads_with_cache_budget(
+                        &store,
+                        &[invalid],
+                        14,
+                        invalid.attributes.structure_rank,
+                        budget
+                    )
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn 被覆と交点行を再利用しても範囲縮小と空面を挟む連続描画は新規領域と一致する() {
+        let context = context();
+        for (z, x, y) in [(0, 0, 0), (7, 110, 51), (22, 3675841, 1655789)] {
+            let window = Window::new(TileId::new(z, x, y).unwrap(), 64, 64).unwrap();
+            let mut actual = Raster::new(window, BACKGROUND, &context).unwrap();
+            let mut reference = Raster::new(window, BACKGROUND, &context).unwrap();
+            let world = |x, y| Point {
+                x: (window.origin_x as f64 + x) / window.scale,
+                y: (window.origin_y as f64 + y) / window.scale,
+            };
+            for step in 0..48 {
+                let (mut mask, mut fresh) = if step % 3 == 0 {
+                    let left = f64::from((step * 17) % 57) - if z == 0 { 0.0 } else { 4.0 };
+                    let top = f64::from((step * 29) % 61) - if z == 0 { 0.0 } else { 5.0 };
+                    let outer = rectangle(
+                        world(left, top).x,
+                        world(left, top).y,
+                        (12.5 + f64::from(step)) / window.scale,
+                        25.25 / window.scale,
+                    );
+                    let hole = rectangle(
+                        world(left + 4.0, top + 4.0).x,
+                        world(left + 4.0, top + 4.0).y,
+                        4.0 / window.scale,
+                        6.0 / window.scale,
+                    );
+                    (
+                        actual.polygon_mask(&[&outer, &hole]).unwrap(),
+                        reference_polygon_mask_fresh(&mut reference, &[&outer, &hole]),
+                    )
+                } else {
+                    let line = if step % 3 == 1 {
+                        vec![
+                            world(if z == 0 { 2.0 } else { -8.0 }, 3.125),
+                            world(30.375, 55.875),
+                            world(70.0, 10.5),
+                        ]
+                    } else {
+                        // 直前の大きな被覆を残さず、完全に窓外の空領域へ戻せること。
+                        vec![world(80.0, 80.0), world(85.0, 85.0)]
+                    };
+                    let mut mask = actual.take_mask();
+                    let mut fresh = Mask::new(window);
+                    actual.stroke_mask(&line, 2.5, &mut mask).unwrap();
+                    reference.stroke_mask(&line, 2.5, &mut fresh).unwrap();
+                    (mask, fresh)
+                };
+                assert_eq!(mask.samples, fresh.samples, "z={z},step={step}");
+                assert_eq!(mask.bounds, fresh.bounds, "z={z},step={step}");
+                // Landと海陸範囲の交差でboundsだけが小さくなる、または消える場合。
+                // 次の再利用では、ここで非表示になった古い被覆も全て消す必要がある。
+                if step % 4 == 0 {
+                    mask.bounds = None;
+                    fresh.bounds = None;
+                } else if step % 4 == 1 {
+                    let clipped = mask.bounds.and_then(|(x0, x1, y0, y1)| {
+                        let bounds = (x0.max(20), x1.min(45), y0.max(20), y1.min(45));
+                        (bounds.0 < bounds.1 && bounds.2 < bounds.3).then_some(bounds)
+                    });
+                    mask.bounds = clipped;
+                    fresh.bounds = clipped;
+                }
+                let color = [50 + step as u8, 160, 210, 255];
+                actual.blend(&mask, color).unwrap();
+                reference.blend(&fresh, color).unwrap();
+                assert_eq!(actual.work, reference.work, "z={z},step={step}");
+                assert_eq!(actual.pixmap.data(), reference.pixmap.data());
+                actual.recycle_mask(mask);
+                assert!(actual.polygon_rows.iter().all(Vec::is_empty));
+                assert!(actual.polygon_rows_capacity <= MAX_CROSSINGS);
+            }
+        }
     }
 
     #[test]
