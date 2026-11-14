@@ -1,0 +1,5542 @@
+{
+  "format": 1,
+  "check_date": "2026-11-14",
+  "generated_at_jst": "2026-11-14T21:52:14.821361+09:00",
+  "status": "failures_found",
+  "results_complete_for_configured_matrix": true,
+  "implementation": {
+    "sdk_runner": "target/release/local-tile-nationwide-check.exe",
+    "sdk_runner_sha256": "0d29a423a71913bccaeaeaf50ef40eb4fa2c0d5511f39189f4daa1060a071c27",
+    "reviewed_render_source_token_fingerprints": {
+      "src/tilegen/standard/paint.rs": "c25701e980ff04f6a1a579002cbf3350286fe2fbec7eb9b01c3d0be523791512",
+      "src/tilegen/standard/store.rs": "baf04e5af051991a9e0adce4a45a2cf450172a5302cbad1320f486cf7959d971"
+    }
+  },
+  "source": {
+    "label": "existing nationwide completed data.sqlite",
+    "dataset_id": "903942a1100d1cae13d680579344798021dc826fb550238fbd9be64f695654f2",
+    "baseline": {
+      "bytes": 26256687104,
+      "mtime_ns": 1794633758560695000
+    },
+    "analysis_unchanged_flags": {
+      "shape-low-zoom-report.json": true,
+      "shape-detail-report.json": true,
+      "shape-candidate-details-report.json": true,
+      "roads-labels-results.json": true
+    },
+    "method": "Source reader reports plus current file size/mtime_ns; no full-file cryptographic hash was taken.",
+    "current": {
+      "bytes": 26256687104,
+      "mtime_ns": 1794633758560695000,
+      "mtime_jst": "2026-11-14T14:22:38.560695+09:00"
+    },
+    "size_unchanged": true,
+    "mtime_unchanged": true,
+    "unchanged_by_recorded_checks": true
+  },
+  "scope": {
+    "method": "Read-only existing nationwide DB analysis plus fixed-profile SDK PNG rendering.",
+    "profile": "osm-like-v1: roads/buildings/labels on, Japanese priority, contours/hillshade off",
+    "sdk_deadline_seconds": 120,
+    "sdk_workers": 2,
+    "default_http_wait_seconds_reference_only": 60,
+    "http_or_gui_execution_performed": false,
+    "all_nationwide_png_tiles_enumerated_or_rendered": false,
+    "zoom_axis_planned": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22
+    ],
+    "zoom_axis_measured": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22
+    ],
+    "limitations": [
+      "Regional anchors, zoom-axis samples and density-selected stress tiles are not every region/zoom combination or every tile up to zoom 22.",
+      "Database-wide maxima and conservative high-zoom candidate bounds are separated from sampled rendering outcomes.",
+      "Successful SDK times above 60 seconds are reference warnings, not measured HTTP outcomes; queueing/concurrency/cold cache may change HTTP latency.",
+      "Rendering work, polygon crossings and glyph limits require real rendering; candidate-count safety alone does not prove their safety.",
+      "Source size/mtime equality is not a full-file cryptographic integrity proof."
+    ]
+  },
+  "plan_inputs": [
+    {
+      "file": "matrix-base.json",
+      "entries": 110
+    },
+    {
+      "file": "matrix-extra.json",
+      "entries": 22
+    }
+  ],
+  "result_inputs": [
+    {
+      "file": "base-results.ndjson",
+      "complete_records": 110
+    },
+    {
+      "file": "extra-results.ndjson",
+      "complete_records": 22
+    }
+  ],
+  "summary": {
+    "planned_tiles": 132,
+    "measured_tiles": 132,
+    "succeeded": 122,
+    "failed": 10,
+    "pending": 0,
+    "error_kinds": {
+      "DeadlineExceeded": 7,
+      "Render": 3
+    },
+    "root_causes": {
+      "deadline_sql_query": 7,
+      "render_work_limit": 3
+    },
+    "successful_sdk_seconds": {
+      "count": 122,
+      "min": 0.0075269,
+      "max": 92.1774789,
+      "median": 0.4182304,
+      "p95_nearest_rank": 30.586549
+    },
+    "successful_sdk_over_default_http_60_seconds": 2,
+    "configured_expected_tiles": 132,
+    "matrix_plan_matches_expected_count": true,
+    "recorded_attempts": 132,
+    "unique_measured_tiles": 132,
+    "repeated_tile_attempts": 0,
+    "measured_without_manifest_entry": []
+  },
+  "by_zoom": {
+    "0": {
+      "planned_tiles": 1,
+      "measured_tiles": 1,
+      "succeeded": 0,
+      "failed": 1,
+      "pending": 0,
+      "error_kinds": {
+        "DeadlineExceeded": 1
+      },
+      "root_causes": {
+        "deadline_sql_query": 1
+      },
+      "successful_sdk_seconds": {
+        "count": 0
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "1": {
+      "planned_tiles": 1,
+      "measured_tiles": 1,
+      "succeeded": 0,
+      "failed": 1,
+      "pending": 0,
+      "error_kinds": {
+        "DeadlineExceeded": 1
+      },
+      "root_causes": {
+        "deadline_sql_query": 1
+      },
+      "successful_sdk_seconds": {
+        "count": 0
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "2": {
+      "planned_tiles": 1,
+      "measured_tiles": 1,
+      "succeeded": 0,
+      "failed": 1,
+      "pending": 0,
+      "error_kinds": {
+        "DeadlineExceeded": 1
+      },
+      "root_causes": {
+        "deadline_sql_query": 1
+      },
+      "successful_sdk_seconds": {
+        "count": 0
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "3": {
+      "planned_tiles": 2,
+      "measured_tiles": 2,
+      "succeeded": 1,
+      "failed": 1,
+      "pending": 0,
+      "error_kinds": {
+        "DeadlineExceeded": 1
+      },
+      "root_causes": {
+        "deadline_sql_query": 1
+      },
+      "successful_sdk_seconds": {
+        "count": 1,
+        "min": 92.1774789,
+        "max": 92.1774789,
+        "median": 92.1774789,
+        "p95_nearest_rank": 92.1774789
+      },
+      "successful_sdk_over_default_http_60_seconds": 1
+    },
+    "4": {
+      "planned_tiles": 2,
+      "measured_tiles": 2,
+      "succeeded": 1,
+      "failed": 1,
+      "pending": 0,
+      "error_kinds": {
+        "DeadlineExceeded": 1
+      },
+      "root_causes": {
+        "deadline_sql_query": 1
+      },
+      "successful_sdk_seconds": {
+        "count": 1,
+        "min": 72.2838107,
+        "max": 72.2838107,
+        "median": 72.2838107,
+        "p95_nearest_rank": 72.2838107
+      },
+      "successful_sdk_over_default_http_60_seconds": 1
+    },
+    "5": {
+      "planned_tiles": 3,
+      "measured_tiles": 3,
+      "succeeded": 2,
+      "failed": 1,
+      "pending": 0,
+      "error_kinds": {
+        "DeadlineExceeded": 1
+      },
+      "root_causes": {
+        "deadline_sql_query": 1
+      },
+      "successful_sdk_seconds": {
+        "count": 2,
+        "min": 0.7023407,
+        "max": 52.8399285,
+        "median": 26.7711346,
+        "p95_nearest_rank": 52.8399285
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "6": {
+      "planned_tiles": 2,
+      "measured_tiles": 2,
+      "succeeded": 1,
+      "failed": 1,
+      "pending": 0,
+      "error_kinds": {
+        "DeadlineExceeded": 1
+      },
+      "root_causes": {
+        "deadline_sql_query": 1
+      },
+      "successful_sdk_seconds": {
+        "count": 1,
+        "min": 49.1259939,
+        "max": 49.1259939,
+        "median": 49.1259939,
+        "p95_nearest_rank": 49.1259939
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "7": {
+      "planned_tiles": 15,
+      "measured_tiles": 15,
+      "succeeded": 13,
+      "failed": 2,
+      "pending": 0,
+      "error_kinds": {
+        "Render": 2
+      },
+      "root_causes": {
+        "render_work_limit": 2
+      },
+      "successful_sdk_seconds": {
+        "count": 13,
+        "min": 0.0085133,
+        "max": 40.5385064,
+        "median": 6.6530299,
+        "p95_nearest_rank": 40.5385064
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "8": {
+      "planned_tiles": 2,
+      "measured_tiles": 2,
+      "succeeded": 1,
+      "failed": 1,
+      "pending": 0,
+      "error_kinds": {
+        "Render": 1
+      },
+      "root_causes": {
+        "render_work_limit": 1
+      },
+      "successful_sdk_seconds": {
+        "count": 1,
+        "min": 6.975054,
+        "max": 6.975054,
+        "median": 6.975054,
+        "p95_nearest_rank": 6.975054
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "9": {
+      "planned_tiles": 2,
+      "measured_tiles": 2,
+      "succeeded": 2,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 2,
+        "min": 2.9899118,
+        "max": 43.3134723,
+        "median": 23.15169205,
+        "p95_nearest_rank": 43.3134723
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "10": {
+      "planned_tiles": 2,
+      "measured_tiles": 2,
+      "succeeded": 2,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 2,
+        "min": 5.2028366,
+        "max": 20.8639246,
+        "median": 13.033380600000001,
+        "p95_nearest_rank": 20.8639246
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "11": {
+      "planned_tiles": 3,
+      "measured_tiles": 3,
+      "succeeded": 3,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 3,
+        "min": 5.4677408,
+        "max": 7.6119029000000005,
+        "median": 6.0779357,
+        "p95_nearest_rank": 7.6119029000000005
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "12": {
+      "planned_tiles": 6,
+      "measured_tiles": 6,
+      "succeeded": 6,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 6,
+        "min": 2.5687972,
+        "max": 5.7161819000000005,
+        "median": 4.48482685,
+        "p95_nearest_rank": 5.7161819000000005
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "13": {
+      "planned_tiles": 7,
+      "measured_tiles": 7,
+      "succeeded": 7,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 7,
+        "min": 0.975945,
+        "max": 1.5690846,
+        "median": 1.1541174,
+        "p95_nearest_rank": 1.5690846
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "14": {
+      "planned_tiles": 27,
+      "measured_tiles": 27,
+      "succeeded": 27,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 27,
+        "min": 0.0229942,
+        "max": 2.0396711,
+        "median": 0.9716134,
+        "p95_nearest_rank": 2.004002
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "15": {
+      "planned_tiles": 5,
+      "measured_tiles": 5,
+      "succeeded": 5,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 5,
+        "min": 0.2487145,
+        "max": 0.6367188,
+        "median": 0.4671664,
+        "p95_nearest_rank": 0.6367188
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "16": {
+      "planned_tiles": 5,
+      "measured_tiles": 5,
+      "succeeded": 5,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 5,
+        "min": 0.0834517,
+        "max": 0.4045096,
+        "median": 0.1734886,
+        "p95_nearest_rank": 0.4045096
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "17": {
+      "planned_tiles": 1,
+      "measured_tiles": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 1,
+        "min": 0.1533455,
+        "max": 0.1533455,
+        "median": 0.1533455,
+        "p95_nearest_rank": 0.1533455
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "18": {
+      "planned_tiles": 21,
+      "measured_tiles": 21,
+      "succeeded": 21,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 21,
+        "min": 0.0099865,
+        "max": 0.082103,
+        "median": 0.0221396,
+        "p95_nearest_rank": 0.0321299
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "19": {
+      "planned_tiles": 1,
+      "measured_tiles": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 1,
+        "min": 0.0505907,
+        "max": 0.0505907,
+        "median": 0.0505907,
+        "p95_nearest_rank": 0.0505907
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "20": {
+      "planned_tiles": 1,
+      "measured_tiles": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 1,
+        "min": 0.0204551,
+        "max": 0.0204551,
+        "median": 0.0204551,
+        "p95_nearest_rank": 0.0204551
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "21": {
+      "planned_tiles": 1,
+      "measured_tiles": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 1,
+        "min": 0.0311453,
+        "max": 0.0311453,
+        "median": 0.0311453,
+        "p95_nearest_rank": 0.0311453
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "22": {
+      "planned_tiles": 21,
+      "measured_tiles": 21,
+      "succeeded": 21,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 21,
+        "min": 0.0075269,
+        "max": 0.0225486,
+        "median": 0.0103208,
+        "p95_nearest_rank": 0.0144675
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    }
+  },
+  "by_region": {
+    "chubu_fuji": {
+      "planned_tiles": 4,
+      "measured_tiles": 4,
+      "succeeded": 3,
+      "failed": 1,
+      "pending": 0,
+      "error_kinds": {
+        "Render": 1
+      },
+      "root_causes": {
+        "render_work_limit": 1
+      },
+      "successful_sdk_seconds": {
+        "count": 3,
+        "min": 0.0075269,
+        "max": 0.0229942,
+        "median": 0.0099865,
+        "p95_nearest_rank": 0.0229942
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "chubu_matsumoto": {
+      "planned_tiles": 4,
+      "measured_tiles": 4,
+      "succeeded": 3,
+      "failed": 1,
+      "pending": 0,
+      "error_kinds": {
+        "Render": 1
+      },
+      "root_causes": {
+        "render_work_limit": 1
+      },
+      "successful_sdk_seconds": {
+        "count": 3,
+        "min": 0.00836,
+        "max": 0.5810994,
+        "median": 0.0191139,
+        "p95_nearest_rank": 0.5810994
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "chubu_nagoya": {
+      "planned_tiles": 8,
+      "measured_tiles": 8,
+      "succeeded": 7,
+      "failed": 1,
+      "pending": 0,
+      "error_kinds": {
+        "Render": 1
+      },
+      "root_causes": {
+        "render_work_limit": 1
+      },
+      "successful_sdk_seconds": {
+        "count": 7,
+        "min": 0.0164505,
+        "max": 5.0982879,
+        "median": 0.2487145,
+        "p95_nearest_rank": 5.0982879
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "chugoku_hiroshima": {
+      "planned_tiles": 4,
+      "measured_tiles": 4,
+      "succeeded": 4,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 4,
+        "min": 0.0115393,
+        "max": 40.5385064,
+        "median": 0.9243473499999999,
+        "p95_nearest_rank": 40.5385064
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "hokkaido_kushiro": {
+      "planned_tiles": 4,
+      "measured_tiles": 4,
+      "succeeded": 4,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 4,
+        "min": 0.0079944,
+        "max": 1.9748187000000001,
+        "median": 0.10069295,
+        "p95_nearest_rank": 1.9748187000000001
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "hokkaido_sapporo": {
+      "planned_tiles": 4,
+      "measured_tiles": 4,
+      "succeeded": 4,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 4,
+        "min": 0.0099073,
+        "max": 15.6475119,
+        "median": 0.6126115,
+        "p95_nearest_rank": 15.6475119
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "hokuriku_niigata": {
+      "planned_tiles": 4,
+      "measured_tiles": 4,
+      "succeeded": 4,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 4,
+        "min": 0.0087172,
+        "max": 24.3971609,
+        "median": 0.2810762,
+        "p95_nearest_rank": 24.3971609
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "kanto_tokyo": {
+      "planned_tiles": 23,
+      "measured_tiles": 23,
+      "succeeded": 14,
+      "failed": 9,
+      "pending": 0,
+      "error_kinds": {
+        "DeadlineExceeded": 7,
+        "Render": 2
+      },
+      "root_causes": {
+        "deadline_sql_query": 7,
+        "render_work_limit": 2
+      },
+      "successful_sdk_seconds": {
+        "count": 14,
+        "min": 0.0144675,
+        "max": 43.3134723,
+        "median": 0.5206142,
+        "p95_nearest_rank": 43.3134723
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "kanto_yokohama": {
+      "planned_tiles": 8,
+      "measured_tiles": 8,
+      "succeeded": 7,
+      "failed": 1,
+      "pending": 0,
+      "error_kinds": {
+        "Render": 1
+      },
+      "root_causes": {
+        "render_work_limit": 1
+      },
+      "successful_sdk_seconds": {
+        "count": 7,
+        "min": 0.011928,
+        "max": 4.0021923,
+        "median": 0.4847719,
+        "p95_nearest_rank": 4.0021923
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "kinki_osaka": {
+      "planned_tiles": 8,
+      "measured_tiles": 8,
+      "succeeded": 7,
+      "failed": 1,
+      "pending": 0,
+      "error_kinds": {
+        "Render": 1
+      },
+      "root_causes": {
+        "render_work_limit": 1
+      },
+      "successful_sdk_seconds": {
+        "count": 7,
+        "min": 0.009754,
+        "max": 5.7161819000000005,
+        "median": 0.4671664,
+        "p95_nearest_rank": 5.7161819000000005
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "kyushu_fukuoka": {
+      "planned_tiles": 8,
+      "measured_tiles": 8,
+      "succeeded": 8,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 8,
+        "min": 0.0108019,
+        "max": 30.586549,
+        "median": 0.6954082500000001,
+        "p95_nearest_rank": 30.586549
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "kyushu_kagoshima": {
+      "planned_tiles": 4,
+      "measured_tiles": 4,
+      "succeeded": 4,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 4,
+        "min": 0.0105817,
+        "max": 6.6530299,
+        "median": 1.0323481,
+        "p95_nearest_rank": 6.6530299
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "nationwide_density_scan": {
+      "planned_tiles": 22,
+      "measured_tiles": 22,
+      "succeeded": 22,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 22,
+        "min": 0.0113262,
+        "max": 92.1774789,
+        "median": 1.5080765999999999,
+        "p95_nearest_rank": 72.2838107
+      },
+      "successful_sdk_over_default_http_60_seconds": 2
+    },
+    "okinawa_naha": {
+      "planned_tiles": 4,
+      "measured_tiles": 4,
+      "succeeded": 4,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 4,
+        "min": 0.0103208,
+        "max": 2.3785105,
+        "median": 0.5649701500000001,
+        "p95_nearest_rank": 2.3785105
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "remote_chichijima": {
+      "planned_tiles": 4,
+      "measured_tiles": 4,
+      "succeeded": 4,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 4,
+        "min": 0.0106945,
+        "max": 0.1108156,
+        "median": 0.0487016,
+        "p95_nearest_rank": 0.1108156
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "remote_ishigaki": {
+      "planned_tiles": 4,
+      "measured_tiles": 4,
+      "succeeded": 4,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 4,
+        "min": 0.0080906,
+        "max": 0.4641076,
+        "median": 0.13518535,
+        "p95_nearest_rank": 0.4641076
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "remote_minamitorishima": {
+      "planned_tiles": 4,
+      "measured_tiles": 4,
+      "succeeded": 4,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 4,
+        "min": 0.0085133,
+        "max": 0.032961,
+        "median": 0.01391705,
+        "p95_nearest_rank": 0.032961
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "remote_wakkanai": {
+      "planned_tiles": 4,
+      "measured_tiles": 4,
+      "succeeded": 4,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 4,
+        "min": 0.0089903,
+        "max": 0.8244475,
+        "median": 0.0849399,
+        "p95_nearest_rank": 0.8244475
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "shikoku_takamatsu": {
+      "planned_tiles": 4,
+      "measured_tiles": 4,
+      "succeeded": 4,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 4,
+        "min": 0.0104885,
+        "max": 40.5385064,
+        "median": 0.42367935,
+        "p95_nearest_rank": 40.5385064
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "tohoku_aomori": {
+      "planned_tiles": 4,
+      "measured_tiles": 4,
+      "succeeded": 4,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 4,
+        "min": 0.0103777,
+        "max": 14.9336989,
+        "median": 0.49748485,
+        "p95_nearest_rank": 14.9336989
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    },
+    "tohoku_sendai": {
+      "planned_tiles": 4,
+      "measured_tiles": 4,
+      "succeeded": 4,
+      "failed": 0,
+      "pending": 0,
+      "error_kinds": {},
+      "root_causes": {},
+      "successful_sdk_seconds": {
+        "count": 4,
+        "min": 0.0081977,
+        "max": 15.2532262,
+        "median": 0.9330887500000001,
+        "p95_nearest_rank": 15.2532262
+      },
+      "successful_sdk_over_default_http_60_seconds": 0
+    }
+  },
+  "region_totals_note": "One tile can represent several regions; region counts are not disjoint.",
+  "pending_tiles": [],
+  "attempt_error_kinds": {
+    "DeadlineExceeded": 7,
+    "Render": 3
+  },
+  "attempt_root_causes": {
+    "deadline_sql_query": 7,
+    "render_work_limit": 3
+  },
+  "latest_result_rule": "Last complete record per tile, in base-results then extra-results file order; all-attempt failure counts are retained separately.",
+  "nationwide_bound_evidence": {
+    "evidence_type": "DB-wide numeric scans/conservative bounds, not exhaustive PNG generation",
+    "standard_individual_shape": {
+      "base_shape_count": 34537263,
+      "max_base_points": 56958,
+      "max_base_bytes": 911341,
+      "lod_shape_count": 15764481,
+      "max_lod_bytes": 911341
+    },
+    "standard_shape_limits": {
+      "encoded_bytes": 33554432,
+      "decoded_points": 1000000
+    },
+    "coarse_zoom_geometry_counts": [
+      {
+        "z": 0,
+        "nonempty_tiles": 1,
+        "over_old_100000_count": 0,
+        "top_tiles": [
+          {
+            "tile": "0/0/0",
+            "candidate_count": 81111
+          }
+        ]
+      },
+      {
+        "z": 1,
+        "nonempty_tiles": 1,
+        "over_old_100000_count": 0,
+        "top_tiles": [
+          {
+            "tile": "1/1/0",
+            "candidate_count": 81111
+          }
+        ]
+      },
+      {
+        "z": 2,
+        "nonempty_tiles": 1,
+        "over_old_100000_count": 0,
+        "top_tiles": [
+          {
+            "tile": "2/3/1",
+            "candidate_count": 81111
+          }
+        ]
+      },
+      {
+        "z": 3,
+        "nonempty_tiles": 4,
+        "over_old_100000_count": 0,
+        "top_tiles": [
+          {
+            "tile": "3/6/3",
+            "candidate_count": 54920
+          },
+          {
+            "tile": "3/7/3",
+            "candidate_count": 41089
+          },
+          {
+            "tile": "3/7/2",
+            "candidate_count": 12272
+          },
+          {
+            "tile": "3/6/2",
+            "candidate_count": 985
+          }
+        ]
+      },
+      {
+        "z": 4,
+        "nonempty_tiles": 6,
+        "over_old_100000_count": 0,
+        "top_tiles": [
+          {
+            "tile": "4/13/6",
+            "candidate_count": 50197
+          },
+          {
+            "tile": "4/14/6",
+            "candidate_count": 34825
+          },
+          {
+            "tile": "4/14/5",
+            "candidate_count": 10060
+          },
+          {
+            "tile": "4/13/5",
+            "candidate_count": 621
+          },
+          {
+            "tile": "4/13/7",
+            "candidate_count": 37
+          },
+          {
+            "tile": "4/14/7",
+            "candidate_count": 25
+          }
+        ]
+      },
+      {
+        "z": 5,
+        "nonempty_tiles": 13,
+        "over_old_100000_count": 0,
+        "top_tiles": [
+          {
+            "tile": "5/27/12",
+            "candidate_count": 35544
+          },
+          {
+            "tile": "5/28/12",
+            "candidate_count": 28187
+          },
+          {
+            "tile": "5/27/13",
+            "candidate_count": 12790
+          },
+          {
+            "tile": "5/28/11",
+            "candidate_count": 8633
+          },
+          {
+            "tile": "5/28/13",
+            "candidate_count": 2388
+          },
+          {
+            "tile": "5/26/13",
+            "candidate_count": 1947
+          },
+          {
+            "tile": "5/29/11",
+            "candidate_count": 934
+          },
+          {
+            "tile": "5/27/11",
+            "candidate_count": 552
+          }
+        ]
+      },
+      {
+        "z": 6,
+        "nonempty_tiles": 36,
+        "over_old_100000_count": 2,
+        "top_tiles": [
+          {
+            "tile": "6/56/25",
+            "candidate_count": 214296
+          },
+          {
+            "tile": "6/55/25",
+            "candidate_count": 210726
+          },
+          {
+            "tile": "6/56/24",
+            "candidate_count": 77908
+          },
+          {
+            "tile": "6/57/24",
+            "candidate_count": 62784
+          },
+          {
+            "tile": "6/57/23",
+            "candidate_count": 58566
+          },
+          {
+            "tile": "6/55/26",
+            "candidate_count": 24278
+          },
+          {
+            "tile": "6/56/23",
+            "candidate_count": 13974
+          },
+          {
+            "tile": "6/54/25",
+            "candidate_count": 10736
+          }
+        ]
+      },
+      {
+        "z": 7,
+        "nonempty_tiles": 100,
+        "over_old_100000_count": 2,
+        "top_tiles": [
+          {
+            "tile": "7/113/50",
+            "candidate_count": 110769
+          },
+          {
+            "tile": "7/110/51",
+            "candidate_count": 100661
+          },
+          {
+            "tile": "7/112/50",
+            "candidate_count": 94990
+          },
+          {
+            "tile": "7/111/50",
+            "candidate_count": 72744
+          },
+          {
+            "tile": "7/111/51",
+            "candidate_count": 44560
+          },
+          {
+            "tile": "7/113/49",
+            "candidate_count": 43415
+          },
+          {
+            "tile": "7/114/48",
+            "candidate_count": 34952
+          },
+          {
+            "tile": "7/114/49",
+            "candidate_count": 26878
+          }
+        ]
+      },
+      {
+        "z": 8,
+        "nonempty_tiles": 265,
+        "over_old_100000_count": 0,
+        "top_tiles": [
+          {
+            "tile": "8/227/100",
+            "candidate_count": 66346
+          },
+          {
+            "tile": "8/220/102",
+            "candidate_count": 51358
+          },
+          {
+            "tile": "8/225/101",
+            "candidate_count": 42613
+          },
+          {
+            "tile": "8/224/101",
+            "candidate_count": 38090
+          },
+          {
+            "tile": "8/223/101",
+            "candidate_count": 37387
+          },
+          {
+            "tile": "8/222/101",
+            "candidate_count": 25832
+          },
+          {
+            "tile": "8/220/103",
+            "candidate_count": 23694
+          },
+          {
+            "tile": "8/223/102",
+            "candidate_count": 22104
+          }
+        ]
+      },
+      {
+        "z": 9,
+        "nonempty_tiles": 703,
+        "over_old_100000_count": 0,
+        "top_tiles": [
+          {
+            "tile": "9/454/201",
+            "candidate_count": 47612
+          },
+          {
+            "tile": "9/441/205",
+            "candidate_count": 37156
+          },
+          {
+            "tile": "9/450/202",
+            "candidate_count": 29086
+          },
+          {
+            "tile": "9/448/203",
+            "candidate_count": 27745
+          },
+          {
+            "tile": "9/455/201",
+            "candidate_count": 21405
+          },
+          {
+            "tile": "9/449/202",
+            "candidate_count": 16649
+          },
+          {
+            "tile": "9/446/203",
+            "candidate_count": 16496
+          },
+          {
+            "tile": "9/454/202",
+            "candidate_count": 15398
+          }
+        ]
+      },
+      {
+        "z": 10,
+        "nonempty_tiles": 2393,
+        "over_old_100000_count": 0,
+        "top_tiles": [
+          {
+            "tile": "10/904/406",
+            "candidate_count": 97766
+          },
+          {
+            "tile": "10/882/411",
+            "candidate_count": 68102
+          },
+          {
+            "tile": "10/908/402",
+            "candidate_count": 56537
+          },
+          {
+            "tile": "10/881/411",
+            "candidate_count": 54938
+          },
+          {
+            "tile": "10/909/402",
+            "candidate_count": 53338
+          },
+          {
+            "tile": "10/901/405",
+            "candidate_count": 52363
+          },
+          {
+            "tile": "10/901/404",
+            "candidate_count": 51877
+          },
+          {
+            "tile": "10/909/403",
+            "candidate_count": 50500
+          }
+        ]
+      }
+    ],
+    "coarse_zoom_rows_scanned": 2534838,
+    "high_zoom_density_sampling_scope": "R-tree density beam search within each root branch, followed by exact z14 candidate counts; not an exhaustive z14 ranking",
+    "high_zoom_density_top_tiles": [
+      {
+        "tile": "14/14369/6488",
+        "candidate_count": 30724,
+        "base_geometry_bytes": 4223328,
+        "base_geometry_points": 239006
+      },
+      {
+        "tile": "14/14363/6503",
+        "candidate_count": 26158,
+        "base_geometry_bytes": 2923930,
+        "base_geometry_points": 161543
+      },
+      {
+        "tile": "14/14370/6487",
+        "candidate_count": 25465,
+        "base_geometry_bytes": 3817541,
+        "base_geometry_points": 217940
+      },
+      {
+        "tile": "14/14370/6489",
+        "candidate_count": 25465,
+        "base_geometry_bytes": 3883309,
+        "base_geometry_points": 222039
+      },
+      {
+        "tile": "14/14550/6455",
+        "candidate_count": 24741,
+        "base_geometry_bytes": 2846945,
+        "base_geometry_points": 157880
+      },
+      {
+        "tile": "14/14369/6489",
+        "candidate_count": 24559,
+        "base_geometry_bytes": 3714875,
+        "base_geometry_points": 212273
+      },
+      {
+        "tile": "14/14361/6508",
+        "candidate_count": 24303,
+        "base_geometry_bytes": 2669823,
+        "base_geometry_points": 147143
+      },
+      {
+        "tile": "14/14368/6488",
+        "candidate_count": 24037,
+        "base_geometry_bytes": 3685493,
+        "base_geometry_points": 210870
+      },
+      {
+        "tile": "14/14547/6449",
+        "candidate_count": 23335,
+        "base_geometry_bytes": 3302123,
+        "base_geometry_points": 187422
+      },
+      {
+        "tile": "14/14547/6450",
+        "candidate_count": 22762,
+        "base_geometry_bytes": 2991254,
+        "base_geometry_points": 168469
+      },
+      {
+        "tile": "14/14362/6509",
+        "candidate_count": 22681,
+        "base_geometry_bytes": 2447973,
+        "base_geometry_points": 134578
+      },
+      {
+        "tile": "14/14555/6449",
+        "candidate_count": 22521,
+        "base_geometry_bytes": 2985985,
+        "base_geometry_points": 168366
+      },
+      {
+        "tile": "14/14550/6457",
+        "candidate_count": 22360,
+        "base_geometry_bytes": 2937344,
+        "base_geometry_points": 165445
+      },
+      {
+        "tile": "14/14550/6456",
+        "candidate_count": 22356,
+        "base_geometry_bytes": 2838868,
+        "base_geometry_points": 159312
+      },
+      {
+        "tile": "14/14548/6450",
+        "candidate_count": 22202,
+        "base_geometry_bytes": 2978082,
+        "base_geometry_points": 168141
+      },
+      {
+        "tile": "14/14545/6450",
+        "candidate_count": 21865,
+        "base_geometry_bytes": 3228069,
+        "base_geometry_points": 183980
+      },
+      {
+        "tile": "14/14549/6455",
+        "candidate_count": 21676,
+        "base_geometry_bytes": 2918872,
+        "base_geometry_points": 164842
+      },
+      {
+        "tile": "14/14548/6451",
+        "candidate_count": 21587,
+        "base_geometry_bytes": 3051219,
+        "base_geometry_points": 173197
+      },
+      {
+        "tile": "14/14369/6487",
+        "candidate_count": 21563,
+        "base_geometry_bytes": 3299015,
+        "base_geometry_points": 188674
+      },
+      {
+        "tile": "14/14548/6449",
+        "candidate_count": 20828,
+        "base_geometry_bytes": 3016332,
+        "base_geometry_points": 171608
+      },
+      {
+        "tile": "14/14549/6454",
+        "candidate_count": 20715,
+        "base_geometry_bytes": 2878787,
+        "base_geometry_points": 163097
+      },
+      {
+        "tile": "14/14556/6448",
+        "candidate_count": 20651,
+        "base_geometry_bytes": 2781535,
+        "base_geometry_points": 157073
+      },
+      {
+        "tile": "14/14420/6480",
+        "candidate_count": 20350,
+        "base_geometry_bytes": 2431946,
+        "base_geometry_points": 135467
+      },
+      {
+        "tile": "14/14554/6446",
+        "candidate_count": 20300,
+        "base_geometry_bytes": 2838856,
+        "base_geometry_points": 160940
+      }
+    ],
+    "selected_geometry_and_largest_shapes": {
+      "read_only": true,
+      "tile_details": [
+        {
+          "tile": "0/0/0",
+          "shape_count": 81111,
+          "selected_geometry_bytes": 6248123,
+          "selected_geometry_points": 324605,
+          "kinds": {
+            "1": 81111
+          }
+        },
+        {
+          "tile": "1/1/0",
+          "shape_count": 81111,
+          "selected_geometry_bytes": 6444251,
+          "selected_geometry_points": 336863,
+          "kinds": {
+            "1": 81111
+          }
+        },
+        {
+          "tile": "2/3/1",
+          "shape_count": 81111,
+          "selected_geometry_bytes": 7212603,
+          "selected_geometry_points": 384885,
+          "kinds": {
+            "1": 81111
+          }
+        },
+        {
+          "tile": "3/6/3",
+          "shape_count": 54920,
+          "selected_geometry_bytes": 6220024,
+          "selected_geometry_points": 344129,
+          "kinds": {
+            "1": 54920
+          }
+        },
+        {
+          "tile": "4/13/6",
+          "shape_count": 50197,
+          "selected_geometry_bytes": 6343441,
+          "selected_geometry_points": 355680,
+          "kinds": {
+            "1": 50197
+          }
+        },
+        {
+          "tile": "5/27/12",
+          "shape_count": 35544,
+          "selected_geometry_bytes": 5381816,
+          "selected_geometry_points": 307484,
+          "kinds": {
+            "1": 35544
+          }
+        },
+        {
+          "tile": "6/56/25",
+          "shape_count": 214296,
+          "selected_geometry_bytes": 70163344,
+          "selected_geometry_points": 4203300,
+          "kinds": {
+            "10": 125239,
+            "110": 74738,
+            "1": 14319
+          }
+        },
+        {
+          "tile": "7/113/50",
+          "shape_count": 110769,
+          "selected_geometry_bytes": 35251337,
+          "selected_geometry_points": 2108776,
+          "kinds": {
+            "10": 77246,
+            "110": 29994,
+            "1": 3529
+          }
+        },
+        {
+          "tile": "8/227/100",
+          "shape_count": 66346,
+          "selected_geometry_bytes": 15454374,
+          "selected_geometry_points": 910318,
+          "kinds": {
+            "10": 48534,
+            "110": 17663,
+            "1": 149
+          }
+        },
+        {
+          "tile": "9/454/201",
+          "shape_count": 47612,
+          "selected_geometry_bytes": 6710004,
+          "selected_geometry_points": 389334,
+          "kinds": {
+            "140": 18547,
+            "10": 21506,
+            "110": 7453,
+            "1": 106
+          }
+        },
+        {
+          "tile": "10/904/406",
+          "shape_count": 97766,
+          "selected_geometry_bytes": 9831486,
+          "selected_geometry_points": 535322,
+          "kinds": {
+            "10": 5972,
+            "40": 74870,
+            "20": 13072,
+            "140": 935,
+            "110": 1190,
+            "70": 255,
+            "30": 501,
+            "80": 719,
+            "90": 7,
+            "50": 156,
+            "60": 84,
+            "100": 3,
+            "1": 2
+          }
+        },
+        {
+          "tile": "6/55/25",
+          "shape_count": 210726,
+          "selected_geometry_bytes": 80363094,
+          "selected_geometry_points": 4844645,
+          "kinds": {
+            "110": 78836,
+            "1": 26581,
+            "10": 105309
+          }
+        },
+        {
+          "tile": "7/110/51",
+          "shape_count": 100661,
+          "selected_geometry_bytes": 34246401,
+          "selected_geometry_points": 2056601,
+          "kinds": {
+            "1": 10623,
+            "10": 57830,
+            "110": 32208
+          }
+        },
+        {
+          "tile": "14/14369/6488",
+          "shape_count": 30724,
+          "selected_geometry_bytes": 4223328,
+          "selected_geometry_points": 239006,
+          "kinds": {
+            "130": 25,
+            "120": 30548,
+            "60": 21,
+            "10": 36,
+            "30": 44,
+            "20": 20,
+            "140": 15,
+            "40": 3,
+            "70": 1,
+            "50": 6,
+            "110": 4,
+            "1": 1
+          }
+        },
+        {
+          "tile": "14/14550/6455",
+          "shape_count": 24741,
+          "selected_geometry_bytes": 2846945,
+          "selected_geometry_points": 157880,
+          "kinds": {
+            "130": 7,
+            "120": 24512,
+            "140": 100,
+            "60": 5,
+            "30": 75,
+            "50": 5,
+            "1": 1,
+            "110": 4,
+            "10": 21,
+            "70": 3,
+            "20": 6,
+            "90": 2
+          }
+        }
+      ],
+      "largest_base_features": [
+        {
+          "feature_id": 34465223,
+          "kind": 1,
+          "osm_type": 3,
+          "osm_id": 69270,
+          "points": 56958,
+          "bytes": 911341,
+          "bounds": [
+            0.8749982939904012,
+            0.8777794837873766,
+            0.3934424818201102,
+            0.39609952682147
+          ],
+          "bbox_center_tiles": [
+            "14/14358/6467",
+            "18/229740/103486",
+            "22/3675841/1655789"
+          ]
+        },
+        {
+          "feature_id": 34470879,
+          "kind": 1,
+          "osm_type": 3,
+          "osm_id": 102457,
+          "points": 47981,
+          "bytes": 767709,
+          "bounds": [
+            0.8589643808333334,
+            0.8597160908333333,
+            0.3970908411453608,
+            0.3984765242827738
+          ],
+          "bbox_center_tiles": [
+            "14/14079/6517",
+            "18/225270/104276",
+            "22/3604334/1668425"
+          ]
+        },
+        {
+          "feature_id": 34477238,
+          "kind": 1,
+          "osm_type": 3,
+          "osm_id": 130752,
+          "points": 43809,
+          "bytes": 700957,
+          "bounds": [
+            0.8777760924910971,
+            0.8803572469444444,
+            0.39609613578094555,
+            0.3994701631653248
+          ],
+          "bbox_center_tiles": [
+            "14/14402/6517",
+            "18/230442/104276",
+            "22/3687072/1668423"
+          ]
+        },
+        {
+          "feature_id": 34519769,
+          "kind": 1,
+          "osm_type": 3,
+          "osm_id": 372707,
+          "points": 39992,
+          "bytes": 639885,
+          "bounds": [
+            0.8916648919740868,
+            0.8935431083333334,
+            0.3821773867098057,
+            0.38477525287132613
+          ],
+          "bbox_center_tiles": [
+            "14/14624/6282",
+            "18/233990/100526",
+            "22/3743852/1608416"
+          ]
+        },
+        {
+          "feature_id": 34495030,
+          "kind": 1,
+          "osm_type": 3,
+          "osm_id": 241666,
+          "points": 38223,
+          "bytes": 611581,
+          "bounds": [
+            0.8667058525,
+            0.8694461100068657,
+            0.3994668125599122,
+            0.40280134809410073
+          ],
+          "bbox_center_tiles": [
+            "14/14222/6572",
+            "18/227560/105154",
+            "22/3640974/1682478"
+          ]
+        },
+        {
+          "feature_id": 34472978,
+          "kind": 1,
+          "osm_type": 3,
+          "osm_id": 117222,
+          "points": 37791,
+          "bytes": 604669,
+          "bounds": [
+            0.8614062961111112,
+            0.8638905178162453,
+            0.4060917107129337,
+            0.40935289590673896
+          ],
+          "bbox_center_tiles": [
+            "14/14133/6680",
+            "18/226138/106881",
+            "22/3618209/1710111"
+          ]
+        },
+        {
+          "feature_id": 34492219,
+          "kind": 1,
+          "osm_type": 3,
+          "osm_id": 234662,
+          "points": 34927,
+          "bytes": 558845,
+          "bounds": [
+            0.8722205566598009,
+            0.8743065969444445,
+            0.3994668125599122,
+            0.4019937373102992
+          ],
+          "bbox_center_tiles": [
+            "14/14307/6565",
+            "18/228920/105049",
+            "22/3662732/1680784"
+          ]
+        },
+        {
+          "feature_id": 34532748,
+          "kind": 1,
+          "osm_type": 3,
+          "osm_id": 470567,
+          "points": 33961,
+          "bytes": 543389,
+          "bounds": [
+            0.8916648667124937,
+            0.8944462443986174,
+            0.37857734466876314,
+            0.38218096104193333
+          ],
+          "bbox_center_tiles": [
+            "14/14631/6232",
+            "18/234109/99714",
+            "22/3745746/1595425"
+          ]
+        },
+        {
+          "feature_id": 34488310,
+          "kind": 1,
+          "osm_type": 3,
+          "osm_id": 198988,
+          "points": 29924,
+          "bytes": 478797,
+          "bounds": [
+            0.8587050694444445,
+            0.8603392361111111,
+            0.41725339093292424,
+            0.41858482928312235
+          ],
+          "bbox_center_tiles": [
+            "14/14082/6847",
+            "18/225318/109554",
+            "22/3605097/1752879"
+          ]
+        },
+        {
+          "feature_id": 34529914,
+          "kind": 1,
+          "osm_type": 3,
+          "osm_id": 436479,
+          "points": 29204,
+          "bytes": 467277,
+          "bounds": [
+            0.8722205162126234,
+            0.8750017060095988,
+            0.39373809269282034,
+            0.39609952682147
+          ],
+          "bbox_center_tiles": [
+            "14/14313/6470",
+            "18/229011/103525",
+            "22/3664190/1656409"
+          ]
+        },
+        {
+          "feature_id": 34508846,
+          "kind": 1,
+          "osm_type": 3,
+          "osm_id": 326315,
+          "points": 27920,
+          "bytes": 446733,
+          "bounds": [
+            0.8751566527777778,
+            0.8777794433401991,
+            0.3994668125599122,
+            0.40136190958189677
+          ],
+          "bbox_center_tiles": [
+            "14/14360/6560",
+            "18/229760/104966",
+            "22/3676173/1679459"
+          ]
+        },
+        {
+          "feature_id": 34498363,
+          "kind": 1,
+          "osm_type": 3,
+          "osm_id": 261611,
+          "points": 27499,
+          "bytes": 439997,
+          "bounds": [
+            0.8598672672222222,
+            0.8611127766735324,
+            0.4009509119963836,
+            0.40280134809410073
+          ],
+          "bbox_center_tiles": [
+            "14/14098/6584",
+            "18/225572/105349",
+            "22/3609156/1685590"
+          ]
+        }
+      ],
+      "elapsed_seconds": 176.28099999998813,
+      "source_unchanged": true
+    },
+    "road_candidates": [
+      {
+        "zoom": 6,
+        "all_categories_bound": false,
+        "grid_tiles": 288,
+        "nonempty_tiles": 10,
+        "limit_exceed_tiles": 0,
+        "byte_limit_exceed_tiles": 0,
+        "top_count": [
+          {
+            "value": 21650,
+            "tile": "6/56/25"
+          },
+          {
+            "value": 18226,
+            "tile": "6/55/25"
+          },
+          {
+            "value": 9210,
+            "tile": "6/56/24"
+          },
+          {
+            "value": 6007,
+            "tile": "6/57/24"
+          },
+          {
+            "value": 3559,
+            "tile": "6/57/23"
+          },
+          {
+            "value": 1492,
+            "tile": "6/55/26"
+          },
+          {
+            "value": 782,
+            "tile": "6/56/23"
+          },
+          {
+            "value": 713,
+            "tile": "6/57/25"
+          },
+          {
+            "value": 312,
+            "tile": "6/54/27"
+          },
+          {
+            "value": 49,
+            "tile": "6/57/22"
+          }
+        ],
+        "top_bytes": []
+      },
+      {
+        "zoom": 7,
+        "all_categories_bound": false,
+        "grid_tiles": 529,
+        "nonempty_tiles": 28,
+        "limit_exceed_tiles": 0,
+        "byte_limit_exceed_tiles": 0,
+        "top_count": [
+          {
+            "value": 49414,
+            "tile": "7/113/50"
+          },
+          {
+            "value": 44833,
+            "tile": "7/112/50"
+          },
+          {
+            "value": 25645,
+            "tile": "7/110/51"
+          },
+          {
+            "value": 23701,
+            "tile": "7/113/49"
+          },
+          {
+            "value": 22635,
+            "tile": "7/111/50"
+          },
+          {
+            "value": 13714,
+            "tile": "7/111/51"
+          },
+          {
+            "value": 11860,
+            "tile": "7/114/48"
+          },
+          {
+            "value": 8467,
+            "tile": "7/113/48"
+          },
+          {
+            "value": 8403,
+            "tile": "7/114/49"
+          },
+          {
+            "value": 6809,
+            "tile": "7/114/47"
+          },
+          {
+            "value": 6072,
+            "tile": "7/112/51"
+          },
+          {
+            "value": 6032,
+            "tile": "7/114/46"
+          }
+        ],
+        "top_bytes": []
+      },
+      {
+        "zoom": 8,
+        "all_categories_bound": false,
+        "grid_tiles": 1225,
+        "nonempty_tiles": 71,
+        "limit_exceed_tiles": 0,
+        "byte_limit_exceed_tiles": 0,
+        "top_count": [
+          {
+            "value": 51578,
+            "tile": "8/227/100"
+          },
+          {
+            "value": 34401,
+            "tile": "8/224/101"
+          },
+          {
+            "value": 25448,
+            "tile": "8/225/101"
+          },
+          {
+            "value": 19361,
+            "tile": "8/226/100"
+          },
+          {
+            "value": 16934,
+            "tile": "8/223/101"
+          },
+          {
+            "value": 14971,
+            "tile": "8/222/101"
+          },
+          {
+            "value": 13865,
+            "tile": "8/221/102"
+          },
+          {
+            "value": 13514,
+            "tile": "8/225/100"
+          },
+          {
+            "value": 12878,
+            "tile": "8/220/102"
+          },
+          {
+            "value": 12400,
+            "tile": "8/227/99"
+          },
+          {
+            "value": 12394,
+            "tile": "8/226/101"
+          },
+          {
+            "value": 12046,
+            "tile": "8/227/98"
+          }
+        ],
+        "top_bytes": []
+      },
+      {
+        "zoom": 9,
+        "all_categories_bound": false,
+        "grid_tiles": 3481,
+        "nonempty_tiles": 219,
+        "limit_exceed_tiles": 0,
+        "byte_limit_exceed_tiles": 0,
+        "top_count": [
+          {
+            "value": 33871,
+            "tile": "9/454/201"
+          },
+          {
+            "value": 20430,
+            "tile": "9/448/203"
+          },
+          {
+            "value": 19119,
+            "tile": "9/450/202"
+          },
+          {
+            "value": 13034,
+            "tile": "9/455/200"
+          },
+          {
+            "value": 12515,
+            "tile": "9/454/200"
+          },
+          {
+            "value": 12480,
+            "tile": "9/441/205"
+          },
+          {
+            "value": 12474,
+            "tile": "9/455/201"
+          },
+          {
+            "value": 11180,
+            "tile": "9/449/202"
+          },
+          {
+            "value": 10342,
+            "tile": "9/449/203"
+          },
+          {
+            "value": 9416,
+            "tile": "9/451/202"
+          },
+          {
+            "value": 8797,
+            "tile": "9/454/202"
+          },
+          {
+            "value": 8703,
+            "tile": "9/448/202"
+          }
+        ],
+        "top_bytes": []
+      },
+      {
+        "zoom": 10,
+        "all_categories_bound": true,
+        "grid_tiles": 11342,
+        "nonempty_tiles": 699,
+        "limit_exceed_tiles": 0,
+        "byte_limit_exceed_tiles": 0,
+        "top_count": [
+          {
+            "value": 368934,
+            "tile": "10/909/403"
+          },
+          {
+            "value": 309267,
+            "tile": "10/897/406"
+          },
+          {
+            "value": 296940,
+            "tile": "10/909/402"
+          },
+          {
+            "value": 296310,
+            "tile": "10/908/403"
+          },
+          {
+            "value": 225656,
+            "tile": "10/901/405"
+          },
+          {
+            "value": 217042,
+            "tile": "10/901/404"
+          },
+          {
+            "value": 191337,
+            "tile": "10/908/402"
+          },
+          {
+            "value": 156240,
+            "tile": "10/908/404"
+          },
+          {
+            "value": 145401,
+            "tile": "10/897/407"
+          },
+          {
+            "value": 140129,
+            "tile": "10/898/405"
+          },
+          {
+            "value": 139793,
+            "tile": "10/908/401"
+          },
+          {
+            "value": 135646,
+            "tile": "10/910/402"
+          }
+        ],
+        "top_bytes": []
+      }
+    ],
+    "name_candidates": [
+      {
+        "zoom": 5,
+        "all_categories_bound": false,
+        "grid_tiles": 165,
+        "nonempty_tiles": 40,
+        "limit_exceed_tiles": 0,
+        "byte_limit_exceed_tiles": 0,
+        "top_count": [
+          {
+            "value": 819,
+            "tile": "5/29/13"
+          },
+          {
+            "value": 819,
+            "tile": "5/29/12"
+          },
+          {
+            "value": 819,
+            "tile": "5/29/11"
+          },
+          {
+            "value": 819,
+            "tile": "5/28/13"
+          },
+          {
+            "value": 819,
+            "tile": "5/28/12"
+          },
+          {
+            "value": 819,
+            "tile": "5/28/11"
+          },
+          {
+            "value": 819,
+            "tile": "5/27/13"
+          },
+          {
+            "value": 819,
+            "tile": "5/27/12"
+          },
+          {
+            "value": 819,
+            "tile": "5/27/11"
+          },
+          {
+            "value": 819,
+            "tile": "5/26/13"
+          },
+          {
+            "value": 819,
+            "tile": "5/26/12"
+          },
+          {
+            "value": 819,
+            "tile": "5/26/11"
+          }
+        ],
+        "top_bytes": [
+          {
+            "value": 143601,
+            "tile": "5/29/13"
+          },
+          {
+            "value": 143601,
+            "tile": "5/29/12"
+          },
+          {
+            "value": 143601,
+            "tile": "5/29/11"
+          },
+          {
+            "value": 143601,
+            "tile": "5/28/13"
+          },
+          {
+            "value": 143601,
+            "tile": "5/28/12"
+          },
+          {
+            "value": 143601,
+            "tile": "5/28/11"
+          },
+          {
+            "value": 143601,
+            "tile": "5/27/13"
+          },
+          {
+            "value": 143601,
+            "tile": "5/27/12"
+          },
+          {
+            "value": 143601,
+            "tile": "5/27/11"
+          },
+          {
+            "value": 143601,
+            "tile": "5/26/13"
+          },
+          {
+            "value": 143601,
+            "tile": "5/26/12"
+          },
+          {
+            "value": 143601,
+            "tile": "5/26/11"
+          }
+        ]
+      },
+      {
+        "zoom": 6,
+        "all_categories_bound": false,
+        "grid_tiles": 288,
+        "nonempty_tiles": 67,
+        "limit_exceed_tiles": 0,
+        "byte_limit_exceed_tiles": 0,
+        "top_count": [
+          {
+            "value": 818,
+            "tile": "6/56/25"
+          },
+          {
+            "value": 818,
+            "tile": "6/55/25"
+          },
+          {
+            "value": 808,
+            "tile": "6/56/24"
+          },
+          {
+            "value": 808,
+            "tile": "6/55/24"
+          },
+          {
+            "value": 806,
+            "tile": "6/57/24"
+          },
+          {
+            "value": 805,
+            "tile": "6/57/25"
+          },
+          {
+            "value": 788,
+            "tile": "6/56/23"
+          },
+          {
+            "value": 788,
+            "tile": "6/55/23"
+          },
+          {
+            "value": 786,
+            "tile": "6/57/23"
+          },
+          {
+            "value": 783,
+            "tile": "6/56/26"
+          },
+          {
+            "value": 783,
+            "tile": "6/55/26"
+          },
+          {
+            "value": 770,
+            "tile": "6/57/26"
+          }
+        ],
+        "top_bytes": [
+          {
+            "value": 143426,
+            "tile": "6/56/25"
+          },
+          {
+            "value": 143426,
+            "tile": "6/55/25"
+          },
+          {
+            "value": 141668,
+            "tile": "6/56/24"
+          },
+          {
+            "value": 141668,
+            "tile": "6/55/24"
+          },
+          {
+            "value": 141322,
+            "tile": "6/57/24"
+          },
+          {
+            "value": 141147,
+            "tile": "6/57/25"
+          },
+          {
+            "value": 138084,
+            "tile": "6/56/23"
+          },
+          {
+            "value": 138084,
+            "tile": "6/55/23"
+          },
+          {
+            "value": 137738,
+            "tile": "6/57/23"
+          },
+          {
+            "value": 137299,
+            "tile": "6/56/26"
+          },
+          {
+            "value": 137299,
+            "tile": "6/55/26"
+          },
+          {
+            "value": 135020,
+            "tile": "6/57/26"
+          }
+        ]
+      },
+      {
+        "zoom": 7,
+        "all_categories_bound": false,
+        "grid_tiles": 529,
+        "nonempty_tiles": 173,
+        "limit_exceed_tiles": 0,
+        "byte_limit_exceed_tiles": 0,
+        "top_count": [
+          {
+            "value": 4060,
+            "tile": "7/112/50"
+          },
+          {
+            "value": 4020,
+            "tile": "7/111/51"
+          },
+          {
+            "value": 4007,
+            "tile": "7/111/50"
+          },
+          {
+            "value": 3953,
+            "tile": "7/112/51"
+          },
+          {
+            "value": 3917,
+            "tile": "7/112/49"
+          },
+          {
+            "value": 3906,
+            "tile": "7/111/52"
+          },
+          {
+            "value": 3805,
+            "tile": "7/111/49"
+          },
+          {
+            "value": 3615,
+            "tile": "7/112/52"
+          },
+          {
+            "value": 3407,
+            "tile": "7/110/52"
+          },
+          {
+            "value": 3310,
+            "tile": "7/110/51"
+          },
+          {
+            "value": 3234,
+            "tile": "7/110/50"
+          },
+          {
+            "value": 2990,
+            "tile": "7/110/49"
+          }
+        ],
+        "top_bytes": [
+          {
+            "value": 620609,
+            "tile": "7/112/50"
+          },
+          {
+            "value": 616089,
+            "tile": "7/111/51"
+          },
+          {
+            "value": 613958,
+            "tile": "7/111/50"
+          },
+          {
+            "value": 604961,
+            "tile": "7/112/51"
+          },
+          {
+            "value": 601933,
+            "tile": "7/111/52"
+          },
+          {
+            "value": 599678,
+            "tile": "7/112/49"
+          },
+          {
+            "value": 584288,
+            "tile": "7/111/49"
+          },
+          {
+            "value": 554747,
+            "tile": "7/112/52"
+          },
+          {
+            "value": 520041,
+            "tile": "7/110/52"
+          },
+          {
+            "value": 502589,
+            "tile": "7/110/51"
+          },
+          {
+            "value": 490969,
+            "tile": "7/110/50"
+          },
+          {
+            "value": 455787,
+            "tile": "7/110/49"
+          }
+        ]
+      },
+      {
+        "zoom": 8,
+        "all_categories_bound": false,
+        "grid_tiles": 1156,
+        "nonempty_tiles": 354,
+        "limit_exceed_tiles": 0,
+        "byte_limit_exceed_tiles": 0,
+        "top_count": [
+          {
+            "value": 2929,
+            "tile": "8/222/102"
+          },
+          {
+            "value": 2791,
+            "tile": "8/221/102"
+          },
+          {
+            "value": 2744,
+            "tile": "8/222/101"
+          },
+          {
+            "value": 2691,
+            "tile": "8/222/103"
+          },
+          {
+            "value": 2623,
+            "tile": "8/221/103"
+          },
+          {
+            "value": 2606,
+            "tile": "8/221/101"
+          },
+          {
+            "value": 2385,
+            "tile": "8/223/101"
+          },
+          {
+            "value": 2351,
+            "tile": "8/223/102"
+          },
+          {
+            "value": 2345,
+            "tile": "8/220/102"
+          },
+          {
+            "value": 2229,
+            "tile": "8/220/103"
+          },
+          {
+            "value": 2212,
+            "tile": "8/224/100"
+          },
+          {
+            "value": 2203,
+            "tile": "8/222/100"
+          }
+        ],
+        "top_bytes": [
+          {
+            "value": 451699,
+            "tile": "8/222/102"
+          },
+          {
+            "value": 425519,
+            "tile": "8/221/102"
+          },
+          {
+            "value": 424755,
+            "tile": "8/222/101"
+          },
+          {
+            "value": 413236,
+            "tile": "8/222/103"
+          },
+          {
+            "value": 398891,
+            "tile": "8/221/103"
+          },
+          {
+            "value": 398575,
+            "tile": "8/221/101"
+          },
+          {
+            "value": 369286,
+            "tile": "8/223/101"
+          },
+          {
+            "value": 363970,
+            "tile": "8/223/102"
+          },
+          {
+            "value": 355386,
+            "tile": "8/220/102"
+          },
+          {
+            "value": 348223,
+            "tile": "8/224/100"
+          },
+          {
+            "value": 346957,
+            "tile": "8/224/101"
+          },
+          {
+            "value": 344927,
+            "tile": "8/222/100"
+          }
+        ]
+      },
+      {
+        "zoom": 9,
+        "all_categories_bound": false,
+        "grid_tiles": 3080,
+        "nonempty_tiles": 753,
+        "limit_exceed_tiles": 0,
+        "byte_limit_exceed_tiles": 0,
+        "top_count": [
+          {
+            "value": 13165,
+            "tile": "9/452/201"
+          },
+          {
+            "value": 13010,
+            "tile": "9/453/201"
+          },
+          {
+            "value": 12854,
+            "tile": "9/452/202"
+          },
+          {
+            "value": 12699,
+            "tile": "9/453/202"
+          },
+          {
+            "value": 12414,
+            "tile": "9/453/200"
+          },
+          {
+            "value": 12244,
+            "tile": "9/452/200"
+          },
+          {
+            "value": 12121,
+            "tile": "9/452/203"
+          },
+          {
+            "value": 12076,
+            "tile": "9/454/200"
+          },
+          {
+            "value": 12011,
+            "tile": "9/454/201"
+          },
+          {
+            "value": 11875,
+            "tile": "9/453/203"
+          },
+          {
+            "value": 11761,
+            "tile": "9/454/202"
+          },
+          {
+            "value": 11610,
+            "tile": "9/455/200"
+          }
+        ],
+        "top_bytes": [
+          {
+            "value": 2279615,
+            "tile": "9/452/201"
+          },
+          {
+            "value": 2264471,
+            "tile": "9/453/201"
+          },
+          {
+            "value": 2233677,
+            "tile": "9/452/202"
+          },
+          {
+            "value": 2217835,
+            "tile": "9/453/202"
+          },
+          {
+            "value": 2159890,
+            "tile": "9/453/200"
+          },
+          {
+            "value": 2128767,
+            "tile": "9/452/200"
+          },
+          {
+            "value": 2125589,
+            "tile": "9/452/203"
+          },
+          {
+            "value": 2109947,
+            "tile": "9/454/200"
+          },
+          {
+            "value": 2099714,
+            "tile": "9/454/201"
+          },
+          {
+            "value": 2097827,
+            "tile": "9/453/203"
+          },
+          {
+            "value": 2061891,
+            "tile": "9/454/202"
+          },
+          {
+            "value": 2040400,
+            "tile": "9/455/200"
+          }
+        ]
+      },
+      {
+        "zoom": 10,
+        "all_categories_bound": false,
+        "grid_tiles": 9800,
+        "nonempty_tiles": 1738,
+        "limit_exceed_tiles": 0,
+        "byte_limit_exceed_tiles": 0,
+        "top_count": [
+          {
+            "value": 10888,
+            "tile": "10/909/403"
+          },
+          {
+            "value": 10869,
+            "tile": "10/909/402"
+          },
+          {
+            "value": 10859,
+            "tile": "10/908/403"
+          },
+          {
+            "value": 10801,
+            "tile": "10/908/402"
+          },
+          {
+            "value": 10719,
+            "tile": "10/910/403"
+          },
+          {
+            "value": 10687,
+            "tile": "10/910/402"
+          },
+          {
+            "value": 10578,
+            "tile": "10/909/404"
+          },
+          {
+            "value": 10576,
+            "tile": "10/908/404"
+          },
+          {
+            "value": 10438,
+            "tile": "10/910/404"
+          },
+          {
+            "value": 10258,
+            "tile": "10/907/402"
+          },
+          {
+            "value": 10247,
+            "tile": "10/907/403"
+          },
+          {
+            "value": 10039,
+            "tile": "10/907/404"
+          }
+        ],
+        "top_bytes": [
+          {
+            "value": 1932910,
+            "tile": "10/909/403"
+          },
+          {
+            "value": 1928493,
+            "tile": "10/908/403"
+          },
+          {
+            "value": 1927966,
+            "tile": "10/909/402"
+          },
+          {
+            "value": 1917971,
+            "tile": "10/908/402"
+          },
+          {
+            "value": 1905095,
+            "tile": "10/910/403"
+          },
+          {
+            "value": 1899159,
+            "tile": "10/910/402"
+          },
+          {
+            "value": 1888438,
+            "tile": "10/909/404"
+          },
+          {
+            "value": 1888305,
+            "tile": "10/908/404"
+          },
+          {
+            "value": 1865021,
+            "tile": "10/910/404"
+          },
+          {
+            "value": 1831661,
+            "tile": "10/907/403"
+          },
+          {
+            "value": 1830477,
+            "tile": "10/907/402"
+          },
+          {
+            "value": 1802090,
+            "tile": "10/907/404"
+          }
+        ]
+      },
+      {
+        "zoom": 11,
+        "all_categories_bound": false,
+        "grid_tiles": 34780,
+        "nonempty_tiles": 4385,
+        "limit_exceed_tiles": 0,
+        "byte_limit_exceed_tiles": 0,
+        "top_count": [
+          {
+            "value": 11477,
+            "tile": "11/1818/806"
+          },
+          {
+            "value": 11451,
+            "tile": "11/1818/807"
+          },
+          {
+            "value": 11388,
+            "tile": "11/1817/806"
+          },
+          {
+            "value": 11150,
+            "tile": "11/1817/807"
+          },
+          {
+            "value": 10048,
+            "tile": "11/1819/807"
+          },
+          {
+            "value": 10004,
+            "tile": "11/1819/806"
+          },
+          {
+            "value": 9817,
+            "tile": "11/1817/805"
+          },
+          {
+            "value": 9783,
+            "tile": "11/1816/806"
+          },
+          {
+            "value": 9760,
+            "tile": "11/1818/805"
+          },
+          {
+            "value": 9551,
+            "tile": "11/1816/807"
+          },
+          {
+            "value": 9444,
+            "tile": "11/1818/808"
+          },
+          {
+            "value": 9213,
+            "tile": "11/1795/813"
+          }
+        ],
+        "top_bytes": [
+          {
+            "value": 2024454,
+            "tile": "11/1818/807"
+          },
+          {
+            "value": 2021942,
+            "tile": "11/1818/806"
+          },
+          {
+            "value": 2009585,
+            "tile": "11/1817/806"
+          },
+          {
+            "value": 1976526,
+            "tile": "11/1817/807"
+          },
+          {
+            "value": 1784186,
+            "tile": "11/1819/807"
+          },
+          {
+            "value": 1771915,
+            "tile": "11/1819/806"
+          },
+          {
+            "value": 1733573,
+            "tile": "11/1817/805"
+          },
+          {
+            "value": 1723451,
+            "tile": "11/1818/805"
+          },
+          {
+            "value": 1717447,
+            "tile": "11/1816/806"
+          },
+          {
+            "value": 1684115,
+            "tile": "11/1816/807"
+          },
+          {
+            "value": 1674419,
+            "tile": "11/1818/808"
+          },
+          {
+            "value": 1633116,
+            "tile": "11/1817/808"
+          }
+        ]
+      },
+      {
+        "zoom": 12,
+        "all_categories_bound": false,
+        "grid_tiles": 130670,
+        "nonempty_tiles": 12226,
+        "limit_exceed_tiles": 0,
+        "byte_limit_exceed_tiles": 0,
+        "top_count": [
+          {
+            "value": 6515,
+            "tile": "12/3635/1614"
+          },
+          {
+            "value": 6461,
+            "tile": "12/3637/1612"
+          },
+          {
+            "value": 6368,
+            "tile": "12/3636/1612"
+          },
+          {
+            "value": 6335,
+            "tile": "12/3636/1614"
+          },
+          {
+            "value": 6325,
+            "tile": "12/3636/1613"
+          },
+          {
+            "value": 6035,
+            "tile": "12/3635/1613"
+          },
+          {
+            "value": 5957,
+            "tile": "12/3637/1613"
+          },
+          {
+            "value": 5955,
+            "tile": "12/3637/1611"
+          },
+          {
+            "value": 5872,
+            "tile": "12/3635/1612"
+          },
+          {
+            "value": 5795,
+            "tile": "12/3636/1611"
+          },
+          {
+            "value": 5573,
+            "tile": "12/3637/1614"
+          },
+          {
+            "value": 5439,
+            "tile": "12/3638/1612"
+          }
+        ],
+        "top_bytes": [
+          {
+            "value": 1178374,
+            "tile": "12/3635/1614"
+          },
+          {
+            "value": 1166588,
+            "tile": "12/3637/1612"
+          },
+          {
+            "value": 1157681,
+            "tile": "12/3636/1614"
+          },
+          {
+            "value": 1156006,
+            "tile": "12/3636/1613"
+          },
+          {
+            "value": 1145930,
+            "tile": "12/3636/1612"
+          },
+          {
+            "value": 1101438,
+            "tile": "12/3635/1613"
+          },
+          {
+            "value": 1097154,
+            "tile": "12/3637/1613"
+          },
+          {
+            "value": 1055274,
+            "tile": "12/3635/1612"
+          },
+          {
+            "value": 1054741,
+            "tile": "12/3637/1611"
+          },
+          {
+            "value": 1029209,
+            "tile": "12/3637/1614"
+          },
+          {
+            "value": 1021077,
+            "tile": "12/3636/1611"
+          },
+          {
+            "value": 975846,
+            "tile": "12/3638/1612"
+          }
+        ]
+      },
+      {
+        "zoom": 13,
+        "all_categories_bound": false,
+        "grid_tiles": 505472,
+        "nonempty_tiles": 37523,
+        "limit_exceed_tiles": 0,
+        "byte_limit_exceed_tiles": 0,
+        "top_count": [
+          {
+            "value": 2979,
+            "tile": "13/7275/3225"
+          },
+          {
+            "value": 2964,
+            "tile": "13/7312/3009"
+          },
+          {
+            "value": 2960,
+            "tile": "13/7274/3226"
+          },
+          {
+            "value": 2945,
+            "tile": "13/7274/3225"
+          },
+          {
+            "value": 2932,
+            "tile": "13/7275/3226"
+          },
+          {
+            "value": 2885,
+            "tile": "13/7312/3008"
+          },
+          {
+            "value": 2855,
+            "tile": "13/7313/3009"
+          },
+          {
+            "value": 2825,
+            "tile": "13/7273/3226"
+          },
+          {
+            "value": 2803,
+            "tile": "13/7276/3225"
+          },
+          {
+            "value": 2800,
+            "tile": "13/7273/3225"
+          },
+          {
+            "value": 2795,
+            "tile": "13/7313/3008"
+          },
+          {
+            "value": 2739,
+            "tile": "13/7274/3227"
+          }
+        ],
+        "top_bytes": [
+          {
+            "value": 545146,
+            "tile": "13/7274/3226"
+          },
+          {
+            "value": 542564,
+            "tile": "13/7275/3225"
+          },
+          {
+            "value": 540147,
+            "tile": "13/7274/3225"
+          },
+          {
+            "value": 535912,
+            "tile": "13/7275/3226"
+          },
+          {
+            "value": 525321,
+            "tile": "13/7273/3226"
+          },
+          {
+            "value": 517833,
+            "tile": "13/7273/3225"
+          },
+          {
+            "value": 509982,
+            "tile": "13/7276/3225"
+          },
+          {
+            "value": 506477,
+            "tile": "13/7274/3227"
+          },
+          {
+            "value": 495708,
+            "tile": "13/7273/3227"
+          },
+          {
+            "value": 488338,
+            "tile": "13/7275/3224"
+          },
+          {
+            "value": 486307,
+            "tile": "13/7276/3226"
+          },
+          {
+            "value": 478290,
+            "tile": "13/7276/3224"
+          }
+        ]
+      },
+      {
+        "zoom": 14,
+        "all_categories_bound": false,
+        "grid_tiles": 1987875,
+        "nonempty_tiles": 125859,
+        "limit_exceed_tiles": 0,
+        "byte_limit_exceed_tiles": 0,
+        "top_count": [
+          {
+            "value": 5307,
+            "tile": "14/14625/6016"
+          },
+          {
+            "value": 5303,
+            "tile": "14/14624/6015"
+          },
+          {
+            "value": 5294,
+            "tile": "14/14625/6015"
+          },
+          {
+            "value": 5109,
+            "tile": "14/14624/6016"
+          },
+          {
+            "value": 5030,
+            "tile": "14/14626/6016"
+          },
+          {
+            "value": 4901,
+            "tile": "14/14624/6014"
+          },
+          {
+            "value": 4820,
+            "tile": "14/14626/6015"
+          },
+          {
+            "value": 4767,
+            "tile": "14/14625/6014"
+          },
+          {
+            "value": 4764,
+            "tile": "14/14625/6017"
+          },
+          {
+            "value": 4724,
+            "tile": "14/14623/6015"
+          },
+          {
+            "value": 4697,
+            "tile": "14/14623/6014"
+          },
+          {
+            "value": 4625,
+            "tile": "14/14626/6017"
+          }
+        ],
+        "top_bytes": [
+          {
+            "value": 1001047,
+            "tile": "14/14624/6015"
+          },
+          {
+            "value": 992844,
+            "tile": "14/14625/6015"
+          },
+          {
+            "value": 976247,
+            "tile": "14/14625/6016"
+          },
+          {
+            "value": 945432,
+            "tile": "14/14624/6016"
+          },
+          {
+            "value": 938242,
+            "tile": "14/14624/6014"
+          },
+          {
+            "value": 914337,
+            "tile": "14/14626/6016"
+          },
+          {
+            "value": 910204,
+            "tile": "14/14625/6014"
+          },
+          {
+            "value": 895948,
+            "tile": "14/14623/6014"
+          },
+          {
+            "value": 893137,
+            "tile": "14/14626/6015"
+          },
+          {
+            "value": 892096,
+            "tile": "14/14623/6015"
+          },
+          {
+            "value": 859685,
+            "tile": "14/14625/6017"
+          },
+          {
+            "value": 827826,
+            "tile": "14/14369/6489"
+          }
+        ]
+      },
+      {
+        "zoom": 14,
+        "all_categories_bound": true,
+        "grid_tiles": 1987875,
+        "nonempty_tiles": 125859,
+        "limit_exceed_tiles": 0,
+        "byte_limit_exceed_tiles": 0,
+        "top_count": [
+          {
+            "value": 5307,
+            "tile": "14/14625/6016"
+          },
+          {
+            "value": 5303,
+            "tile": "14/14624/6015"
+          },
+          {
+            "value": 5294,
+            "tile": "14/14625/6015"
+          },
+          {
+            "value": 5109,
+            "tile": "14/14624/6016"
+          },
+          {
+            "value": 5030,
+            "tile": "14/14626/6016"
+          },
+          {
+            "value": 4901,
+            "tile": "14/14624/6014"
+          },
+          {
+            "value": 4820,
+            "tile": "14/14626/6015"
+          },
+          {
+            "value": 4767,
+            "tile": "14/14625/6014"
+          },
+          {
+            "value": 4766,
+            "tile": "14/14625/6017"
+          },
+          {
+            "value": 4724,
+            "tile": "14/14623/6015"
+          },
+          {
+            "value": 4697,
+            "tile": "14/14623/6014"
+          },
+          {
+            "value": 4627,
+            "tile": "14/14626/6017"
+          }
+        ],
+        "top_bytes": [
+          {
+            "value": 1001047,
+            "tile": "14/14624/6015"
+          },
+          {
+            "value": 992844,
+            "tile": "14/14625/6015"
+          },
+          {
+            "value": 976247,
+            "tile": "14/14625/6016"
+          },
+          {
+            "value": 945432,
+            "tile": "14/14624/6016"
+          },
+          {
+            "value": 938242,
+            "tile": "14/14624/6014"
+          },
+          {
+            "value": 914337,
+            "tile": "14/14626/6016"
+          },
+          {
+            "value": 910204,
+            "tile": "14/14625/6014"
+          },
+          {
+            "value": 895948,
+            "tile": "14/14623/6014"
+          },
+          {
+            "value": 893137,
+            "tile": "14/14626/6015"
+          },
+          {
+            "value": 892096,
+            "tile": "14/14623/6015"
+          },
+          {
+            "value": 859937,
+            "tile": "14/14625/6017"
+          },
+          {
+            "value": 827973,
+            "tile": "14/14369/6489"
+          }
+        ]
+      }
+    ],
+    "road_rows_scanned": 10668302,
+    "name_rows_scanned": 529313,
+    "road_name_proof_and_limitations": {
+      "database_rows": "Every one of 10,668,302 road R-tree rows and 529,313 name R-tree rows was processed once; source opened mode=ro&immutable=1 and query_only.",
+      "road_0_5": "The renderer returns no road candidates below zoom 6.",
+      "road_6_9": "Exact full coverage of all tile coordinates intersecting source bounds plus query margin; Style::visible includes one-zoom link delay.",
+      "road_10_22": "All road categories at zoom 10 give a conservative upper bound for each finer tile: every fine query rectangle is inside its zoom-10 parent query rectangle. Maximum 368,934 < 1,000,000.",
+      "names_0_4": "No category is visible below zoom 5.",
+      "names_5_13": "Exact full candidate count and in-memory byte accounting on all source-covered tiles; category minimum zoom and fixed-cell label query bounds included.",
+      "names_14_22": "All 24 categories at zoom 14 bound every finer tile, as each fine label query is inside its parent label query. Maximum 5,307 candidates / 1,001,047 bytes.",
+      "single_tile_name_query": "At 256px, label_query_bounds is [(x-2)/2^z,(x+3)/2^z] times the same y bounds, clamped to 0..1. Outward-rounded SQLite R-tree coordinates are used.",
+      "limits_accounted": "Road candidate keys <=1,000,000; label candidates <=100,000; names bytes+112 bytes per LabelCandidate <=16MiB. sizeof values independently confirmed by parent Rust SDK runner.",
+      "limitations": "This is exhaustive candidate-count/byte accounting with conservative high-zoom bounds, not exhaustive PNG rendering. It does not prove every tile avoids rendering work/time/crossing limits or name glyph/shape limits; these require SDK stress rendering. The MAX_LAYOUTS count is separately bounded by layout_count_bound."
+    },
+    "candidate_sql_spot_checks": [
+      {
+        "kind": "roads",
+        "tile": "6/56/25",
+        "all_categories_bound": false,
+        "count": 21650,
+        "sql_matches": true
+      },
+      {
+        "kind": "roads",
+        "tile": "7/113/50",
+        "all_categories_bound": false,
+        "count": 49414,
+        "sql_matches": true
+      },
+      {
+        "kind": "roads",
+        "tile": "8/227/100",
+        "all_categories_bound": false,
+        "count": 51578,
+        "sql_matches": true
+      },
+      {
+        "kind": "roads",
+        "tile": "9/454/201",
+        "all_categories_bound": false,
+        "count": 33871,
+        "sql_matches": true
+      },
+      {
+        "kind": "roads",
+        "tile": "10/909/403",
+        "all_categories_bound": true,
+        "count": 368934,
+        "sql_matches": true
+      },
+      {
+        "kind": "labels",
+        "tile": "5/29/13",
+        "all_categories_bound": false,
+        "count": 819,
+        "bytes": 143601,
+        "sql_matches": true
+      },
+      {
+        "kind": "labels",
+        "tile": "6/56/25",
+        "all_categories_bound": false,
+        "count": 818,
+        "bytes": 143426,
+        "sql_matches": true
+      },
+      {
+        "kind": "labels",
+        "tile": "7/112/50",
+        "all_categories_bound": false,
+        "count": 4060,
+        "bytes": 620609,
+        "sql_matches": true
+      },
+      {
+        "kind": "labels",
+        "tile": "8/222/102",
+        "all_categories_bound": false,
+        "count": 2929,
+        "bytes": 451699,
+        "sql_matches": true
+      },
+      {
+        "kind": "labels",
+        "tile": "9/452/201",
+        "all_categories_bound": false,
+        "count": 13165,
+        "bytes": 2279615,
+        "sql_matches": true
+      },
+      {
+        "kind": "labels",
+        "tile": "10/909/403",
+        "all_categories_bound": false,
+        "count": 10888,
+        "bytes": 1932910,
+        "sql_matches": true
+      },
+      {
+        "kind": "labels",
+        "tile": "11/1818/806",
+        "all_categories_bound": false,
+        "count": 11477,
+        "bytes": 2021942,
+        "sql_matches": true
+      },
+      {
+        "kind": "labels",
+        "tile": "11/1818/807",
+        "all_categories_bound": false,
+        "count": 11451,
+        "bytes": 2024454,
+        "sql_matches": true
+      },
+      {
+        "kind": "labels",
+        "tile": "12/3635/1614",
+        "all_categories_bound": false,
+        "count": 6515,
+        "bytes": 1178374,
+        "sql_matches": true
+      },
+      {
+        "kind": "labels",
+        "tile": "13/7274/3226",
+        "all_categories_bound": false,
+        "count": 2960,
+        "bytes": 545146,
+        "sql_matches": true
+      },
+      {
+        "kind": "labels",
+        "tile": "13/7275/3225",
+        "all_categories_bound": false,
+        "count": 2979,
+        "bytes": 542564,
+        "sql_matches": true
+      },
+      {
+        "kind": "labels",
+        "tile": "14/14624/6015",
+        "all_categories_bound": false,
+        "count": 5303,
+        "bytes": 1001047,
+        "sql_matches": true
+      },
+      {
+        "kind": "labels",
+        "tile": "14/14625/6016",
+        "all_categories_bound": false,
+        "count": 5307,
+        "bytes": 976247,
+        "sql_matches": true
+      },
+      {
+        "kind": "labels",
+        "tile": "14/14624/6015",
+        "all_categories_bound": true,
+        "count": 5303,
+        "bytes": 1001047,
+        "sql_matches": true
+      },
+      {
+        "kind": "labels",
+        "tile": "14/14625/6016",
+        "all_categories_bound": true,
+        "count": 5307,
+        "bytes": 976247,
+        "sql_matches": true
+      }
+    ],
+    "label_layout_count_bound": {
+      "source_rtree_rounding_max_normalized": [
+        1.1920927267539128e-07,
+        1.1920927245334667e-07,
+        5.9604631730270086e-08,
+        5.960463927978665e-08
+      ],
+      "source_rtree_rounding_max_pixels_at_zoom22": [
+        127.99998188018799,
+        127.99998164176941,
+        63.99998599290848,
+        63.99999409914017
+      ],
+      "cell_size_pixels": 128,
+      "cell_limit": 16,
+      "max_query_cells_per_axis": 12,
+      "max_layout_candidates_after_cell_limit": 2304,
+      "layout_limit": 4096,
+      "layout_limit_exceeded": false,
+      "scope": "All 529313 stored anchors and z0..22, 256x256 single-tile rendering; glyph count/shape errors are separate."
+    },
+    "single_road_geometry_bound": {
+      "road_records": 10668302,
+      "max_base_point_count": 1674,
+      "max_base_geometry_bytes": 26784,
+      "single_geometry_point_limit": 1000000,
+      "single_geometry_byte_limit": 16000000,
+      "exceeds_point_limit": false,
+      "exceeds_byte_limit": false,
+      "elapsed_seconds": 2.7660000000032596,
+      "source_unchanged": true,
+      "scope": "One metadata-only aggregate over all base features; no geometry_lod table scan.",
+      "lod_inference": "Importer constructs each LOD by simplifying base road vertices, preserving a subset of input vertices. LOD count cannot exceed base count under that import rule; this is a rule-based bound, not a readback audit of all LOD rows."
+    }
+  },
+  "low_zoom_query_plan_evidence": {
+    "method": "sqlite_master metadata and EXPLAIN only; no feature scan",
+    "findings": [
+      "All five passes scan the matching R-tree range, seek each feature row by primary key, and use a temporary B-tree for ordering.",
+      "There is no min_zoom/kind-first covering index, so invisible buildings still cause feature-row lookups before the min_zoom/pass filter.",
+      "For world/near-world low zoom ranges, the R-tree range contains almost all geometries; sorting is blocking, so the first visible feature is not returned until the scan completes.",
+      "The existing UNIQUE(osm_type,osm_id,role,kind) index supports an osm_type=3 prefix search for current importer landmask rows, but this cannot be assumed for arbitrary valid completed datasets without a compatibility strategy."
+    ],
+    "indexes": [
+      [
+        "sqlite_autoindex_standard_features_1",
+        null
+      ]
+    ],
+    "passes": [
+      {
+        "pass": 0,
+        "query_plan": [
+          [
+            4,
+            0,
+            0,
+            "SCAN r VIRTUAL TABLE INDEX 2:B0D1B2D3"
+          ],
+          [
+            12,
+            0,
+            0,
+            "SEARCH f USING INTEGER PRIMARY KEY (rowid=?)"
+          ],
+          [
+            207,
+            0,
+            0,
+            "USE TEMP B-TREE FOR ORDER BY"
+          ]
+        ]
+      },
+      {
+        "pass": 1,
+        "query_plan": [
+          [
+            4,
+            0,
+            0,
+            "SCAN r VIRTUAL TABLE INDEX 2:B0D1B2D3"
+          ],
+          [
+            12,
+            0,
+            0,
+            "SEARCH f USING INTEGER PRIMARY KEY (rowid=?)"
+          ],
+          [
+            207,
+            0,
+            0,
+            "USE TEMP B-TREE FOR ORDER BY"
+          ]
+        ]
+      },
+      {
+        "pass": 2,
+        "query_plan": [
+          [
+            4,
+            0,
+            0,
+            "SCAN r VIRTUAL TABLE INDEX 2:B0D1B2D3"
+          ],
+          [
+            12,
+            0,
+            0,
+            "SEARCH f USING INTEGER PRIMARY KEY (rowid=?)"
+          ],
+          [
+            207,
+            0,
+            0,
+            "USE TEMP B-TREE FOR ORDER BY"
+          ]
+        ]
+      },
+      {
+        "pass": 3,
+        "query_plan": [
+          [
+            4,
+            0,
+            0,
+            "SCAN r VIRTUAL TABLE INDEX 2:B0D1B2D3"
+          ],
+          [
+            12,
+            0,
+            0,
+            "SEARCH f USING INTEGER PRIMARY KEY (rowid=?)"
+          ],
+          [
+            207,
+            0,
+            0,
+            "USE TEMP B-TREE FOR ORDER BY"
+          ]
+        ]
+      },
+      {
+        "pass": 4,
+        "query_plan": [
+          [
+            4,
+            0,
+            0,
+            "SCAN r VIRTUAL TABLE INDEX 2:B0D1B2D3"
+          ],
+          [
+            12,
+            0,
+            0,
+            "SEARCH f USING INTEGER PRIMARY KEY (rowid=?)"
+          ],
+          [
+            207,
+            0,
+            0,
+            "USE TEMP B-TREE FOR ORDER BY"
+          ]
+        ]
+      }
+    ]
+  },
+  "measured_tiles": [
+    {
+      "tile": "0/0/0",
+      "ok": false,
+      "seconds": 120.0017468,
+      "error_kind": "DeadlineExceeded",
+      "error": "RenderError {\n    kind: DeadlineExceeded,\n    message: \"標準地図の描画に失敗しました\",\n    source: Some(\n        SqliteFailure(\n            Error {\n                code: OperationInterrupted,\n                extended_code: 9,\n            },\n            Some(\n                \"interrupted\",\n            ),\n        ),\n    ),\n}",
+      "result_file": "base-results.ndjson",
+      "result_line": 2,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "deadline_sql_query",
+      "sqlite_code": "OperationInterrupted"
+    },
+    {
+      "tile": "1/1/0",
+      "ok": false,
+      "seconds": 120.0012215,
+      "error_kind": "DeadlineExceeded",
+      "error": "RenderError {\n    kind: DeadlineExceeded,\n    message: \"標準地図の描画に失敗しました\",\n    source: Some(\n        SqliteFailure(\n            Error {\n                code: OperationInterrupted,\n                extended_code: 9,\n            },\n            Some(\n                \"interrupted\",\n            ),\n        ),\n    ),\n}",
+      "result_file": "base-results.ndjson",
+      "result_line": 1,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "deadline_sql_query",
+      "sqlite_code": "OperationInterrupted"
+    },
+    {
+      "tile": "2/3/1",
+      "ok": false,
+      "seconds": 120.000138,
+      "error_kind": "DeadlineExceeded",
+      "error": "RenderError {\n    kind: DeadlineExceeded,\n    message: \"標準地図の描画に失敗しました\",\n    source: Some(\n        SqliteFailure(\n            Error {\n                code: OperationInterrupted,\n                extended_code: 9,\n            },\n            Some(\n                \"interrupted\",\n            ),\n        ),\n    ),\n}",
+      "result_file": "base-results.ndjson",
+      "result_line": 3,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "deadline_sql_query",
+      "sqlite_code": "OperationInterrupted"
+    },
+    {
+      "tile": "3/6/3",
+      "ok": true,
+      "seconds": 92.1774789,
+      "candidates": 54920,
+      "vertices": 344129,
+      "png_bytes": 3886,
+      "result_file": "extra-results.ndjson",
+      "result_line": 11,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "3/7/3",
+      "ok": false,
+      "seconds": 120.0012237,
+      "error_kind": "DeadlineExceeded",
+      "error": "RenderError {\n    kind: DeadlineExceeded,\n    message: \"標準地図の描画に失敗しました\",\n    source: Some(\n        SqliteFailure(\n            Error {\n                code: OperationInterrupted,\n                extended_code: 9,\n            },\n            Some(\n                \"interrupted\",\n            ),\n        ),\n    ),\n}",
+      "result_file": "base-results.ndjson",
+      "result_line": 4,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "deadline_sql_query",
+      "sqlite_code": "OperationInterrupted"
+    },
+    {
+      "tile": "4/13/6",
+      "ok": true,
+      "seconds": 72.2838107,
+      "candidates": 50197,
+      "vertices": 355680,
+      "png_bytes": 7535,
+      "result_file": "extra-results.ndjson",
+      "result_line": 10,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "4/14/6",
+      "ok": false,
+      "seconds": 120.0058613,
+      "error_kind": "DeadlineExceeded",
+      "error": "RenderError {\n    kind: DeadlineExceeded,\n    message: \"標準地図の描画に失敗しました\",\n    source: Some(\n        SqliteFailure(\n            Error {\n                code: OperationInterrupted,\n                extended_code: 9,\n            },\n            Some(\n                \"interrupted\",\n            ),\n        ),\n    ),\n}",
+      "result_file": "base-results.ndjson",
+      "result_line": 6,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "deadline_sql_query",
+      "sqlite_code": "OperationInterrupted"
+    },
+    {
+      "tile": "5/27/12",
+      "ok": true,
+      "seconds": 52.8399285,
+      "candidates": 36363,
+      "vertices": 307484,
+      "png_bytes": 13127,
+      "result_file": "extra-results.ndjson",
+      "result_line": 12,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "5/28/12",
+      "ok": false,
+      "seconds": 120.0026918,
+      "error_kind": "DeadlineExceeded",
+      "error": "RenderError {\n    kind: DeadlineExceeded,\n    message: \"標準地図の描画に失敗しました\",\n    source: Some(\n        SqliteFailure(\n            Error {\n                code: OperationInterrupted,\n                extended_code: 9,\n            },\n            Some(\n                \"interrupted\",\n            ),\n        ),\n    ),\n}",
+      "result_file": "base-results.ndjson",
+      "result_line": 5,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "deadline_sql_query",
+      "sqlite_code": "OperationInterrupted"
+    },
+    {
+      "tile": "5/29/13",
+      "ok": true,
+      "seconds": 0.7023407,
+      "candidates": 820,
+      "vertices": 4,
+      "png_bytes": 836,
+      "result_file": "extra-results.ndjson",
+      "result_line": 1,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "6/55/25",
+      "ok": true,
+      "seconds": 49.1259939,
+      "candidates": 229770,
+      "vertices": 4917577,
+      "png_bytes": 60793,
+      "result_file": "extra-results.ndjson",
+      "result_line": 22,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "6/56/25",
+      "ok": false,
+      "seconds": 120.00152,
+      "error_kind": "DeadlineExceeded",
+      "error": "RenderError {\n    kind: DeadlineExceeded,\n    message: \"標準地図の描画に失敗しました\",\n    source: Some(\n        SqliteFailure(\n            Error {\n                code: OperationInterrupted,\n                extended_code: 9,\n            },\n            Some(\n                \"interrupted\",\n            ),\n        ),\n    ),\n}",
+      "result_file": "base-results.ndjson",
+      "result_line": 12,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "deadline_sql_query",
+      "sqlite_code": "OperationInterrupted"
+    },
+    {
+      "tile": "7/108/55",
+      "ok": true,
+      "seconds": 0.2407455,
+      "candidates": 2172,
+      "vertices": 22105,
+      "png_bytes": 3513,
+      "result_file": "base-results.ndjson",
+      "result_line": 7,
+      "regions": [
+        "remote_ishigaki"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "7/109/54",
+      "ok": true,
+      "seconds": 2.3785105,
+      "candidates": 10649,
+      "vertices": 148372,
+      "png_bytes": 8654,
+      "result_file": "base-results.ndjson",
+      "result_line": 8,
+      "regions": [
+        "okinawa_naha"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "7/110/51",
+      "ok": true,
+      "seconds": 30.586549,
+      "candidates": 129616,
+      "vertices": 2159987,
+      "png_bytes": 94785,
+      "result_file": "base-results.ndjson",
+      "result_line": 9,
+      "regions": [
+        "kyushu_fukuoka"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "7/110/52",
+      "ok": true,
+      "seconds": 6.6530299,
+      "candidates": 28922,
+      "vertices": 373536,
+      "png_bytes": 31575,
+      "result_file": "base-results.ndjson",
+      "result_line": 10,
+      "regions": [
+        "kyushu_kagoshima"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "7/111/50",
+      "ok": true,
+      "seconds": 40.5385064,
+      "candidates": 99386,
+      "vertices": 2184066,
+      "png_bytes": 75537,
+      "result_file": "base-results.ndjson",
+      "result_line": 11,
+      "regions": [
+        "chugoku_hiroshima",
+        "shikoku_takamatsu"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "7/112/50",
+      "ok": false,
+      "seconds": 74.394295,
+      "error_kind": "Render",
+      "error": "RenderError {\n    kind: Render,\n    message: \"標準地図の描画に失敗しました\",\n    source: Some(\n        \"地図描画の演算量上限を超えました\",\n    ),\n}",
+      "result_file": "base-results.ndjson",
+      "result_line": 14,
+      "regions": [
+        "chubu_nagoya",
+        "kinki_osaka"
+      ],
+      "root_cause_class": "render_work_limit",
+      "sqlite_code": null
+    },
+    {
+      "tile": "7/113/49",
+      "ok": true,
+      "seconds": 24.3971609,
+      "candidates": 70039,
+      "vertices": 1756333,
+      "png_bytes": 89031,
+      "result_file": "base-results.ndjson",
+      "result_line": 13,
+      "regions": [
+        "hokuriku_niigata"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "7/113/50",
+      "ok": false,
+      "seconds": 71.3155798,
+      "error_kind": "Render",
+      "error": "RenderError {\n    kind: Render,\n    message: \"標準地図の描画に失敗しました\",\n    source: Some(\n        \"地図描画の演算量上限を超えました\",\n    ),\n}",
+      "result_file": "base-results.ndjson",
+      "result_line": 22,
+      "regions": [
+        "chubu_fuji",
+        "chubu_matsumoto",
+        "kanto_tokyo",
+        "kanto_yokohama"
+      ],
+      "root_cause_class": "render_work_limit",
+      "sqlite_code": null
+    },
+    {
+      "tile": "7/114/45",
+      "ok": true,
+      "seconds": 0.8244475,
+      "candidates": 3094,
+      "vertices": 74238,
+      "png_bytes": 9470,
+      "result_file": "base-results.ndjson",
+      "result_line": 15,
+      "regions": [
+        "remote_wakkanai"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "7/114/47",
+      "ok": true,
+      "seconds": 15.6475119,
+      "candidates": 31813,
+      "vertices": 607917,
+      "png_bytes": 54027,
+      "result_file": "base-results.ndjson",
+      "result_line": 16,
+      "regions": [
+        "hokkaido_sapporo"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "7/114/48",
+      "ok": true,
+      "seconds": 14.9336989,
+      "candidates": 48452,
+      "vertices": 1151979,
+      "png_bytes": 59730,
+      "result_file": "base-results.ndjson",
+      "result_line": 17,
+      "regions": [
+        "tohoku_aomori"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "7/114/49",
+      "ok": true,
+      "seconds": 15.2532262,
+      "candidates": 37051,
+      "vertices": 731607,
+      "png_bytes": 28631,
+      "result_file": "base-results.ndjson",
+      "result_line": 18,
+      "regions": [
+        "tohoku_sendai"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "7/114/53",
+      "ok": true,
+      "seconds": 0.1108156,
+      "candidates": 1784,
+      "vertices": 6253,
+      "png_bytes": 3536,
+      "result_file": "base-results.ndjson",
+      "result_line": 19,
+      "regions": [
+        "remote_chichijima"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "7/115/47",
+      "ok": true,
+      "seconds": 1.9748187000000001,
+      "candidates": 6514,
+      "vertices": 166619,
+      "png_bytes": 10195,
+      "result_file": "base-results.ndjson",
+      "result_line": 20,
+      "regions": [
+        "hokkaido_kushiro"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "7/118/55",
+      "ok": true,
+      "seconds": 0.0085133,
+      "candidates": 5,
+      "vertices": 16,
+      "png_bytes": 2136,
+      "result_file": "base-results.ndjson",
+      "result_line": 21,
+      "regions": [
+        "remote_minamitorishima"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "8/222/102",
+      "ok": true,
+      "seconds": 6.975054,
+      "candidates": 30080,
+      "vertices": 825382,
+      "png_bytes": 94454,
+      "result_file": "extra-results.ndjson",
+      "result_line": 3,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "8/227/100",
+      "ok": false,
+      "seconds": 45.8494012,
+      "error_kind": "Render",
+      "error": "RenderError {\n    kind: Render,\n    message: \"標準地図の描画に失敗しました\",\n    source: Some(\n        \"地図描画の演算量上限を超えました\",\n    ),\n}",
+      "result_file": "base-results.ndjson",
+      "result_line": 23,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "render_work_limit",
+      "sqlite_code": null
+    },
+    {
+      "tile": "9/452/201",
+      "ok": true,
+      "seconds": 2.9899118,
+      "candidates": 22660,
+      "vertices": 193513,
+      "png_bytes": 84200,
+      "result_file": "extra-results.ndjson",
+      "result_line": 2,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "9/454/201",
+      "ok": true,
+      "seconds": 43.3134723,
+      "candidates": 93494,
+      "vertices": 527156,
+      "png_bytes": 161100,
+      "result_file": "base-results.ndjson",
+      "result_line": 24,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "10/904/406",
+      "ok": true,
+      "seconds": 5.2028366,
+      "candidates": 107094,
+      "vertices": 571636,
+      "png_bytes": 127180,
+      "result_file": "extra-results.ndjson",
+      "result_line": 13,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "10/909/403",
+      "ok": true,
+      "seconds": 20.8639246,
+      "candidates": 90076,
+      "vertices": 377865,
+      "png_bytes": 133654,
+      "result_file": "base-results.ndjson",
+      "result_line": 27,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "11/1818/806",
+      "ok": true,
+      "seconds": 7.6119029000000005,
+      "candidates": 37507,
+      "vertices": 139568,
+      "png_bytes": 145277,
+      "result_file": "extra-results.ndjson",
+      "result_line": 4,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "11/1818/807",
+      "ok": true,
+      "seconds": 5.4677408,
+      "candidates": 38871,
+      "vertices": 149312,
+      "png_bytes": 140062,
+      "result_file": "extra-results.ndjson",
+      "result_line": 5,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "11/1819/806",
+      "ok": true,
+      "seconds": 6.0779357,
+      "candidates": 37131,
+      "vertices": 147667,
+      "png_bytes": 129606,
+      "result_file": "base-results.ndjson",
+      "result_line": 25,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "12/3531/1641",
+      "ok": true,
+      "seconds": 2.5687972,
+      "candidates": 9609,
+      "vertices": 58662,
+      "png_bytes": 62850,
+      "result_file": "base-results.ndjson",
+      "result_line": 57,
+      "regions": [
+        "kyushu_fukuoka"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "12/3589/1626",
+      "ok": true,
+      "seconds": 5.7161819000000005,
+      "candidates": 23319,
+      "vertices": 96995,
+      "png_bytes": 106525,
+      "result_file": "base-results.ndjson",
+      "result_line": 58,
+      "regions": [
+        "kinki_osaka"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "12/3605/1619",
+      "ok": true,
+      "seconds": 5.0982879,
+      "candidates": 25193,
+      "vertices": 88494,
+      "png_bytes": 93076,
+      "result_file": "base-results.ndjson",
+      "result_line": 59,
+      "regions": [
+        "chubu_nagoya"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "12/3635/1614",
+      "ok": true,
+      "seconds": 4.5209785,
+      "candidates": 21093,
+      "vertices": 99270,
+      "png_bytes": 102229,
+      "result_file": "extra-results.ndjson",
+      "result_line": 9,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "12/3636/1616",
+      "ok": true,
+      "seconds": 4.0021923,
+      "candidates": 16890,
+      "vertices": 93730,
+      "png_bytes": 102123,
+      "result_file": "base-results.ndjson",
+      "result_line": 61,
+      "regions": [
+        "kanto_yokohama"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "12/3638/1612",
+      "ok": true,
+      "seconds": 4.4486752,
+      "candidates": 22682,
+      "vertices": 98986,
+      "png_bytes": 114268,
+      "result_file": "base-results.ndjson",
+      "result_line": 26,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "13/7063/3283",
+      "ok": true,
+      "seconds": 0.975945,
+      "candidates": 4453,
+      "vertices": 39115,
+      "png_bytes": 107506,
+      "result_file": "base-results.ndjson",
+      "result_line": 60,
+      "regions": [
+        "kyushu_fukuoka"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "13/7179/3253",
+      "ok": true,
+      "seconds": 1.1444919,
+      "candidates": 8081,
+      "vertices": 32884,
+      "png_bytes": 95666,
+      "result_file": "base-results.ndjson",
+      "result_line": 62,
+      "regions": [
+        "kinki_osaka"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "13/7211/3239",
+      "ok": true,
+      "seconds": 1.1998708,
+      "candidates": 4873,
+      "vertices": 18574,
+      "png_bytes": 81274,
+      "result_file": "base-results.ndjson",
+      "result_line": 63,
+      "regions": [
+        "chubu_nagoya"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "13/7273/3232",
+      "ok": true,
+      "seconds": 1.1541174,
+      "candidates": 4470,
+      "vertices": 40519,
+      "png_bytes": 101869,
+      "result_file": "base-results.ndjson",
+      "result_line": 64,
+      "regions": [
+        "kanto_yokohama"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "13/7274/3226",
+      "ok": true,
+      "seconds": 1.5690846,
+      "candidates": 7388,
+      "vertices": 41511,
+      "png_bytes": 107597,
+      "result_file": "extra-results.ndjson",
+      "result_line": 6,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "13/7275/3225",
+      "ok": true,
+      "seconds": 1.0419683,
+      "candidates": 7266,
+      "vertices": 42425,
+      "png_bytes": 101240,
+      "result_file": "extra-results.ndjson",
+      "result_line": 7,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "13/7276/3225",
+      "ok": true,
+      "seconds": 1.3873806,
+      "candidates": 8648,
+      "vertices": 48027,
+      "png_bytes": 104472,
+      "result_file": "base-results.ndjson",
+      "result_line": 29,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/13842/7049",
+      "ok": true,
+      "seconds": 0.4641076,
+      "candidates": 6169,
+      "vertices": 45502,
+      "png_bytes": 86912,
+      "result_file": "base-results.ndjson",
+      "result_line": 28,
+      "regions": [
+        "remote_ishigaki"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14002/6955",
+      "ok": true,
+      "seconds": 1.1078007,
+      "candidates": 9712,
+      "vertices": 79694,
+      "png_bytes": 122179,
+      "result_file": "base-results.ndjson",
+      "result_line": 30,
+      "regions": [
+        "okinawa_naha"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14126/6567",
+      "ok": true,
+      "seconds": 0.9588653,
+      "candidates": 11649,
+      "vertices": 91561,
+      "png_bytes": 134639,
+      "result_file": "base-results.ndjson",
+      "result_line": 31,
+      "regions": [
+        "kyushu_fukuoka"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14133/6675",
+      "ok": true,
+      "seconds": 2.0396711,
+      "candidates": 16346,
+      "vertices": 128144,
+      "png_bytes": 130910,
+      "result_file": "base-results.ndjson",
+      "result_line": 33,
+      "regions": [
+        "kyushu_kagoshima"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14220/6523",
+      "ok": true,
+      "seconds": 1.8277763999999999,
+      "candidates": 13417,
+      "vertices": 92765,
+      "png_bytes": 130142,
+      "result_file": "base-results.ndjson",
+      "result_line": 32,
+      "regions": [
+        "chugoku_hiroshima"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14292/6526",
+      "ok": true,
+      "seconds": 0.8152288,
+      "candidates": 7441,
+      "vertices": 58517,
+      "png_bytes": 107778,
+      "result_file": "base-results.ndjson",
+      "result_line": 34,
+      "regions": [
+        "shikoku_takamatsu"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14358/6467",
+      "ok": true,
+      "seconds": 0.0245816,
+      "candidates": 69,
+      "vertices": 59740,
+      "png_bytes": 15233,
+      "result_file": "extra-results.ndjson",
+      "result_line": 19,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14358/6506",
+      "ok": true,
+      "seconds": 2.004002,
+      "candidates": 15997,
+      "vertices": 94260,
+      "png_bytes": 117232,
+      "result_file": "base-results.ndjson",
+      "result_line": 36,
+      "regions": [
+        "kinki_osaka"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14363/6503",
+      "ok": true,
+      "seconds": 1.2408996,
+      "candidates": 30613,
+      "vertices": 174555,
+      "png_bytes": 114667,
+      "result_file": "extra-results.ndjson",
+      "result_line": 15,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14369/6488",
+      "ok": true,
+      "seconds": 1.1980373,
+      "candidates": 37279,
+      "vertices": 249570,
+      "png_bytes": 103863,
+      "result_file": "extra-results.ndjson",
+      "result_line": 14,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14370/6487",
+      "ok": true,
+      "seconds": 1.4470686,
+      "candidates": 31527,
+      "vertices": 228700,
+      "png_bytes": 119410,
+      "result_file": "extra-results.ndjson",
+      "result_line": 16,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14370/6489",
+      "ok": true,
+      "seconds": 1.0430739,
+      "candidates": 32027,
+      "vertices": 231865,
+      "png_bytes": 104249,
+      "result_file": "extra-results.ndjson",
+      "result_line": 17,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14422/6479",
+      "ok": true,
+      "seconds": 1.1663998,
+      "candidates": 15610,
+      "vertices": 90185,
+      "png_bytes": 115027,
+      "result_file": "base-results.ndjson",
+      "result_line": 35,
+      "regions": [
+        "chubu_nagoya"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14471/6420",
+      "ok": true,
+      "seconds": 0.5810994,
+      "candidates": 3162,
+      "vertices": 34654,
+      "png_bytes": 88189,
+      "result_file": "base-results.ndjson",
+      "result_line": 38,
+      "regions": [
+        "chubu_matsumoto"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14505/6469",
+      "ok": true,
+      "seconds": 0.0229942,
+      "candidates": 97,
+      "vertices": 7033,
+      "png_bytes": 14235,
+      "result_file": "base-results.ndjson",
+      "result_line": 37,
+      "regions": [
+        "chubu_fuji"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14519/6324",
+      "ok": true,
+      "seconds": 0.5449184,
+      "candidates": 9824,
+      "vertices": 73157,
+      "png_bytes": 122445,
+      "result_file": "base-results.ndjson",
+      "result_line": 39,
+      "regions": [
+        "hokuriku_niigata"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14547/6464",
+      "ok": true,
+      "seconds": 0.8178571,
+      "candidates": 5375,
+      "vertices": 43188,
+      "png_bytes": 76295,
+      "result_file": "base-results.ndjson",
+      "result_line": 40,
+      "regions": [
+        "kanto_yokohama"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14550/6455",
+      "ok": true,
+      "seconds": 1.1646224,
+      "candidates": 29239,
+      "vertices": 170862,
+      "png_bytes": 127322,
+      "result_file": "extra-results.ndjson",
+      "result_line": 18,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14552/6451",
+      "ok": true,
+      "seconds": 1.5749388,
+      "candidates": 9841,
+      "vertices": 65882,
+      "png_bytes": 115973,
+      "result_file": "base-results.ndjson",
+      "result_line": 41,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14597/6153",
+      "ok": true,
+      "seconds": 0.9716134,
+      "candidates": 10908,
+      "vertices": 70956,
+      "png_bytes": 119362,
+      "result_file": "base-results.ndjson",
+      "result_line": 42,
+      "regions": [
+        "tohoku_aomori"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14603/6304",
+      "ok": true,
+      "seconds": 1.8393407000000002,
+      "candidates": 13783,
+      "vertices": 77185,
+      "png_bytes": 128334,
+      "result_file": "base-results.ndjson",
+      "result_line": 48,
+      "regions": [
+        "tohoku_sendai"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14624/6015",
+      "ok": true,
+      "seconds": 0.6892336,
+      "candidates": 10315,
+      "vertices": 42763,
+      "png_bytes": 121098,
+      "result_file": "extra-results.ndjson",
+      "result_line": 8,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14625/6016",
+      "ok": true,
+      "seconds": 1.1995263,
+      "candidates": 12182,
+      "vertices": 54841,
+      "png_bytes": 127290,
+      "result_file": "base-results.ndjson",
+      "result_line": 43,
+      "regions": [
+        "hokkaido_sapporo"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14639/5866",
+      "ok": true,
+      "seconds": 0.1560334,
+      "candidates": 1993,
+      "vertices": 14770,
+      "png_bytes": 55983,
+      "result_file": "base-results.ndjson",
+      "result_line": 44,
+      "regions": [
+        "remote_wakkanai"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14663/6910",
+      "ok": true,
+      "seconds": 0.0803523,
+      "candidates": 881,
+      "vertices": 11297,
+      "png_bytes": 30386,
+      "result_file": "base-results.ndjson",
+      "result_line": 45,
+      "regions": [
+        "remote_chichijima"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/14762/6021",
+      "ok": true,
+      "seconds": 0.1878351,
+      "candidates": 3263,
+      "vertices": 20565,
+      "png_bytes": 67817,
+      "result_file": "base-results.ndjson",
+      "result_line": 46,
+      "regions": [
+        "hokkaido_kushiro"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "14/15199/7051",
+      "ok": true,
+      "seconds": 0.032961,
+      "candidates": 113,
+      "vertices": 1232,
+      "png_bytes": 14371,
+      "result_file": "base-results.ndjson",
+      "result_line": 47,
+      "regions": [
+        "remote_minamitorishima"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "15/28253/13134",
+      "ok": true,
+      "seconds": 0.4319512,
+      "candidates": 3340,
+      "vertices": 40425,
+      "png_bytes": 126923,
+      "result_file": "base-results.ndjson",
+      "result_line": 65,
+      "regions": [
+        "kyushu_fukuoka"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "15/28717/13013",
+      "ok": true,
+      "seconds": 0.4671664,
+      "candidates": 3846,
+      "vertices": 29601,
+      "png_bytes": 81614,
+      "result_file": "base-results.ndjson",
+      "result_line": 66,
+      "regions": [
+        "kinki_osaka"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "15/28845/12959",
+      "ok": true,
+      "seconds": 0.2487145,
+      "candidates": 3057,
+      "vertices": 20841,
+      "png_bytes": 95396,
+      "result_file": "base-results.ndjson",
+      "result_line": 67,
+      "regions": [
+        "chubu_nagoya"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "15/29094/12929",
+      "ok": true,
+      "seconds": 0.4847719,
+      "candidates": 3164,
+      "vertices": 34300,
+      "png_bytes": 113739,
+      "result_file": "base-results.ndjson",
+      "result_line": 69,
+      "regions": [
+        "kanto_yokohama"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "15/29105/12903",
+      "ok": true,
+      "seconds": 0.6367188,
+      "candidates": 3508,
+      "vertices": 34870,
+      "png_bytes": 102531,
+      "result_file": "base-results.ndjson",
+      "result_line": 50,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "16/56506/26269",
+      "ok": true,
+      "seconds": 0.1591546,
+      "candidates": 901,
+      "vertices": 28597,
+      "png_bytes": 94484,
+      "result_file": "base-results.ndjson",
+      "result_line": 68,
+      "regions": [
+        "kyushu_fukuoka"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "16/57435/26026",
+      "ok": true,
+      "seconds": 0.1734886,
+      "candidates": 1110,
+      "vertices": 18046,
+      "png_bytes": 72793,
+      "result_file": "base-results.ndjson",
+      "result_line": 70,
+      "regions": [
+        "kinki_osaka"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "16/57691/25918",
+      "ok": true,
+      "seconds": 0.0834517,
+      "candidates": 719,
+      "vertices": 10063,
+      "png_bytes": 59101,
+      "result_file": "base-results.ndjson",
+      "result_line": 71,
+      "regions": [
+        "chubu_nagoya"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "16/58188/25859",
+      "ok": true,
+      "seconds": 0.1935759,
+      "candidates": 1235,
+      "vertices": 27389,
+      "png_bytes": 99673,
+      "result_file": "base-results.ndjson",
+      "result_line": 78,
+      "regions": [
+        "kanto_yokohama"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "16/58211/25806",
+      "ok": true,
+      "seconds": 0.4045096,
+      "candidates": 1428,
+      "vertices": 28334,
+      "png_bytes": 102356,
+      "result_file": "base-results.ndjson",
+      "result_line": 49,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "17/116423/51613",
+      "ok": true,
+      "seconds": 0.1533455,
+      "candidates": 579,
+      "vertices": 23216,
+      "png_bytes": 99927,
+      "result_file": "base-results.ndjson",
+      "result_line": 51,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/221480/112785",
+      "ok": true,
+      "seconds": 0.0296252,
+      "candidates": 92,
+      "vertices": 10418,
+      "png_bytes": 35586,
+      "result_file": "base-results.ndjson",
+      "result_line": 72,
+      "regions": [
+        "remote_ishigaki"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/224045/111281",
+      "ok": true,
+      "seconds": 0.0221396,
+      "candidates": 82,
+      "vertices": 20443,
+      "png_bytes": 34916,
+      "result_file": "base-results.ndjson",
+      "result_line": 73,
+      "regions": [
+        "okinawa_naha"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/226027/105077",
+      "ok": true,
+      "seconds": 0.0235507,
+      "candidates": 77,
+      "vertices": 21244,
+      "png_bytes": 22953,
+      "result_file": "base-results.ndjson",
+      "result_line": 74,
+      "regions": [
+        "kyushu_fukuoka"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/226140/106800",
+      "ok": true,
+      "seconds": 0.0250251,
+      "candidates": 79,
+      "vertices": 38616,
+      "png_bytes": 41258,
+      "result_file": "base-results.ndjson",
+      "result_line": 75,
+      "regions": [
+        "kyushu_kagoshima"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/227523/104379",
+      "ok": true,
+      "seconds": 0.0209183,
+      "candidates": 74,
+      "vertices": 14884,
+      "png_bytes": 24846,
+      "result_file": "base-results.ndjson",
+      "result_line": 76,
+      "regions": [
+        "chugoku_hiroshima"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/228681/104416",
+      "ok": true,
+      "seconds": 0.0321299,
+      "candidates": 68,
+      "vertices": 10366,
+      "png_bytes": 21713,
+      "result_file": "base-results.ndjson",
+      "result_line": 77,
+      "regions": [
+        "shikoku_takamatsu"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/229740/103486",
+      "ok": true,
+      "seconds": 0.0118914,
+      "candidates": 4,
+      "vertices": 57769,
+      "png_bytes": 823,
+      "result_file": "extra-results.ndjson",
+      "result_line": 20,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/229741/104106",
+      "ok": true,
+      "seconds": 0.0238919,
+      "candidates": 91,
+      "vertices": 11466,
+      "png_bytes": 19261,
+      "result_file": "base-results.ndjson",
+      "result_line": 80,
+      "regions": [
+        "kinki_osaka"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/230764/103673",
+      "ok": true,
+      "seconds": 0.0164505,
+      "candidates": 44,
+      "vertices": 5637,
+      "png_bytes": 17461,
+      "result_file": "base-results.ndjson",
+      "result_line": 79,
+      "regions": [
+        "chubu_nagoya"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/231537/102725",
+      "ok": true,
+      "seconds": 0.0191139,
+      "candidates": 58,
+      "vertices": 4617,
+      "png_bytes": 25289,
+      "result_file": "base-results.ndjson",
+      "result_line": 82,
+      "regions": [
+        "chubu_matsumoto"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/232090/103513",
+      "ok": true,
+      "seconds": 0.0099865,
+      "candidates": 10,
+      "vertices": 6284,
+      "png_bytes": 9272,
+      "result_file": "base-results.ndjson",
+      "result_line": 81,
+      "regions": [
+        "chubu_fuji"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/232305/101193",
+      "ok": true,
+      "seconds": 0.017234,
+      "candidates": 78,
+      "vertices": 8750,
+      "png_bytes": 26709,
+      "result_file": "base-results.ndjson",
+      "result_line": 83,
+      "regions": [
+        "hokuriku_niigata"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/232753/103439",
+      "ok": true,
+      "seconds": 0.0281163,
+      "candidates": 109,
+      "vertices": 19887,
+      "png_bytes": 31238,
+      "result_file": "base-results.ndjson",
+      "result_line": 84,
+      "regions": [
+        "kanto_yokohama"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/232847/103226",
+      "ok": true,
+      "seconds": 0.082103,
+      "candidates": 262,
+      "vertices": 21281,
+      "png_bytes": 71591,
+      "result_file": "base-results.ndjson",
+      "result_line": 52,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/233555/98458",
+      "ok": true,
+      "seconds": 0.0233563,
+      "candidates": 139,
+      "vertices": 8297,
+      "png_bytes": 39202,
+      "result_file": "base-results.ndjson",
+      "result_line": 85,
+      "regions": [
+        "tohoku_aomori"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/233651/100867",
+      "ok": true,
+      "seconds": 0.0268368,
+      "candidates": 80,
+      "vertices": 2789,
+      "png_bytes": 19536,
+      "result_file": "base-results.ndjson",
+      "result_line": 86,
+      "regions": [
+        "tohoku_sendai"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/234003/96263",
+      "ok": true,
+      "seconds": 0.0256967,
+      "candidates": 100,
+      "vertices": 9674,
+      "png_bytes": 34622,
+      "result_file": "base-results.ndjson",
+      "result_line": 87,
+      "regions": [
+        "hokkaido_sapporo"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/234235/93870",
+      "ok": true,
+      "seconds": 0.0138464,
+      "candidates": 28,
+      "vertices": 3729,
+      "png_bytes": 6504,
+      "result_file": "base-results.ndjson",
+      "result_line": 88,
+      "regions": [
+        "remote_wakkanai"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/234613/110563",
+      "ok": true,
+      "seconds": 0.0170509,
+      "candidates": 51,
+      "vertices": 6003,
+      "png_bytes": 22517,
+      "result_file": "base-results.ndjson",
+      "result_line": 89,
+      "regions": [
+        "remote_chichijima"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/236207/96339",
+      "ok": true,
+      "seconds": 0.0135508,
+      "candidates": 50,
+      "vertices": 3168,
+      "png_bytes": 11278,
+      "result_file": "base-results.ndjson",
+      "result_line": 90,
+      "regions": [
+        "hokkaido_kushiro"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "18/243196/112829",
+      "ok": true,
+      "seconds": 0.0188799,
+      "candidates": 14,
+      "vertices": 670,
+      "png_bytes": 8242,
+      "result_file": "base-results.ndjson",
+      "result_line": 92,
+      "regions": [
+        "remote_minamitorishima"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "19/465694/206453",
+      "ok": true,
+      "seconds": 0.0505907,
+      "candidates": 115,
+      "vertices": 20520,
+      "png_bytes": 35415,
+      "result_file": "base-results.ndjson",
+      "result_line": 53,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "20/931389/412906",
+      "ok": true,
+      "seconds": 0.0204551,
+      "candidates": 64,
+      "vertices": 20005,
+      "png_bytes": 20696,
+      "result_file": "base-results.ndjson",
+      "result_line": 54,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "21/1862778/825812",
+      "ok": true,
+      "seconds": 0.0311453,
+      "candidates": 49,
+      "vertices": 19866,
+      "png_bytes": 13595,
+      "result_file": "base-results.ndjson",
+      "result_line": 56,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3543688/1804573",
+      "ok": true,
+      "seconds": 0.0080906,
+      "candidates": 8,
+      "vertices": 9886,
+      "png_bytes": 823,
+      "result_file": "base-results.ndjson",
+      "result_line": 91,
+      "regions": [
+        "remote_ishigaki"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3584722/1780508",
+      "ok": true,
+      "seconds": 0.0103208,
+      "candidates": 12,
+      "vertices": 19783,
+      "png_bytes": 823,
+      "result_file": "base-results.ndjson",
+      "result_line": 93,
+      "regions": [
+        "okinawa_naha"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3616441/1681237",
+      "ok": true,
+      "seconds": 0.0108019,
+      "candidates": 11,
+      "vertices": 20154,
+      "png_bytes": 823,
+      "result_file": "base-results.ndjson",
+      "result_line": 94,
+      "regions": [
+        "kyushu_fukuoka"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3618252/1708808",
+      "ok": true,
+      "seconds": 0.0105817,
+      "candidates": 10,
+      "vertices": 38172,
+      "png_bytes": 3376,
+      "result_file": "base-results.ndjson",
+      "result_line": 95,
+      "regions": [
+        "kyushu_kagoshima"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3640368/1670065",
+      "ok": true,
+      "seconds": 0.0115393,
+      "candidates": 14,
+      "vertices": 14483,
+      "png_bytes": 823,
+      "result_file": "base-results.ndjson",
+      "result_line": 97,
+      "regions": [
+        "chugoku_hiroshima"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3658908/1670664",
+      "ok": true,
+      "seconds": 0.0104885,
+      "candidates": 8,
+      "vertices": 9896,
+      "png_bytes": 823,
+      "result_file": "base-results.ndjson",
+      "result_line": 96,
+      "regions": [
+        "shikoku_takamatsu"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3675841/1655789",
+      "ok": true,
+      "seconds": 0.0113262,
+      "candidates": 3,
+      "vertices": 57680,
+      "png_bytes": 823,
+      "result_file": "extra-results.ndjson",
+      "result_line": 21,
+      "regions": [
+        "nationwide_density_scan"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3675868/1665703",
+      "ok": true,
+      "seconds": 0.009754,
+      "candidates": 7,
+      "vertices": 10829,
+      "png_bytes": 823,
+      "result_file": "base-results.ndjson",
+      "result_line": 98,
+      "regions": [
+        "kinki_osaka"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3692229/1658770",
+      "ok": true,
+      "seconds": 0.0225486,
+      "candidates": 11,
+      "vertices": 5413,
+      "png_bytes": 823,
+      "result_file": "base-results.ndjson",
+      "result_line": 100,
+      "regions": [
+        "chubu_nagoya"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3704595/1643610",
+      "ok": true,
+      "seconds": 0.00836,
+      "candidates": 11,
+      "vertices": 4023,
+      "png_bytes": 3641,
+      "result_file": "base-results.ndjson",
+      "result_line": 99,
+      "regions": [
+        "chubu_matsumoto"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3713443/1656214",
+      "ok": true,
+      "seconds": 0.0075269,
+      "candidates": 6,
+      "vertices": 6274,
+      "png_bytes": 1020,
+      "result_file": "base-results.ndjson",
+      "result_line": 101,
+      "regions": [
+        "chubu_fuji"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3716889/1619101",
+      "ok": true,
+      "seconds": 0.0087172,
+      "candidates": 10,
+      "vertices": 8166,
+      "png_bytes": 823,
+      "result_file": "base-results.ndjson",
+      "result_line": 102,
+      "regions": [
+        "hokuriku_niigata"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3724052/1655026",
+      "ok": true,
+      "seconds": 0.011928,
+      "candidates": 9,
+      "vertices": 18970,
+      "png_bytes": 823,
+      "result_file": "base-results.ndjson",
+      "result_line": 103,
+      "regions": [
+        "kanto_yokohama"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3725556/1651625",
+      "ok": true,
+      "seconds": 0.0144675,
+      "candidates": 40,
+      "vertices": 19793,
+      "png_bytes": 8998,
+      "result_file": "base-results.ndjson",
+      "result_line": 55,
+      "regions": [
+        "kanto_tokyo"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3736891/1575328",
+      "ok": true,
+      "seconds": 0.0103777,
+      "candidates": 10,
+      "vertices": 7201,
+      "png_bytes": 5240,
+      "result_file": "base-results.ndjson",
+      "result_line": 104,
+      "regions": [
+        "tohoku_aomori"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3738428/1613881",
+      "ok": true,
+      "seconds": 0.0081977,
+      "candidates": 7,
+      "vertices": 2206,
+      "png_bytes": 823,
+      "result_file": "base-results.ndjson",
+      "result_line": 105,
+      "regions": [
+        "tohoku_sendai"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3744051/1540209",
+      "ok": true,
+      "seconds": 0.0099073,
+      "candidates": 12,
+      "vertices": 9204,
+      "png_bytes": 1662,
+      "result_file": "base-results.ndjson",
+      "result_line": 106,
+      "regions": [
+        "hokkaido_sapporo"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3747762/1501933",
+      "ok": true,
+      "seconds": 0.0089903,
+      "candidates": 5,
+      "vertices": 3418,
+      "png_bytes": 823,
+      "result_file": "base-results.ndjson",
+      "result_line": 107,
+      "regions": [
+        "remote_wakkanai"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3753808/1769010",
+      "ok": true,
+      "seconds": 0.0106945,
+      "candidates": 14,
+      "vertices": 5618,
+      "png_bytes": 4126,
+      "result_file": "base-results.ndjson",
+      "result_line": 108,
+      "regions": [
+        "remote_chichijima"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3779317/1541434",
+      "ok": true,
+      "seconds": 0.0079944,
+      "candidates": 6,
+      "vertices": 2974,
+      "png_bytes": 823,
+      "result_file": "base-results.ndjson",
+      "result_line": 109,
+      "regions": [
+        "hokkaido_kushiro"
+      ],
+      "root_cause_class": "none"
+    },
+    {
+      "tile": "22/3891149/1805273",
+      "ok": true,
+      "seconds": 0.0089542,
+      "candidates": 7,
+      "vertices": 508,
+      "png_bytes": 1879,
+      "result_file": "base-results.ndjson",
+      "result_line": 110,
+      "regions": [
+        "remote_minamitorishima"
+      ],
+      "root_cause_class": "none"
+    }
+  ],
+  "input_problems": []
+}

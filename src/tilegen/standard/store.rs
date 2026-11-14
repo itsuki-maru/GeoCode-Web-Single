@@ -366,6 +366,197 @@ pub fn query_features(conn: &Connection, b: Rect, zoom: u8) -> Result<Vec<Featur
     }
     Ok(out)
 }
+
+const RENDER_KINDS: [FeatureKind; 16] = [
+    FeatureKind::Land,
+    FeatureKind::Forest,
+    FeatureKind::Grass,
+    FeatureKind::Park,
+    FeatureKind::Farmland,
+    FeatureKind::Residential,
+    FeatureKind::Commercial,
+    FeatureKind::Industrial,
+    FeatureKind::Sand,
+    FeatureKind::BareRock,
+    FeatureKind::Wetland,
+    FeatureKind::Water,
+    FeatureKind::Building,
+    FeatureKind::Waterway,
+    FeatureKind::Railway,
+    FeatureKind::Contour,
+];
+// 256pxではz7、512pxの比較窓ではz8程度から、非表示地物の本体参照が支配的になる。
+const BROAD_RENDER_QUERY_WIDTH: f64 = 1.0 / 128.0;
+
+fn broad_render_query(b: Rect) -> bool {
+    (b.max_x - b.min_x).max(b.max_y - b.min_y) >= BROAD_RENDER_QUERY_WIDTH
+}
+
+fn render_kinds(
+    zoom: u8,
+    pass: u8,
+    spec: Option<&crate::tilegen::render_spec::RenderSpec>,
+) -> Vec<i64> {
+    RENDER_KINDS
+        .into_iter()
+        .filter(|kind| {
+            zoom >= kind.min_zoom()
+                && spec.is_none_or(|s| match kind {
+                    FeatureKind::Building => s.buildings,
+                    FeatureKind::Contour => s.contours,
+                    _ => true,
+                })
+                && match kind {
+                    FeatureKind::Water | FeatureKind::Building | FeatureKind::Contour => pass == 1,
+                    FeatureKind::Waterway => matches!(pass, 0 | 1 | 4),
+                    FeatureKind::Railway => matches!(pass, 0 | 3 | 4),
+                    _ => pass == 0,
+                }
+        })
+        .map(|kind| kind as i64)
+        .collect()
+}
+
+/// kindだけを評価してからidを返せる既存索引を使う。外部作成DBの索引名は仮定しない。
+fn render_kind_index(conn: &Connection) -> Result<Option<String>> {
+    let mut indexes =
+        conn.prepare("SELECT name FROM pragma_index_list('standard_features') WHERE partial=0")?;
+    let names = indexes
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut selected: Option<(usize, String)> = None;
+    for name in names {
+        let mut info = conn.prepare("SELECT name FROM pragma_index_info(?) ORDER BY seqno")?;
+        let columns = info
+            .query_map([&name], |row| row.get::<_, Option<String>>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        if columns
+            .iter()
+            .any(|column| column.as_deref() == Some("kind"))
+            && selected
+                .as_ref()
+                .is_none_or(|(length, _)| columns.len() < *length)
+        {
+            selected = Some((columns.len(), name));
+        }
+    }
+    Ok(selected.map(|(_, name)| name))
+}
+
+fn render_feature_sql(conn: &Connection, b: Rect, kinds: &[i64], pass: u8) -> Result<String> {
+    let codes = kinds
+        .iter()
+        .map(i64::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    // 不明な分類は従来と同じpass0へ残し、FeatureKind::from_codeで拒否する。
+    let unknown = if pass == 0 {
+        format!(
+            " OR kind NOT IN ({})",
+            RENDER_KINDS
+                .iter()
+                .map(|kind| (*kind as i64).to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    } else {
+        String::new()
+    };
+    let kind_filter = format!("(kind IN ({codes}){unknown})");
+    let (prefix, source) = if let Some(index) = broad_render_query(b)
+        .then(|| render_kind_index(conn))
+        .transpose()?
+        .flatten()
+    {
+        let quoted_index = index.replace('"', "\"\"");
+        (
+            format!("WITH visible_ids AS MATERIALIZED (SELECT id FROM standard_features INDEXED BY \"{quoted_index}\" WHERE {kind_filter}), "),
+            "visible_ids v CROSS JOIN standard_features f CROSS JOIN standard_rtree r WHERE f.id=v.id AND r.id=v.id AND".to_owned(),
+        )
+    } else {
+        (
+            "WITH ".to_owned(),
+            format!(
+                "standard_rtree r JOIN standard_features f ON f.id=r.id WHERE {kind_filter} AND"
+            ),
+        )
+    };
+    // paint::phaseと同じphase順。その後の段階分けも旧描画ループと一致させる。
+    let phase = "CASE f.kind WHEN 1 THEN 0 WHEN 110 THEN 40 WHEN 120 THEN 45 \
+        WHEN 150 THEN 30 WHEN 130 THEN CASE f.structure WHEN 0 THEN 25 WHEN 1 THEN 40 ELSE 60 END \
+        WHEN 140 THEN CASE f.structure WHEN 0 THEN 25 ELSE 50 END ELSE 10 END";
+    Ok(format!(
+        "{prefix} candidates AS (
+          SELECT f.id,f.osm_type,f.osm_id,f.role,f.kind,f.layer,f.structure,({phase}) AS phase
+          FROM {source} r.min_x<=? AND r.max_x>=? AND r.min_y<=? AND r.max_y>=? AND f.min_zoom<=?
+        ) SELECT id,osm_type,osm_id,role,kind,layer,structure FROM candidates
+          WHERE (CASE WHEN phase<30 THEN 0 WHEN phase<50 THEN 1
+            WHEN phase=50 AND structure=0 THEN 2 WHEN phase=50 AND structure=1 THEN 3 ELSE 4 END)=?
+          ORDER BY phase,layer,structure,kind,osm_type,osm_id,role,id"
+    ))
+}
+
+/// 描画段階の中を従来と同じ順序で走査し、形状は1地物ずつ読み出す。
+/// 全件を返すAPIの件数・合計容量制限を、広域タイルの地物省略には使わない。
+/// SQLiteの並べ替えにも形状BLOBを含めず、単一形状の受入上限は維持する。
+pub(crate) fn visit_render_features(
+    conn: &Connection,
+    b: Rect,
+    zoom: u8,
+    pass: u8,
+    spec: Option<&crate::tilegen::render_spec::RenderSpec>,
+    context: &crate::tilegen::operation::OperationContext,
+    mut visit: impl FnMut(&Feature) -> Result<()>,
+) -> Result<()> {
+    context.check()?;
+    ensure!(pass <= 4, "不正な描画段階です");
+    let kinds = render_kinds(zoom, pass, spec);
+    if kinds.is_empty() {
+        return context.check();
+    }
+    if broad_render_query(b) {
+        // 世界の反対側など候補のない広域窓で、全分類索引を走査しない。
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM standard_rtree WHERE min_x<=? AND max_x>=? AND min_y<=? AND max_y>=?)",
+            params![b.max_x, b.min_x, b.max_y, b.min_y], |row| row.get(0),
+        )?;
+        if !exists {
+            return context.check();
+        }
+    }
+    let sql = render_feature_sql(conn, b, &kinds, pass)?;
+    let mut candidates = conn.prepare(&sql)?;
+    let mut rows = candidates.query(params![b.max_x, b.min_x, b.max_y, b.min_y, zoom, pass,])?;
+    let mut geometry = conn.prepare(
+        "SELECT length(coalesce(l.geometry,f.geometry)),coalesce(l.geometry,f.geometry)
+         FROM standard_features f LEFT JOIN standard_geometry_lod l ON l.feature_id=f.id AND l.zoom=?
+         WHERE f.id=?",
+    )?;
+    while let Some(row) = rows.next()? {
+        context.check()?;
+        let mut shape_rows = geometry.query(params![zoom, row.get::<_, i64>(0)?])?;
+        let shape = shape_rows.next()?.context("描画する地物が見つかりません")?;
+        let bytes: i64 = shape.get(0)?;
+        ensure!(
+            bytes > 0 && bytes as u64 <= MAX_BYTES as u64,
+            "形状BLOBが過大です"
+        );
+        let feature = Feature {
+            osm_type: row.get(1)?,
+            osm_id: row.get(2)?,
+            role: row.get(3)?,
+            kind: FeatureKind::from_code(row.get(4)?)?,
+            layer: row.get(5)?,
+            structure: row.get(6)?,
+            geometry: decode(&shape.get::<_, Vec<u8>>(1)?)?,
+        };
+        validate_feature(&feature)?;
+        context.check()?;
+        visit(&feature)?;
+    }
+    context.check()
+}
+
 pub fn details(conn: &Connection) -> Result<Option<StandardMetadata>> {
     let data:Option<String>=conn.query_row("SELECT value FROM metadata WHERE key='standard_document' AND length(CAST(value AS BLOB))<=1048576",[],|r|r.get(0)).optional()?;
     data.map(|s| {
@@ -1055,6 +1246,405 @@ mod tests {
             assert!(query_features(&conn, Rect::new(0.0, 1.0, 0.0, 1.0).unwrap(), 14).is_err());
         }
     }
+
+    #[test]
+    fn 逐次地物の順序と表示選択は従来の描画段階に一致する() {
+        use crate::tilegen::{operation::OperationContext, render_spec::RenderSpec};
+
+        let conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        let mut input = Vec::new();
+        for kind in RENDER_KINDS {
+            for structure in 0..=2 {
+                for layer in [-1, 0, 1] {
+                    let mut f = feature();
+                    let sequence = input.len() as i64;
+                    f.kind = kind;
+                    f.structure = structure;
+                    f.layer = layer;
+                    f.osm_type = 1 + sequence % 4;
+                    f.osm_id = 100 - sequence;
+                    f.role = if kind == FeatureKind::Contour {
+                        500
+                    } else {
+                        sequence % 3
+                    };
+                    if matches!(
+                        kind,
+                        FeatureKind::Waterway | FeatureKind::Railway | FeatureKind::Contour
+                    ) {
+                        f.geometry = Geometry::Line(vec![
+                            Point { x: 0.1, y: 0.1 },
+                            Point { x: 0.9, y: 0.9 },
+                        ]);
+                    }
+                    input.push(f);
+                }
+            }
+        }
+        // SQLの保存順に依存して従来と異なる重なり順にならないことも確認する。
+        for f in input.iter().rev() {
+            insert_feature(&conn, f).unwrap();
+        }
+        let key = |f: &Feature| {
+            (
+                super::super::paint::phase(f),
+                f.layer,
+                f.structure,
+                f.kind as i64,
+                f.osm_type,
+                f.osm_id,
+                f.role,
+            )
+        };
+        input.sort_unstable_by_key(&key);
+        let mut hidden = RenderSpec::osm_like();
+        hidden.buildings = false;
+        hidden.contours = false;
+        for zoom in [0, 5, 6, 7, 8, 9, 10, 11, 13, 14, 16] {
+            for spec in [None, Some(hidden), Some(RenderSpec::osm_like())] {
+                let mut expected = Vec::new();
+                for pass in 0..=4 {
+                    for f in &input {
+                        if zoom < f.kind.min_zoom() {
+                            continue;
+                        }
+                        if spec.is_some_and(|s| {
+                            (f.kind == FeatureKind::Building && !s.buildings)
+                                || (f.kind == FeatureKind::Contour && !s.contours)
+                        }) {
+                            continue;
+                        }
+                        let phase = super::super::paint::phase(f);
+                        // 修正前のrender_windowが使用していた5つのfilterを独立に適用する。
+                        let selected = match pass {
+                            0 => phase < 30,
+                            1 => (30..50).contains(&phase),
+                            2 => phase == 50 && f.structure == 0,
+                            3 => phase == 50 && f.structure == 1,
+                            _ => phase >= 60 || (phase == 50 && f.structure == 2),
+                        };
+                        if selected {
+                            expected.push((pass, key(f)));
+                        }
+                    }
+                }
+                for bounds in [
+                    Rect::new(0.0, 1.0, 0.0, 1.0).unwrap(),
+                    Rect::new(0.499, 0.501, 0.499, 0.501).unwrap(),
+                ] {
+                    let mut actual = Vec::new();
+                    for pass in 0..=4 {
+                        visit_render_features(
+                            &conn,
+                            bounds,
+                            zoom,
+                            pass,
+                            spec.as_ref(),
+                            &OperationContext::default(),
+                            |f| {
+                                actual.push((pass, key(f)));
+                                Ok(())
+                            },
+                        )
+                        .unwrap();
+                    }
+                    assert_eq!(
+                        actual, expected,
+                        "z{zoom} / 表示設定: {spec:?} / 範囲: {bounds:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn 広域は既存の被覆索引で可視分類を先に選び狭域は空間索引を使う() {
+        use crate::tilegen::operation::OperationContext;
+        let conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        for (id, kind, osm_type) in [
+            (1, FeatureKind::Land, 1),
+            (2, FeatureKind::Building, 1),
+            (3, FeatureKind::Land, 3),
+        ] {
+            let mut f = feature();
+            f.osm_id = id;
+            f.kind = kind;
+            f.osm_type = osm_type;
+            insert_feature(&conn, &f).unwrap();
+        }
+        // SDK作成のLand(type1)も実importerのLand(type3)も保持する。
+        let broad = Rect::new(0.0, 1.0, 0.0, 1.0).unwrap();
+        let mut actual = Vec::new();
+        visit_render_features(
+            &conn,
+            broad,
+            0,
+            0,
+            None,
+            &OperationContext::default(),
+            |f| {
+                actual.push(f.osm_id);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(actual, [1, 3]);
+        let sql = render_feature_sql(&conn, broad, &render_kinds(0, 0, None), 0).unwrap();
+        let plan = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap()
+            .query_map(params![1.0, 0.0, 1.0, 0.0, 0, 0], |row| {
+                row.get::<_, String>(3)
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+            .join("\n");
+        assert!(
+            plan.contains("MATERIALIZE visible_ids") && plan.contains("COVERING INDEX"),
+            "{plan}"
+        );
+        let narrow = Rect::new(0.499, 0.501, 0.499, 0.501).unwrap();
+        let sql = render_feature_sql(&conn, narrow, &render_kinds(0, 0, None), 0).unwrap();
+        assert!(!sql.contains("MATERIALIZED"));
+        assert!(render_kinds(0, 1, None).is_empty());
+        assert!(render_kinds(8, 3, None).is_empty());
+        assert!(render_kinds(8, 4, None).is_empty());
+        for zoom in 0..=22 {
+            assert!(render_kinds(zoom, 2, None).is_empty());
+        }
+        conn.execute_batch("CREATE INDEX \"render \"\"kind\"\"\" ON standard_features(kind)")
+            .unwrap();
+        assert_eq!(
+            render_kind_index(&conn).unwrap().as_deref(),
+            Some("render \"kind\"")
+        );
+        let mut count = 0;
+        visit_render_features(
+            &conn,
+            broad,
+            0,
+            0,
+            None,
+            &OperationContext::default(),
+            |_| {
+                count += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn 被覆索引がない完成形式でも読み取り経路へ戻り分類不明を見逃さない() {
+        use crate::tilegen::operation::OperationContext;
+        let conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        let mut f = feature();
+        f.kind = FeatureKind::Land;
+        insert_feature(&conn, &f).unwrap();
+        // 任意の外部完成DBは既存のUNIQUE索引名・配置を持つとは限らない。
+        conn.execute_batch("PRAGMA foreign_keys=OFF; CREATE TABLE feature_copy AS SELECT * FROM standard_features; DROP TABLE standard_features; ALTER TABLE feature_copy RENAME TO standard_features;").unwrap();
+        assert!(render_kind_index(&conn).unwrap().is_none());
+        let mut count = 0;
+        visit_render_features(
+            &conn,
+            Rect::new(0.0, 1.0, 0.0, 1.0).unwrap(),
+            0,
+            0,
+            None,
+            &OperationContext::default(),
+            |_| {
+                count += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(count, 1);
+        conn.execute("UPDATE standard_features SET kind=999", [])
+            .unwrap();
+        let error = visit_render_features(
+            &conn,
+            Rect::new(0.0, 1.0, 0.0, 1.0).unwrap(),
+            0,
+            0,
+            None,
+            &OperationContext::default(),
+            |_| panic!("分類不明を描画しない"),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("未対応の地物分類"), "{error:?}");
+    }
+
+    #[test]
+    fn 広域地物を全件保持せず件数容量と累計頂点の旧上限を超えて走査する() {
+        use crate::tilegen::operation::OperationContext;
+
+        let conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        let mut f = feature();
+        let mut outer = (0..20)
+            .map(|index| {
+                let angle = std::f64::consts::TAU * index as f64 / 20.0;
+                Point {
+                    x: 0.5 + 0.1 * angle.cos(),
+                    y: 0.5 + 0.1 * angle.sin(),
+                }
+            })
+            .collect::<Vec<_>>();
+        outer.push(outer[0]);
+        f.geometry = Geometry::Polygon(vec![PolygonPart {
+            outer,
+            holes: vec![],
+        }]);
+        let (bytes, points) = encode(&f.geometry).unwrap();
+        const COUNT: usize = 100_001;
+        assert!(COUNT * bytes.len() > MAX_BYTES);
+        assert!(COUNT * points > 2_000_000);
+        // 取り込み/LOD構築ではなく描画readerの全件保持制約だけを再現する。
+        conn.execute_batch("BEGIN").unwrap();
+        {
+            let mut insert = conn.prepare("INSERT INTO standard_features(id,osm_type,osm_id,role,kind,layer,structure,min_zoom,min_x,max_x,min_y,max_y,point_count,geometry) VALUES(?,1,?,0,10,0,1,6,0.4,0.6,0.4,0.6,?,?)").unwrap();
+            let mut index = conn
+                .prepare("INSERT INTO standard_rtree VALUES(?,0.4,0.6,0.4,0.6)")
+                .unwrap();
+            for id in 1..=COUNT as i64 {
+                insert
+                    .execute(params![id, id, points as i64, &bytes])
+                    .unwrap();
+                index.execute([id]).unwrap();
+            }
+        }
+        conn.execute_batch("COMMIT").unwrap();
+        let bounds = Rect::new(0.0, 1.0, 0.0, 1.0).unwrap();
+        assert!(
+            query_features(&conn, bounds, 7).is_err(),
+            "全件収集APIの安全上限は保持する"
+        );
+        let mut visited = 0;
+        visit_render_features(
+            &conn,
+            bounds,
+            7,
+            0,
+            None,
+            &OperationContext::default(),
+            |f| {
+                assert_eq!(f.osm_id, visited + 1);
+                visited += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(visited, COUNT as i64);
+
+        // R-treeが空と判断できる広域窓は、件数に比例する索引走査を始めない。
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let steps = Arc::new(AtomicUsize::new(0));
+        let observed = steps.clone();
+        conn.progress_handler(
+            100,
+            Some(move || {
+                observed.fetch_add(1, Ordering::Relaxed);
+                false
+            }),
+        );
+        visit_render_features(
+            &conn,
+            Rect::new(0.9, 1.0, 0.9, 1.0).unwrap(),
+            7,
+            0,
+            None,
+            &OperationContext::default(),
+            |_| panic!("範囲外の地物を訪問しない"),
+        )
+        .unwrap();
+        conn.progress_handler(0, None::<fn() -> bool>);
+        assert!(
+            steps.load(Ordering::Relaxed) < 100,
+            "空の広域を全件走査しない"
+        );
+    }
+
+    #[test]
+    fn 逐次地物の取消と期限は後続の読み取りと訪問を停止する() {
+        use crate::tilegen::{
+            cancel,
+            operation::{OperationContext, is_deadline_exceeded},
+        };
+        use std::time::Instant;
+
+        let conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        for id in 1..=2 {
+            let mut f = feature();
+            f.osm_id = id;
+            insert_feature(&conn, &f).unwrap();
+        }
+        let bounds = Rect::new(0.0, 1.0, 0.0, 1.0).unwrap();
+        for cancel_after in [1, 2] {
+            let context = OperationContext::default();
+            let mut visited = 0;
+            let error = visit_render_features(&conn, bounds, 14, 0, None, &context, |_| {
+                visited += 1;
+                if visited == cancel_after {
+                    context.cancellation_token().cancel();
+                }
+                Ok(())
+            })
+            .unwrap_err();
+            assert!(cancel::is_interrupted(&error));
+            assert_eq!(visited, cancel_after);
+        }
+
+        let expired = OperationContext::default().with_deadline(Instant::now());
+        let error = visit_render_features(&conn, bounds, 14, 0, None, &expired, |_| {
+            panic!("期限超過後は地物を訪問しない")
+        })
+        .unwrap_err();
+        assert!(is_deadline_exceeded(&error));
+    }
+
+    #[test]
+    fn 逐次描画でも不正構造と単一形状のサイズや構文違反を拒否する() {
+        use crate::tilegen::operation::OperationContext;
+
+        for change in [
+            "UPDATE standard_features SET structure=3",
+            "UPDATE standard_features SET geometry=x'00'",
+            "UPDATE standard_features SET geometry=zeroblob(33554433)",
+        ] {
+            let conn = Connection::open_in_memory().unwrap();
+            initialize(&conn).unwrap();
+            insert_feature(&conn, &feature()).unwrap();
+            conn.execute(change, []).unwrap();
+            let mut visited = 0;
+            assert!(
+                visit_render_features(
+                    &conn,
+                    Rect::new(0.0, 1.0, 0.0, 1.0).unwrap(),
+                    14,
+                    0,
+                    None,
+                    &OperationContext::default(),
+                    |_| {
+                        visited += 1;
+                        Ok(())
+                    }
+                )
+                .is_err(),
+                "拒否する不正データ: {change}"
+            );
+            assert_eq!(visited, 0);
+        }
+    }
+
     #[test]
     fn 未対応の追加メタデータ版を現在の契約へ混ぜない() {
         let conn = Connection::open_in_memory().unwrap();

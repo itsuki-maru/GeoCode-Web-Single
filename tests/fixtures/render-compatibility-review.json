@@ -39,8 +39,8 @@
     "src/tilegen/standard/landmask.rs": "cda95359a319bd4a1c81599e2bc2a9a4023374f08d33e4d82412b69db3c9ba5c",
     "src/tilegen/standard/mod.rs": "88a353741fce632fa006aa6ee691ba324de45e75a0d796f7cdab416c039ed9a6",
     "src/tilegen/standard/model.rs": "a5ec9dfcaa9ed4984afaedce9dc726b8d2c6f03aa7d5566b9d289a18e26981fe",
-    "src/tilegen/standard/paint.rs": "38bf83a5d8b72d575dc1c2b3c3612b4f1523a73f817bdde6fcb9cb1ba8d1aff5",
-    "src/tilegen/standard/store.rs": "cde3a23c9d3e70810e198e7a66bcb85d031da73fa67d241f1e305db2b4eb26ee",
+    "src/tilegen/standard/paint.rs": "0316dc740928135c42ec3f0bc4bf4dad2164c646f1a59f6985a8914f4d2f9479",
+    "src/tilegen/standard/store.rs": "98a6dbd324a35840eb78b2f83cff79ab429575b7af035b1734744a9a67961d69",
     "src/tilegen/standard/text.rs": "3744f9c9e72c4b67bc6053146fc29c82cb0b2e6549328bcbeadf782bb583cde6",
     "src/tilegen/store.rs": "0c5fdbf337c5828c142a6b5adb6f8285d8202725bb7d710ce7791c2d1186dc36",
     "src/tilegen/style.rs": "dd7627d33398840df2e7b0d599b0793b369b42dbd33a9dade6fa5931843a8d19",
@@ -72,7 +72,7 @@
   ],
   "review": {
     "baseline_ref": "9c30ae1",
-    "reason": "schema3・identity4にOSM標準風配色・固定フォント・名称配置・不変描画設定を追加した。旧描画経路と旧v2・v3契約を維持し、道路35枚・標準7枚の全画素一致、新名称2枚と境界・設定・SDK・CLI・runtime回帰を確認した。HarfRust・Skrifa導入に伴うbytemuck derive機能の統合で旧依存指紋は変わったが、旧画素が不変であることを固定画像で確認して認定を更新した。実資料レビューでz13未満の橋・トンネルの構造強調を通常道路へ正規化し、0.5px断片の低ズーム画素一致で回帰を確認した。旧42画像は不変であり、固定フォントのstatic化も内容・hash・画素を維持した。",
+    "reason": "全国DBの広域検索を表示種別の既存被覆索引で先に絞り込む方式へ変更し、凸形の線描画を各辺が交差する標本行だけの処理へ改善した。同じ地物・LOD・描画順・交点式・包含規則を維持し、単一形状、8000万の演算量、取消・期限の上限も維持する。単体75件と統合24件、道路35画像・標準7画像・名称付き2画像の固定RGBA、境界比較を確認した。同じ全国DB・抽出132枚を2worker・1枚120秒で再生成し、旧10失敗を含む全132枚が成功した。参照が存在する既存PNGとの画素一致も確認し、描画契約・世代識別・既存URLを据え置く。",
     "required_validation": "render_golden、standard_tile_render、carto_tile_render、取り込み・SDK・世代管理の回帰試験"
   },
   "source_scope": "src/tilegen/**/*.rs + render-profile-policy + execution-certification + fixed-golden-inputs + font-assets",

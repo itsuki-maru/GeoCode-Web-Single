@@ -25,7 +25,6 @@ use super::{
 pub const STYLE_VERSION: &str = "standard-terrain-v1";
 const SAMPLES: usize = 4;
 const COORDINATE_GRID: f64 = 4096.0;
-const MAX_FEATURES: usize = 131_072;
 const MAX_TOTAL_POINTS: usize = 2_000_000;
 const MAX_CROSSINGS: usize = 4_000_000;
 const MAX_WORK: usize = 80_000_000;
@@ -300,39 +299,6 @@ fn render_window(
     TileId::new(tile.z, tile.x, tile.y)?;
     let window = Window::new(tile, width as usize, height as usize)?;
     let query = window.bounds().expand(QUERY_MARGIN / window.scale);
-    let mut features = super::store::query_features(store.connection(), query, tile.z)?;
-    if let Some(spec) = spec {
-        features.retain(|feature| match feature.kind {
-            FeatureKind::Building => spec.buildings,
-            FeatureKind::Contour => spec.contours,
-            _ => true,
-        });
-    }
-    ensure!(
-        features.len() <= MAX_FEATURES,
-        "標準地図の地物候補数上限を超えました"
-    );
-    let mut total = 0_usize;
-    for feature in &features {
-        total = total
-            .checked_add(point_count(&feature.geometry))
-            .context("頂点数の加算が上限を超えました")?;
-        ensure!(
-            total <= MAX_TOTAL_POINTS,
-            "標準地図の総頂点数上限を超えました"
-        );
-    }
-    features.sort_unstable_by_key(|feature| {
-        (
-            phase(feature),
-            feature.layer,
-            feature.structure,
-            feature.kind as i64,
-            feature.osm_type,
-            feature.osm_id,
-            feature.role,
-        )
-    });
     let mut roads = if spec.is_some_and(|spec| !spec.roads) {
         Vec::new()
     } else {
@@ -419,38 +385,42 @@ fn render_window(
         raster.landmask = Some(mask);
     }
 
-    for feature in features.iter().filter(|feature| phase(feature) < 30) {
-        raster.feature(feature, tile.z)?;
-    }
+    let mut feature_count = 0_u64;
+    let mut total_points = 0_u64;
+    let mut draw_pass = |raster: &mut Raster<'_>, pass| -> Result<()> {
+        super::store::visit_render_features(
+            store.connection(),
+            query,
+            tile.z,
+            pass,
+            spec,
+            context,
+            |feature| {
+                // 全地物を保持しないので頂点予算も個別形状へ適用する。
+                // タイル全体のCPU処理量・期限・取消は引き続きRaster/contextで制限する。
+                let points = point_count(&feature.geometry);
+                ensure!(
+                    points <= MAX_TOTAL_POINTS,
+                    "標準地図の地物頂点数上限を超えました"
+                );
+                feature_count += 1;
+                total_points = total_points
+                    .checked_add(points as u64)
+                    .context("頂点数の加算が上限を超えました")?;
+                raster.feature(feature, tile.z)
+            },
+        )
+    };
+    draw_pass(&mut raster, 0)?;
     if spec.is_none_or(|spec| spec.hillshade) {
         raster.shade(store.connection(), query, tile.z)?;
     }
     raster.roads(store, &roads, tile.z, 0)?;
-    for feature in features
-        .iter()
-        .filter(|feature| (30..50).contains(&phase(feature)))
-    {
-        raster.feature(feature, tile.z)?;
-    }
-    for feature in features
-        .iter()
-        .filter(|feature| phase(feature) == 50 && feature.structure == 0)
-    {
-        raster.feature(feature, tile.z)?;
-    }
-    for feature in features
-        .iter()
-        .filter(|feature| phase(feature) == 50 && feature.structure == 1)
-    {
-        raster.feature(feature, tile.z)?;
-    }
+    draw_pass(&mut raster, 1)?;
+    draw_pass(&mut raster, 2)?;
+    draw_pass(&mut raster, 3)?;
     raster.roads(store, &roads, tile.z, 1)?;
-    for feature in features
-        .iter()
-        .filter(|feature| phase(feature) >= 60 || (phase(feature) == 50 && feature.structure == 2))
-    {
-        raster.feature(feature, tile.z)?;
-    }
+    draw_pass(&mut raster, 4)?;
     raster.roads(store, &roads, tile.z, 2)?;
     context.check()?;
     let labels = if let Some(spec) = spec.filter(|spec| spec.labels) {
@@ -466,12 +436,13 @@ fn render_window(
     } else {
         0
     };
-    let candidate_count = (features.len() + roads.len()) as u64 + labels;
-    let loaded_vertices = total as u64 + raster.road_vertices;
+    let candidate_count = feature_count + roads.len() as u64 + labels;
+    let loaded_vertices = total_points + raster.road_vertices;
     Ok((raster.pixmap, candidate_count, loaded_vertices))
 }
 
-fn phase(feature: &Feature) -> i32 {
+#[cfg(test)]
+pub(super) fn phase(feature: &Feature) -> i32 {
     match feature.kind {
         FeatureKind::Land => 0,
         FeatureKind::Forest
@@ -749,6 +720,7 @@ impl<'a> Raster<'a> {
     }
 
     fn polygon_mask(&mut self, rings: &[&[Point]]) -> Result<Mask> {
+        self.context.check()?;
         let mut rows = vec![Vec::<f64>::new(); self.window.height * SAMPLES];
         let mut crossings = 0_usize;
         for ring in rings {
@@ -766,6 +738,12 @@ impl<'a> Raster<'a> {
         }
         let mut mask = Mask::new(self.window);
         for (row, xs) in rows.iter_mut().enumerate() {
+            // 交点がない行には被覆標本がなく、描画・整列・演算量の課金も不要。
+            // 広域の微小面ごとに画面全行を課金すると、実際に塗る標本が少なくても
+            // 累計上限へ達する。交点・区間・塗りの実処理に対する上限は維持する。
+            if xs.is_empty() {
+                continue;
+            }
             self.charge(xs.len().saturating_add(1))?;
             xs.sort_unstable_by(f64::total_cmp);
             ensure!(xs.len().is_multiple_of(2), "面の走査線交点数が不正です");
@@ -928,7 +906,10 @@ impl<'a> Raster<'a> {
     }
 
     fn pixel_polygon_union(&mut self, points: &[Point], mask: &mut Mask) -> Result<()> {
-        // 線の各長方形・円近似は凸面なので、交点リストを全画面へ確保しない。
+        // 線の各長方形・円近似は凸面なので、各標本行の左右端だけを保持する。
+        // 毎行ですべての辺を調べる代わりに、辺が交差する行だけを走査する。
+        // 交点の式と標本の包含規則は従来と同じまま、丸端の空の辺検査を省く。
+        self.context.check()?;
         let min_y = points
             .iter()
             .map(|point| point.y)
@@ -941,25 +922,51 @@ impl<'a> Raster<'a> {
         let limit = (self.window.height * SAMPLES) as i64;
         let start = ((min_y * SAMPLES as f64 - 0.5).ceil() as i64 - base).clamp(0, limit) as usize;
         let end = ((max_y * SAMPLES as f64 - 0.5).ceil() as i64 - base).clamp(0, limit) as usize;
-        self.charge(end.saturating_sub(start).saturating_mul(points.len()))?;
-        for row in start..end {
-            let y = self.window.origin_y as f64 + (row as f64 + 0.5) / SAMPLES as f64;
-            let mut left = f64::INFINITY;
-            let mut right = f64::NEG_INFINITY;
-            for pair in points.windows(2) {
-                let (a, b) = if pair[0].y < pair[1].y {
-                    (pair[0], pair[1])
-                } else {
-                    (pair[1], pair[0])
-                };
-                if y >= a.y && y < b.y {
-                    let x = a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x);
-                    left = left.min(x);
-                    right = right.max(x);
-                }
+        if start == end {
+            return Ok(());
+        }
+        let mut spans = vec![(f64::INFINITY, f64::NEG_INFINITY); end - start];
+        let mut crossing_work = 0_usize;
+        for (index, pair) in points.windows(2).enumerate() {
+            if index != 0 && index.is_multiple_of(128) {
+                self.context.check()?;
             }
+            let (a, b) = if pair[0].y < pair[1].y {
+                (pair[0], pair[1])
+            } else {
+                (pair[1], pair[0])
+            };
+            let first = ((a.y * SAMPLES as f64 - 0.5).ceil() as i64 - base)
+                .clamp(start as i64, end as i64) as usize;
+            let last = ((b.y * SAMPLES as f64 - 0.5).ceil() as i64 - base)
+                .clamp(start as i64, end as i64) as usize;
+            crossing_work = crossing_work
+                .checked_add(last.saturating_sub(first))
+                .context("凸面の交点処理量が上限を超えました")?;
+            for (offset, span) in spans
+                .iter_mut()
+                .enumerate()
+                .take(last - start)
+                .skip(first - start)
+            {
+                let row = start + offset;
+                let y = self.window.origin_y as f64 + (row as f64 + 0.5) / SAMPLES as f64;
+                let x = a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x);
+                span.0 = span.0.min(x);
+                span.1 = span.1.max(x);
+            }
+        }
+        // 矩形と丸端は最大33頂点の小さな凸面。0行の辺ごとに時計を確認せず、
+        // 交点計算の実処理量を集約し、被覆maskへ書き込む前に1回で検査する。
+        self.charge(
+            points
+                .len()
+                .checked_add(crossing_work)
+                .context("凸面の処理量が上限を超えました")?,
+        )?;
+        for (offset, (left, right)) in spans.into_iter().enumerate() {
             if left < right {
-                self.fill_interval(mask, row, left, right)?;
+                self.fill_interval(mask, start + offset, left, right)?;
             }
         }
         Ok(())
@@ -1306,6 +1313,299 @@ mod tests {
     fn 描画設定の識別は安定する() {
         assert_eq!(style_hash(), style_hash());
         assert_eq!(style_hash().len(), 64);
+    }
+
+    #[test]
+    fn 地物種別の最小ズームと描画スタイルの表示開始ズームは一致する() {
+        for style in FEATURE_STYLES {
+            assert_eq!(style.kind.min_zoom(), style.zoom, "{:?}", style.kind);
+        }
+        for code in 1..=150 {
+            if let Ok(kind) = FeatureKind::from_code(code) {
+                assert_eq!(feature_style(kind).zoom, kind.min_zoom(), "{kind:?}");
+            }
+        }
+    }
+
+    // 修正前の「各行ですべての辺を検査する」凸面描画を、画素互換性の参照にする。
+    fn reference_pixel_polygon_union(raster: &mut Raster<'_>, points: &[Point], mask: &mut Mask) {
+        let min_y = points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
+        let max_y = points.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max);
+        let base = raster.window.origin_y * SAMPLES as i64;
+        let limit = (raster.window.height * SAMPLES) as i64;
+        let start = ((min_y * SAMPLES as f64 - 0.5).ceil() as i64 - base).clamp(0, limit) as usize;
+        let end = ((max_y * SAMPLES as f64 - 0.5).ceil() as i64 - base).clamp(0, limit) as usize;
+        raster.charge((end - start) * points.len()).unwrap();
+        for row in start..end {
+            let y = raster.window.origin_y as f64 + (row as f64 + 0.5) / SAMPLES as f64;
+            let mut left = f64::INFINITY;
+            let mut right = f64::NEG_INFINITY;
+            for pair in points.windows(2) {
+                let (a, b) = if pair[0].y < pair[1].y {
+                    (pair[0], pair[1])
+                } else {
+                    (pair[1], pair[0])
+                };
+                if y >= a.y && y < b.y {
+                    let x = a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x);
+                    left = left.min(x);
+                    right = right.max(x);
+                }
+            }
+            if left < right {
+                raster.fill_interval(mask, row, left, right).unwrap();
+            }
+        }
+    }
+
+    fn pixel_circle(x: f64, y: f64, radius: f64) -> Vec<Point> {
+        let mut points = (0..LINE_CIRCLE_POINTS)
+            .map(|step| {
+                let angle = step as f64 / LINE_CIRCLE_POINTS as f64 * std::f64::consts::TAU;
+                round_pixel(Point {
+                    x: x + radius * libm::cos(angle),
+                    y: y + radius * libm::sin(angle),
+                })
+            })
+            .collect::<Vec<_>>();
+        points.push(points[0]);
+        points
+    }
+
+    #[test]
+    fn 凸面の辺別走査は高ズームと窓境界を含め旧標本と一致する() {
+        let context = context();
+        for (z, x, y) in [(0, 0, 0), (7, 113, 50), (22, 3675841, 1655789)] {
+            for size in [256, 512] {
+                let window = Window::new(TileId::new(z, x, y).unwrap(), size, size).unwrap();
+                let (ox, oy) = (window.origin_x as f64, window.origin_y as f64);
+                let mut shapes = vec![
+                    rectangle(ox - 200.0, oy - 100.0, 900.0, 700.0),
+                    rectangle(ox + 0.125, oy + 0.125, 2.0, 2.0),
+                    vec![
+                        point(ox - 80.0, oy + 20.125),
+                        point(ox + 500.0, oy + 490.375),
+                        point(ox + 500.5, oy + 489.875),
+                        point(ox - 79.5, oy + 19.625),
+                        point(ox - 80.0, oy + 20.125),
+                    ],
+                ];
+                for radius in [0.5, 1.25, 16.0] {
+                    for (cx, cy) in [
+                        (-2.0, 2.0),
+                        (0.125, 0.125),
+                        (127.875, 128.125),
+                        (255.875, 256.125),
+                        (510.0, 510.0),
+                    ] {
+                        shapes.push(pixel_circle(ox + cx, oy + cy, radius));
+                    }
+                }
+                let mut actual = Raster::new(window, BACKGROUND, &context).unwrap();
+                let mut reference = Raster::new(window, BACKGROUND, &context).unwrap();
+                for shape in shapes {
+                    // 各形状を単独で比較し、先の面の被覆で差が隠れないようにする。
+                    let (mut actual_mask, mut reference_mask) =
+                        (Mask::new(window), Mask::new(window));
+                    actual
+                        .pixel_polygon_union(&shape, &mut actual_mask)
+                        .unwrap();
+                    reference_pixel_polygon_union(&mut reference, &shape, &mut reference_mask);
+                    assert_eq!(
+                        actual_mask.samples, reference_mask.samples,
+                        "z={z},size={size}"
+                    );
+                    assert_eq!(actual_mask.bounds, reference_mask.bounds);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn 凸面の走査行範囲は世界端と半標本の隣接浮動小数点でも旧述語と一致する() {
+        for (z, x, y) in [
+            (0, 0, 0),
+            (7, 113, 50),
+            (22, 0, 0),
+            (22, (1 << 22) - 1, (1 << 22) - 1),
+        ] {
+            let window = Window::new(TileId::new(z, x, y).unwrap(), 256, 256).unwrap();
+            let base = window.origin_y * SAMPLES as i64;
+            let limit = (window.height * SAMPLES) as i64;
+            for boundary in [0, 1, 2, 3, 511, 1022, 1023] {
+                let sample_y = window.origin_y as f64 + (boundary as f64 + 0.5) / SAMPLES as f64;
+                let below = f64::from_bits(sample_y.to_bits() - 1);
+                let above = f64::from_bits(sample_y.to_bits() + 1);
+                for (p, q) in [
+                    (below, sample_y),
+                    (sample_y, above),
+                    (below, above),
+                    (above, below),
+                    (above, sample_y),
+                    (sample_y, below),
+                    (sample_y, sample_y),
+                    (
+                        sample_y - 1.0 / COORDINATE_GRID,
+                        sample_y + 1.0 / COORDINATE_GRID,
+                    ),
+                ] {
+                    let (a, b) = if p < q { (p, q) } else { (q, p) };
+                    let first = ((a * SAMPLES as f64 - 0.5).ceil() as i64 - base).clamp(0, limit);
+                    let last = ((b * SAMPLES as f64 - 0.5).ceil() as i64 - base).clamp(0, limit);
+                    // ceilを使用せず、旧処理と同じ包含述語をすべての可視標本へ適用する。
+                    for row in 0..limit {
+                        let y = window.origin_y as f64 + (row as f64 + 0.5) / SAMPLES as f64;
+                        assert_eq!(
+                            first <= row && row < last,
+                            a <= y && y < b,
+                            "z={z},boundary={boundary},row={row},a={a:?},b={b:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn 丸端の空辺走査を省いても実際の交点と塗りの演算上限を保持する() {
+        let context = context();
+        let window = Window::new(TileId::new(0, 0, 0).unwrap(), 256, 256).unwrap();
+        let circle = pixel_circle(100.0, 100.0, 1.25);
+        let mut actual = Raster::new(window, BACKGROUND, &context).unwrap();
+        let mut reference = Raster::new(window, BACKGROUND, &context).unwrap();
+        actual
+            .pixel_polygon_union(&circle, &mut Mask::new(window))
+            .unwrap();
+        reference_pixel_polygon_union(&mut reference, &circle, &mut Mask::new(window));
+        assert!(
+            actual.work * 2 < reference.work,
+            "{} / {}",
+            actual.work,
+            reference.work
+        );
+        let mut exact = Raster::new(window, BACKGROUND, &context).unwrap();
+        exact.work = MAX_WORK - actual.work;
+        exact
+            .pixel_polygon_union(&circle, &mut Mask::new(window))
+            .unwrap();
+        assert_eq!(exact.work, MAX_WORK);
+        let mut exceeded = Raster::new(window, BACKGROUND, &context).unwrap();
+        exceeded.work = MAX_WORK - actual.work + 1;
+        assert!(
+            exceeded
+                .pixel_polygon_union(&circle, &mut Mask::new(window))
+                .unwrap_err()
+                .to_string()
+                .contains("演算量上限")
+        );
+        let token = CancellationToken::new();
+        let cancelled = OperationContext::new(token.clone());
+        let mut raster = Raster::new(window, BACKGROUND, &cancelled).unwrap();
+        token.cancel();
+        assert!(
+            raster
+                .pixel_polygon_union(&circle, &mut Mask::new(window))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn 被覆標本のない微小面は空の走査行で演算上限を消費しない() {
+        let context = context();
+        let window = Window::new(TileId::new(1, 0, 0).unwrap(), 256, 256).unwrap();
+        let mut raster = Raster::new(window, BACKGROUND, &context).unwrap();
+        // 最初の標本(0.125px)へ届かず、どの走査行にも交点を持たない面。
+        let tiny = rectangle(
+            10.0 / window.scale,
+            0.03 / window.scale,
+            1.0 / window.scale,
+            0.04 / window.scale,
+        );
+        raster.work = MAX_WORK - 1;
+        for _ in 0..64 {
+            let mask = raster.polygon_mask(&[&tiny]).unwrap();
+            assert!(mask.bounds.is_none());
+            assert!(mask.samples.iter().all(|sample| *sample == 0));
+        }
+        assert_eq!(raster.work, MAX_WORK - 1);
+    }
+
+    #[test]
+    fn 空行を省略しても有効な被覆処理には演算上限を適用する() {
+        let context = context();
+        let window = Window::new(TileId::new(1, 0, 0).unwrap(), 256, 256).unwrap();
+        let mut raster = Raster::new(window, BACKGROUND, &context).unwrap();
+        raster.work = MAX_WORK - 1;
+        let area = rectangle(0.1, 0.1, 0.1, 0.1);
+        let error = raster
+            .polygon_mask(&[&area])
+            .err()
+            .expect("有効な描画の演算量上限で停止する");
+        assert!(error.to_string().contains("演算量上限"));
+    }
+
+    #[test]
+    fn 空行省略後も境界と穴の全被覆標本が偶奇判定に一致する() {
+        let context = context();
+        let window = Window::new(TileId::new(2, 1, 1).unwrap(), 16, 16).unwrap();
+        let outer = [
+            (-2.0, 3.125),
+            (8.375, 1.375),
+            (17.0, 11.125),
+            (2.125, 13.375),
+            (-2.0, 3.125),
+        ];
+        let hole = [
+            (4.125, 5.125),
+            (9.375, 5.125),
+            (9.375, 8.375),
+            (4.125, 8.375),
+            (4.125, 5.125),
+        ];
+        let world = |ring: &[(f64, f64)]| {
+            ring.iter()
+                .map(|&(x, y)| Point {
+                    x: (window.origin_x as f64 + x) / window.scale,
+                    y: (window.origin_y as f64 + y) / window.scale,
+                })
+                .collect::<Vec<_>>()
+        };
+        let outer_world = world(&outer);
+        let hole_world = world(&hole);
+        let mut raster = Raster::new(window, BACKGROUND, &context).unwrap();
+        let mask = raster.polygon_mask(&[&outer_world, &hole_world]).unwrap();
+        // 走査線実装を使わず、各標本からの半直線で元の面と穴を直接判定する。
+        let inside = |x: f64, y: f64| {
+            let mut odd = false;
+            for ring in [&outer[..], &hole[..]] {
+                for edge in ring.windows(2) {
+                    let (a, b) = (edge[0], edge[1]);
+                    if (a.1 > y) != (b.1 > y) && x < a.0 + (y - a.1) * (b.0 - a.0) / (b.1 - a.1) {
+                        odd = !odd;
+                    }
+                }
+            }
+            odd
+        };
+        for row in 0..window.height {
+            for column in 0..window.width {
+                let mut expected = 0_u16;
+                for dy in 0..SAMPLES {
+                    for dx in 0..SAMPLES {
+                        let x = column as f64 + (dx as f64 + 0.5) / SAMPLES as f64;
+                        let y = row as f64 + (dy as f64 + 0.5) / SAMPLES as f64;
+                        if inside(x, y) {
+                            expected |= 1 << (dy * SAMPLES + dx);
+                        }
+                    }
+                }
+                assert_eq!(
+                    mask.samples[row * window.width + column],
+                    expected,
+                    "標本不一致: {column},{row}"
+                );
+            }
+        }
     }
 
     #[test]
