@@ -94,7 +94,7 @@ impl RenderSpec {
 mod tests {
     use super::*;
     #[test]
-    fn 未使用の言語は同じ設定へ正規化し表示変更を区別する() {
+    fn unused_language_is_normalized_and_display_changes_remain_distinct() {
         let mut a = RenderSpec::osm_like();
         a.labels = false;
         let mut b = a;

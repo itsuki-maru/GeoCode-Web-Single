@@ -5,6 +5,8 @@ pub enum LaunchMode {
     Desktop,
     Server(String),
     LocalTiles(Vec<String>),
+    TileManager(Option<std::path::PathBuf>),
+    TileWorker(std::path::PathBuf),
     Help,
 }
 
@@ -13,6 +15,22 @@ pub fn parse(args: &[String]) -> Result<LaunchMode, String> {
         return Ok(LaunchMode::Desktop);
     };
     match first {
+        "local-tiles" if args.get(1).is_some_and(|value| value == "gui") => {
+            match &args[2..] {
+                [] => Ok(LaunchMode::TileManager(None)),
+                [help] if matches!(help.as_str(), "--help" | "-h") => Ok(LaunchMode::Help),
+                [option, path] if option == "--config" && std::path::Path::new(path).is_absolute() =>
+                    Ok(LaunchMode::TileManager(Some(path.into()))),
+                _ => Err("使用方法: local-tiles gui [--config ABSOLUTE_JSON_PATH]".into()),
+            }
+        },
+        "local-tiles" if args.get(1).is_some_and(|value| value == "worker") => {
+            match &args[2..] {
+                [option, path] if option == "--request" && std::path::Path::new(path).is_absolute() =>
+                    Ok(LaunchMode::TileWorker(path.into())),
+                _ => Err("workerには受付ファイルの絶対パスが必要です。".into()),
+            }
+        },
         "local-tiles" => Ok(LaunchMode::LocalTiles(args[1..].to_vec())),
         "--help" | "-h" if args.len() == 1 => Ok(LaunchMode::Help),
         "-s" if args.len() <= 2 => {
@@ -36,7 +54,7 @@ mod tests {
     }
 
     #[test]
-    fn モードを先頭引数だけで判定し別モードの混在を拒否する() {
+    fn selects_modes_from_the_first_argument_and_rejects_mixed_modes() {
         assert_eq!(parse(&[]).unwrap(), LaunchMode::Desktop);
         assert_eq!(
             parse(&arguments(&["-s"])).unwrap(),
@@ -62,5 +80,32 @@ mod tests {
             parse(&arguments(&["local-tiles", "import", "--input", "-s"])).unwrap(),
             LaunchMode::LocalTiles(arguments(&["import", "--input", "-s"]))
         );
+    }
+
+    #[test]
+    fn parses_tile_manager_and_worker_modes_independently_of_desktop_mode() {
+        assert_eq!(
+            parse(&arguments(&["local-tiles", "gui"])).unwrap(),
+            LaunchMode::TileManager(None)
+        );
+        let absolute = std::env::current_dir().unwrap().join("設定 日本語.json");
+        let path = absolute.to_str().unwrap();
+        assert_eq!(
+            parse(&arguments(&["local-tiles", "gui", "--config", path])).unwrap(),
+            LaunchMode::TileManager(Some(absolute.clone()))
+        );
+        assert_eq!(
+            parse(&arguments(&["local-tiles", "worker", "--request", path])).unwrap(),
+            LaunchMode::TileWorker(absolute.clone())
+        );
+        for args in [
+            &["local-tiles", "gui", "-s"][..],
+            &["local-tiles", "gui", "--config", "relative.json"],
+            &["local-tiles", "gui", "--config", path, "extra"],
+            &["local-tiles", "worker"],
+            &["local-tiles", "worker", "--request", "relative.json"],
+        ] {
+            assert!(parse(&arguments(args)).is_err(), "{args:?}");
+        }
     }
 }

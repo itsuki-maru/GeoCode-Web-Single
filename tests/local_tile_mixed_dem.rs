@@ -102,7 +102,7 @@ fn render(dataset: &Dataset, tile: TileId) -> Vec<u8> {
 }
 
 #[test]
-fn 隣接する異なる測地系の原標高を連続して読み入力順や保存先で画像を変えない() {
+fn read_adjacent_mixed_datum_elevation_continuously_and_render_independently_of_order_and_path() {
     let root = tempfile::tempdir().unwrap();
     let pbf = root.path().join("map.pbf");
     fixture::write_inputs(&pbf, &root.path().join("unused.xml"));
@@ -187,7 +187,7 @@ fn 隣接する異なる測地系の原標高を連続して読み入力順や�
 }
 
 #[test]
-fn 重複と欠損の入力測地系を採用セルの測地系と区別する() {
+fn distinguish_duplicate_and_missing_input_datums_from_selected_cell_datums() {
     let root = tempfile::tempdir().unwrap();
     let pbf = root.path().join("map.pbf");
     fixture::write_inputs(&pbf, &root.path().join("unused.xml"));
@@ -226,7 +226,7 @@ fn 重複と欠損の入力測地系を採用セルの測地系と区別する()
 }
 
 #[test]
-fn 禁止した混在は壊れたpbfを走査する前に停止する() {
+fn reject_disallowed_mixed_datums_before_scanning_invalid_pbf() {
     let root = tempfile::tempdir().unwrap();
     let pbf = root.path().join("not-a-pbf.pbf");
     std::fs::write(&pbf, b"not a PBF").unwrap();
@@ -252,7 +252,7 @@ fn 禁止した混在は壊れたpbfを走査する前に停止する() {
 }
 
 #[test]
-fn 単独資料は混在許可を選んだだけでは別の地図にしない() {
+fn keep_single_source_map_identity_when_mixed_datums_are_allowed() {
     let root = tempfile::tempdir().unwrap();
     let pbf = root.path().join("map.pbf");
     let dem = root.path().join("dem.xml");

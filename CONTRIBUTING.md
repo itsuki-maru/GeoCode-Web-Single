@@ -61,6 +61,24 @@ cargo fmt --check
 cargo test
 ```
 
+`ok` は実施して成功した試験、`FAILED` は失敗、`ignored` は未実施として分けて集計する。実exe・実資料・リンク作成権限などの前提が必要な試験を、前提不足のまま早期returnして成功にしない。個別試験を追加実行した場合は、同じ試験を重複加算しない。
+
+配布exeを使う合成データ試験は、リリースビルド後に次の2件を明示実行する。`GEOCODE_TEST_CLI_EXE`の指定は必須。実PBFを用いる長時間試験や基準画像更新までまとめて動かさないよう、`--ignored`には試験名と`--exact`を併用する。
+
+```powershell
+$env:GEOCODE_TEST_CLI_EXE = (Resolve-Path './target/release/geocode_web_single.exe').Path
+$distributionTests = @(
+  'generate_terrain_register_backgrounds_and_resume_with_the_selected_distribution_binary',
+  'import_the_new_format_and_render_with_another_configuration_after_removing_sources'
+)
+foreach ($distributionTest in $distributionTests) {
+  cargo test --offline --test local_tile_standard_exe $distributionTest -- --ignored --exact
+  if ($LASTEXITCODE -ne 0) { throw "配布exe試験に失敗しました: $distributionTest" }
+}
+```
+
+HTTP試験はローカルの模擬サーバーと、プロキシを使用しないテスト用クライアントを使う。子プロセス試験は有効な実行ファイルだけを使い、待機期限と失敗時の終了回収を備える。不正exeの起動や外部サービスへの実通信を、エラー再現の代用にしない。
+
 ローカル地図の描画・取り込みに関係する変更では、`node scripts/check-render-compatibility.mjs --offline`も実行する。コメント・Rustdocを除いた補助指紋、関連する解決済み推移依存、旧実装から固定した画像を照合する。補助指紋は描画世代には使用しない。
 
 画像を変える修正は`src/tilegen/identity.rs`の該当互換性版を更新する。同じ画素になる最適化・依存更新では、固定画像と取り込み・SDK・世代管理の回帰を確認し、据え置く理由を記録する。確認後の記録更新は`node scripts/check-render-compatibility.mjs --offline --record --reason "20文字以上の判断理由"`を使う。期待画像を変更後の実装から再生成して合格にしない。実行構成の認定には`res/tile-render-execution.json`も使い、未認定構成を環境変数で強制解除しない。

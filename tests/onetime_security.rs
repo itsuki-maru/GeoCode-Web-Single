@@ -72,7 +72,7 @@ fn payload(layers: Vec<Uuid>, password: Option<&str>, update: bool) -> GenarateU
 }
 
 #[test]
-fn 旧形式の通常共有要求はスナップショットなしで読み込める() {
+fn deserialize_legacy_share_requests_without_snapshots() {
     let mut value = json!({
         "minutes": 60,
         "layers": [Uuid::nil().to_string()],
@@ -606,7 +606,7 @@ async fn management_requires_login_and_invalidation_is_scoped_to_the_authenticat
 }
 
 #[tokio::test]
-async fn スナップショット共有も認証と所有者の検証を経て同じ共有枠へ保存する() {
+async fn authenticate_and_check_ownership_before_saving_snapshots_to_the_same_share_slot() {
     let pool = common::test_pool().await;
     let (owner, layer, _, _) = fixture(&pool, "snapshot-manage-owner").await;
     let (other, foreign_layer, _, _) = fixture(&pool, "snapshot-manage-other").await;

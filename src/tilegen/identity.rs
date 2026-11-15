@@ -228,7 +228,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn 識別は描画契約と入力だけを追跡しビルド来歴を受け取らない() {
+    fn render_identity_tracks_contract_and_inputs_without_build_provenance() {
         let contract = RenderContract::for_format(1, 1).unwrap();
         assert_eq!(
             contract.id(),
@@ -269,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn 新規完成dbの識別は入力内容と取り込み条件で決まる() {
+    fn dataset_identity_depends_on_input_content_and_import_options() {
         let expected = imported_dataset_id("source", "rules");
         assert_eq!(
             expected,

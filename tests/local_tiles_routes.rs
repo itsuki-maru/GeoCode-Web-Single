@@ -55,7 +55,8 @@ async fn body(response: axum::response::Response) -> Value {
 }
 
 #[tokio::test]
-async fn 管理操作は非公開とし共通背景設定と世代付き_xyzだけで配信する() {
+async fn keep_management_private_and_serve_only_shared_background_settings_and_versioned_xyz_tiles()
+{
     let pool = common::test_pool().await;
     let root = tempfile::tempdir().unwrap();
     let input = root.path().join("fixture.osm.pbf");

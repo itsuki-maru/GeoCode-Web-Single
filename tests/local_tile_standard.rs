@@ -126,7 +126,8 @@ async fn xyz(app: &Arc<LocalTiles>, id: &str, render: &str, tile: TileId) -> (St
 }
 
 #[tokio::test]
-async fn 新旧形式の共存と地形配信をコマンド切替と再開の後も維持する() {
+async fn preserve_legacy_and_standard_datasets_and_terrain_serving_across_command_switches_and_resume()
+ {
     let root = tempfile::tempdir().unwrap();
     let pool = pool(root.path()).await;
     let mut config = LocalTileConfig::defaults(root.path());
@@ -299,7 +300,16 @@ async fn 新旧形式の共存と地形配信をコマンド切替と再開の�
         app.start_import(standard_request).await.unwrap()["id"],
         standard_import_id
     );
-    let app_tile_tables:i64=sqlx::query_scalar("SELECT count(*) FROM sqlite_schema WHERE name LIKE 'standard_%' OR name LIKE 'local_tile_%'").fetch_one(&pool).await.unwrap();
+    let app_tile_tables: i64 = sqlx::query_scalar(
+        r#"
+        SELECT count(*)
+        FROM sqlite_schema
+        WHERE name LIKE 'standard_%' OR name LIKE 'local_tile_%'
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(app_tile_tables, 0);
     let catalog_db = rusqlite::Connection::open_with_flags(
         &config.catalog_database_path,
@@ -316,7 +326,7 @@ async fn 新旧形式の共存と地形配信をコマンド切替と再開の�
 }
 
 #[tokio::test]
-async fn 不正な標高入力の原因と終了時診断を再起動後も履歴に残す() {
+async fn retain_invalid_elevation_causes_and_final_diagnostics_after_restart() {
     let root = tempfile::tempdir().unwrap();
     let pool = pool(root.path()).await;
     let mut config = LocalTileConfig::defaults(root.path());

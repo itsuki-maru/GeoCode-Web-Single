@@ -185,7 +185,7 @@ mod tests {
     const REMOTE: &str = "https://geocode-web-mobile-app.pages.dev/assets/manifest.json";
 
     #[test]
-    fn custom_elementを標準タグの前方一致で解釈しない() {
+    fn does_not_match_custom_elements_by_standard_tag_prefix() {
         let html = format!(
             "<link-widget rel=manifest href='{REMOTE}'></link-widget><script-widget></script-widget><link rel=manifest href='{REMOTE}'>"
         );
@@ -195,7 +195,7 @@ mod tests {
     }
 
     #[test]
-    fn 終端名の前方一致や文字列領域を本物のリンクと誤認しない() {
+    fn rejects_end_tag_prefixes_and_links_in_text_regions() {
         for name in [
             "script",
             "style",
@@ -214,7 +214,7 @@ mod tests {
     }
 
     #[test]
-    fn manifestだけを書き換えコメントやスクリプトや通常リンクを保持する() {
+    fn rewrites_only_manifest_links_and_preserves_other_content() {
         let html = format!(
             "<!-- <link rel='manifest' href='{REMOTE}'> --><script>const a=\"<link rel='manifest' href='{REMOTE}'>\";</script><a href='{REMOTE}'>出典</a><LINK title='a > b' HREF='{REMOTE}' REL='alternate MANIFEST'>"
         );
@@ -227,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn タブレットと引用符省略と未知参照の扱いを固定する() {
+    fn handles_tablets_unquoted_attributes_and_unknown_references_consistently() {
         let html = "<link rel=manifest href=https://geocode-web-mobile-app.pages.dev/assets/manifest-tab.json><link rel=icon href='https://geocode-web-mobile-app.pages.dev/assets/manifest.json'><link rel=manifest href='/custom.json'>";
         let changed = localize_manifest(html);
         assert!(changed.starts_with("<link rel=manifest href=/assets/manifest-tab.json>"));

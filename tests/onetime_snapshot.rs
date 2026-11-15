@@ -392,7 +392,7 @@ async fn rendered(pool: &SqlitePool, id: &str, mobile: bool) -> Value {
 }
 
 #[tokio::test]
-async fn 取得済みの地図と色分けを保存し除外データを公開しない() {
+async fn save_fetched_maps_and_color_rules_without_exposing_excluded_data() {
     let pool = common::test_pool().await;
     let (user, layer, marker, excluded, snapshot) = fixture(&pool).await;
     let id = create(&pool, &user, payload(&layer, Some(snapshot.clone()), false))
@@ -480,7 +480,7 @@ async fn 取得済みの地図と色分けを保存し除外データを公開�
 }
 
 #[tokio::test]
-async fn 他人の対象や除外情報や未管理タイルを拒否し既存共有を保持する() {
+async fn reject_foreign_targets_exclusions_and_unmanaged_tiles_without_changing_existing_shares() {
     let pool = common::test_pool().await;
     let (user, layer, marker, excluded, snapshot) = fixture(&pool).await;
     let original = create(&pool, &user, payload(&layer, Some(snapshot.clone()), false)).await;
@@ -567,7 +567,7 @@ async fn 他人の対象や除外情報や未管理タイルを拒否し既存�
 }
 
 #[tokio::test]
-async fn 空の地図を共有でき新規発行失敗でも以前の共有を失効させない() {
+async fn share_empty_maps_and_preserve_existing_shares_when_new_issuance_fails() {
     let pool = common::test_pool().await;
     let (user, layer, _, _, mut snapshot) = fixture(&pool).await;
     snapshot["markers"] = json!({});
@@ -644,7 +644,7 @@ async fn 空の地図を共有でき新規発行失敗でも以前の共有を�
 }
 
 #[tokio::test]
-async fn 複数接続の通常共有とスナップショット共有と停止を一枠に直列化する() {
+async fn serialize_normal_shares_snapshot_shares_and_stops_into_one_slot_across_connections() {
     let (pool, path) = common::file_test_pool().await;
     let (user, layer, _, _, snapshot) = fixture(&pool).await;
     let mut jobs = Vec::new();
@@ -701,7 +701,8 @@ async fn 複数接続の通常共有とスナップショット共有と停止�
 }
 
 #[tokio::test]
-async fn 再接続後も日本語本文と小数の地図状態と真偽値を保持し日時を同じ基準で扱う() {
+async fn preserve_japanese_text_decimal_map_state_booleans_and_timestamp_semantics_after_reconnection()
+ {
     let (pool, path) = common::file_test_pool().await;
     let (user, layer, marker, _, mut snapshot) = fixture(&pool).await;
     snapshot["markers"][&marker]["marker_name"] = json!("保存する地点🗺️");
@@ -779,7 +780,7 @@ async fn 再接続後も日本語本文と小数の地図状態と真偽値を�
 }
 
 #[tokio::test]
-async fn 元の図形と重ね合わせタイルが更新されても保存した定義と表示を保持する() {
+async fn preserve_saved_definitions_and_visibility_after_source_shapes_and_overlays_change() {
     let pool = common::test_pool().await;
     let (user, layer, _, _, mut snapshot) = fixture(&pool).await;
     snapshot["state"]["objectQuery"] = json!("");

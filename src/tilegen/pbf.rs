@@ -744,7 +744,7 @@ mod checked_tests {
     use super::*;
 
     #[test]
-    fn 通常と密なnodeの選択タグを旧走査から分離する() -> Result<()> {
+    fn selected_tags_from_regular_and_dense_nodes_are_isolated_from_legacy_scan() -> Result<()> {
         for dense in [false, true] {
             let mut fixture = crate::tilegen::test_support::Fixture::sample();
             fixture.dense = dense;
@@ -791,7 +791,7 @@ mod checked_tests {
     }
 
     #[test]
-    fn 関係の走査は新形式でだけ有効にし逆順圧縮入力も読める() -> Result<()> {
+    fn relation_scan_requires_new_format_and_reads_reversed_compressed_inputs() -> Result<()> {
         for compressed in [false, true] {
             for relations_first in [false, true] {
                 let mut fixture = crate::tilegen::test_support::Fixture::sample();

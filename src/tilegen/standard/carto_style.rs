@@ -165,7 +165,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn 低ズームの橋とトンネルは通常道路と同色同幅同破線になる() {
+    fn low_zoom_bridges_and_tunnels_match_regular_road_style() {
         for road_class in RoadClass::ALL {
             for is_link in [false, true] {
                 let ground = RoadAttributes {
@@ -201,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    fn ズーム十三以上で橋の縁とトンネルの破線を強調する() {
+    fn emphasizes_bridge_casing_and_tunnel_dashes_from_zoom_thirteen() {
         let ground = RoadAttributes {
             road_class: RoadClass::Primary,
             is_link: false,

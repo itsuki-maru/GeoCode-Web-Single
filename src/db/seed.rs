@@ -1,5 +1,5 @@
 use crate::config::CONFIG;
-use crate::model::{ReturningId, ReturningId64};
+use crate::model::{ApplicationInitSetup, ReturningId, ReturningId64};
 use bcrypt::{DEFAULT_COST, hash};
 use chrono::{TimeDelta, Utc};
 use sqlx::Pool;
@@ -9,6 +9,43 @@ use uuid::Uuid;
 
 // 初期データの存在確認
 pub async fn check_and_insert_initial_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Error> {
+    check_and_insert_initial_data_with_options(pool, || SeedOptions {
+        admin_username: &CONFIG.admin_user_name,
+        admin_password: &CONFIG.admin_user_password,
+        failed_count: &CONFIG.failed_count,
+        next_challenge_minutes: &CONFIG.next_challenge_minutes,
+        challenge_limit_start: &CONFIG.challenge_limit_start,
+    })
+    .await
+}
+
+/// 初期設定ウィンドウ専用。CONFIGやプロセス環境を初期化せず、明示された設定だけを使う。
+pub async fn check_and_insert_initial_data_with_settings(
+    pool: &Pool<Sqlite>,
+    settings: &ApplicationInitSetup,
+) -> Result<(), sqlx::Error> {
+    check_and_insert_initial_data_with_options(pool, || SeedOptions {
+        admin_username: &settings.admin_username,
+        admin_password: &settings.admin_passwotd,
+        failed_count: &settings.failed_account_lock,
+        next_challenge_minutes: &settings.next_challenge_minutes,
+        challenge_limit_start: &settings.challenge_limit_time_failed_count,
+    })
+    .await
+}
+
+struct SeedOptions<'a> {
+    admin_username: &'a str,
+    admin_password: &'a str,
+    failed_count: &'a str,
+    next_challenge_minutes: &'a str,
+    challenge_limit_start: &'a str,
+}
+
+async fn check_and_insert_initial_data_with_options<'a>(
+    pool: &Pool<Sqlite>,
+    options: impl FnOnce() -> SeedOptions<'a>,
+) -> Result<(), sqlx::Error> {
     // タイルサーバー初期データの存在を確認するクエリ
     let row: (i64,) = query_as(
         r#"
@@ -37,7 +74,7 @@ pub async fn check_and_insert_initial_data(pool: &Pool<Sqlite>) -> Result<(), sq
     .await?;
 
     if row.0 == 0 {
-        insert_initial_admin_data(pool).await?;
+        insert_initial_admin_data(pool, &options()).await?;
     } else {
         tracing::info!("Admin User Exists.");
     }
@@ -84,7 +121,7 @@ async fn insert_initial_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Error> {
 
     match result {
         Ok(init_data) => tracing::info!("Created Tile Sever Data: {}", init_data.id),
-        Err(_) => tracing::error!("Initial Data Create Error."),
+        Err(error) => return Err(error),
     }
 
     let create_at = Utc::now().naive_utc();
@@ -120,7 +157,7 @@ async fn insert_initial_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Error> {
 
     match result {
         Ok(init_data) => tracing::info!("Created Tile Sever Data: {}", init_data.id),
-        Err(_) => tracing::error!("Initial Data Create Error."),
+        Err(error) => return Err(error),
     }
 
     // トランザクション終了
@@ -130,7 +167,10 @@ async fn insert_initial_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Error> {
 }
 
 // 管理者アカウント作成、アカウントロック回数設定
-async fn insert_initial_admin_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Error> {
+async fn insert_initial_admin_data(
+    pool: &Pool<Sqlite>,
+    options: &SeedOptions<'_>,
+) -> Result<(), sqlx::Error> {
     let now = Utc::now().naive_utc();
     let yesterday;
     match TimeDelta::try_days(1) {
@@ -144,8 +184,8 @@ async fn insert_initial_admin_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Erro
     }
 
     // パスワードをハッシュ化(ソルト値はハッシュ値に組み込んで管理)
-    let hashed_password =
-        hash(&CONFIG.admin_user_password, DEFAULT_COST).expect("Admin Password Hash Error.");
+    let hashed_password = hash(options.admin_password, DEFAULT_COST)
+        .map_err(|error| sqlx::Error::Protocol(format!("Admin password hash error: {error}")))?;
 
     // 新規ID
     let new_admin_id = Uuid::now_v7().to_string();
@@ -176,7 +216,7 @@ async fn insert_initial_admin_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Erro
         RETURNING id
         "#,
         new_admin_id,
-        CONFIG.admin_user_name,
+        options.admin_username,
         hashed_password,
         now,
         true,
@@ -224,23 +264,25 @@ async fn insert_initial_admin_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Erro
 
             match returnig_layer_id {
                 Ok(_) => {
-                    tracing::info!("Created admin user: {}", CONFIG.admin_user_name);
+                    tracing::info!("Created admin user: {}", options.admin_username);
                 },
                 Err(e) => {
                     tracing::error!("Master Layer Create Error: {}.", e);
+                    return Err(e);
                 },
             }
         },
         Err(e) => {
             tracing::error!("Master Layer Create Error: {}.", e);
+            return Err(e);
         },
     }
 
     // アカウントロックまでの時間を設定
-    let failed_count_parsed = CONFIG
+    let failed_count_parsed = options
         .failed_count
         .parse::<u32>()
-        .expect("Failed Count Parse Error.");
+        .map_err(|error| sqlx::Error::Protocol(format!("Failed count: {error}")))?;
 
     // 新規ID
     let new_settings_id = Uuid::now_v7().to_string();
@@ -265,7 +307,7 @@ async fn insert_initial_admin_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Erro
         "#,
         new_settings_id,
         setting_value,
-        CONFIG.failed_count,
+        options.failed_count,
         description,
         now,
         now,
@@ -275,14 +317,14 @@ async fn insert_initial_admin_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Erro
 
     match result {
         Ok(_) => tracing::info!("Failed Count: {}", failed_count_parsed),
-        Err(_) => tracing::error!("Initial Data Create Error."),
+        Err(error) => return Err(error),
     }
 
     // 複数回のログインに失敗した際の時間制限（分）を設定
-    let next_challenge_minutes_parsed = CONFIG
+    let next_challenge_minutes_parsed = options
         .next_challenge_minutes
         .parse::<u32>()
-        .expect("Failed Count Parse Error."); // 検証のみ
+        .map_err(|error| sqlx::Error::Protocol(format!("Next challenge minutes: {error}")))?;
 
     // 新規ID
     let new_settings_id = Uuid::now_v7().to_string();
@@ -306,7 +348,7 @@ async fn insert_initial_admin_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Erro
         "#,
         new_settings_id,
         setting_value,
-        CONFIG.next_challenge_minutes,
+        options.next_challenge_minutes,
         description,
         now,
         now,
@@ -316,14 +358,14 @@ async fn insert_initial_admin_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Erro
 
     match result {
         Ok(_) => tracing::info!("Next Challenge Minutes: {}", next_challenge_minutes_parsed),
-        Err(_) => tracing::error!("Initial Data Create Error."),
+        Err(error) => return Err(error),
     }
 
     // ログイン試行時間制限を開始するまでの回数を設定
-    let challenge_limit_start_parsed = CONFIG
+    let challenge_limit_start_parsed = options
         .challenge_limit_start
         .parse::<u32>()
-        .expect("Failed Count Parse Error."); // 検証のみ
+        .map_err(|error| sqlx::Error::Protocol(format!("Challenge limit start: {error}")))?;
 
     // 新規ID
     let new_settings_id = Uuid::now_v7().to_string();
@@ -347,7 +389,7 @@ async fn insert_initial_admin_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Erro
         "#,
         new_settings_id,
         setting_value,
-        CONFIG.challenge_limit_start,
+        options.challenge_limit_start,
         description,
         now,
         now,
@@ -360,7 +402,7 @@ async fn insert_initial_admin_data(pool: &Pool<Sqlite>) -> Result<(), sqlx::Erro
             "Next Challenge Limit Start: {}",
             challenge_limit_start_parsed
         ),
-        Err(_) => tracing::error!("Initial Data Create Error."),
+        Err(error) => return Err(error),
     }
 
     // トランザクションの終了

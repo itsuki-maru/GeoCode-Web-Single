@@ -352,7 +352,7 @@ mod tests {
         out
     }
     #[test]
-    fn 陸域Polygonを本体内で読み入力位置に依存しない() {
+    fn imports_land_polygons_independently_of_source_location() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("land.shp");
         fs::write(&path, shape()).unwrap();
@@ -365,7 +365,7 @@ mod tests {
         assert_eq!(source.sha256.len(), 64);
     }
     #[test]
-    fn 投影座標の陸域と壊れたレコードを拒否する() {
+    fn rejects_projected_landmask_coordinates_and_corrupt_records() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("land.shp");
         fs::write(&path, shape()).unwrap();
@@ -384,7 +384,7 @@ mod tests {
         assert!(import_into(&conn, &path, &OperationContext::default()).is_err());
     }
     #[test]
-    fn 度単位係数と本初子午線と楕円体の偽装を拒否する() {
+    fn rejects_spoofed_degree_units_prime_meridians_and_ellipsoids() {
         assert!(validate_prj(PRJ).is_ok());
         for bad in [
             PRJ.replace("0.0174532925199433", "1"),

@@ -8,7 +8,7 @@ use axum::{
     response::Response,
 };
 use geocode_web_single::handler::live_camera::{
-    self as camera, CameraConfig, Exchange, Join, Leave, Outgoing, Start,
+    self as camera, CameraConfig, CloudflareTurnClient, Exchange, Join, Leave, Outgoing, Start,
 };
 use serde_json::{Value, json};
 use sqlx::SqlitePool;
@@ -19,6 +19,7 @@ fn config() -> CameraConfig {
         provider: String::new(),
         cloudflare_key_id: String::new(),
         cloudflare_api_token: String::new(),
+        cloudflare_turn_client: CloudflareTurnClient::default(),
         enabled: true,
         stun_urls: vec![],
         urls: vec!["turn:localhost:3478".into()],
@@ -733,6 +734,21 @@ async fn lease_expiry_cannot_be_renewed_and_frees_the_viewer_slot() {
 
 #[tokio::test]
 async fn cloudflare_session_lifetime_and_preflight_authorization() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = calls.clone();
+    let upstream = axum::Router::new().fallback(move || {
+        observed.fetch_add(1, Ordering::SeqCst);
+        async { axum::http::StatusCode::INTERNAL_SERVER_ERROR }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/v1/turn/keys/", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, upstream).await.unwrap();
+    });
     let pool = common::test_pool().await;
     use geocode_web_single::error::AppError;
     let (user, location, public, member, id) = fixture(&pool).await;
@@ -740,6 +756,16 @@ async fn cloudflare_session_lifetime_and_preflight_authorization() {
     cloudflare.provider = "cloudflare".into();
     cloudflare.cloudflare_key_id = "a".repeat(32);
     cloudflare.cloudflare_api_token = "test-token".into();
+    cloudflare.cloudflare_turn_client = CloudflareTurnClient::with_endpoint(
+        reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_millis(1500))
+            .build()
+            .unwrap(),
+        reqwest::Url::parse(&endpoint).unwrap(),
+    )
+    .unwrap();
     // 外部APIを呼ばずに拒否されることをエラー種別でも検証する。
     assert!(matches!(
         camera::start(
@@ -800,6 +826,12 @@ async fn cloudflare_session_lifetime_and_preflight_authorization() {
         .await,
         Err(AppError::NotFound)
     ));
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "拒否処理はTURNを取得しない"
+    );
+    server.abort();
     // coturnの既存セッションにはCloudflare用の時間制限を適用しない。
     assert!(
         camera::publisher_exchange(

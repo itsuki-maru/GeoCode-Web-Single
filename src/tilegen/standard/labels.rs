@@ -603,7 +603,7 @@ pub fn geometry_anchor(geometry: &Geometry, context: &OperationContext) -> Resul
 mod tests {
     use super::*;
     #[test]
-    fn 関係memberの重複だけを除き離れた同名施設を保持する() {
+    fn deduplicates_relation_members_without_merging_distant_same_named_facilities() {
         let conn = Connection::open_in_memory().unwrap();
         initialize(&conn).unwrap();
         let tags = BTreeMap::from([
@@ -626,7 +626,7 @@ mod tests {
         assert!(labels.iter().all(|label| label.osm_id != 10));
     }
     #[test]
-    fn 穴のある面の代表点は面の内側に置く() {
+    fn polygon_label_anchor_stays_inside_the_area_and_outside_holes() {
         let ring = |a: f64, b: f64| {
             vec![
                 Point { x: a, y: a },
@@ -646,7 +646,7 @@ mod tests {
         assert!(in_part(point, &part));
     }
     #[test]
-    fn 独立地名を往復し同名別地点を統合しない() {
+    fn standalone_places_round_trip_without_merging_distinct_locations() {
         let c = Connection::open_in_memory().unwrap();
         initialize(&c).unwrap();
         let tags = BTreeMap::from([

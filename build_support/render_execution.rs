@@ -269,7 +269,8 @@ mod tests {
     }
 
     #[test]
-    fn 関係ない版や保存先や列挙順の変更は依存の認定を変えない() {
+    fn keep_dependency_certification_stable_across_unrelated_versions_paths_and_enumeration_order()
+    {
         let baseline = metadata();
         let expected = dependency_fingerprint(&baseline).unwrap();
         let mut changed = baseline.clone();
@@ -289,7 +290,7 @@ mod tests {
     }
 
     #[test]
-    fn 欠けた依存情報や機能情報を無視して認定しない() {
+    fn reject_missing_dependency_or_feature_information() {
         for mutation in 0..7 {
             let mut changed = metadata();
             match mutation {
@@ -314,7 +315,8 @@ mod tests {
     }
 
     #[test]
-    fn 標準地図専用のxml依存変更は道路の指紋と認定を変えない() {
+    fn keep_road_fingerprints_and_certification_stable_when_standard_only_xml_dependencies_change()
+    {
         let mut baseline = metadata();
         for name in STANDARD_DEPENDENCY_ROOTS
             .iter()
@@ -373,7 +375,8 @@ mod tests {
     }
 
     #[test]
-    fn 文字エンジンと分割規則の依存変更は名称付き系列だけの認定を変える() {
+    fn change_only_label_series_certification_when_text_engine_or_segmentation_dependencies_change()
+    {
         let mut baseline = metadata();
         for name in OSM_DEPENDENCY_ROOTS
             .iter()
@@ -419,7 +422,8 @@ mod tests {
     }
 
     #[test]
-    fn 未認定構成を拒否し診断用情報を契約の識別へ混ぜない() {
+    fn reject_uncertified_configurations_and_exclude_diagnostic_information_from_contract_identity()
+    {
         let manifest = json!({"format":1,"dependency_fingerprint":"deps","compilers":["compiler"],
             "targets":["target"],"opt_levels":["0","3"],"target_feature_sets":[["sse2"]],
             "rustflag_sets":[[]],"application_feature_sets":[[]]});

@@ -428,7 +428,14 @@ async fn owned_history_latest_typed_filters_and_csv_agree() {
     let mut first = search(&pool, user, json!({"limit":2})).await;
     let at = first.as_of;
     let mut keys = vec![];
+    let mut cursors = std::collections::HashSet::new();
+    let mut pages = 0;
     loop {
+        pages += 1;
+        assert!(
+            pages <= 4,
+            "six fixture rows did not finish paging at limit 2"
+        );
         assert_eq!(first.target_count, 3);
         keys.extend(
             first
@@ -436,10 +443,21 @@ async fn owned_history_latest_typed_filters_and_csv_agree() {
                 .iter()
                 .map(|r| (r.target_type.clone(), r.id.clone())),
         );
+        assert!(
+            keys.len() <= 6,
+            "paging returned more than six fixture rows"
+        );
         let Some(cursor) = first.next_cursor else {
             break;
         };
-        first = search(&pool, user, json!({"limit":2,"cursor":cursor,"as_of":at})).await;
+        let cursor_key = serde_json::to_string(&cursor).unwrap();
+        assert!(cursors.insert(cursor_key), "paging repeated a cursor");
+        first = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            search(&pool, user, json!({"limit":2,"cursor":cursor,"as_of":at})),
+        )
+        .await
+        .expect("cursor page query did not finish");
     }
     assert_eq!(keys.len(), 6);
     keys.sort();

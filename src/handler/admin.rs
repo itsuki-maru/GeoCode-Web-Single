@@ -32,7 +32,12 @@ pub struct MapDisplaySettings {
 
 pub(super) async fn load_clustering_min_zoom(pool: &SqlitePool) -> Result<i32, AppError> {
     let value = sqlx::query_scalar::<_, String>(
-        "SELECT setting_value FROM application_settings WHERE setting_key = $1",
+        r#"
+        SELECT
+            setting_value
+        FROM application_settings
+        WHERE setting_key = $1
+        "#,
     )
     .bind(CLUSTERING_MIN_ZOOM_KEY)
     .fetch_optional(pool)

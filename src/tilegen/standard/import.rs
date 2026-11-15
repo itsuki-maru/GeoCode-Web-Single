@@ -28,7 +28,7 @@ use crate::tilegen::{
     style::normalize_tags,
 };
 
-pub const IMPORT_REVISION: &str = "standard-areas-dem-contours-v2-mixed-dem";
+pub const IMPORT_REVISION: &str = "standard-areas-dem-contours-v4-valid-ring-contacts";
 const MAX_POINTS: usize = 1_000_000;
 const MAX_DOCUMENT_BYTES: usize = 24 * 1024 * 1024;
 
@@ -729,7 +729,7 @@ fn run(
             "vertical_correction": details["vertical_correction"],
         })
     });
-    let mut import_rules = serde_json::json!({"revision":IMPORT_REVISION,"schema":options.feature_set.schema(),"geometry":2,"missing_nodes":base.missing_nodes,"invalid_areas":options.invalid_areas,"max_points":MAX_POINTS,"empty_role":"outer","nested_relations":"reject","antimeridian":"reject","contours_m":20,"area_lod_error_px":store::AREA_LOD_ERROR_PX,"road_lod_error_px":store::ROAD_LOD_ERROR_PX,"input_identity":input_identity,"elevation":elevation_rules});
+    let mut import_rules = serde_json::json!({"revision":IMPORT_REVISION,"schema":options.feature_set.schema(),"geometry":2,"missing_nodes":base.missing_nodes,"invalid_areas":options.invalid_areas,"max_points":MAX_POINTS,"empty_role":"containment-depth","multipolygon_roles":"alternating-containment-v1","ring_contacts":"valid-point-touch-v1","inner_shared_edges":"same-parent-boundary-union-v1","nested_relations":"reject","antimeridian":"reject","contours_m":20,"area_lod_error_px":store::AREA_LOD_ERROR_PX,"road_lod_error_px":store::ROAD_LOD_ERROR_PX,"input_identity":input_identity,"elevation":elevation_rules});
     if extended {
         import_rules["labels"] = serde_json::json!(labels::EXTRACTION_REVISION);
         import_rules["contour_data"] = serde_json::json!(if options.elevation_input.is_some() {
@@ -1213,7 +1213,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn 入力来歴の説明や集計や走査回数で内容識別を変えない() {
+    fn content_identity_ignores_provenance_descriptions_summaries_and_pass_counts() {
         let first = vec![SourceInfo {
             kind: "osm-pbf".into(),
             sha256: "a".repeat(64),
@@ -1293,7 +1293,7 @@ mod tests {
     }
 
     #[test]
-    fn 地名nodeだけのpbfでも新形式を完成できる() -> Result<()> {
+    fn completes_new_format_from_a_pbf_with_only_place_nodes() -> Result<()> {
         let temp = tempfile::tempdir()?;
         let input = temp.path().join("point.pbf");
         let mut fixture = Fixture::sample();
@@ -1331,7 +1331,7 @@ mod tests {
     }
 
     #[test]
-    fn 新形式は独立地名と施設名と行政代表点を三走査で保存する() -> Result<()> {
+    fn new_format_stores_places_facility_labels_and_admin_points_in_three_passes() -> Result<()> {
         for dense in [false, true] {
             let temp = tempfile::tempdir()?;
             let input = temp.path().join("labels.pbf");
@@ -1477,7 +1477,7 @@ mod tests {
     }
 
     #[test]
-    fn 等高線の非収録は新形式だけで明示し格子を残す() -> Result<()> {
+    fn contour_omission_is_explicit_for_new_format_and_preserves_elevation_grids() -> Result<()> {
         let temp = tempfile::tempdir()?;
         let input = temp.path().join("map.pbf");
         Fixture::sample().write(&input);
@@ -1530,7 +1530,7 @@ mod tests {
     }
 
     #[test]
-    fn 逆順の複合建物を別完成形式へ保存し元入力なしでも復元できる() -> Result<()> {
+    fn reversed_building_relations_round_trip_in_new_format_without_source_inputs() -> Result<()> {
         for backwards in [false, true] {
             let temp = tempfile::tempdir()?;
             let input = temp.path().join("map.pbf");
@@ -1576,7 +1576,212 @@ mod tests {
     }
 
     #[test]
-    fn 欠損した穴は面全体を除外し既存完成データベースを上書きしない() -> Result<()> {
+    fn imports_islands_and_their_ponds_with_explicit_empty_and_mixed_roles() -> Result<()> {
+        for roles in ["explicit", "empty", "mixed"] {
+            let temp = tempfile::tempdir()?;
+            let input = temp.path().join("islands.pbf");
+            let mut fixture = sample();
+            fixture.dense = true;
+            fixture.zlib = true;
+            fixture.relations_first = true;
+            fixture.ways_first = true;
+            for (id, lon, lat) in [
+                (30, 139.7025, 35.7025),
+                (31, 139.7035, 35.7025),
+                (32, 139.7035, 35.7035),
+                (33, 139.7025, 35.7035),
+                (34, 139.7028, 35.7028),
+                (35, 139.7032, 35.7028),
+                (36, 139.7032, 35.7032),
+                (37, 139.7028, 35.7032),
+            ] {
+                fixture.nodes.push(Node { id, lon, lat });
+            }
+            for (id, nodes, role) in [
+                (104, vec![30, 31, 32, 33, 30], "outer"),
+                (105, vec![34, 35, 36, 37, 34], "inner"),
+            ] {
+                fixture.ways.push(Way {
+                    id,
+                    nodes,
+                    tags: BTreeMap::new(),
+                });
+                fixture.relations[0].members.push(Member {
+                    id,
+                    kind: MemberKind::Way,
+                    role: role.into(),
+                });
+            }
+            for member in &mut fixture.relations[0].members {
+                if roles == "empty" || (roles == "mixed" && member.id == 101) {
+                    member.role.clear();
+                }
+            }
+            fixture.write(&input);
+            let options = StandardImportOptions {
+                base: ImportOptions {
+                    input,
+                    store: temp.path().join("islands.sqlite"),
+                    work_dir: temp.path().join("work"),
+                    missing_nodes: MissingNodes::Error,
+                },
+                elevation_input: None,
+                elevation_datum_policy: Default::default(),
+                landmask_input: None,
+                invalid_areas: InvalidAreas::Error,
+                feature_set: StandardFeatureSet::StandardV2,
+                contour_data: ContourData::Off,
+            };
+            let report = run_with_context(&options, &OperationContext::default())?;
+            assert_eq!(report.metadata.importer_version, IMPORT_REVISION);
+            let db = Connection::open_with_flags(
+                &options.base.store,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )?;
+            let features = store::query_features(&db, report.metadata.bbox, 16)?;
+            let area = features
+                .iter()
+                .find(|feature| feature.osm_type == 2)
+                .unwrap();
+            let Geometry::Polygon(parts) = &area.geometry else {
+                panic!("multipolygon geometry is required")
+            };
+            assert_eq!(parts.len(), 2, "{roles}: outer shore and island");
+            assert!(parts.iter().all(|part| part.holes.len() == 1), "{roles}");
+            let details = store::details(&db)?.unwrap();
+            assert!(details.skipped_areas.is_empty(), "{roles}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn imports_valid_contacts_and_shared_holes_with_area_and_label_records() -> Result<()> {
+        for shape in ["point-hole", "point-outers", "shared-holes"] {
+            let temp = tempfile::tempdir()?;
+            let input = temp.path().join("contacts.pbf");
+            let mut fixture = sample();
+            fixture.dense = true;
+            fixture.zlib = true;
+            fixture.relations_first = true;
+            fixture.ways_first = true;
+            fixture.relations[0].tags = BTreeMap::from([
+                ("type".into(), "multipolygon".into()),
+                ("natural".into(), "water".into()),
+                ("water".into(), "pond".into()),
+                ("name".into(), "接触する池".into()),
+            ]);
+            let expected = match shape {
+                "point-hole" => {
+                    fixture
+                        .ways
+                        .iter_mut()
+                        .find(|way| way.id == 103)
+                        .unwrap()
+                        .nodes = vec![20, 24, 27, 20];
+                    (1, 1)
+                },
+                "point-outers" => {
+                    fixture.relations[0]
+                        .members
+                        .retain(|member| member.role != "inner");
+                    for (id, lon, lat) in [
+                        (30, 139.72, 35.71),
+                        (31, 139.72, 35.72),
+                        (32, 139.71, 35.72),
+                    ] {
+                        fixture.nodes.push(Node { id, lon, lat });
+                    }
+                    fixture.ways.push(Way {
+                        id: 104,
+                        nodes: vec![22, 30, 31, 32, 22],
+                        tags: BTreeMap::new(),
+                    });
+                    fixture.relations[0].members.push(Member {
+                        id: 104,
+                        kind: MemberKind::Way,
+                        role: "outer".into(),
+                    });
+                    (2, 0)
+                },
+                "shared-holes" => {
+                    for (id, lon, lat) in [(28, 139.706, 35.702), (29, 139.706, 35.704)] {
+                        fixture.nodes.push(Node { id, lon, lat });
+                    }
+                    fixture.ways.push(Way {
+                        id: 104,
+                        nodes: vec![25, 28, 29, 26, 25],
+                        tags: BTreeMap::new(),
+                    });
+                    fixture.relations[0].members.push(Member {
+                        id: 104,
+                        kind: MemberKind::Way,
+                        role: "inner".into(),
+                    });
+                    (1, 1)
+                },
+                _ => unreachable!(),
+            };
+            fixture.write(&input);
+            let options = StandardImportOptions {
+                base: ImportOptions {
+                    input,
+                    store: temp.path().join("contacts.sqlite"),
+                    work_dir: temp.path().join("work"),
+                    missing_nodes: MissingNodes::Error,
+                },
+                elevation_input: None,
+                elevation_datum_policy: Default::default(),
+                landmask_input: None,
+                invalid_areas: InvalidAreas::Error,
+                feature_set: StandardFeatureSet::StandardV2,
+                contour_data: ContourData::Off,
+            };
+            let report = run_with_context(&options, &OperationContext::default())?;
+            let db = Connection::open_with_flags(
+                &options.base.store,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )?;
+            let details = store::details(&db)?.unwrap();
+            assert!(details.skipped_areas.is_empty(), "{shape}");
+            assert_eq!(details.counts.get("water"), Some(&1), "{shape}");
+            let features = store::query_features(&db, report.metadata.bbox, 16)?;
+            let feature = features
+                .iter()
+                .find(|f| f.osm_type == 2 && f.osm_id == 101)
+                .unwrap();
+            let Geometry::Polygon(parts) = &feature.geometry else {
+                panic!("polygon required")
+            };
+            assert_eq!(
+                (
+                    parts.len(),
+                    parts.iter().map(|p| p.holes.len()).sum::<usize>()
+                ),
+                expected,
+                "{shape}"
+            );
+            let found = labels::query_labels(&db, report.metadata.bbox)?;
+            let label = found
+                .iter()
+                .find(|label| label.osm_type == 2 && label.osm_id == 101)
+                .unwrap();
+            assert!(
+                parts
+                    .iter()
+                    .any(|part| areas::contains(&part.outer, label.anchor)
+                        && !part
+                            .holes
+                            .iter()
+                            .any(|hole| areas::contains(hole, label.anchor))),
+                "{shape}: label belongs in the filled area"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn missing_inner_rings_skip_whole_areas_without_overwriting_completed_databases() -> Result<()>
+    {
         let temp = tempfile::tempdir()?;
         let input = temp.path().join("map.pbf");
         let mut fixture = sample();
@@ -1610,7 +1815,7 @@ mod tests {
     }
 
     #[test]
-    fn 分類の除外と水路鉄道を明示する() {
+    fn classification_exclusions_waterways_and_railways_are_explicit() {
         assert_eq!(
             area_kind(&BTreeMap::from([("building".into(), "yes".into())])),
             Some(FeatureKind::Building)

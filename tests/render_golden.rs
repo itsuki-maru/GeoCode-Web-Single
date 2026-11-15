@@ -29,7 +29,7 @@ fn display_chunks(bytes: &[u8]) -> Vec<([u8; 4], Vec<u8>)> {
 }
 
 #[test]
-fn 描画方式変更前の固定画像とすべての画素が一致する() {
+fn match_every_pixel_of_the_golden_images_from_before_rendering_changes() {
     let root =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/render-golden");
     let manifest: serde_json::Value =

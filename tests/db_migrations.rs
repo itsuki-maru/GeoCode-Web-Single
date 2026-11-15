@@ -2029,7 +2029,7 @@ async fn saved_condition_upgrade_keeps_rows_when_sql_was_applied_before_runtime_
 }
 
 #[tokio::test]
-async fn 共有スナップショット列の追加で既存共有を保持する() {
+async fn preserve_existing_shares_when_adding_snapshot_columns() {
     let pool = memory_pool().await;
     run_migrations(&pool).await.unwrap();
     sqlx::raw_sql(
@@ -2093,7 +2093,7 @@ async fn 共有スナップショット列の追加で既存共有を保持す�
 }
 
 #[tokio::test]
-async fn sqlxで共有列を追加済みでも実行時移行を再実行できる() {
+async fn rerun_runtime_migrations_after_sqlx_has_added_share_columns() {
     let pool = memory_pool().await;
     run_migrations(&pool).await.unwrap();
     sqlx::raw_sql(
@@ -2130,7 +2130,7 @@ async fn sqlxで共有列を追加済みでも実行時移行を再実行でき�
 }
 
 #[tokio::test]
-async fn 実行時とsqlxの共有スナップショット列定義が一致する() {
+async fn match_runtime_and_sqlx_snapshot_column_definitions() {
     let runtime = memory_pool().await;
     run_migrations(&runtime).await.unwrap();
     let prepared = memory_pool().await;
@@ -2161,7 +2161,7 @@ async fn 実行時とsqlxの共有スナップショット列定義が一致す�
 }
 
 #[tokio::test]
-async fn 背景とタイル設定の更新で旧データを保持し_sql_先行適用と再実行に対応する() {
+async fn preserve_legacy_background_and_tile_settings_across_sql_first_migrations_and_reruns() {
     for sql_first in [false, true] {
         let pool = common::test_pool().await;
         sqlx::raw_sql(
@@ -2183,9 +2183,29 @@ async fn 背景とタイル設定の更新で旧データを保持し_sql_先行
         .execute(&pool)
         .await
         .unwrap();
-        let original: Vec<(i64, String, String, String, String, bool, Option<i64>, Option<i64>, String, String)> =
-            sqlx::query_as("SELECT id,layer_name,label,url,attribution,include_foreign_tiles,min_zoom,max_zoom,create_at,updated_at FROM tileserver_model ORDER BY id")
-                .fetch_all(&pool).await.unwrap();
+        let original: Vec<(
+            i64,
+            String,
+            String,
+            String,
+            String,
+            bool,
+            Option<i64>,
+            Option<i64>,
+            String,
+            String,
+        )> = sqlx::query_as(
+            r#"
+                SELECT
+                    id, layer_name, label, url, attribution, include_foreign_tiles,
+                    min_zoom, max_zoom, create_at, updated_at
+                FROM tileserver_model
+                ORDER BY id
+                "#,
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
         let saved_share: (String, String) =
             sqlx::query_as("SELECT url,map_snapshot FROM temporary_urls WHERE id='saved-share'")
                 .fetch_one(&pool)
@@ -2207,9 +2227,29 @@ async fn 背景とタイル設定の更新で旧データを保持し_sql_先行
         }
         run_migrations(&pool).await.unwrap();
         run_migrations(&pool).await.unwrap();
-        let upgraded: Vec<(i64, String, String, String, String, bool, Option<i64>, Option<i64>, String, String)> =
-            sqlx::query_as("SELECT id,layer_name,label,url,attribution,include_foreign_tiles,min_zoom,max_zoom,create_at,updated_at FROM tileserver_model ORDER BY id")
-                .fetch_all(&pool).await.unwrap();
+        let upgraded: Vec<(
+            i64,
+            String,
+            String,
+            String,
+            String,
+            bool,
+            Option<i64>,
+            Option<i64>,
+            String,
+            String,
+        )> = sqlx::query_as(
+            r#"
+                SELECT
+                    id, layer_name, label, url, attribution, include_foreign_tiles,
+                    min_zoom, max_zoom, create_at, updated_at
+                FROM tileserver_model
+                ORDER BY id
+                "#,
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
         assert_eq!(upgraded, original);
         let defaults: Vec<(String, Option<String>)> =
             sqlx::query_as("SELECT kind,style_url FROM tileserver_model ORDER BY id")
@@ -2245,9 +2285,20 @@ async fn application_migrations_never_create_tile_catalog_tables() {
     let pool = memory_pool().await;
     run_migrations(&pool).await.unwrap();
     sqlx::query(
-        "INSERT INTO tileserver_model (id,layer_name,label,url,attribution,include_foreign_tiles,min_zoom,max_zoom,create_at,updated_at)
-         VALUES (42,'Existing background','existing','/tile/{z}/{x}/{y}.png','Existing attribution',FALSE,0,19,'2026-11-11','2026-11-11')",
-    ).execute(&pool).await.unwrap();
+        r#"
+        INSERT INTO tileserver_model (
+            id, layer_name, label, url, attribution, include_foreign_tiles,
+            min_zoom, max_zoom, create_at, updated_at
+        )
+        VALUES (
+            42, 'Existing background', 'existing', '/tile/{z}/{x}/{y}.png',
+            'Existing attribution', FALSE, 0, 19, '2026-11-11', '2026-11-11'
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     run_migrations(&pool).await.unwrap();
     let tables: Vec<String> = sqlx::query_scalar(
         "SELECT name FROM sqlite_schema WHERE type='table' AND name LIKE 'local_tile_%'",

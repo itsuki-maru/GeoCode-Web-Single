@@ -159,7 +159,8 @@ fn cache_identity_ignores_path_and_optional_index_but_tracks_data_and_tile() -> 
 }
 
 #[test]
-fn 旧完成dbの識別とビルド来歴を保持し描画キーから来歴を除外する() -> Result<()> {
+fn preserve_legacy_dataset_identity_and_build_provenance_but_exclude_provenance_from_render_keys()
+-> Result<()> {
     let (root, dataset) = fixture(true, MissingNodes::Error)?;
     let tile = TileId::from_lon_lat(14, 139.7, 35.7)?;
     let contract_id = dataset.render_contract().id();

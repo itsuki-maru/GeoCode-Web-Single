@@ -134,7 +134,7 @@ mod tests {
     }
 
     #[test]
-    fn 描画契約が同じなら登録元のビルドを問わない() {
+    fn accept_matching_render_contracts_from_any_build() {
         let mut profile = stored();
         assert!(is_compatible(&profile));
         profile.build_id = "さらに別のビルド".into();
@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn 同じdbの複数表示を区別し無効な非正規化契約を認めない() {
+    fn distinguish_render_specs_and_reject_noncanonical_contracts() {
         let mut a = stored();
         let contract = RenderContract::for_format(3, 2).unwrap();
         a.id = identity::render_id(&a.dataset_id, &contract);
@@ -165,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn 旧形式と未知形式と改変された世代は生成可能にしない() {
+    fn reject_legacy_unknown_and_modified_profiles_for_generation() {
         for mutation in [
             "legacy", "version", "contract", "schema", "geometry", "hash", "profile", "dataset",
             "retired",

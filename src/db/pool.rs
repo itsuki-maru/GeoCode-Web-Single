@@ -680,10 +680,17 @@ pub async fn create_user_with_master_layer(
 
 /// CLIでは初期化・migrationをせず、既存本体DBがこの版のschemaかを検査する。
 pub async fn validate_existing_schema(pool: &SqlitePool) -> Result<(), Error> {
-    let rows: Vec<(i64, String)> =
-        sqlx::query_as("SELECT version,name FROM schema_migrations ORDER BY version")
-            .fetch_all(pool)
-            .await?;
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        r#"
+            SELECT
+                version,
+                name
+            FROM schema_migrations
+            ORDER BY version
+            "#,
+    )
+    .fetch_all(pool)
+    .await?;
     if rows.len() != MIGRATIONS.len()
         || MIGRATIONS
             .iter()
@@ -755,7 +762,12 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), Error> {
                     "style_url"
                 };
                 let exists: i64 = sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM pragma_table_info('tileserver_model') WHERE name=$1",
+                    r#"
+                    SELECT
+                        COUNT(*)
+                    FROM pragma_table_info('tileserver_model')
+                    WHERE name = $1
+                    "#,
                 )
                 .bind(column)
                 .fetch_one(&mut *tx)

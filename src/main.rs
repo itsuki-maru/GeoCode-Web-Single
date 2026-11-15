@@ -413,11 +413,22 @@ fn main() {
         Ok(geocode_web_single::launch::LaunchMode::LocalTiles(arguments)) => {
             exit_cli(run_local_tiles_cli(&arguments));
         },
+        Ok(geocode_web_single::launch::LaunchMode::TileManager(config)) => {
+            if let Err(message) = geocode_web_single::tile_manager::desktop::run(config) {
+                eprintln!("ローカル地図管理画面を起動できません: {message}");
+                exit_cli(1);
+            }
+            return;
+        },
+        Ok(geocode_web_single::launch::LaunchMode::TileWorker(request)) => {
+            init_cli_tracing();
+            exit_cli(geocode_web_single::tile_manager::run_worker(&request));
+        },
         Ok(geocode_web_single::launch::LaunchMode::Help) => {
             #[cfg(windows)]
             let _ = utils::ensure_cli_console();
             println!(
-                "GeoCode-Web-Single\n引数なし: デスクトップ\n-s [IP:PORT]: サーバー\nlocal-tiles --help: ローカル地図の管理CLI"
+                "GeoCode-Web-Single\n引数なし: デスクトップ\n-s [IP:PORT]: サーバー\nlocal-tiles gui [--config ABSOLUTE_JSON_PATH]: ローカル地図の管理画面（サーバー非起動）\nlocal-tiles --help: ローカル地図の管理CLI"
             );
             exit_cli(0);
         },

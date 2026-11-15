@@ -1438,7 +1438,7 @@ mod tests {
     }
 
     #[test]
-    fn 単位円の共有は旧三角関数の全ビットと線の全被覆を保持する() {
+    fn shared_unit_circle_preserves_trigonometric_bits_and_line_coverage() {
         for (step, direction) in line_circle_directions().iter().enumerate() {
             let angle = (step as f64 / LINE_CIRCLE_POINTS as f64) * std::f64::consts::TAU;
             assert_eq!(direction.x.to_bits(), libm::cos(angle).to_bits());
@@ -1472,7 +1472,7 @@ mod tests {
     }
 
     #[test]
-    fn 道路形状の有界再利用は無効時と満杯時も画素と演算量と読込点数を保持する() {
+    fn bounded_road_geometry_reuse_preserves_pixels_work_and_point_counts() {
         use crate::tilegen::{store, style::RoadClass};
         use rusqlite::{Connection, params};
         use std::collections::BTreeMap;
@@ -1636,7 +1636,7 @@ mod tests {
     }
 
     #[test]
-    fn 被覆と交点行を再利用しても範囲縮小と空面を挟む連続描画は新規領域と一致する() {
+    fn reused_coverage_and_intersections_match_fresh_buffers_after_resizing_and_empty_areas() {
         let context = context();
         for (z, x, y) in [(0, 0, 0), (7, 110, 51), (22, 3675841, 1655789)] {
             let window = Window::new(TileId::new(z, x, y).unwrap(), 64, 64).unwrap();
@@ -1711,7 +1711,134 @@ mod tests {
     }
 
     #[test]
-    fn 面の穴は下の地物を残し全頂点が窓外でも塗る() {
+    fn imported_contact_boundaries_match_manual_polygons_and_neighbor_tile_crops() {
+        use super::super::{areas, model::PolygonPart};
+        use crate::tilegen::pbf::{Member, MemberKind, Relation};
+        use std::collections::BTreeMap;
+
+        let outer = rectangle(0.0625, 0.0625, 0.375, 0.375);
+        let tangent_hole = vec![
+            point(0.0625, 0.0625),
+            point(0.1875, 0.125),
+            point(0.125, 0.1875),
+            point(0.0625, 0.0625),
+        ];
+        let first_outer = rectangle(0.0625, 0.0625, 0.1875, 0.1875);
+        let second_outer = rectangle(0.25, 0.25, 0.1875, 0.1875);
+        let cases = [
+            (
+                vec![("outer", outer.clone()), ("inner", tangent_hole.clone())],
+                vec![PolygonPart {
+                    outer: outer.clone(),
+                    holes: vec![tangent_hole],
+                }],
+            ),
+            (
+                vec![
+                    ("outer", first_outer.clone()),
+                    ("outer", second_outer.clone()),
+                ],
+                vec![
+                    PolygonPart {
+                        outer: first_outer,
+                        holes: vec![],
+                    },
+                    PolygonPart {
+                        outer: second_outer,
+                        holes: vec![],
+                    },
+                ],
+            ),
+            (
+                vec![
+                    ("outer", outer.clone()),
+                    ("inner", rectangle(0.125, 0.125, 0.125, 0.125)),
+                    ("inner", rectangle(0.25, 0.125, 0.125, 0.125)),
+                ],
+                vec![PolygonPart {
+                    outer,
+                    holes: vec![rectangle(0.125, 0.125, 0.25, 0.125)],
+                }],
+            ),
+        ];
+        for (case, (rings, reference)) in cases.into_iter().enumerate() {
+            let mut nodes = BTreeMap::<i64, Point>::new();
+            let mut ways = BTreeMap::new();
+            let mut relation = Relation {
+                id: 100,
+                members: Vec::new(),
+                tags: BTreeMap::new(),
+            };
+            for (way, (role, ring)) in rings.into_iter().enumerate() {
+                let ids = ring
+                    .into_iter()
+                    .map(|p| {
+                        if let Some((&id, _)) = nodes.iter().find(|(_, old)| **old == p) {
+                            return id;
+                        }
+                        let id = nodes.len() as i64 + 1;
+                        nodes.insert(id, p);
+                        id
+                    })
+                    .collect::<Vec<_>>();
+                ways.insert(way as i64, ids);
+                relation.members.push(Member {
+                    id: way as i64,
+                    kind: MemberKind::Way,
+                    role: role.into(),
+                });
+            }
+            let actual = areas::relation(
+                &relation,
+                |id| Ok(ways[&id].clone()),
+                |id| Ok(nodes[&id]),
+                || Ok(()),
+            )
+            .unwrap();
+            let render = |parts: &[PolygonPart], tile, width, height| {
+                let context = context();
+                let mut raster = Raster::new(
+                    Window::new(tile, width, height).unwrap(),
+                    [20, 90, 30, 255],
+                    &context,
+                )
+                .unwrap();
+                let rings = parts
+                    .iter()
+                    .flat_map(|part| {
+                        std::iter::once(part.outer.as_slice())
+                            .chain(part.holes.iter().map(Vec::as_slice))
+                    })
+                    .collect::<Vec<_>>();
+                let mask = raster.polygon_mask(&rings).unwrap();
+                raster.blend(&mask, [30, 120, 240, 255]).unwrap();
+                raster.pixmap
+            };
+            let tile = TileId::new(2, 0, 0).unwrap();
+            let large = render(&actual, tile, 512, 512);
+            assert_eq!(
+                large.data(),
+                render(&reference, tile, 512, 512).data(),
+                "case {case}"
+            );
+            for y in 0..2 {
+                for x in 0..2 {
+                    let small = render(&actual, TileId::new(2, x, y).unwrap(), 256, 256);
+                    for row in 0..256usize {
+                        let begin = ((y as usize * 256 + row) * 512 + x as usize * 256) * 4;
+                        assert_eq!(
+                            &large.data()[begin..begin + 1024],
+                            &small.data()[row * 1024..(row + 1) * 1024],
+                            "case {case}, tile {x}/{y}, row {row}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn polygon_holes_preserve_underlying_features_and_enclosing_polygons_are_filled() {
         let context = context();
         let window = Window::new(TileId::new(1, 0, 0).unwrap(), 256, 256).unwrap();
         let mut raster = Raster::new(window, [20, 90, 30, 255], &context).unwrap();
@@ -1727,7 +1854,7 @@ mod tests {
     }
 
     #[test]
-    fn 海陸の処理範囲外を海や陸として確定しない() {
+    fn landmask_leaves_areas_outside_coverage_unclassified() {
         let context = context();
         let window = Window::new(TileId::new(1, 0, 0).unwrap(), 256, 256).unwrap();
         let mut raster = Raster::new(window, BACKGROUND, &context).unwrap();
@@ -1757,7 +1884,7 @@ mod tests {
     }
 
     #[test]
-    fn 水域面が等高線を覆い湖面に地形線を残さない() {
+    fn water_polygons_cover_contours_without_terrain_lines_on_lakes() {
         let context = context();
         let window = Window::new(TileId::new(1, 0, 0).unwrap(), 256, 256).unwrap();
         let mut raster = Raster::new(window, BACKGROUND, &context).unwrap();
@@ -1792,7 +1919,7 @@ mod tests {
     }
 
     #[test]
-    fn 複合面と線の四タイルは直接描画窓と一致する() {
+    fn polygon_and_line_quads_match_a_single_viewport() {
         let context = context();
         let tile = TileId::new(2, 1, 1).unwrap();
         let outer = vec![
@@ -1835,7 +1962,7 @@ mod tests {
     }
 
     #[test]
-    fn 平面の陰影は色を変えず勾配の向きで明暗が変わる() {
+    fn hillshade_preserves_flat_colors_and_follows_slope_direction() {
         assert!((shade_factor([100.0; 9], 0.5, 0.0001) - 1.0).abs() < 1e-12);
         let east = [0.0, 100.0, 200.0, 0.0, 100.0, 200.0, 0.0, 100.0, 200.0];
         let west = east.map(|height| 200.0 - height);
@@ -1843,13 +1970,13 @@ mod tests {
     }
 
     #[test]
-    fn 描画設定の識別は安定する() {
+    fn render_spec_identity_is_stable() {
         assert_eq!(style_hash(), style_hash());
         assert_eq!(style_hash().len(), 64);
     }
 
     #[test]
-    fn 地物種別の最小ズームと描画スタイルの表示開始ズームは一致する() {
+    fn feature_min_zoom_matches_style_visibility_thresholds() {
         for style in FEATURE_STYLES {
             assert_eq!(style.kind.min_zoom(), style.zoom, "{:?}", style.kind);
         }
@@ -1906,7 +2033,7 @@ mod tests {
     }
 
     #[test]
-    fn 凸面の辺別走査は高ズームと窓境界を含め旧標本と一致する() {
+    fn convex_edge_scan_matches_legacy_samples_at_high_zoom_and_tile_edges() {
         let context = context();
         for (z, x, y) in [(0, 0, 0), (7, 113, 50), (22, 3675841, 1655789)] {
             for size in [256, 512] {
@@ -1955,7 +2082,7 @@ mod tests {
     }
 
     #[test]
-    fn 凸面の走査行範囲は世界端と半標本の隣接浮動小数点でも旧述語と一致する() {
+    fn convex_scan_row_bounds_match_legacy_predicates_at_world_and_subsample_edges() {
         for (z, x, y) in [
             (0, 0, 0),
             (7, 113, 50),
@@ -2000,7 +2127,7 @@ mod tests {
     }
 
     #[test]
-    fn 丸端の空辺走査を省いても実際の交点と塗りの演算上限を保持する() {
+    fn skipping_empty_round_cap_edges_preserves_intersections_and_operation_limits() {
         let context = context();
         let window = Window::new(TileId::new(0, 0, 0).unwrap(), 256, 256).unwrap();
         let circle = pixel_circle(100.0, 100.0, 1.25);
@@ -2043,7 +2170,7 @@ mod tests {
     }
 
     #[test]
-    fn 被覆標本のない微小面は空の走査行で演算上限を消費しない() {
+    fn subpixel_polygons_without_covered_samples_do_not_consume_empty_row_operations() {
         let context = context();
         let window = Window::new(TileId::new(1, 0, 0).unwrap(), 256, 256).unwrap();
         let mut raster = Raster::new(window, BACKGROUND, &context).unwrap();
@@ -2064,7 +2191,7 @@ mod tests {
     }
 
     #[test]
-    fn 空行を省略しても有効な被覆処理には演算上限を適用する() {
+    fn skipping_empty_rows_preserves_limits_for_covered_samples() {
         let context = context();
         let window = Window::new(TileId::new(1, 0, 0).unwrap(), 256, 256).unwrap();
         let mut raster = Raster::new(window, BACKGROUND, &context).unwrap();
@@ -2078,7 +2205,7 @@ mod tests {
     }
 
     #[test]
-    fn 空行省略後も境界と穴の全被覆標本が偶奇判定に一致する() {
+    fn skipped_rows_preserve_even_odd_coverage_for_boundaries_and_holes() {
         let context = context();
         let window = Window::new(TileId::new(2, 1, 1).unwrap(), 16, 16).unwrap();
         let outer = [
@@ -2142,7 +2269,7 @@ mod tests {
     }
 
     #[test]
-    fn 取消と不正輪郭を描画前に拒否する() {
+    fn rejects_cancellation_and_invalid_contours_before_drawing() {
         let token = CancellationToken::new();
         let context = OperationContext::new(token.clone());
         let mut raster = Raster::new(

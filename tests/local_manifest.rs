@@ -40,7 +40,7 @@ fn assert_manifest(html: &str, mobile: bool) {
 }
 
 #[tokio::test]
-async fn 共通_pc_mobileエントリと共有テンプレートの_manifestをローカル化する() {
+async fn localize_manifests_for_shared_desktop_mobile_entries_and_share_templates() {
     let pool = common::test_pool().await;
     let user = common::create_test_user(&pool, "local-manifest-user").await;
     let layer = common::master_layer_id(&pool, &user).await;
@@ -83,7 +83,7 @@ async fn 共通_pc_mobileエントリと共有テンプレートの_manifestを�
 }
 
 #[tokio::test]
-async fn manifestとアイコンを同梱_http資材だけで取得できる() {
+async fn serve_manifests_and_icons_from_bundled_http_assets_only() {
     for file in ["manifest-tab.json", "manifest.json"] {
         let response = serve_static_file(Path(file.to_string())).await.unwrap();
         assert_eq!(response.headers()["content-type"], "application/json");

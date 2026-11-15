@@ -483,7 +483,7 @@ fn render(path: &Path, scene: Scene) -> tiny_skia::Pixmap {
 }
 
 #[test]
-fn 標準地図の初期基準画像と画素が一致する() {
+fn match_standard_map_reference_image_pixels() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(ROOT);
     let manifest: Value = serde_json::from_slice(
         &fs::read(root.join("manifest.json")).expect("基準画像は明示生成テストで初回だけ作成する"),
@@ -511,7 +511,7 @@ fn 標準地図の初期基準画像と画素が一致する() {
 
 #[test]
 #[ignore = "新機能の初回レビュー用画像を明示的に保存する。通常の回帰で期待値を更新しない"]
-fn 標準地図の初期基準画像を明示的に保存する() {
+fn explicitly_record_standard_map_reference_images() {
     assert_eq!(
         std::env::var("GEOCODE_WRITE_STANDARD_GOLDENS").as_deref(),
         Ok("1")
@@ -538,7 +538,7 @@ fn 標準地図の初期基準画像を明示的に保存する() {
 }
 
 #[test]
-fn 地物の挿入順と保存場所が変わっても描画と識別が一致する() {
+fn keep_rendering_and_identity_stable_across_feature_order_and_storage_paths() {
     for scene in scenes() {
         let (temporary, original, _) = build(scene, false);
         let (_reverse_temporary, reversed, _) = build(scene, true);
@@ -567,7 +567,7 @@ fn 地物の挿入順と保存場所が変わっても描画と識別が一致�
 }
 
 #[test]
-fn 完成ストアの四タイルは独立した大きな描画窓と一致する() {
+fn match_four_store_tiles_to_an_independent_large_render_window() {
     for scene in scenes().into_iter().filter(|scene| scene.tile.z > 0) {
         let (_temporary, path, _) = build(scene, false);
         let store = Store::open(&path).unwrap();
@@ -591,7 +591,7 @@ fn 完成ストアの四タイルは独立した大きな描画窓と一致す�
 }
 
 #[test]
-fn 小規模人工地域の容量と描画計測を記録する() {
+fn record_storage_and_rendering_measurements_for_a_small_synthetic_region() {
     let mut results = Vec::new();
     for scene in scenes() {
         let (_temporary, path, mut result) = build(scene, false);

@@ -181,8 +181,14 @@ jobs:
           if (-not $buildInfo.standard_generation_verified) { throw '標準地図・地形の実行構成が未認定です。' }
           $buildInfo | ConvertTo-Json -Depth 5
           $env:GEOCODE_TEST_CLI_EXE = $binary
-          cargo test --locked --test local_tile_standard_exe
-          if ($LASTEXITCODE -ne 0) { throw '配布用exeの標準地図CLI試験に失敗しました。' }
+          $distributionTests = @(
+            'generate_terrain_register_backgrounds_and_resume_with_the_selected_distribution_binary',
+            'import_the_new_format_and_render_with_another_configuration_after_removing_sources'
+          )
+          foreach ($distributionTest in $distributionTests) {
+            cargo test --locked --test local_tile_standard_exe $distributionTest -- --ignored --exact
+            if ($LASTEXITCODE -ne 0) { throw "配布用exeの標準地図CLI試験に失敗しました: $distributionTest" }
+          }
 
       - name: Collect artifacts
         shell: pwsh

@@ -156,6 +156,7 @@ impl Invocation {
 pub fn help_text() -> &'static str {
     "GeoCode-Web-Single ローカル地図CLI\n\n\
 使用方法: geocode_web_single.exe local-tiles <コマンド> [オプション]\n\n\
+管理画面: local-tiles gui [--config ABSOLUTE_JSON_PATH]（サーバー非起動）\n\n\
   build-info / config show / status\n\
   elevation inspect --input ABSOLUTE_PATH [--elevation-datum-policy strict|allow-jgd2000-2011]\n\
   datasets list / show --dataset ID\n\
@@ -1074,7 +1075,7 @@ mod standard_argument_tests {
     }
 
     #[test]
-    fn 標高地形の取り込みと描画世代を解析する() {
+    fn parse_elevation_import_and_render_profile_options() {
         let invocation=parse(&args("import --input D:/map.pbf --name 地形 --features standard-v1 --elevation-input E:/dem --landmask-input E:/land.shp --invalid-areas skip-feature")).unwrap();
         let Command::Import(request) = invocation.command else {
             panic!("importが必要です")
@@ -1094,7 +1095,7 @@ mod standard_argument_tests {
     }
 
     #[test]
-    fn 道路既定を維持し誤った地形オプションを拒否する() {
+    fn preserve_road_defaults_and_reject_invalid_terrain_options() {
         let Command::Import(request) = parse(&args("import --input D:/map.pbf --name 道路"))
             .unwrap()
             .command
@@ -1118,7 +1119,7 @@ mod standard_argument_tests {
     }
 
     #[test]
-    fn 新形式の描画設定を正規化し既定の旧世代準備を維持する() {
+    fn normalize_render_specs_and_preserve_legacy_profile_preparation() {
         let Command::Prepare { spec, .. } = parse(&args("datasets prepare --dataset abc"))
             .unwrap()
             .command

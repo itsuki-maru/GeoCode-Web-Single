@@ -265,7 +265,7 @@ fn crop(image: &tiny_skia::Pixmap, x: u32, y: u32) -> Vec<u8> {
 }
 
 #[test]
-fn 新配色の道路と建物と文字を個別に切り替える() {
+fn toggle_roads_buildings_and_labels_independently_with_the_new_palette() {
     let (_temporary, path) = fixture(16, false);
     let spec = RenderSpec::osm_like();
     let full = render(&path, tile(16), &spec);
@@ -295,7 +295,7 @@ fn 新配色の道路と建物と文字を個別に切り替える() {
 }
 
 #[test]
-fn 低ズームの短い橋とトンネルに通常道路より太い丸点を描かない() {
+fn avoid_thick_round_dots_for_short_bridges_and_tunnels_at_low_zoom() {
     let mut spec = RenderSpec::osm_like();
     spec.labels = false;
     for zoom in [6, 10, 12] {
@@ -329,7 +329,7 @@ fn 低ズームの短い橋とトンネルに通常道路より太い丸点を�
 }
 
 #[test]
-fn 新配色と文字と破線の四タイルは大きな窓と入力順変更でも一致する() {
+fn match_four_tiles_to_a_large_window_with_the_new_palette_labels_and_dashes() {
     let (_temporary, path) = fixture(16, false);
     let (_reverse_temporary, reverse_path) = fixture(16, true);
     let store = Store::open(&path).unwrap();
@@ -351,40 +351,74 @@ fn 新配色と文字と破線の四タイルは大きな窓と入力順変更�
     }
 }
 
+fn carto_golden_images() -> Vec<(String, TileId, tiny_skia::Pixmap)> {
+    [14, 16]
+        .into_iter()
+        .map(|zoom| {
+            let (_temporary, path) = fixture(zoom, false);
+            let current = tile(zoom);
+            let image = render(&path, current, &RenderSpec::osm_like());
+            (format!("city-z{zoom}"), current, image)
+        })
+        .collect()
+}
+
+fn carto_golden_manifest(images: &[(String, TileId, tiny_skia::Pixmap)]) -> serde_json::Value {
+    let cases = images
+        .iter()
+        .map(|(name, current, image)| {
+            serde_json::json!({
+                "name":name,"z":current.z,"x":current.x,"y":current.y,
+                "rgba_sha256":hash(image.data()),
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "format":1,"purpose":"名称と新配色の固定画像。従来の道路35枚・標準7枚とは別に確認する。",
+        "style_version":"osm-like-v1","style_hash":RenderSpec::osm_like().hash(),
+        "font_sha256":standard::text::font_hash(),"cases":cases,
+    })
+}
+
 #[test]
-fn 新しい地図の固定画像を確認する() {
-    let mut cases = Vec::new();
-    for zoom in [14, 16] {
-        let (_temporary, path) = fixture(zoom, false);
-        let image = render(&path, tile(zoom), &RenderSpec::osm_like());
-        let target = Path::new(GOLDEN_ROOT).join(format!("city-z{zoom}.png"));
-        if std::env::var_os("GEOCODE_UPDATE_CARTO_GOLDEN").is_some() {
-            fs::create_dir_all(target.parent().unwrap()).unwrap();
-            image.save_png(&target).unwrap();
-        }
+fn verify_carto_map_golden_images() {
+    let images = carto_golden_images();
+    for (name, _, image) in &images {
+        let target = Path::new(GOLDEN_ROOT).join(format!("{name}.png"));
         let expected = tiny_skia::Pixmap::load_png(&target).unwrap();
         assert!(
             image.data() == expected.data(),
             "新地図の固定画像が変化しました: {}",
             target.display()
         );
-        cases.push(serde_json::json!({
-            "name":format!("city-z{zoom}"),"z":zoom,"x":tile(zoom).x,"y":tile(zoom).y,
-            "rgba_sha256":hash(image.data()),
-        }));
     }
-    let manifest = serde_json::json!({
-        "format":1,"purpose":"名称と新配色の固定画像。従来の道路35枚・標準7枚とは別に確認する。",
-        "style_version":"osm-like-v1","style_hash":RenderSpec::osm_like().hash(),
-        "font_sha256":standard::text::font_hash(),"cases":cases,
-    });
+    let manifest = carto_golden_manifest(&images);
     let path = Path::new(GOLDEN_ROOT).join("manifest.json");
-    if std::env::var_os("GEOCODE_UPDATE_CARTO_GOLDEN").is_some() {
-        fs::write(&path, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
-    }
     let expected: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     assert_eq!(
         expected, manifest,
         "新描画契約と固定画像の記録が一致しません"
     );
+}
+
+#[test]
+#[ignore = "基準画像の明示更新用。GEOCODE_UPDATE_CARTO_GOLDEN=1を指定して--ignoredで実行する"]
+fn explicitly_update_carto_map_golden_images() {
+    assert_eq!(
+        std::env::var("GEOCODE_UPDATE_CARTO_GOLDEN").as_deref(),
+        Ok("1"),
+        "基準画像の更新にはGEOCODE_UPDATE_CARTO_GOLDEN=1が必要です"
+    );
+    let images = carto_golden_images();
+    fs::create_dir_all(GOLDEN_ROOT).unwrap();
+    for (name, _, image) in &images {
+        image
+            .save_png(Path::new(GOLDEN_ROOT).join(format!("{name}.png")))
+            .unwrap();
+    }
+    fs::write(
+        Path::new(GOLDEN_ROOT).join("manifest.json"),
+        serde_json::to_vec_pretty(&carto_golden_manifest(&images)).unwrap(),
+    )
+    .unwrap();
 }

@@ -148,7 +148,16 @@ struct EnvDefaults {
 /// 設定ディレクトリに依存するパス系の値を含めて、現在の既定値を組み立てる。
 fn env_defaults(setup_dir: &std::path::Path) -> EnvDefaults {
     let database_path = setup_dir.join("geocode-web.sqlite");
-    let database_url = format!("sqlite:{}", database_path.to_string_lossy());
+    // SQLxは?より後を接続オプションとし、%を復号する。Windowsのverbatimパスも
+    // ファイル名として往復できるよう、パス内の区切り文字だけを符号化する。
+    let database_url = format!(
+        "sqlite:{}",
+        database_path
+            .to_string_lossy()
+            .replace('%', "%25")
+            .replace('?', "%3F")
+            .replace('#', "%23")
+    );
     let images_path = setup_dir.join("images").to_string_lossy().into_owned();
 
     EnvDefaults {
@@ -250,13 +259,44 @@ pub fn build_env_from_form(
     setup_dir: PathBuf,
     form: SetupForm,
 ) -> Result<ApplicationInitSetup, String> {
+    let env = build_env_settings(&setup_dir, form)?;
+    let env_json_path = setup_dir.join("geocode-web-single.env.json");
+    write_to_json_file(env_json_path, &env).map_err(|e| e.to_string())?;
+    Ok(env)
+}
+
+/// サーバ起動・環境変数・ファイル作成を伴わず、初期設定の入力だけを検証する。
+pub fn validate_setup_form(form: &SetupForm) -> Result<(), String> {
     crate::utils::validate_username(&form.admin_username).map_err(|error| error.to_string())?;
     if form.admin_password.chars().count() < 8
         || matches!(form.admin_password.as_str(), "password123" | "P@ssw0rd")
     {
         return Err("管理者パスワードは8文字以上の値を指定してください。".to_string());
     }
-    let defaults = env_defaults(&setup_dir);
+    for (name, value) in [
+        ("アカウントロック回数", &form.failed_account_lock),
+        ("次の試行までの分数", &form.next_challenge_minutes),
+        (
+            "試行時間制限の開始回数",
+            &form.challenge_limit_time_failed_count,
+        ),
+        ("アクセストークン有効分数", &form.access_token_exp_minutes),
+        ("更新トークン有効分数", &form.refresh_token_exp_minutes),
+    ] {
+        if value.parse::<u32>().ok().is_none_or(|number| number == 0) {
+            return Err(format!("{name}は1以上の整数で指定してください。"));
+        }
+    }
+    Ok(())
+}
+
+/// 初期設定値だけを構築する。保存とサーバ起動は呼出側の責務。
+pub fn build_env_settings(
+    setup_dir: &std::path::Path,
+    form: SetupForm,
+) -> Result<ApplicationInitSetup, String> {
+    validate_setup_form(&form)?;
+    let defaults = env_defaults(setup_dir);
     let secret_key = Uuid::new_v4().to_string();
 
     let env = ApplicationInitSetup {
@@ -342,9 +382,6 @@ pub fn build_env_from_form(
         live_map_password_window_minutes: defaults.live_map_password_window_minutes,
     };
     crate::local_tiles::config::LocalTileConfig::from_setup(&env)?;
-    let env_json_path = setup_dir.join("geocode-web-single.env.json");
-    write_to_json_file(env_json_path, &env).map_err(|e| e.to_string())?;
-
     Ok(env)
 }
 

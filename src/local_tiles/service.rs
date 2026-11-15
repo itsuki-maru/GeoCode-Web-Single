@@ -660,14 +660,31 @@ impl LocalTiles {
     ) -> Result<()> {
         let prefix = format!("/local-tiles/{dataset_id}/");
         let backgrounds: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM tileserver_model WHERE instr(url,?)>0)",
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM tileserver_model
+                WHERE instr(url, ?) > 0
+            )
+            "#,
         )
         .bind(&prefix)
         .fetch_one(&mut **tx)
         .await
         .map_err(Failure::internal)?;
-        let shares: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM temporary_urls WHERE instr(COALESCE(map_snapshot,''),?)>0)")
-            .bind(&prefix).fetch_one(&mut **tx).await.map_err(Failure::internal)?;
+        let shares: bool = sqlx::query_scalar(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM temporary_urls
+                WHERE instr(COALESCE(map_snapshot, ''), ?) > 0
+            )
+            "#,
+        )
+        .bind(&prefix)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(Failure::internal)?;
         if backgrounds || shares {
             return Err(Failure::new(
                 409,
@@ -839,23 +856,51 @@ impl LocalTiles {
             .await
             .map_err(Failure::internal)?;
         self.validate_background_url(&url).await?;
-        if let Some(existing) =
-            sqlx::query_scalar::<_, i64>("SELECT id FROM tileserver_model WHERE url=?")
-                .bind(&url)
-                .fetch_optional(&mut *transaction)
-                .await
-                .map_err(Failure::internal)?
+        if let Some(existing) = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT id
+            FROM tileserver_model
+            WHERE url = ?
+            "#,
+        )
+        .bind(&url)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(Failure::internal)?
         {
             return Ok(json!({"id":existing}));
         }
-        let maximum: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id),0) FROM tileserver_model")
-            .fetch_one(&mut *transaction)
-            .await
-            .map_err(Failure::internal)?;
+        let maximum: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COALESCE(MAX(id), 0)
+            FROM tileserver_model
+            "#,
+        )
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(Failure::internal)?;
         let background_id = maximum.checked_add(1).ok_or_else(Failure::unavailable)?;
         let attribution = attribution_html(&dataset_info(&dataset.dataset)["attribution"])?;
-        sqlx::query("INSERT INTO tileserver_model (id,layer_name,label,url,attribution,include_foreign_tiles,min_zoom,max_zoom,kind,style_url,create_at,updated_at) VALUES (?,?,?,?,?,FALSE,0,22,'raster',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
-            .bind(background_id).bind(format!("local_{id}_{}",&profile.id[..12])).bind(name.map(str::trim).unwrap_or(&record.name)).bind(url).bind(attribution).execute(&mut *transaction).await.map_err(Failure::internal)?;
+        sqlx::query(
+            r#"
+            INSERT INTO tileserver_model (
+                id, layer_name, label, url, attribution, include_foreign_tiles,
+                min_zoom, max_zoom, kind, style_url, create_at, updated_at
+            )
+            VALUES (
+                ?, ?, ?, ?, ?, FALSE,
+                0, 22, 'raster', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .bind(background_id)
+        .bind(format!("local_{id}_{}", &profile.id[..12]))
+        .bind(name.map(str::trim).unwrap_or(&record.name))
+        .bind(url)
+        .bind(attribution)
+        .execute(&mut *transaction)
+        .await
+        .map_err(Failure::internal)?;
         transaction.commit().await.map_err(Failure::internal)?;
         Ok(json!({"id":background_id}))
     }
@@ -1052,7 +1097,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn 未認定構成でも保存_pngと照会を維持し新規生成を拒否する() {
+    async fn serve_cached_tiles_and_queries_but_reject_generation_for_uncertified_builds() {
         let (_root, app, id) = registered_service().await;
         let profile = catalog::list_profiles(&app.catalog, &id)
             .await
@@ -1131,8 +1176,22 @@ mod tests {
         );
         let url = tile_url(&id, &profile.id);
         app.validate_background_url(&url).await.unwrap();
-        sqlx::query("INSERT INTO tileserver_model (id,layer_name,label,url,attribution,include_foreign_tiles,min_zoom,max_zoom,kind,style_url,create_at,updated_at) VALUES (999,'race','race',?,'',FALSE,0,22,'raster',NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
-            .bind(url).execute(&mut *reference).await.unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO tileserver_model (
+                id, layer_name, label, url, attribution, include_foreign_tiles,
+                min_zoom, max_zoom, kind, style_url, create_at, updated_at
+            )
+            VALUES (
+                999, 'race', 'race', ?, '', FALSE,
+                0, 22, 'raster', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .bind(url)
+        .execute(&mut *reference)
+        .await
+        .unwrap();
         reference.commit().await.unwrap();
         assert_eq!(task.await.unwrap().unwrap_err().status, 409);
         assert!(
@@ -1276,12 +1335,13 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         let app = LocalTiles::new(LocalTileConfig::defaults(root.path()), pool);
         let entered = Arc::new(tokio::sync::Notify::new());
-        let release = Arc::new(std::sync::Barrier::new(2));
+        let (release, gate) = std::sync::mpsc::channel();
         let signal = entered.clone();
-        let gate = release.clone();
+        let gate = std::sync::Mutex::new(gate);
         *app.activation_hook.lock().unwrap() = Some(Arc::new(move || {
             signal.notify_one();
-            gate.wait();
+            // 途中のassertやtimeoutで親がpanicしても、senderのDropで解除する。
+            let _ = gate.lock().unwrap().recv_timeout(Duration::from_secs(30));
         }));
         let activating = app.clone();
         let activation = tokio::spawn(async move { activating.ensure_writer().await });
@@ -1289,16 +1349,22 @@ mod tests {
             .await
             .unwrap();
         activation.abort();
-        let _ = activation.await;
+        let _ = tokio::time::timeout(Duration::from_secs(5), activation)
+            .await
+            .expect("activation task did not observe cancellation");
         let stopping = app.clone();
         let mut shutdown = tokio::spawn(async move { stopping.shutdown().await });
-        while !app.closing.load(Ordering::Acquire) {
-            tokio::task::yield_now().await;
-        }
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !app.closing.load(Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("shutdown did not enter its closing phase");
         let waited = tokio::time::timeout(Duration::from_millis(30), &mut shutdown)
             .await
             .is_err();
-        release.wait();
+        release.send(()).unwrap();
         if waited {
             tokio::time::timeout(Duration::from_secs(5), shutdown)
                 .await

@@ -1999,7 +1999,7 @@ mod tests {
     }
 
     #[test]
-    fn 公式DEM10と5の非正方形メッシュを等角セル中心へ解釈する() {
+    fn official_dem_meshes_use_equal_angle_cell_centers() {
         // 2次メッシュの7分30秒×5分を1125×750で割ると両軸とも1/9000度。
         let ten = xml(
             1125,
@@ -2033,7 +2033,7 @@ mod tests {
         assert_eq!(g.mask[g.mask.len() - 1], 1);
     }
     #[test]
-    fn 開始位置末尾省略と水底欠損をゼロ標高から区別する() {
+    fn start_offsets_and_missing_water_bottoms_are_distinct_from_zero_elevation() {
         let text = xml(
             3,
             3,
@@ -2051,7 +2051,7 @@ mod tests {
     }
 
     #[test]
-    fn 十m標高のその他だけを有効値として採用し欠損と水底を維持する() {
+    fn other_category_is_valid_only_for_ten_meter_dem_and_preserves_masks() {
         let base = xml(
             3,
             3,
@@ -2083,7 +2083,7 @@ mod tests {
 
     #[test]
     #[ignore = "GEOCODE_DEM_SMOKE_INPUTで指定した実資料1～2件を読取専用で検証する"]
-    fn 実標高zipのsdk取り込みで有効セルと等高線を保存する() {
+    fn sdk_import_of_real_elevation_zip_preserves_cells_and_contours() {
         let input = PathBuf::from(std::env::var_os("GEOCODE_DEM_SMOKE_INPUT").unwrap());
         let connection = connection();
         let context = OperationContext::default();
@@ -2108,7 +2108,7 @@ mod tests {
     }
 
     #[test]
-    fn 未知CRS走査方向過大セルと不正標高を拒否する() {
+    fn rejects_unknown_crs_scan_axes_oversized_grids_and_invalid_elevations() {
         let base = xml(
             2,
             2,
@@ -2130,7 +2130,7 @@ mod tests {
         }
     }
     #[test]
-    fn チャンクの圧縮往復と展開長マスク検査() {
+    fn chunk_round_trip_validates_decoded_length_and_masks() {
         let mut c = Chunk::empty();
         c.values[17] = -0.5;
         c.mask[17] = 1;
@@ -2143,7 +2143,7 @@ mod tests {
         assert!(Chunk::decode(&c.encode().unwrap()).is_err());
     }
     #[test]
-    fn 固定格子のチャンク境界で双線形標高が連続する() {
+    fn bilinear_sampling_is_continuous_across_fixed_grid_chunk_boundaries() {
         let c = connection();
         let context = OperationContext::default();
         let mut grid = Grid {
@@ -2178,7 +2178,7 @@ mod tests {
         }
     }
     #[test]
-    fn 完成標高と等高線は元入力を削除しても利用できる() {
+    fn stored_elevation_and_contours_survive_source_removal() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("dem.xml");
         let values = (0..64)
@@ -2216,7 +2216,7 @@ mod tests {
         assert!(sampler.sample(p).is_some());
     }
     #[test]
-    fn XMLとZIPの格納名容器日時を変えても入力識別は同じ() {
+    fn input_identity_ignores_xml_zip_entry_names_and_container_timestamps() {
         let dir = tempfile::tempdir().unwrap();
         let text = xml(
             2,
@@ -2248,7 +2248,7 @@ mod tests {
         assert!(zip_inputs(&zip_path, 0, &OperationContext::default()).is_err());
     }
     #[test]
-    fn 面が全欠損か基準面が混在する入力は完成成功にしない() {
+    fn rejects_all_missing_grids_and_mixed_vertical_datums() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("none.xml");
         fs::write(
@@ -2297,7 +2297,7 @@ mod tests {
         assert!(import_into(&connection(), dir.path(), &OperationContext::default()).is_err());
     }
     #[test]
-    fn 内容順の重複選択と明示priorityが保存場所に依存しない() {
+    fn duplicate_selection_and_explicit_priorities_are_path_independent() {
         let dir = tempfile::tempdir().unwrap();
         for (name, value) in [("a.xml", 3), ("b.xml", 9)] {
             fs::write(
@@ -2341,7 +2341,7 @@ mod tests {
     }
 
     #[test]
-    fn 入力一覧の不正な優先度を既定値へ黙って置き換えない() {
+    fn rejects_invalid_manifest_priorities_instead_of_defaulting() {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("inputs.json");
         fs::write(
@@ -2355,7 +2355,7 @@ mod tests {
     }
 
     #[test]
-    fn 事前検査は原資料の混在方針と全文検査の範囲を区別する() {
+    fn preflight_separates_mixed_datum_policy_from_full_validation_scope() {
         let dir = tempfile::tempdir().unwrap();
         for (name, crs) in [("old.xml", "jgd2000"), ("new.xml", "jgd2011")] {
             let text = xml(
@@ -2396,7 +2396,7 @@ mod tests {
     }
 
     #[test]
-    fn 混在検査は新標高の混入と取消と読取失敗を区別する() {
+    fn mixed_datum_inspection_distinguishes_new_datums_cancellation_and_read_errors() {
         let dir = tempfile::tempdir().unwrap();
         let context = OperationContext::default();
         for (name, crs) in [("old.xml", "jgd2000"), ("new.xml", "jgd2024")] {
@@ -2436,7 +2436,7 @@ mod tests {
     }
 
     #[test]
-    fn 単独入力は混在の許可だけで識別や格子を変えない() {
+    fn allowing_mixed_datums_preserves_single_input_identity_and_grid() {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("source.xml");
         fs::write(
@@ -2478,7 +2478,7 @@ mod tests {
     }
 
     #[test]
-    fn 空の自己終了標高配列は事前検査と本読取で欠損格子として一致する() {
+    fn self_closing_empty_elevation_arrays_match_preflight_and_import_masks() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("empty.xml");
         let empty = xml(2, 2, 139.0, 35.0, 0.001, "", "0 0", "fguuid:jgd2000.bl")
@@ -2499,7 +2499,7 @@ mod tests {
     }
 
     #[test]
-    fn 長いzip格納名の診断は文字境界で制限し内容は展開しない() {
+    fn long_zip_entry_diagnostics_are_utf8_bounded_without_decompression() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("long-name.zip");
         let entry = format!("{}.xml", "名前🌏".repeat(300));
@@ -2532,7 +2532,7 @@ mod tests {
     }
 
     #[test]
-    fn 鞍点と同値セルの等高線は再現可能で欠損を補完しない() {
+    fn saddle_and_equal_height_contours_are_reproducible_without_filling_gaps() {
         let mut output = BTreeMap::new();
         cell_segments(319000, 55000, [0.0, 40.0, 0.0, 40.0], 1000, &mut output).unwrap();
         assert_eq!(output[&20].len(), 2);

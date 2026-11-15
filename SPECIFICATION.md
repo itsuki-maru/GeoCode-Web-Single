@@ -1317,11 +1317,14 @@ OSM-Tile-Generatorの生成核を`src/tilegen/`へ移植し、本体の`src/loca
 
 - XYZ、Web Mercator、256px不透明PNG、z0〜22。旧schema/geometry=1/1の`roads-v1`と道路取り込みの既定動作・画素・IDを維持する。旧道路のz0〜5は背景のみ。
 - `import --features standard-v1`はschema/geometry=2/2の別完成DBを作り、建物・中庭・土地被覆・水域・島・水路・鉄道を格納する。PBFはRelation→Way→Nodeの3走査とディスクstagingで処理し、欠損面を直線で補完しない。標準地図の描画契約v3は道路のv2から分離する。
+- 面Relationは、内部が交差せず面の内部を分断しない輪郭同士の点接触を許容する。同じ外周に属する穴同士の共有辺は既存頂点で分割して相殺し、単純な輪郭へ統合する。外周を含む共有辺、自己交差、roleの矛盾、欠損memberは補修しない。接点はLODでも保持し、縮約が接触関係・穴の所属を変えた場合は元の形状を使う。点数・検査量の上限と取消検査を維持する。
+- 接触対応後の取り込み契約は`standard-areas-dem-contours-v4-valid-ring-contacts`とし、再取り込みで別dataset IDを作る。既存完成DB・PNGを変更せず、描画契約は固定画像の回帰確認を条件に維持する。
 - 新完成DBは国土地理院FGD-GMLの標高チャンク・必要階層・20m等高線と、処理済みWGS84陸域面を内包できる。Horn方式の陰影とズーム別の等高線を本体内で合成する。DEMの欠損・水底を0mの陸地とせず、海陸処理範囲外を海と断定しない。地名・標高数値ラベル、3D建物、一般GeoTIFFは対象外。
 - 元PBF・DEM・陸域データは取り込み時だけ使用する。標高だけの更新も別完成DBへの再取り込みとし、既存完成DB・PNG・履歴へ追記・変換しない。管理DBのschema1・本体マイグレーション・共通フロントは変更しない。
 - `geocode-web-single.env.json`の`tile_catalog_database_path`・`tile_dataset_path`・`tile_cache_path`・`tile_work_path`で、管理DBファイル・完成DB・PNG・作業領域を独立して絶対パス指定する。既定は`~/.geocode-web-single/tiles/catalog.sqlite`と`tiles/{datasets,png,work}`。旧JSONは既定補完し、変更は全起動経路で再起動時に反映する。自動移動・既存画像保存先の変更は行わない。SQLite内部一時ファイルはOS標準tempを使用する。
 - 完成DBは不変・読み取り専用として使い、更新は別ファイルで完成させる。外部参照DBの登録は複製しない。PNGの公開直前ファイルはPNG側、完成直前DBはDB側と同じファイルシステムに置いて公開する。
 - 専用catalogの`local_tile_datasets`・`local_tile_render_profiles`・`local_tile_jobs`に、DB登録・描画世代・ジョブ状態を保持する。取り込みは途中再開せず、事前生成は世代・範囲・ズームが一致するmanifestと完成PNGを検査して再開する。取り込み受付はUUIDの`request_id`により、同じ要求の再送で同じジョブを返す。
+- 専用Tauri管理画面のPBF取り込みでは、面地物の構築失敗時は既定で`skip-feature`を送り、該当する面全体を除外して残りを続行する。「詳細設定」で`error`（処理を停止する）も明示選択できる。全国用PowerShellスクリプトと除外方針を揃える。PBF破損・保存失敗・取消等の全体停止条件と、引数省略時のCLI既定`error`は維持する。
 - ビルド来歴、取り込み互換性、描画互換性を分離する。新規dataset IDはPBF内容・取り込み契約・条件、render IDは保存済みdataset ID・描画契約から算出し、コメント・CLI・認証・製品版・非描画依存の更新では変えない。実スタイル値と明示的な互換性版、実形式・寸法・色解釈を固定形式でhash化する。全ソースhashは診断専用で、生成可否は共通のprofile互換性判定を使う。
 - catalog schema v1と旧完成DBのmetadataは変更しない。profileの`info_json`へ道路の契約v2または標準地図の契約v3を保存し、既存`build_id`は初回登録時の来歴として保持する。旧方式の初回切替だけ明示的に新世代を準備し、旧ID・PNG・manifest・背景・共有・履歴は保持する。同じ描画契約なら、異なるビルド来歴でもPNG・URL・事前生成再開を継続できる。
 - 実行構成は`res/tile-render-execution.json`で認定する。未認定のcompiler・CPU機能・flags・関連依存構成では新規生成等を503で停止し、照会と保存PNGは維持する。描画ソースのトークン指紋・関連推移依存・固定RGBA/PNGをCIで検査し、ソース指紋は描画世代へ混ぜない。

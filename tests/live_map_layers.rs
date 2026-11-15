@@ -1,5 +1,7 @@
 #[allow(dead_code)]
 mod common;
+#[path = "support/sqlite_contention.rs"]
+mod sqlite_contention;
 
 use axum::{
     Json,
@@ -426,11 +428,12 @@ async fn tile_usage_is_saved_and_query_cannot_override_it() {
 
 #[tokio::test]
 async fn selection_waits_for_concurrent_layer_deletion() {
-    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use sqlx::sqlite::SqliteConnectOptions;
     use std::time::Duration;
     let path = common::test_files_dir().join(format!("live-layer-race-{}.sqlite", Uuid::new_v4()));
-    let pool = SqlitePoolOptions::new()
-        .max_connections(2)
+    let contention = sqlite_contention::SqliteContention::new();
+    let pool = contention
+        .pool_options(2)
         .connect_with(
             SqliteConnectOptions::new()
                 .filename(&path)
@@ -465,14 +468,20 @@ async fn selection_waits_for_concurrent_layer_deletion() {
     .unwrap();
     let worker_pool = pool.clone();
     let map_id = map.id.clone();
-    let worker =
-        tokio::spawn(
-            async move { update(&worker_pool, &admin, &map_id, &admin, Some(vec![b])).await },
-        );
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(!worker.is_finished());
-    tx.commit().await.unwrap();
-    assert!(worker.await.unwrap().is_err());
+    let worker = contention
+        .spawn(async move { update(&worker_pool, &admin, &map_id, &admin, Some(vec![b])).await });
+    let result = tokio::time::timeout(Duration::from_secs(15), async {
+        contention.wait_until_busy().await;
+        assert!(!worker.is_finished());
+        tx.commit().await.unwrap();
+        worker.finish().await
+    })
+    .await
+    .expect("concurrent layer selection did not finish");
+    assert!(matches!(
+        result,
+        Err(geocode_web_single::error::AppError::Validation(_))
+    ));
     let ids: Vec<String> = sqlx::query_scalar(
         r#"
         SELECT

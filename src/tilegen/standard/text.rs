@@ -677,7 +677,7 @@ mod tests {
     }
 
     #[test]
-    fn 日本語と結合文字を整形し長名と欠字を上限内へ収める() {
+    fn shapes_japanese_and_combining_text_within_name_and_missing_glyph_limits() {
         assert_eq!(
             font_hash(),
             "68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5"
@@ -709,7 +709,7 @@ mod tests {
     }
 
     #[test]
-    fn 言語の優先順を固定する() {
+    fn language_fallback_order_is_stable() {
         let mut label = candidate(1, 0.0, 0.0, "現地名", 1);
         label.names.insert("name:ja".into(), "日本語名".into());
         label.names.insert("name:en".into(), "English".into());
@@ -719,7 +719,7 @@ mod tests {
     }
 
     #[test]
-    fn 名称の許可表と表示対象ズームを一致させる() {
+    fn label_allowlist_matches_visibility_zoom_thresholds() {
         let expected = [
             ("place.city", 5),
             ("place.town", 8),
@@ -764,7 +764,7 @@ mod tests {
     }
 
     #[test]
-    fn 未表示の施設が十万件を超えても低ズームを描き表示対象の上限は維持する() {
+    fn low_zoom_ignores_over_hundred_thousand_hidden_facilities_while_enforcing_visible_limits() {
         let conn = connection(&[]);
         let count = super::super::labels::MAX_QUERY_LABELS as i64 + 1;
         conn.execute("WITH RECURSIVE ids(id) AS (SELECT 1 UNION ALL SELECT id+1 FROM ids WHERE id<?) INSERT INTO map_labels(osm_type,osm_id,category,names,x,y,importance,population,admin_level,capital) SELECT 0,id,'landmark.park','{\"name\":\"公園\"}',0.515625,0.515625,400000000,NULL,NULL,0 FROM ids", [count]).unwrap();
@@ -830,7 +830,7 @@ mod tests {
     }
 
     #[test]
-    fn 異体字と結合文字と不可視の整形情報を原列のまま渡す() {
+    fn passes_variants_combining_marks_and_invisible_controls_to_shaping_unchanged() {
         let text = "葛\u{e0100} e\u{301} A\u{200d}B C\u{200c}D";
         assert_eq!(line_texts(text, 17).unwrap(), vec![text.to_owned()]);
         let (lines, missing) = prepare_lines(text, 17).unwrap();
@@ -850,7 +850,7 @@ mod tests {
     }
 
     #[test]
-    fn 日本語の行頭句読点と行末開き括弧を避けて改行する() {
+    fn line_breaks_avoid_japanese_leading_punctuation_and_trailing_open_brackets() {
         for text in [
             "地".repeat(13) + "）高松市",
             "地".repeat(12) + "（高松市）",
@@ -882,7 +882,7 @@ mod tests {
     }
 
     #[test]
-    fn 長名だけは一行に収まる短縮名を優先し大きすぎる短縮名を採用しない() {
+    fn long_names_prefer_fitting_short_names_and_reject_oversized_alternatives() {
         let long_name = "瀬戸内海国立公園高松地区自然観察施設";
         let mut label = candidate(1, 128.0, 128.0, long_name, 1);
         label
@@ -906,7 +906,7 @@ mod tests {
     }
 
     #[test]
-    fn 小集落と小字も高ズームで描画する() {
+    fn small_settlements_and_local_areas_render_at_high_zoom() {
         for (id, category, minimum) in [
             (1, "place.isolated_dwelling", 15),
             (2, "place.locality", 13),
@@ -926,7 +926,7 @@ mod tests {
     }
 
     #[test]
-    fn 外側で隠れる上位の原候補も競合として残す() {
+    fn retains_occluded_higher_priority_candidates_as_external_blockers() {
         let low = candidate(1, 210.0, 130.0, "地名地名地名", 1);
         let middle = candidate(2, 290.0, 130.0, "地名地名地名", 2);
         let high = candidate(3, 370.0, 130.0, "地名地名地名", 3);
@@ -948,7 +948,7 @@ mod tests {
     }
 
     #[test]
-    fn 可視文字の反対側へ離れた長名の競合も四隅の窓で一致する() {
+    fn distant_long_name_blockers_produce_matching_quad_crops() {
         let long_name = "地".repeat(13);
         for (visible_x, blocker_x) in [(151.0, -80.0), (361.0, 592.0)] {
             for y in [251.5, 260.5] {
@@ -990,7 +990,7 @@ mod tests {
     }
 
     #[test]
-    fn 外側競合の照会範囲は上下左右に三半径と丸めの余白を持つ() {
+    fn external_blocker_queries_include_three_radii_and_rounding_margin() {
         let viewport = Rect {
             min_x: 10_000.25,
             max_x: 10_256.25,
@@ -1009,7 +1009,7 @@ mod tests {
     }
 
     #[test]
-    fn 世界固定セルの候補上限を窓の外側も含めて適用する() {
+    fn world_fixed_cell_limits_include_candidates_outside_the_viewport() {
         let mut candidates = (1..=16)
             .map(|id| candidate(id, 370.0, 140.0, "町", 100 - id))
             .collect::<Vec<_>>();
@@ -1022,7 +1022,7 @@ mod tests {
     }
 
     #[test]
-    fn 隣接タイルと大きな窓で文字とセル境界の画素が一致する() {
+    fn adjacent_tiles_match_large_viewport_labels_and_cell_edges() {
         let mut candidates = vec![
             candidate(1, 255.75, 190.25, "日本語の境界ラベル", 10000),
             candidate(2, 400.5, 300.5, "瀬戸内海", 9000),
@@ -1056,7 +1056,7 @@ mod tests {
     }
 
     #[test]
-    fn 取消済みの文字描画は候補を取得する前に停止する() {
+    fn cancelled_text_rendering_stops_before_candidate_queries() {
         let cancellation = CancellationToken::new();
         cancellation.cancel();
         let context = OperationContext::new(cancellation);

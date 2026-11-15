@@ -55,7 +55,14 @@ async fn address_search_uses_sqlite_login_and_rejects_revoked_sessions() {
     let app = Router::new()
         .route("/geocode", post(search_handler))
         .layer(Extension(pool.clone()))
-        .layer(Extension(GeocoderClient::default()));
+        .layer(Extension(GeocoderClient(
+            reqwest::Client::builder()
+                .no_proxy()
+                .timeout(std::time::Duration::from_secs(10))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .unwrap(),
+        )));
     let request = |cookie: Option<&str>| {
         let mut builder = Request::builder()
             .method("POST")

@@ -220,20 +220,20 @@ fn assert_pixels_with_options(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn 指定した配布用実行ファイルで地形生成と背景登録と再開が完結する() {
+#[ignore = "配布exeをGEOCODE_TEST_CLI_EXEへ指定し、--ignoredで実行する"]
+async fn generate_terrain_register_backgrounds_and_resume_with_the_selected_distribution_binary() {
     verify_offline_executable("standard-v1", 2).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn 指定した配布用実行ファイルで新形式を取り込み原資料削除後も別設定で生成する() {
+#[ignore = "配布exeをGEOCODE_TEST_CLI_EXEへ指定し、--ignoredで実行する"]
+async fn import_the_new_format_and_render_with_another_configuration_after_removing_sources() {
     verify_offline_executable("standard-v2", 3).await;
 }
 
 async fn verify_offline_executable(features: &str, schema: u32) {
-    let Some(path) = std::env::var_os("GEOCODE_TEST_CLI_EXE") else {
-        eprintln!("GEOCODE_TEST_CLI_EXE未指定のため、配布用実exeの検証をスキップします。");
-        return;
-    };
+    let path = std::env::var_os("GEOCODE_TEST_CLI_EXE")
+        .expect("GEOCODE_TEST_CLI_EXEに検証する配布exeを指定してください");
     let executable = PathBuf::from(path)
         .canonicalize()
         .expect("GEOCODE_TEST_CLI_EXEのファイルがありません");
@@ -493,7 +493,8 @@ async fn verify_offline_executable(features: &str, schema: u32) {
 /// 実資料は環境変数で明示指定し、生成物をworkspaceの隔離領域へ残す。
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "実PBF・DEM・陸域を明示して、長時間の取り込みと画素照合を行う"]
-async fn 指定した実資料の混在標高を隔離領域へ取り込み背景と画像を検証する() {
+async fn import_real_mixed_datum_elevation_into_isolated_storage_and_verify_backgrounds_and_images()
+{
     if let Some(root) = std::env::var_os("GEOCODE_REAL_REUSE_ROOT") {
         verify_existing_real_dataset(PathBuf::from(root));
         return;

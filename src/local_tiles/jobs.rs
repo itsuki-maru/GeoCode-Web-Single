@@ -493,13 +493,53 @@ impl LocalTiles {
         Ok((plan, profile.id, max_tiles))
     }
 
-    pub async fn start_precompute(
+    pub async fn start_precompute(self: &Arc<Self>, request: PrecomputeRequest) -> Result<Value> {
+        self.start_precompute_request(request, None).await
+    }
+
+    /// GUIの永続受付UUIDをジョブIDとして使い、受付通知前に画面が閉じても重複生成しない。
+    /// 既存CLIは引き続きstart_precomputeで毎回新しいUUIDを発行する。
+    pub async fn start_precompute_with_request_id(
+        self: &Arc<Self>,
+        request: PrecomputeRequest,
+        request_id: &str,
+    ) -> Result<Value> {
+        let id = uuid::Uuid::parse_str(request_id)
+            .map_err(|_| Failure::new(400, "request_idはUUIDで指定してください。"))?
+            .to_string();
+        self.start_precompute_request(request, Some(id)).await
+    }
+
+    async fn start_precompute_request(
         self: &Arc<Self>,
         mut request: PrecomputeRequest,
+        request_id: Option<String>,
     ) -> Result<Value> {
         self.ensure_generation_allowed()?;
         let _admission = self.admission.lock().await;
         self.ensure_writer().await?;
+        if let Some(id) = &request_id {
+            if let Some(existing) = catalog::get_job(&self.catalog, id)
+                .await
+                .map_err(catalog_failure)?
+            {
+                let saved: PrecomputeRequest = serde_json::from_str(&existing.request_json)
+                    .map_err(|_| Failure::new(409, "同じrequest_idの条件を確認できません。"))?;
+                if request.render_id.is_none() {
+                    request.render_id = saved.render_id;
+                }
+                if existing.kind != "precompute"
+                    || serde_json::to_string(&request).map_err(Failure::internal)?
+                        != existing.request_json
+                {
+                    return Err(Failure::new(
+                        409,
+                        "同じrequest_idに異なる事前生成条件は指定できません。",
+                    ));
+                }
+                return Ok(job_value(existing));
+            }
+        }
         if request.resume_job_id.is_some() && request.render_id.is_none() {
             request.render_id = Some(self.saved_resume_render(&request).await?);
         }
@@ -527,7 +567,7 @@ impl LocalTiles {
                 .await?;
         }
         let admission = self.admit_job(self.precompute_slot.clone())?;
-        let id = uuid::Uuid::new_v4().to_string();
+        let id = request_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let token = CancellationToken::new();
         let record = new_job(
             &id,
@@ -1000,7 +1040,7 @@ mod cancellation_tests {
     use super::*;
 
     #[tokio::test]
-    async fn 取消監視の管理db待機中も実処理の完了を回収する() {
+    async fn collect_completed_work_while_cancellation_monitor_waits_for_catalog() {
         let root = tempfile::tempdir().unwrap();
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
@@ -1039,7 +1079,7 @@ mod cancellation_tests {
     }
 
     #[test]
-    fn 追加項目が欠けた道路要求は旧形式の文字列へそのまま戻る() {
+    fn serialize_legacy_road_request_without_optional_fields() {
         let old = r#"{"name":"旧道路","input_path":"C:/maps/japan.pbf","missing_nodes":"error","request_id":null}"#;
         let request: ImportRequest = serde_json::from_str(old).unwrap();
         assert_eq!(request.features, "roads-v1");
@@ -1052,7 +1092,7 @@ mod cancellation_tests {
     }
 
     #[tokio::test]
-    async fn 旧要求の識別子再送と識別子なし実行中要求を二重起動しない() {
+    async fn reuse_legacy_request_ids_and_deduplicate_active_imports() {
         let root = tempfile::tempdir().unwrap();
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(2)
@@ -1099,6 +1139,75 @@ mod cancellation_tests {
         }
         assert_eq!(catalog::total_jobs(&app.catalog).await.unwrap(), 2);
         app.shutdown().await;
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn reuse_precompute_request_uuid_after_validating_parameters_and_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(2)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        let config = LocalTileConfig::defaults(root.path());
+        let app = LocalTiles::new(config.clone(), pool.clone());
+        app.ensure_writer().await.unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let request = PrecomputeRequest {
+            dataset_id: "既存dataset".into(),
+            bbox: [139.0, 35.0, 140.0, 36.0],
+            min_zoom: 10,
+            max_zoom: 11,
+            render_id: Some("保存済render".into()),
+            ..Default::default()
+        };
+        let mut record = new_job(&id, "precompute", None, &request, &app.owner_id).unwrap();
+        record.state = "succeeded".into();
+        catalog::insert_job(&app.catalog, &record).await.unwrap();
+        let mut implicit_render = request.clone();
+        implicit_render.render_id = None;
+        let replay = app
+            .start_precompute_with_request_id(implicit_render, &id)
+            .await
+            .unwrap();
+        assert_eq!(replay["id"], id);
+        assert_eq!(replay["state"], "succeeded");
+        let mut changed = request.clone();
+        changed.bbox[0] = 138.0;
+        assert_eq!(
+            app.start_precompute_with_request_id(changed, &id)
+                .await
+                .unwrap_err()
+                .status,
+            409
+        );
+        assert_eq!(
+            app.start_precompute_with_request_id(request.clone(), "invalid")
+                .await
+                .unwrap_err()
+                .status,
+            400
+        );
+        let other = LocalTiles::new(config, pool.clone());
+        assert_eq!(
+            other
+                .start_precompute_with_request_id(request.clone(), &id)
+                .await
+                .unwrap_err()
+                .status,
+            503
+        );
+        assert_eq!(catalog::total_jobs(&app.catalog).await.unwrap(), 1);
+        app.shutdown().await;
+        let replay = other
+            .start_precompute_with_request_id(request, &id)
+            .await
+            .unwrap();
+        assert_eq!(replay["id"], id);
+        assert_eq!(replay["state"], "succeeded");
+        assert_eq!(catalog::total_jobs(&other.catalog).await.unwrap(), 1);
+        other.shutdown().await;
         pool.close().await;
     }
 

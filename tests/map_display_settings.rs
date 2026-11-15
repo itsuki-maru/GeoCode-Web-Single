@@ -16,7 +16,7 @@ async fn response_json(response: Response) -> Value {
 }
 
 #[tokio::test]
-async fn 管理者のみがクラスタ解除の最小ズームを保存でき地図は最新値を使う() {
+async fn allow_only_administrators_to_save_cluster_disable_zoom_and_use_the_latest_value() {
     let pool = common::test_pool().await;
     let admin = common::create_test_admin(&pool, "map-settings-admin").await;
     let user = common::create_test_user(&pool, "map-settings-user").await;
@@ -115,7 +115,11 @@ async fn 管理者のみがクラスタ解除の最小ズームを保存でき�
 
     // 保存値が不正でも、従来の既定値で地図を利用できる。
     sqlx::query(
-        "UPDATE application_settings SET setting_value = 'invalid' WHERE setting_key = 'clustering_min_zoom'",
+        r#"
+        UPDATE application_settings
+        SET setting_value = 'invalid'
+        WHERE setting_key = 'clustering_min_zoom'
+        "#,
     )
     .execute(&pool)
     .await

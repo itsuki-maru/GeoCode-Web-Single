@@ -9,6 +9,7 @@ use crate::tilegen::{
 use anyhow::{Context, Result, ensure};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
 const MAX_BYTES: usize = 32 * 1024 * 1024;
@@ -229,6 +230,12 @@ pub fn insert_feature_with_context(
     } else {
         f.kind.min_zoom()
     };
+    let polygon_topology = match &f.geometry {
+        Geometry::Polygon(parts) if min_zoom <= 13 => {
+            Some(PolygonLodTopology::new(parts, context)?)
+        },
+        _ => None,
+    };
     conn.execute("INSERT INTO standard_features(osm_type,osm_id,role,kind,layer,structure,min_zoom,min_x,max_x,min_y,max_y,point_count,geometry) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
         params![f.osm_type,f.osm_id,f.role,f.kind as i64,f.layer,f.structure,min_zoom,b.min_x,b.max_x,b.min_y,b.max_y,points as i64,data])?;
     let id = conn.last_insert_rowid();
@@ -246,42 +253,14 @@ pub fn insert_feature_with_context(
                 epsilon,
                 || context.check(),
             )?),
-            Geometry::Polygon(parts) => {
-                let mut simple = Vec::new();
-                let mut accepted = true;
-                for part in parts {
-                    for ring in std::iter::once(&part.outer).chain(part.holes.iter()) {
-                        let p = crate::tilegen::simplify::simplify_with_check(
-                            ring,
-                            &vec![false; ring.len()],
-                            epsilon,
-                            || context.check(),
-                        )?;
-                        if p.len() < 4 {
-                            accepted = false;
-                            break;
-                        }
-                        simple.push(p);
-                    }
-                    if !accepted {
-                        break;
-                    }
-                }
-                if accepted {
-                    match super::areas::polygon_from_rings(simple, context) {
-                        Ok(p)
-                            if p.len() == parts.len()
-                                && p.iter().map(|p| p.holes.len()).sum::<usize>()
-                                    == parts.iter().map(|p| p.holes.len()).sum::<usize>() =>
-                        {
-                            Geometry::Polygon(p)
-                        },
-                        _ => f.geometry.clone(),
-                    }
-                } else {
-                    f.geometry.clone()
-                }
-            },
+            Geometry::Polygon(parts) => Geometry::Polygon(polygon_lod(
+                parts,
+                polygon_topology
+                    .as_ref()
+                    .context("面のLOD条件がありません")?,
+                epsilon,
+                context,
+            )?),
         };
         let (bytes, _) = encode(&lod)?;
         conn.execute(
@@ -290,6 +269,204 @@ pub fn insert_feature_with_context(
         )?;
     }
     Ok(())
+}
+
+type ContactSignature = Vec<Vec<(u64, u64)>>;
+
+/// 接点のない面は従来のstrict検査へ渡し、既存LODの採用条件を変えない。
+struct PolygonLodTopology {
+    protected: Vec<Vec<bool>>,
+    contacts: Option<ContactSignature>,
+}
+
+impl PolygonLodTopology {
+    fn new(
+        parts: &[PolygonPart],
+        context: &crate::tilegen::operation::OperationContext,
+    ) -> Result<Self> {
+        let protected = super::areas::topology_locks(parts, context)?;
+        let contacts = if protected.iter().flatten().any(|&fixed| fixed) {
+            Some(contact_signature(parts, &protected, context)?)
+        } else {
+            None
+        };
+        Ok(Self {
+            protected,
+            contacts,
+        })
+    }
+}
+
+fn polygon_lod(
+    parts: &[PolygonPart],
+    topology: &PolygonLodTopology,
+    epsilon: f64,
+    context: &crate::tilegen::operation::OperationContext,
+) -> Result<Vec<PolygonPart>> {
+    let mut simple = Vec::new();
+    for ring in parts
+        .iter()
+        .flat_map(|part| std::iter::once(&part.outer).chain(part.holes.iter()))
+    {
+        let fixed = topology
+            .protected
+            .get(simple.len())
+            .context("面のLOD固定点が不足しています")?;
+        let reduced = crate::tilegen::simplify::simplify_with_check(ring, fixed, epsilon, || {
+            context.check()
+        })?;
+        if reduced.len() < 4 {
+            return Ok(parts.to_vec());
+        }
+        simple.push(reduced);
+    }
+    ensure!(
+        simple.len() == topology.protected.len(),
+        "面のLOD固定点の輪郭数が一致しません"
+    );
+    let validation = if let Some(expected_contacts) = &topology.contacts {
+        let mut flattened = simple.into_iter();
+        let mut candidate = Vec::with_capacity(parts.len());
+        for part in parts {
+            let outer = flattened.next().context("面のLOD外周がありません")?;
+            let holes = (0..part.holes.len())
+                .map(|_| flattened.next().context("面のLOD穴がありません"))
+                .collect::<Result<Vec<_>>>()?;
+            candidate.push(PolygonPart { outer, holes });
+        }
+        let rings = candidate
+            .iter()
+            .flat_map(|part| std::iter::once(&part.outer).chain(part.holes.iter()))
+            .cloned()
+            .collect();
+        match super::areas::polygon_from_rings_with_contacts(rings, context) {
+            Ok(validated) => {
+                // 新しい接触のnodingや、別outerへの穴の付け替えも採用しない。
+                let same_grouping = grouping_fingerprints(&candidate, context)?
+                    == grouping_fingerprints(&validated, context)?;
+                let candidate_topology = PolygonLodTopology::new(&candidate, context)?;
+                if same_grouping && candidate_topology.contacts.as_ref() == Some(expected_contacts)
+                {
+                    Ok(validated)
+                } else {
+                    return Ok(parts.to_vec());
+                }
+            },
+            Err(error) => Err(error),
+        }
+    } else {
+        // 新しい有効な接触まで許すと、従来fallbackしたLODの画素が変わってしまう。
+        super::areas::polygon_from_rings(simple, context)
+    };
+    // validator中の取消・期限を原形fallbackで成功扱いにしない。
+    context.check()?;
+    match validation {
+        Ok(validated)
+            if validated.len() == parts.len()
+                && validated.iter().map(|part| part.holes.len()).sum::<usize>()
+                    == parts.iter().map(|part| part.holes.len()).sum::<usize>() =>
+        {
+            Ok(validated)
+        },
+        _ => Ok(parts.to_vec()),
+    }
+}
+
+fn contact_signature(
+    parts: &[PolygonPart],
+    protected: &[Vec<bool>],
+    context: &crate::tilegen::operation::OperationContext,
+) -> Result<ContactSignature> {
+    let mut signature = Vec::with_capacity(protected.len());
+    for ring in parts
+        .iter()
+        .flat_map(|part| std::iter::once(&part.outer).chain(part.holes.iter()))
+    {
+        let fixed = protected
+            .get(signature.len())
+            .context("面の接触固定点が不足しています")?;
+        ensure!(ring.len() == fixed.len(), "面の接触固定点数が一致しません");
+        let mut coordinates = Vec::new();
+        for (index, (&point, &keep)) in ring.iter().zip(fixed).enumerate() {
+            if index.is_multiple_of(1024) {
+                context.check()?;
+            }
+            if keep {
+                coordinates.push((coordinate_bits(point.x), coordinate_bits(point.y)));
+            }
+        }
+        signature.push(coordinates);
+    }
+    ensure!(
+        signature.len() == protected.len(),
+        "面の接触輪郭数が一致しません"
+    );
+    Ok(signature)
+}
+
+fn coordinate_bits(value: f64) -> u64 {
+    if value == 0.0 {
+        0.0f64.to_bits()
+    } else {
+        value.to_bits()
+    }
+}
+
+fn grouping_fingerprints(
+    parts: &[PolygonPart],
+    context: &crate::tilegen::operation::OperationContext,
+) -> Result<Vec<([u8; 32], Vec<[u8; 32]>)>> {
+    let mut groups = Vec::with_capacity(parts.len());
+    for part in parts {
+        context.check()?;
+        let outer = ring_fingerprint(&part.outer, context)?;
+        let mut holes = part
+            .holes
+            .iter()
+            .map(|ring| ring_fingerprint(ring, context))
+            .collect::<Result<Vec<_>>>()?;
+        holes.sort_unstable();
+        groups.push((outer, holes));
+    }
+    groups.sort_unstable();
+    Ok(groups)
+}
+
+fn ring_fingerprint(
+    ring: &[Point],
+    context: &crate::tilegen::operation::OperationContext,
+) -> Result<[u8; 32]> {
+    ensure!(
+        ring.len() >= 4 && ring.first() == ring.last(),
+        "LOD輪郭が閉じていません"
+    );
+    let count = ring.len() - 1;
+    let compare = |a: Point, b: Point| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y));
+    let mut start = 0;
+    for index in 1..count {
+        if index.is_multiple_of(1024) {
+            context.check()?;
+        }
+        if compare(ring[index], ring[start]).is_lt() {
+            start = index;
+        }
+    }
+    let forward = compare(ring[(start + 1) % count], ring[(start + count - 1) % count]).is_lt();
+    let mut hash = Sha256::new();
+    hash.update((count as u64).to_le_bytes());
+    for offset in 0..count {
+        if offset.is_multiple_of(1024) {
+            context.check()?;
+        }
+        let index = if forward {
+            (start + offset) % count
+        } else {
+            (start + count - offset) % count
+        };
+        hash.update(coordinate_bits(ring[index].x).to_le_bytes());
+        hash.update(coordinate_bits(ring[index].y).to_le_bytes());
+    }
+    Ok(hash.finalize().into())
 }
 pub fn insert_road(
     conn: &Connection,
@@ -1041,7 +1218,7 @@ mod tests {
     }
 
     #[test]
-    fn 標高の出典と採用集計の矛盾を完成メタデータとして受け付けない() {
+    fn rejects_elevation_provenance_and_summary_mismatches_at_publication() {
         let conn = Connection::open_in_memory().unwrap();
         initialize(&conn).unwrap();
         let valid = elevation_metadata(&conn);
@@ -1077,7 +1254,7 @@ mod tests {
     }
 
     #[test]
-    fn 標高の集計だけを改変しても実格子と違えば完成公開しない() {
+    fn rejects_elevation_summaries_that_disagree_with_stored_grids() {
         let conn = Connection::open_in_memory().unwrap();
         initialize(&conn).unwrap();
         let mut extra = elevation_metadata(&conn);
@@ -1108,7 +1285,7 @@ mod tests {
     }
 
     #[test]
-    fn 標高の出典欠落や保存文書の不一致を完成成功にしない() {
+    fn rejects_missing_elevation_provenance_and_inconsistent_documents() {
         for change in 0..4 {
             let conn = Connection::open_in_memory().unwrap();
             initialize(&conn).unwrap();
@@ -1147,7 +1324,7 @@ mod tests {
     }
 
     #[test]
-    fn 面の穴と複数部品を復元し余剰バイトを拒否する() {
+    fn decodes_polygon_holes_and_parts_and_rejects_trailing_bytes() {
         let ring = vec![
             Point { x: 0.1, y: 0.1 },
             Point { x: 0.9, y: 0.1 },
@@ -1182,6 +1359,212 @@ mod tests {
             }]),
         }
     }
+
+    fn polygon_feature(parts: Vec<PolygonPart>) -> Feature {
+        Feature {
+            geometry: Geometry::Polygon(parts),
+            ..feature()
+        }
+    }
+
+    fn point(x: f64, y: f64) -> Point {
+        Point { x, y }
+    }
+
+    fn stored_polygon_lods(conn: &Connection) -> Vec<(u8, Vec<PolygonPart>)> {
+        let mut statement = conn
+            .prepare("SELECT zoom,geometry FROM standard_geometry_lod ORDER BY zoom")
+            .unwrap();
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, u8>(0)?, row.get::<_, Vec<u8>>(1)?))
+            })
+            .unwrap()
+            .map(|row| {
+                let (zoom, bytes) = row.unwrap();
+                let Geometry::Polygon(parts) = decode(&bytes).unwrap() else {
+                    panic!("stored LOD must remain polygon geometry")
+                };
+                (zoom, parts)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn contact_lods_keep_shared_vertices_while_simplifying_and_round_trip() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        let contact = point(0.5, 0.25);
+        let f = polygon_feature(vec![PolygonPart {
+            outer: vec![
+                point(0.25, 0.25),
+                point(0.375, 0.25),
+                contact,
+                point(0.625, 0.25),
+                point(0.75, 0.25),
+                point(0.75, 0.75),
+                point(0.25, 0.75),
+                point(0.25, 0.25),
+            ],
+            holes: vec![vec![
+                point(0.4, 0.4),
+                point(0.5, 0.6),
+                point(0.6, 0.4),
+                contact,
+                point(0.4, 0.4),
+            ]],
+        }]);
+        insert_feature(&conn, &f).unwrap();
+        let source: Vec<u8> = conn
+            .query_row("SELECT geometry FROM standard_features", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(decode(&source).unwrap(), f.geometry);
+        let lods = stored_polygon_lods(&conn);
+        assert_eq!(lods.len(), 8);
+        for (zoom, parts) in lods {
+            assert_eq!(parts.len(), 1, "z{zoom}");
+            assert_eq!(parts[0].holes.len(), 1, "z{zoom}");
+            assert!(
+                parts[0].outer.contains(&contact),
+                "z{zoom}: outer lost contact"
+            );
+            assert!(
+                parts[0].holes[0].contains(&contact),
+                "z{zoom}: hole lost contact"
+            );
+            assert_eq!(parts[0].outer.len(), 6, "z{zoom}: unnecessary fallback");
+            assert_eq!(parts[0].holes[0].len(), 5, "z{zoom}");
+        }
+        let loaded = query_features(&conn, Rect::new(0.0, 1.0, 0.0, 1.0).unwrap(), 22).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].geometry, f.geometry);
+    }
+
+    #[test]
+    fn point_touching_outer_parts_remain_separate_at_every_lod() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        let contact = point(0.5, 0.5);
+        let f = polygon_feature(vec![
+            PolygonPart {
+                outer: vec![
+                    point(0.1, 0.1),
+                    point(0.5, 0.1),
+                    contact,
+                    point(0.3, 0.5),
+                    point(0.1, 0.5),
+                    point(0.1, 0.1),
+                ],
+                holes: vec![],
+            },
+            PolygonPart {
+                outer: vec![
+                    contact,
+                    point(0.9, 0.5),
+                    point(0.9, 0.9),
+                    point(0.5, 0.9),
+                    contact,
+                ],
+                holes: vec![],
+            },
+        ]);
+        insert_feature(&conn, &f).unwrap();
+        for (zoom, parts) in stored_polygon_lods(&conn) {
+            assert_eq!(parts.len(), 2, "z{zoom}");
+            assert!(parts.iter().all(|part| part.holes.is_empty()), "z{zoom}");
+            assert!(
+                parts.iter().all(|part| part.outer.contains(&contact)),
+                "z{zoom}"
+            );
+            assert!(parts.iter().all(|part| part.outer.len() == 5), "z{zoom}");
+        }
+    }
+
+    #[test]
+    fn noncontact_lods_keep_legacy_fallback_when_simplification_creates_contact() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        let bump = point(0.5, 0.25 - 0.000_001);
+        let part = PolygonPart {
+            outer: vec![
+                point(0.25, 0.25),
+                bump,
+                point(0.75, 0.25),
+                point(0.75, 0.75),
+                point(0.25, 0.75),
+                point(0.25, 0.25),
+            ],
+            holes: vec![vec![
+                point(0.4, 0.4),
+                point(0.5, 0.6),
+                point(0.6, 0.4),
+                point(0.5, 0.25),
+                point(0.4, 0.4),
+            ]],
+        };
+        let topology =
+            PolygonLodTopology::new(std::slice::from_ref(&part), &Default::default()).unwrap();
+        assert!(topology.contacts.is_none());
+        let epsilon = AREA_LOD_ERROR_PX / (256.0 * 64.0);
+        let reduced = crate::tilegen::simplify::simplify(
+            &part.outer,
+            &vec![false; part.outer.len()],
+            epsilon,
+        )
+        .unwrap();
+        assert!(
+            !reduced.contains(&bump),
+            "fixture must create a new contact if simplified"
+        );
+        let f = polygon_feature(vec![part]);
+        insert_feature(&conn, &f).unwrap();
+        let lod = stored_polygon_lods(&conn).remove(0);
+        assert_eq!(lod.0, 6);
+        assert_eq!(Geometry::Polygon(lod.1), f.geometry);
+    }
+
+    #[test]
+    fn contact_lods_fall_back_when_simplification_creates_an_extra_touch() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize(&conn).unwrap();
+        let part = PolygonPart {
+            outer: vec![
+                point(0.25, 0.25),
+                point(0.5, 0.25 - 0.000_001),
+                point(0.75, 0.25),
+                point(0.75, 0.5),
+                point(0.75, 0.75),
+                point(0.25, 0.75),
+                point(0.25, 0.25),
+            ],
+            holes: vec![
+                vec![
+                    point(0.6, 0.5),
+                    point(0.675, 0.6),
+                    point(0.75, 0.5),
+                    point(0.675, 0.4),
+                    point(0.6, 0.5),
+                ],
+                vec![
+                    point(0.4, 0.35),
+                    point(0.5, 0.4),
+                    point(0.6, 0.35),
+                    point(0.5, 0.25),
+                    point(0.4, 0.35),
+                ],
+            ],
+        };
+        let topology =
+            PolygonLodTopology::new(std::slice::from_ref(&part), &Default::default()).unwrap();
+        assert!(topology.contacts.is_some());
+        let f = polygon_feature(vec![part]);
+        insert_feature(&conn, &f).unwrap();
+        let lod = stored_polygon_lods(&conn).remove(0);
+        assert_eq!(lod.0, 6);
+        assert_eq!(Geometry::Polygon(lod.1), f.geometry);
+    }
     fn metadata(conn: &Connection) -> StoreMetadata {
         let (n, b, p, l) = summary(conn).unwrap();
         StoreMetadata {
@@ -1209,7 +1592,7 @@ mod tests {
         }
     }
     #[test]
-    fn 索引や必須lodの欠損を完成成功にしない() {
+    fn rejects_missing_indexes_and_required_lods_at_publication() {
         for change in [
             "DELETE FROM standard_rtree",
             "DELETE FROM standard_geometry_lod WHERE zoom=6",
@@ -1239,7 +1622,7 @@ mod tests {
         }
     }
     #[test]
-    fn 不明構造や形状分類不一致を欠けた成功画像にしない() {
+    fn rejects_unknown_structures_and_geometry_kind_mismatches() {
         for change in [
             "UPDATE standard_features SET structure=3",
             "UPDATE standard_features SET kind=140",
@@ -1253,7 +1636,7 @@ mod tests {
     }
 
     #[test]
-    fn 縮約形状の優先読取は旧coalesceの選択と欠損時の原形状を保持する() {
+    fn preferred_lod_reads_match_coalesce_and_fall_back_to_original_geometry() {
         let conn = Connection::open_in_memory().unwrap();
         initialize(&conn).unwrap();
         insert_feature(&conn, &feature()).unwrap();
@@ -1323,7 +1706,7 @@ mod tests {
     }
 
     #[test]
-    fn 逐次地物の順序と表示選択は従来の描画段階に一致する() {
+    fn streamed_features_preserve_legacy_render_order_and_visibility() {
         use crate::tilegen::{operation::OperationContext, render_spec::RenderSpec};
 
         let conn = Connection::open_in_memory().unwrap();
@@ -1434,7 +1817,7 @@ mod tests {
     }
 
     #[test]
-    fn 広域は既存の被覆索引で可視分類を先に選び狭域は空間索引を使う() {
+    fn wide_viewports_filter_visible_kinds_via_coverage_index_and_narrow_views_use_spatial_index() {
         use crate::tilegen::operation::OperationContext;
         let conn = Connection::open_in_memory().unwrap();
         initialize(&conn).unwrap();
@@ -1521,7 +1904,7 @@ mod tests {
     }
 
     #[test]
-    fn 被覆索引がない完成形式でも読み取り経路へ戻り分類不明を見逃さない() {
+    fn missing_coverage_index_uses_fallback_without_hiding_unknown_kinds() {
         use crate::tilegen::operation::OperationContext;
         let conn = Connection::open_in_memory().unwrap();
         initialize(&conn).unwrap();
@@ -1562,7 +1945,7 @@ mod tests {
     }
 
     #[test]
-    fn 広域地物を全件保持せず件数容量と累計頂点の旧上限を超えて走査する() {
+    fn streams_wide_features_beyond_legacy_count_byte_and_vertex_limits() {
         use crate::tilegen::operation::OperationContext;
 
         let conn = Connection::open_in_memory().unwrap();
@@ -1655,7 +2038,7 @@ mod tests {
     }
 
     #[test]
-    fn 逐次地物の取消と期限は後続の読み取りと訪問を停止する() {
+    fn streamed_feature_cancellation_and_deadlines_stop_reads_and_visits() {
         use crate::tilegen::{
             cancel,
             operation::{OperationContext, is_deadline_exceeded},
@@ -1694,7 +2077,7 @@ mod tests {
     }
 
     #[test]
-    fn 逐次描画でも不正構造と単一形状のサイズや構文違反を拒否する() {
+    fn streaming_rejects_invalid_structures_and_oversized_or_malformed_geometry() {
         use crate::tilegen::operation::OperationContext;
 
         for change in [
@@ -1728,7 +2111,7 @@ mod tests {
     }
 
     #[test]
-    fn 未対応の追加メタデータ版を現在の契約へ混ぜない() {
+    fn rejects_unsupported_extra_metadata_versions() {
         let conn = Connection::open_in_memory().unwrap();
         initialize(&conn).unwrap();
         conn.execute(

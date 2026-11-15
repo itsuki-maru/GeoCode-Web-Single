@@ -17,6 +17,8 @@ use sha2::{Digest, Sha256};
 use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
 use uuid::Uuid;
 
+pub use super::camera_turn::CloudflareTurnClient;
+
 const LEASE: i64 = 15;
 const MAX_VIEWERS: i64 = 3;
 
@@ -51,6 +53,7 @@ pub struct CameraConfig {
     pub provider: String,
     pub cloudflare_key_id: String,
     pub cloudflare_api_token: String,
+    pub cloudflare_turn_client: CloudflareTurnClient,
     pub enabled: bool,
     pub urls: Vec<String>,
     pub stun_urls: Vec<String>,
@@ -64,6 +67,7 @@ impl CameraConfig {
             cloudflare_key_id: std::env::var("CAMERA_CLOUDFLARE_TURN_KEY_ID").unwrap_or_default(),
             cloudflare_api_token: std::env::var("CAMERA_CLOUDFLARE_TURN_API_TOKEN")
                 .unwrap_or_default(),
+            cloudflare_turn_client: CloudflareTurnClient::default(),
             enabled: std::env::var("CAMERA_SHARING_ENABLED").as_deref() == Ok("true"),
             urls: std::env::var("CAMERA_TURN_URLS")
                 .unwrap_or_default()
@@ -149,12 +153,14 @@ impl CameraConfig {
     async fn connection_ice(&self, identity: Uuid) -> Result<Value, AppError> {
         let servers = self.ice(identity);
         if self.provider == "cloudflare" {
-            let result = super::camera_turn::credentials(
-                &self.cloudflare_key_id,
-                &self.cloudflare_api_token,
-                identity,
-            )
-            .await;
+            let result = self
+                .cloudflare_turn_client
+                .credentials(
+                    &self.cloudflare_key_id,
+                    &self.cloudflare_api_token,
+                    identity,
+                )
+                .await;
             return self.merge_cloudflare_ice(servers, result);
         }
         Ok(servers)
@@ -1051,6 +1057,68 @@ pub async fn leave(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn injected_cloudflare_transport_is_used_for_successful_ice_requests() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let upstream = axum::Router::new().route(
+            "/v1/turn/keys/{key}/credentials/generate-ice-servers",
+            axum::routing::post(
+                move |headers: HeaderMap, Path(key): Path<String>, Json(body): Json<Value>| {
+                    let observed = observed.clone();
+                    async move {
+                        assert_eq!(key, "a".repeat(32));
+                        assert_eq!(headers["authorization"], "Bearer test-token");
+                        assert_eq!(body, json!({"ttl":86400}));
+                        observed.fetch_add(1, Ordering::SeqCst);
+                        (
+                            axum::http::StatusCode::CREATED,
+                            Json(json!({"iceServers":[{
+                                "urls":["turn:local.invalid:3478"],
+                                "username":"fixture-user",
+                                "credential":"fixture-password"
+                            }]})),
+                        )
+                    }
+                },
+            ),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/v1/turn/keys/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, upstream).await.unwrap();
+        });
+        let config = CameraConfig {
+            provider: "cloudflare".into(),
+            cloudflare_key_id: "a".repeat(32),
+            cloudflare_api_token: "test-token".into(),
+            cloudflare_turn_client: CloudflareTurnClient::with_endpoint(
+                reqwest::Client::builder()
+                    .no_proxy()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .timeout(std::time::Duration::from_millis(1500))
+                    .build()
+                    .unwrap(),
+                reqwest::Url::parse(&endpoint).unwrap(),
+            )
+            .unwrap(),
+            enabled: true,
+            urls: vec![],
+            stun_urls: vec![],
+            secret: String::new(),
+            relay_only: true,
+        };
+        let ice = config.connection_ice(Uuid::new_v4()).await.unwrap();
+        server.abort();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(ice[0]["username"], "fixture-user");
+        assert_eq!(ice[0]["credential"], "fixture-password");
+    }
+
     #[test]
     fn cloudflare_provider_configuration_and_fallback() {
         let mut c = CameraConfig {
@@ -1058,6 +1126,7 @@ mod tests {
             provider: "cloudflare".into(),
             cloudflare_key_id: "a".repeat(32),
             cloudflare_api_token: "test-token".into(),
+            cloudflare_turn_client: CloudflareTurnClient::default(),
             stun_urls: vec!["stun:stun.cloudflare.com:3478".into()],
             urls: vec![],
             secret: String::new(),
@@ -1132,6 +1201,7 @@ mod tests {
             provider: String::new(),
             cloudflare_key_id: String::new(),
             cloudflare_api_token: String::new(),
+            cloudflare_turn_client: CloudflareTurnClient::default(),
             enabled: true,
             stun_urls: vec![],
             urls: vec!["turns:turn.example.com:443".into()],
@@ -1150,6 +1220,7 @@ mod tests {
             provider: String::new(),
             cloudflare_key_id: String::new(),
             cloudflare_api_token: String::new(),
+            cloudflare_turn_client: CloudflareTurnClient::default(),
             enabled: true,
             urls: vec![],
             stun_urls: vec![],

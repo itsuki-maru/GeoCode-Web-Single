@@ -5,6 +5,10 @@ mod support;
 #[path = "standard_tile_fixture/mod.rs"]
 mod standard_fixture;
 
+#[path = "support/process_output.rs"]
+mod process_output;
+use process_output::CommandTestExt;
+
 use geocode_web_single::{
     db::run_migrations,
     local_tiles::{
@@ -54,7 +58,7 @@ async fn execute(args: &[&str], config: &LocalTileConfig, pool: &SqlitePool) -> 
 }
 
 #[tokio::test]
-async fn 同じ完成dbの複数描画世代をcliで固定し背景名と再開を独立して保存する() {
+async fn keep_render_profiles_background_names_and_resume_state_independent_for_one_dataset() {
     let root = tempfile::tempdir().unwrap();
     let database = root.path().join("app.sqlite");
     let pool = pool(&database).await;
@@ -286,7 +290,7 @@ fn binary() -> std::path::PathBuf {
 }
 
 #[tokio::test]
-async fn 実バイナリの取込失敗は原因をjsonと標準エラーへ残す() {
+async fn report_binary_import_failure_causes_in_json_and_stderr() {
     let root = tempfile::tempdir().unwrap();
     let database = root.path().join("app.sqlite");
     let pool = pool(&database).await;
@@ -311,7 +315,7 @@ async fn 実バイナリの取込失敗は原因をjsonと標準エラーへ残�
         .arg(&dem)
         .arg("--json")
         .env("RUST_LOG", "warn")
-        .output()
+        .output_with_timeout(Duration::from_secs(60))
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
     let job: Value =
@@ -328,7 +332,7 @@ async fn 実バイナリの取込失敗は原因をjsonと標準エラーへ残�
 }
 
 #[test]
-fn 混在方針は取り込み条件として解析し既定の道路要求は変えない() {
+fn parse_mixed_datum_policy_without_changing_default_road_requests() {
     let default = invocation(&["import", "--input", "D:/map.pbf", "--name", "道路"]);
     let Command::Import(request) = default.command else {
         panic!("取り込みコマンドが必要です");
@@ -397,7 +401,7 @@ fn 混在方針は取り込み条件として解析し既定の道路要求は�
 }
 
 #[tokio::test]
-async fn 標高検査は本体dbと生成ownerなしで結果と取消を返す() {
+async fn inspect_elevation_and_handle_cancellation_without_the_main_database_or_generation_owner() {
     let root = tempfile::tempdir().unwrap();
     let pbf = root.path().join("unused.pbf");
     let dem = root.path().join("dem.xml");
@@ -433,7 +437,7 @@ async fn 標高検査は本体dbと生成ownerなしで結果と取消を返す(
 }
 
 #[test]
-fn 実バイナリの混在検査は設定なしで受入可否と終了コードを返す() {
+fn return_mixed_datum_acceptance_and_exit_codes_without_configuration() {
     let root = tempfile::tempdir().unwrap();
     let pbf = root.path().join("unused.pbf");
     let dem = root.path().join("template.xml");
@@ -462,7 +466,7 @@ fn 実バイナリの混在検査は設定なしで受入可否と終了コー�
             .arg(&missing_settings)
             .arg("--json")
             .current_dir(root.path())
-            .output()
+            .output_with_timeout(Duration::from_secs(60))
             .unwrap();
         assert_eq!(
             output.status.code(),
@@ -482,7 +486,7 @@ fn 実バイナリの混在検査は設定なしで受入可否と終了コー�
         .args(["--config"])
         .arg(&missing_settings)
         .arg("--json")
-        .output()
+        .output_with_timeout(Duration::from_secs(60))
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
     let failed: Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -496,7 +500,7 @@ fn 実バイナリの混在検査は設定なしで受入可否と終了コー�
 
 #[cfg(windows)]
 #[test]
-fn windows_shell_でも_jsonと終了コードをリダイレクトできる() {
+fn redirect_json_and_exit_codes_in_windows_shells() {
     use std::os::windows::process::CommandExt;
 
     let root = tempfile::tempdir().unwrap();
@@ -537,7 +541,7 @@ exit $nativeExitCode
         .arg(binary())
         .arg(&output)
         .arg(&error)
-        .output()
+        .output_with_timeout(Duration::from_secs(60))
         .unwrap();
     assert_eq!(
         powershell.status.code(),
@@ -557,7 +561,7 @@ exit $nativeExitCode
         .env("GEOCODE_LOCAL_CLI_STDOUT", &output)
         .env("GEOCODE_LOCAL_CLI_STDERR", &error)
         .raw_arg(r#"""%GEOCODE_LOCAL_CLI_EXE%" local-tiles unknown --json 1>"%GEOCODE_LOCAL_CLI_STDOUT%" 2>"%GEOCODE_LOCAL_CLI_STDERR%"""#)
-        .output().unwrap();
+        .output_with_timeout(Duration::from_secs(60)).unwrap();
     assert_eq!(
         command.status.code(),
         Some(2),
@@ -570,7 +574,7 @@ exit $nativeExitCode
 }
 
 #[test]
-fn 引数解析はモード混在と不明引数を拒否する() {
+fn reject_mixed_launch_modes_and_unknown_arguments() {
     assert!(matches!(invocation(&[]).command, Command::Help));
     let build_info = invocation(&["build-info", "--json"]);
     assert!(matches!(build_info.command, Command::BuildInfo));
@@ -640,13 +644,13 @@ fn 引数解析はモード混在と不明引数を拒否する() {
 }
 
 #[test]
-fn 実バイナリのhelpと設定照会は設定ファイルを補完保存しない() {
+fn avoid_saving_configuration_defaults_for_binary_help_and_config_queries() {
     let root = tempfile::tempdir().unwrap();
     let missing = root.path().join("未作成フォルダ/設定.json");
     let help = Process::new(binary())
         .args(["local-tiles", "--help", "--config"])
         .arg(&missing)
-        .output()
+        .output_with_timeout(Duration::from_secs(60))
         .unwrap();
     assert!(
         help.status.success(),
@@ -658,7 +662,7 @@ fn 実バイナリのhelpと設定照会は設定ファイルを補完保存し�
     let build_info = Process::new(binary())
         .args(["local-tiles", "build-info", "--json", "--config"])
         .arg(&missing)
-        .output()
+        .output_with_timeout(Duration::from_secs(60))
         .unwrap();
     assert!(
         build_info.status.success(),
@@ -689,7 +693,7 @@ fn 実バイナリのhelpと設定照会は設定ファイルを補完保存し�
     let output = Process::new(binary())
         .args(["local-tiles", "config", "show", "--json", "--config"])
         .arg(&path)
-        .output()
+        .output_with_timeout(Duration::from_secs(60))
         .unwrap();
     assert!(
         output.status.success(),
@@ -710,7 +714,7 @@ fn 実バイナリのhelpと設定照会は設定ファイルを補完保存し�
     assert!(!root.path().join("tiles").exists());
     let bad = Process::new(binary())
         .args(["local-tiles", "unknown", "--json"])
-        .output()
+        .output_with_timeout(Duration::from_secs(60))
         .unwrap();
     assert_eq!(bad.status.code(), Some(2));
     assert_eq!(
@@ -720,7 +724,7 @@ fn 実バイナリのhelpと設定照会は設定ファイルを補完保存し�
 }
 
 #[tokio::test]
-async fn 未登録状態の照会でcatalogを作成しない() {
+async fn avoid_creating_the_catalog_when_querying_unregistered_storage() {
     let root = tempfile::tempdir().unwrap();
     let pool = pool(&root.path().join("app.sqlite")).await;
     let config = LocalTileConfig::defaults(root.path());
@@ -742,7 +746,7 @@ async fn 未登録状態の照会でcatalogを作成しない() {
 }
 
 #[tokio::test]
-async fn 取り込みと事前生成の_cliが履歴と_urlを保持し共通背景へ登録する() {
+async fn preserve_cli_import_and_precompute_history_urls_and_background_registration() {
     let root = tempfile::tempdir().unwrap();
     let pool = pool(&root.path().join("app.sqlite")).await;
     let mut config = LocalTileConfig::defaults(root.path());
@@ -903,7 +907,7 @@ async fn 取り込みと事前生成の_cliが履歴と_urlを保持し共通背
 }
 
 #[tokio::test]
-async fn 読取_cliは生成ownerを奪わず別_cliの取消だけを限定更新する() {
+async fn allow_readonly_cli_queries_and_scoped_cancellation_without_taking_generation_ownership() {
     let root = tempfile::tempdir().unwrap();
     let pool = pool(&root.path().join("app.sqlite")).await;
     let config = LocalTileConfig::defaults(root.path());
@@ -978,7 +982,7 @@ async fn 読取_cliは生成ownerを奪わず別_cliの取消だけを限定更�
 }
 
 #[tokio::test]
-async fn 実バイナリの取り込みは一時設定だけを使い_json結果と終了コードを返す() {
+async fn use_only_temporary_configuration_for_binary_import_and_return_json_and_exit_codes() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("app.sqlite");
     let pool = pool(&path).await;
@@ -991,7 +995,7 @@ async fn 実バイナリの取り込みは一時設定だけを使い_json結果
         .arg(&input)
         .args(["--name", "実exeの道路", "--json", "--config"])
         .arg(&setting)
-        .output()
+        .output_with_timeout(Duration::from_secs(60))
         .unwrap();
     assert!(
         output.status.success(),
@@ -1006,7 +1010,7 @@ async fn 実バイナリの取り込みは一時設定だけを使い_json結果
         .arg(result["id"].as_str().unwrap())
         .args(["--json", "--config"])
         .arg(&setting)
-        .output()
+        .output_with_timeout(Duration::from_secs(60))
         .unwrap();
     assert!(
         watched.status.success(),
@@ -1028,7 +1032,7 @@ async fn 実バイナリの取り込みは一時設定だけを使い_json結果
         .arg(result["progress"]["dataset"]["id"].as_str().unwrap())
         .args(["--json", "--config"])
         .arg(&setting)
-        .output()
+        .output_with_timeout(Duration::from_secs(60))
         .unwrap();
     assert!(
         url.status.success(),

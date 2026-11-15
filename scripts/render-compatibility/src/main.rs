@@ -364,7 +364,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn コメントと説明属性と整形だけなら同じ指紋になる() {
+    fn keep_fingerprints_stable_for_comments_documentation_attributes_and_formatting() {
         let plain = "pub fn value() -> &'static str { r#\"// literal /* value */\"# }";
         let documented = "//! モジュールの説明\n/// 関数の説明\n#[doc = \"別の説明\"] pub fn value ( ) -> &'static str { /* 外 /* 内 */ 終 */ r#\"// literal /* value */\"# // 行末\n}";
         assert_eq!(
@@ -374,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn 処理と文字列の変更は説明コメントとして除外しない() {
+    fn retain_logic_and_string_changes_when_excluding_documentation_comments() {
         assert_ne!(
             source_fingerprint("fn value(){let x=1;}").unwrap(),
             source_fingerprint("fn value(){let x=2;}").unwrap()
@@ -387,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn ファイルの追加と削除と内容差を検出する() {
+    fn detect_added_removed_and_changed_files() {
         let expected = json!({"kept":"one","removed":"two"});
         let actual = BTreeMap::from([
             ("kept".into(), "changed".into()),
@@ -400,7 +400,7 @@ mod tests {
     }
 
     #[test]
-    fn 固定フォントと出典とライセンスの変更と欠落を検出する() {
+    fn detect_changed_or_missing_fonts_attribution_and_licenses() {
         let temporary = env::temp_dir().join(format!(
             "geocode-render-font-{}-{}",
             std::process::id(),
@@ -428,7 +428,7 @@ mod tests {
     }
 
     #[test]
-    fn 関連する推移依存だけを追跡し無関係な更新と配置差を除く() {
+    fn track_only_relevant_transitive_dependencies_and_ignore_unrelated_updates_and_paths() {
         let mut packages =
             vec![json!({"id":"root","name":"geocode_web_single","version":"1.0.0","source":null})];
         let mut nodes = Vec::new();

@@ -419,11 +419,17 @@ pub async fn filter_targets(
             .as_ref()
             .map(|ids| ids.iter().map(Uuid::to_string).collect::<Vec<_>>());
         if let Some(ids) = &layers {
-            let owned: Vec<String> =
-                sqlx::query_scalar("SELECT id FROM layer_model WHERE user_id=$1")
-                    .bind(user)
-                    .fetch_all(&mut *tx)
-                    .await?;
+            let owned: Vec<String> = sqlx::query_scalar(
+                r#"
+                    SELECT
+                        id
+                    FROM layer_model
+                    WHERE user_id = $1
+                    "#,
+            )
+            .bind(user)
+            .fetch_all(&mut *tx)
+            .await?;
             if ids.iter().any(|id| !owned.contains(id)) {
                 return Err(AppError::NotFound);
             }
