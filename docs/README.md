@@ -32,7 +32,7 @@ GeoCode-Web-Singleの主要機能について、利用手順、現在の処理�
 |---|---|
 | [重ね合わせタイル](TILE_OVERLAYS.md) | タイル登録、共有、気象庁ナウキャスト |
 | [タイル配信プロキシ](TILE_PROXY.md) | 上流APIキー、Redisキャッシュ |
-| [ローカル地図](LOCAL_TILES.md) | OSM PBF取り込み、地名・ランドマーク名、表示選択と描画世代、XYZ配信・事前生成、保存先とオフライン利用 |
+| [ローカル地図](LOCAL_TILES.md) | SQLite版固有のタイル生成、専用Tauri管理画面・CLI、OSM PBF取り込み、地名・ランドマーク名、表示選択と描画世代、XYZ配信・事前生成、保存先とオフライン利用 |
 | [全国の名称付き地図の導入](JAPAN_LOCAL_TILES_SETUP.md) | 初回起動前からのセットアップ、全国データ取得・再取り込みのPowerShellスクリプト、背景登録とオフライン確認 |
 | [地図印刷・PDF出力](MAP_PRINTING.md) | PCの通常・全画面・回答・一時共有地図の操作、出力対象と検証 |
 | [管理者機能](ADMINISTRATION.md) | ユーザー管理、権限設定、管理機能への案内 |
@@ -47,7 +47,9 @@ GeoCode-Web-Singleの主要機能について、利用手順、現在の処理�
 
 タイル管理情報は本体DBから独立したSQLiteへ保存する。[DB分離計画](plans/LOCAL_TILE_CATALOG_DB_SPLIT_PLAN.md)と[実装・検証記録](plans/LOCAL_TILE_CATALOG_DB_SPLIT_PROGRESS.md)を参照する。
 
-専用管理画面を本体CLIへ移した改修は、[CLI化とフロントエンド共通化計画](plans/LOCAL_TILE_CLI_AND_FRONTEND_COMPAT_PLAN.md)と[実装・検証記録](plans/LOCAL_TILE_CLI_PROGRESS.md)を参照する。PostgreSQL版との共通フロントを維持し、管理はコマンド、表示は共通の背景地図設定とXYZ配信を使う。
+共通Webフロントの専用管理画面を本体CLIへ移した改修の履歴は、[CLI化とフロントエンド共通化計画](plans/LOCAL_TILE_CLI_AND_FRONTEND_COMPAT_PLAN.md)と[実装・検証記録](plans/LOCAL_TILE_CLI_PROGRESS.md)を参照する。
+
+現在は同じexeの`local-tiles` CLIに加え、`local-tiles gui`の独立したTauri管理画面から操作できる。管理画面は通常HTTPサーバー・タイル配信を起動しない。PostgreSQL版との共通Webフロント・テンプレートを維持し、表示は共通の背景地図設定とXYZ配信を使う。共通Webフロントへの生成管理画面や管理HTTP APIは追加しない。現行の手順は[ローカル地図](LOCAL_TILES.md)を参照する。
 
 コメントや描画に関係しない変更でタイル世代が変わる問題は、[描画世代識別の修正計画](plans/LOCAL_TILE_RENDER_IDENTITY_PLAN.md)と[実装・検証記録](plans/LOCAL_TILE_RENDER_IDENTITY_PROGRESS.md)を参照する。ビルド来歴・取り込み互換性・描画互換性を分離し、同じ描画契約のURLとPNGを継続利用する。
 

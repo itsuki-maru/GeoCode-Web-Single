@@ -13,7 +13,7 @@
 
 Rust/Axum 製 API サーバーと Vue 3 製フロントエンドを Tauri 2 でラップし、SQLite データベースとともに Windows 向けアプリケーションとして配布します。
 
-> PostgreSQLを使用するGeoCode-Webを、Windows上でSQLiteとともに単一アプリとして動かす構成です。OSM PBFの地物と、事前に取得した標高・陸域データからタイルを生成し、別のタイルサーバーなしでオフラインの地図表示が可能です。国土地理院等の外部背景や住所検索などの外部機能には、それぞれ接続が必要です。
+> PostgreSQLを使用するGeoCode-Webを、Windows上でSQLiteとともに単一アプリとして動かす構成です。ローカルタイルの生成・配信はSQLite版固有の機能で、PostgreSQL版への実装予定はありません。OSM PBFの地物と、事前に取得した標高・陸域データからタイルを生成し、別のタイルサーバーなしでオフラインの地図表示が可能です。国土地理院等の外部背景や住所検索などの外部機能には、それぞれ接続が必要です。
 
 **現時点では Windows のみサポートしています。** 配布形式は Windows NSIS インストーラ（`.exe`）、MSI インストーラ（`.msi`）、および cargo が生成する単体実行ファイル（`.exe`）です。
 
@@ -21,7 +21,7 @@ Rust/Axum 製 API サーバーと Vue 3 製フロントエンドを Tauri 2 で�
 
 - ユーザーガイド: [USER-GUIDE.md](https://project.geocode-web.com/USER-GUIDE.md)
 - 仕様書: [SPECIFICATION.md](SPECIFICATION.md)
-- ローカル地図: [PBF取り込み・保存先設定・オフライン利用](docs/LOCAL_TILES.md)
+- ローカル地図: [専用管理画面・CLI・PBF取り込み・オフライン利用](docs/LOCAL_TILES.md)
 - 気象庁ナウキャストの登録: [仕様書 9.10](SPECIFICATION.md#910-気象庁ナウキャスト)
 - 変更履歴: [CHANGELOG.md](CHANGELOG.md), [release_notes.md](release_notes.md)
 - コントリビューションガイド: [CONTRIBUTING.md](CONTRIBUTING.md)
@@ -331,7 +331,9 @@ User-Agent に `Mobile` が含まれるアクセスにはモバイル向け UI (
       └── work/                     # 取り込み作業領域
 ```
 
-同じexeの`local-tiles`コマンドで、PBF取り込み、完成DB登録、背景追加、事前生成を行う。`import --features standard-v2`では、建物・土地被覆・水域に加えて地名・主要なランドマーク名を持つ別完成DBを作る。`datasets prepare --style osm-like-v1`で道路・建物・文字・等高線・陰影・名称の言語を選び、同じDBから通常地図と地形付き地図を異なる描画世代として利用できる。通常地図は道路・建物・文字がon、等高線・陰影がoff、日本語優先となる。背景には`background add --render RENDER_ID --name 表示名`で別名を付けられる。
+同じexeの`local-tiles` CLIまたは`local-tiles gui`で開く専用Tauri管理画面で、PBF取り込み、完成DB登録、背景追加、事前生成を行う。管理画面では通常アプリ・HTTPサーバー・タイル配信を起動しない。起動・操作方法は[ローカル地図](docs/LOCAL_TILES.md#サーバを起動せず管理画面を開く)を参照する。
+
+`import --features standard-v2`では、建物・土地被覆・水域に加えて地名・主要なランドマーク名を持つ別完成DBを作る。`datasets prepare --style osm-like-v1`で道路・建物・文字・等高線・陰影・名称の言語を選び、同じDBから通常地図と地形付き地図を異なる描画世代として利用できる。通常地図は道路・建物・文字がon、等高線・陰影がoff、日本語優先となる。背景には`background add --render RENDER_ID --name 表示名`で別名を付けられる。
 
 取り込みの既定は従来の道路形式で、文字のない`standard-v1`も継続利用できる。既存DBへ名称だけを追加することはできないため、名称表示には元PBFから新しい`standard-v2` DBを作る。既存のDB・PNG・背景・履歴は保持する。`--elevation-input`の国土地理院FGD-GMLから陰影・等高線、`--landmask-input`の処理済みWGS84陸域から海陸を生成する。新形式の`--contour-data off`は等高線をDBへ収録しない指定、準備時の`--contours off`は収録済み等高線を表示しない指定となる。元データの準備と四国の実行例は[ローカル地図](docs/LOCAL_TILES.md)を参照する。表示はPostgreSQL版と共通の`src_frontend`・`src/templates`、背景設定と通常のXYZ URLを使い、文字を含む生成処理は本体内で動く。同梱フォントと生成認定は`local-tiles build-info --json`の`font`・`osm_generation_verified`で確認できる。
 
