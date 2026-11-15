@@ -72,28 +72,9 @@ jobs:
             src_frontend/frontend-mobile/package-lock.json
             src_frontend/template-scripts/package-lock.json
 
-      - name: Read pinned frontend source
-        id: frontend-source
-        shell: pwsh
-        run: |
-          $baseline = Get-Content tests/fixtures/frontend-compat-baseline.json -Raw | ConvertFrom-Json
-          if ($baseline.repository -notmatch '^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$' -or $baseline.source_ref -notmatch '^[a-f0-9]{40}$') {
-            throw 'Invalid pinned frontend source'
-          }
-          "repository=$($baseline.repository)" | Add-Content -Path $env:GITHUB_OUTPUT -Encoding utf8
-          "ref=$($baseline.source_ref)" | Add-Content -Path $env:GITHUB_OUTPUT -Encoding utf8
-
-      - name: Checkout pinned PostgreSQL frontend source
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ steps.frontend-source.outputs.repository }}
-          ref: ${{ steps.frontend-source.outputs.ref }}
-          path: .frontend-source
-          token: ${{ secrets.FRONTEND_SOURCE_TOKEN || github.token }}
-          persist-credentials: false
-
+      # CIと同じ固定基準を照合し、配布ビルドにも移植元の読取トークンを要求しない。
       - name: Check shared frontend compatibility
-        run: node scripts/check-frontend-compat.mjs --source-root .frontend-source
+        run: node scripts/check-frontend-compat.mjs
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable

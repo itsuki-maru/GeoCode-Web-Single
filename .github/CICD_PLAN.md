@@ -114,7 +114,22 @@ $env:TAURI_CONFIG = @{ build = @{ frontendDist = $env:GEOCODE_FRONTEND_DIST } } 
 
 共通フロント全体を固定したPostgreSQL基準と比較し、差分や余剰ファイルがあれば失敗させる。3系統のVueと地図テンプレート用ES Modulesは`target/frontend-dist`内だけでビルド・集約し、`GEOCODE_FRONTEND_DIST`でRustへ渡す。`-SkipCargoBuild`でRust release buildを省略する。既存のルート`dist/`や`src_frontend`各`dist/`を消さず、未管理の既存出力・リンクされたパスも上書きしない。
 
-CI/releaseでは`tests/fixtures/frontend-compat-baseline.json`のrepository・40桁commitを読み、別ディレクトリへcheckoutして`--source-root`でも照合する。元リポジトリがprivateの場合は、内容の読取権限だけを持つ`FRONTEND_SOURCE_TOKEN` secretを設定する。取得失敗時はjobを失敗させ、保存済みbaselineだけの成功へ切り替えない。Tauri自身の埋込先も`TAURI_CONFIG`または`--config`で隔離先へ指定する。
+通常のCI/releaseは、リポジトリに保存した`tests/fixtures/frontend-compat-baseline.json`との照合を必須とする。非公開の移植元リポジトリを取得せず、`FRONTEND_SOURCE_TOKEN`等の追加Secretも要求しない。これにより、移植元へのアクセス権がない環境やforkのPRでも同じ固定基準を検査できる。内容差・欠落・余剰は引き続き失敗とし、CIで基準を自動更新しない。Tauri自身の埋込先も`TAURI_CONFIG`または`--config`で隔離先へ指定する。
+
+移植元との直接照合は、移植・基準更新時、または基準の出自を再確認する際に明示的に行う。移植元を読める認証済み環境で、採用コミットの専用作業コピーを用意する。現在の保存基準を監査する例は次のとおり。既存の作業中コピーを強制的に切り替えない。
+
+```powershell
+$sourceRoot = 'C:/src/GeoCode-Web-audit'
+$baseline = Get-Content tests/fixtures/frontend-compat-baseline.json -Raw | ConvertFrom-Json
+$sourceRef = git -C $sourceRoot rev-parse HEAD
+if ($LASTEXITCODE -ne 0 -or $sourceRef -ne $baseline.source_ref) {
+    throw '移植元の専用コピーを採用コミットへ用意してください。'
+}
+node scripts/check-frontend-compat.mjs --source-root $sourceRoot
+if ($LASTEXITCODE -ne 0) { throw '移植元との直接照合に失敗しました。' }
+```
+
+直接照合を要求した場合は、取得・照合失敗を成功扱いにしない。採用コミットや基準を更新する際は、移植元の内容と変更差分をレビューする。通常CIの固定基準検査と、この明示的な直接照合は別の検証として扱う。
 
 ### Rust フォーマット確認
 
