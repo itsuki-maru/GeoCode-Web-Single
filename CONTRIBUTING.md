@@ -17,7 +17,7 @@ GeoCode-Web-Single への提案を歓迎します。大きな変更に入る前�
 推奨環境:
 
 - Rust 1.99.1（ローカル地図の認定構成。更新時は画素・取り込み回帰と認定記録を確認）
-- Node.js 20.x
+- Node.js 24.x（LTS）
 - npm
 - PowerShell 7 以上
 - `sqlx-cli` (`cargo install sqlx-cli --no-default-features --features sqlite`)

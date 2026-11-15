@@ -235,6 +235,14 @@ fn main() {
         .canonicalize()
         .expect("frontend assets must be built before Rust");
     println!("cargo:rerun-if-changed={}", assets.display());
+    // 診断exampleも、選択した本番資材と同じテンプレートをコンパイル時に使う。
+    println!(
+        "cargo:rustc-env=GEOCODE_ANSWER_MAP_TEMPLATE={}",
+        assets
+            .join("templates")
+            .join("form-answer-map.html")
+            .display()
+    );
     let source = [
         ("Asset", assets.clone()),
         ("Templates", assets.join("templates")),

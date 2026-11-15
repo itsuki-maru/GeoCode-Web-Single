@@ -124,6 +124,11 @@ try {
         $projectOutput = Assert-OutputPath (Join-Path $scratch $name)
         # Viteに既存の各project/distではなく、選択領域内の出力先を明示する。
         Invoke-BuildCommand 'npm' @('exec', '--no', '--', 'vite', 'build', '--outDir', $projectOutput, '--emptyOutDir')
+        if ($name -eq 'frontend') {
+            # 共通build-onlyのvendor生成も、既存project/distへ書かず同じ隔離先へ適用する。
+            Assert-NoLinkedTree $projectOutput
+            Invoke-BuildCommand 'node' @((Join-Path $workspaceRoot 'scripts/copy-frontend-vendor-assets.mjs'), '--output-root', $output, '--destination', $projectOutput)
+        }
     }
 
     $pages = @{frontend='index.html';'frontend-mobile'='index-mobile.html';'frontend-admin'='index-admin.html'}

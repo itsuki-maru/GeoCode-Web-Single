@@ -61,9 +61,11 @@ PR CI では以下を確認する。
 
 ローカル地図の描画・取り込み互換性は`node scripts/check-render-compatibility.mjs`でも検査する。通常コメント・Rustdocを除いた補助指紋、系列別の推移依存、旧道路の固定35画像、標準地図の初期基準7画像と互換性判断記録を照合する。指紋は描画世代の計算には使わない。道路8依存と標準地図10依存の認定を分離し、XML側だけの変更で道路認定を変えない。CI/releaseのRustは、実行構成の認定記録と同じ1.99.1へ固定する。
 
-releaseでは最適化構成の`render_golden`と`standard_tile_render`も実行し、Tauriのパッケージ作成後に実exeの`local-tiles build-info --json`が`execution.verified=true`と`standard_generation_verified=true`を返すことを確認する。`GEOCODE_TEST_CLI_EXE`に実exeを指定した`local_tile_standard_exe`で、CLI取り込み・事前生成・元入力削除後の生成とSDKとの画素一致も確認する。未認定・試験失敗のexeは配布物へ収集しない。認定構成を追加する場合は、固定画像・取り込み・世代管理の回帰後に`res/tile-render-execution.json`、互換性判断記録、toolchain指定をそろえて更新する。
+releaseでは最適化構成の`render_golden`・`standard_tile_render`・`carto_tile_render`も実行し、Tauriのパッケージ作成後に実exeの`local-tiles build-info --json`が`execution.verified=true`・`standard_generation_verified=true`・`osm_generation_verified=true`を返すことを確認する。`GEOCODE_TEST_CLI_EXE`に実exeを指定した`local_tile_standard_exe`で、CLI取り込み・事前生成・元入力削除後の生成とSDKとの画素一致も確認する。未認定・試験失敗のexeは配布物へ収集しない。認定構成を追加する場合は、固定画像・取り込み・世代管理の回帰後に`res/tile-render-execution.json`、互換性判断記録、toolchain指定をそろえて更新する。
 
 通常フロントエンドのテストは `../template-scripts/src` を直接読み込むため、`frontend` のmatrixジョブでも `template-scripts` の依存を `npm ci` で準備する。各ジョブの `node_modules` は独立しており、別の `template-scripts` ジョブでインストールしても共有されない。通常フロントエンドのnpmキャッシュキーには、両プロジェクトのlockファイルを含める。
+
+Node.jsは全ジョブで24系を使用し、テンプレートのMapLibre依存を含むlockfileの対応範囲に揃える。PowerShellの複数コマンドからなる手順では、各検査の非0終了をその場で伝播し、後続処理の成功で検査失敗を上書きしない。
 
 `cargo clippy` は既存警告の整理後に必須化する。導入時は `continue-on-error` ではなく、警告を解消してから必須チェックへ追加する。
 
@@ -105,7 +107,7 @@ npm test --prefix src_frontend/template-scripts
 ### 埋め込み用フロントエンド成果物の生成確認
 
 ```powershell
-node --test tests/frontend-compat.test.mjs tests/build-frontend-assets.test.mjs
+node --test tests/frontend-compat.test.mjs tests/build-frontend-assets.test.mjs tests/frontend-vendor-assets.test.mjs
 node scripts/check-frontend-compat.mjs
 ./scripts/build-frontend-assets.ps1 -SkipCargoBuild -OutputRoot target/frontend-dist
 $env:GEOCODE_FRONTEND_DIST = (Resolve-Path target/frontend-dist).Path
@@ -113,6 +115,8 @@ $env:TAURI_CONFIG = @{ build = @{ frontendDist = $env:GEOCODE_FRONTEND_DIST } } 
 ```
 
 共通フロント全体を固定したPostgreSQL基準と比較し、差分や余剰ファイルがあれば失敗させる。3系統のVueと地図テンプレート用ES Modulesは`target/frontend-dist`内だけでビルド・集約し、`GEOCODE_FRONTEND_DIST`でRustへ渡す。`-SkipCargoBuild`でRust release buildを省略する。既存のルート`dist/`や`src_frontend`各`dist/`を消さず、未管理の既存出力・リンクされたパスも上書きしない。
+
+隔離ビルドでも、共通frontendの`build-only`が行うvendor生成を省略しない。SQLite専用helperでLeaflet・markercluster・XSS・markedと必要なCSS/PNGの12ファイルを同じ隔離先に生成する。HTML/CSSから参照される資材の実HTTP配信は`local_manifest`試験でも検査し、既存distにだけ存在する資材で成功しないことを確認する。
 
 通常のCI/releaseは、リポジトリに保存した`tests/fixtures/frontend-compat-baseline.json`との照合を必須とする。非公開の移植元リポジトリを取得せず、`FRONTEND_SOURCE_TOKEN`等の追加Secretも要求しない。これにより、移植元へのアクセス権がない環境やforkのPRでも同じ固定基準を検査できる。内容差・欠落・余剰は引き続き失敗とし、CIで基準を自動更新しない。Tauri自身の埋込先も`TAURI_CONFIG`または`--config`で隔離先へ指定する。
 

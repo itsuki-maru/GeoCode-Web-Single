@@ -64,7 +64,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: |
             src_frontend/frontend/package-lock.json
@@ -98,9 +98,13 @@ jobs:
         shell: pwsh
         run: |
           npm ci --prefix src_frontend/frontend
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm ci --prefix src_frontend/frontend-mobile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm ci --prefix src_frontend/frontend-admin
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm ci --prefix src_frontend/template-scripts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Generate CI .env
         shell: pwsh
@@ -124,7 +128,9 @@ jobs:
         shell: pwsh
         run: |
           sqlx database create
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           sqlx migrate run
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Install Tauri CLI
         shell: pwsh
@@ -133,8 +139,10 @@ jobs:
       - name: Build frontend bundles
         shell: pwsh
         run: |
-          node --test tests/frontend-compat.test.mjs tests/build-frontend-assets.test.mjs
+          node --test tests/frontend-compat.test.mjs tests/build-frontend-assets.test.mjs tests/frontend-vendor-assets.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/check-frontend-compat.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./scripts/build-frontend-assets.ps1 -SkipCargoBuild -OutputRoot target/frontend-dist
           $assets = (Resolve-Path target/frontend-dist).Path
           "GEOCODE_FRONTEND_DIST=$assets" | Add-Content -Path $env:GITHUB_ENV -Encoding utf8
@@ -146,7 +154,7 @@ jobs:
         shell: pwsh
         env:
           CARGO_INCREMENTAL: "0"
-        run: cargo test --locked --release --test render_golden --test standard_tile_render
+        run: cargo test --locked --release --test render_golden --test standard_tile_render --test carto_tile_render
 
       - name: Build Tauri app
         shell: pwsh
@@ -160,6 +168,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw '配布用exeのビルド情報を取得できません。' }
           if (-not $buildInfo.execution.verified) { throw "描画実行構成が未認定です: $($buildInfo.execution.reason)" }
           if (-not $buildInfo.standard_generation_verified) { throw '標準地図・地形の実行構成が未認定です。' }
+          if (-not $buildInfo.osm_generation_verified) { throw '名称付き地図の実行構成が未認定です。' }
           $buildInfo | ConvertTo-Json -Depth 5
           $env:GEOCODE_TEST_CLI_EXE = $binary
           $distributionTests = @(

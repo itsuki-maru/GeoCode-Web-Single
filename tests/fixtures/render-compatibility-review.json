@@ -11,7 +11,7 @@
     "flate2"
   ],
   "files": {
-    "build.rs": "24b97329b58656a20506ad9341ddadb5b78482e71483f8c9a03b7c9d3dbda3cc",
+    "build.rs": "25454d269729f8f0ba727e0fadcd83941605734b6aaabee5ec74514ec96ca8ca",
     "build_support/render_execution.rs": "2b864ceae72e5aa020cbeaf6d123b4b907332c97de1a4ebad92e4dd6dc2bb732",
     "res/fonts/NotoSansCJKjp-Regular.otf": "68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5",
     "res/fonts/OFL.txt": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2",
@@ -73,7 +73,7 @@
   ],
   "review": {
     "baseline_ref": "9c30ae1",
-    "reason": "点接触と同一外周内の穴の共有辺の取り込みを拡張し取り込み契約を更新。既存成功2373 Relationの形状を完全維持し、非接触LODの旧検査を維持。固定RGBAとPNG・取り込み・SDK・世代管理の回帰に成功したため描画契約は据え置く。",
+    "reason": "診断exampleの固定dist参照を、build.rsが解決した本番テンプレートの完全パスを渡す方式へ変更。distなしの隔離コピーで全targetのコンパイルと既存の固定画像・取り込み・SDK回帰を確認。描画処理・保存形式・実行構成は変わらず同じ画素のため描画契約を維持する。",
     "required_validation": "render_golden、standard_tile_render、carto_tile_render、取り込み・SDK・世代管理の回帰試験"
   },
   "source_scope": "src/tilegen/**/*.rs + render-profile-policy + execution-certification + fixed-golden-inputs + font-assets",
