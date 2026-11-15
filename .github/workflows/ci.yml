@@ -124,10 +124,11 @@ jobs:
       - name: Check shared frontend compatibility
         run: node scripts/check-frontend-compat.mjs
 
-      - name: Install Rust (stable)
+      - name: Install Rust 1.99.1 with rustfmt
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.99.1"
+          components: rustfmt
 
       - name: Cache Rust build
         uses: swatinem/rust-cache@v2
