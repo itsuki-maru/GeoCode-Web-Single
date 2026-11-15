@@ -35,6 +35,25 @@ The Rust application depends on crates such as Axum, Tokio, Serde, SQLx, Tauri, 
 
 The dependency tree is mostly permissive licenses such as MIT, Apache-2.0, BSD, ISC, Zlib, Unlicense, and 0BSD. The local dependency metadata also includes some MPL-2.0 crates and crates with explicit license files, including `ring`. These licenses do not change the license of the application code, but their notices and license texts must be respected when distributing binaries.
 
+### Local OSM Tile Generation
+
+The integrated tile generator uses the following additional direct dependencies. Versions and license expressions below were checked against the resolved `Cargo.lock` and local crate manifests on 2026-11-12.
+
+| Component | Resolved version | License expression |
+| --- | --- | --- |
+| rusqlite | 0.32.1 | MIT |
+| tiny-skia | 0.12.0 | BSD-3-Clause |
+| libm | 0.2.16 | MIT |
+| osmpbfreader | 0.19.1 | WTFPL |
+| protobuf | 3.7.2 | MIT |
+| flate2 | 1.1.9 | MIT OR Apache-2.0 |
+| fs2 | 0.4.3 | MIT/Apache-2.0 |
+| tempfile | 3.27.0 | MIT OR Apache-2.0 |
+
+`rusqlite` and SQLx share `libsqlite3-sys` 0.30.1 (crate license: MIT). The bundled SQLite engine uses the [SQLite public-domain dedication](https://www.sqlite.org/copyright.html); preserve the accompanying upstream files when preparing notices. Transitive dependencies retain their own licenses.
+
+Map data is separate from the renderer's software licenses. OpenStreetMap data uses the [Open Data Commons Open Database License (ODbL)](https://www.openstreetmap.org/copyright). Display the dataset attribution, including “© OpenStreetMap contributors” where applicable, and observe the applicable data-license requirements when redistributing databases or rendered maps. The application carries the dataset attribution into local backgrounds; importing a local file does not grant additional rights to its contents.
+
 ## Images, Icons, Screenshots, and Sample Data
 
 This repository contains application icons, public UI icons, screenshots, user guide images, and sample data under directories such as:

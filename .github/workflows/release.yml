@@ -64,7 +64,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: |
             src_frontend/frontend/package-lock.json
@@ -72,21 +72,39 @@ jobs:
             src_frontend/frontend-mobile/package-lock.json
             src_frontend/template-scripts/package-lock.json
 
+      # CIと同じ固定基準を照合し、配布ビルドにも移植元の読取トークンを要求しない。
+      - name: Check shared frontend compatibility
+        run: node scripts/check-frontend-compat.mjs
+
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.1"
 
       - name: Cache Rust build
         uses: swatinem/rust-cache@v2
         with:
           workspaces: . -> target
 
+      - name: Check rendering compatibility review
+        shell: pwsh
+        run: |
+          cargo test --locked --manifest-path scripts/render-compatibility/Cargo.toml --target-dir target/render-identity-verification/tools
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/check-render-compatibility.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Install frontend dependencies
         shell: pwsh
         run: |
           npm ci --prefix src_frontend/frontend
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm ci --prefix src_frontend/frontend-mobile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm ci --prefix src_frontend/frontend-admin
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm ci --prefix src_frontend/template-scripts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Generate CI .env
         shell: pwsh
@@ -110,7 +128,9 @@ jobs:
         shell: pwsh
         run: |
           sqlx database create
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           sqlx migrate run
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Install Tauri CLI
         shell: pwsh
@@ -118,11 +138,47 @@ jobs:
 
       - name: Build frontend bundles
         shell: pwsh
-        run: ./src_frontend/scripts/frontends-builder.ps1 -SkipCargoBuild
+        run: |
+          node --test tests/frontend-compat.test.mjs tests/build-frontend-assets.test.mjs tests/frontend-vendor-assets.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/check-frontend-compat.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./scripts/build-frontend-assets.ps1 -SkipCargoBuild -OutputRoot target/frontend-dist
+          $assets = (Resolve-Path target/frontend-dist).Path
+          "GEOCODE_FRONTEND_DIST=$assets" | Add-Content -Path $env:GITHUB_ENV -Encoding utf8
+          $tauri = @{ build = @{ frontendDist = $assets } } | ConvertTo-Json -Compress
+          "TAURI_CONFIG=$tauri" | Add-Content -Path $env:GITHUB_ENV -Encoding utf8
+          $tauri | Set-Content target/tauri-frontend-config.json -Encoding utf8
+
+      - name: Verify fixed render reference in release mode
+        shell: pwsh
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: cargo test --locked --release --test render_golden --test standard_tile_render --test carto_tile_render
 
       - name: Build Tauri app
         shell: pwsh
-        run: cargo tauri build
+        run: cargo tauri build --config target/tauri-frontend-config.json
+
+      - name: Verify packaged render execution
+        shell: pwsh
+        run: |
+          $binary = (Resolve-Path target/release/geocode_web_single.exe).Path
+          $buildInfo = & $binary local-tiles build-info --json | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw '配布用exeのビルド情報を取得できません。' }
+          if (-not $buildInfo.execution.verified) { throw "描画実行構成が未認定です: $($buildInfo.execution.reason)" }
+          if (-not $buildInfo.standard_generation_verified) { throw '標準地図・地形の実行構成が未認定です。' }
+          if (-not $buildInfo.osm_generation_verified) { throw '名称付き地図の実行構成が未認定です。' }
+          $buildInfo | ConvertTo-Json -Depth 5
+          $env:GEOCODE_TEST_CLI_EXE = $binary
+          $distributionTests = @(
+            'generate_terrain_register_backgrounds_and_resume_with_the_selected_distribution_binary',
+            'import_the_new_format_and_render_with_another_configuration_after_removing_sources'
+          )
+          foreach ($distributionTest in $distributionTests) {
+            cargo test --locked --test local_tile_standard_exe $distributionTest -- --ignored --exact
+            if ($LASTEXITCODE -ne 0) { throw "配布用exeの標準地図CLI試験に失敗しました: $distributionTest" }
+          }
 
       - name: Collect artifacts
         shell: pwsh

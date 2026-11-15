@@ -16,6 +16,8 @@ pub enum AppError {
     InternalServerError,
     #[error("bad gateway")]
     BadGateway,
+    #[error("{0}")]
+    ServiceUnavailable(String),
     #[error("conflict")]
     Conflict,
     #[error(
@@ -47,6 +49,7 @@ impl AppError {
             AppError::NotFound => StatusCode::NOT_FOUND,
             AppError::InternalServerError => StatusCode::INTERNAL_SERVER_ERROR,
             AppError::BadGateway => StatusCode::BAD_GATEWAY,
+            AppError::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             AppError::Conflict
             | AppError::IdempotencyConflict
             | AppError::ImportAccountConflict => StatusCode::CONFLICT,
@@ -68,6 +71,8 @@ impl AppError {
             | AppError::IdempotencyConflict
             | AppError::ImportAccountConflict
             | AppError::TooManyRequests(_) => self.to_string(),
+
+            AppError::ServiceUnavailable(_) => self.to_string(),
 
             // 内部エラーは隠す
             AppError::Sqlx(_) => "database error".to_string(),

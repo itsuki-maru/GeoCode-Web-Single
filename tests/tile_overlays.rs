@@ -1,5 +1,7 @@
 #[allow(dead_code)]
 mod common;
+#[path = "support/sqlite_contention.rs"]
+mod sqlite_contention;
 
 use axum::{
     Json,
@@ -436,11 +438,12 @@ async fn upgrade_preserves_existing_data_and_cascades_user_deletion() {
 
 #[tokio::test]
 async fn selection_waits_for_concurrent_disable() {
-    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use sqlx::sqlite::SqliteConnectOptions;
     use std::time::Duration;
     let path = common::test_files_dir().join(format!("tile-race-{}.sqlite", uuid::Uuid::new_v4()));
-    let pool = SqlitePoolOptions::new()
-        .max_connections(2)
+    let contention = sqlite_contention::SqliteContention::new();
+    let pool = contention
+        .pool_options(2)
         .connect_with(
             SqliteConnectOptions::new()
                 .filename(&path)
@@ -473,7 +476,7 @@ async fn selection_waits_for_concurrent_disable() {
     .await
     .unwrap();
     let worker_pool = pool.clone();
-    let task = tokio::spawn(async move {
+    let task = contention.spawn(async move {
         user_select(
             Extension(user),
             Extension(worker_pool),
@@ -482,10 +485,16 @@ async fn selection_waits_for_concurrent_disable() {
         )
         .await
     });
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    tx.commit().await.unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(15), async {
+        contention.wait_until_busy().await;
+        assert!(!task.is_finished());
+        tx.commit().await.unwrap();
+        task.finish().await
+    })
+    .await
+    .expect("concurrent overlay selection did not finish");
     assert!(matches!(
-        task.await.unwrap(),
+        result,
         Err(geocode_web_single::error::AppError::NotFound)
     ));
     let count: i64 = sqlx::query_scalar(
@@ -515,6 +524,39 @@ async fn selection_waits_for_concurrent_disable() {
             Err(error) => panic!("failed to remove test database {}: {error}", path.display()),
         }
     }
+}
+
+#[tokio::test]
+async fn dropping_a_contended_worker_releases_its_sqlite_connection() {
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use std::time::Duration;
+    let root = tempfile::tempdir().unwrap();
+    let options = SqliteConnectOptions::new()
+        .filename(root.path().join("contention.sqlite"))
+        .create_if_missing(true);
+    let writer = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options.clone())
+        .await
+        .unwrap();
+    let contention = sqlite_contention::SqliteContention::new();
+    let worker = contention
+        .pool_options(1)
+        .connect_with(options)
+        .await
+        .unwrap();
+    let tx = writer.begin_with("BEGIN IMMEDIATE").await.unwrap();
+    let worker_pool = worker.clone();
+    let task = contention
+        .spawn(async move { worker_pool.begin_with("BEGIN IMMEDIATE").await.map(|_| ()) });
+    contention.wait_until_busy().await;
+    drop(task);
+    // writerのロックを解放しなくても、取消でblocking SQLite workerが終了する。
+    tokio::time::timeout(Duration::from_secs(5), worker.close())
+        .await
+        .expect("cancelled SQLite worker retained its connection");
+    tx.rollback().await.unwrap();
+    writer.close().await;
 }
 
 #[tokio::test]
@@ -615,6 +657,7 @@ async fn temporary_overlay_sharing_is_opt_in_and_query_only_controls_visibility(
         let Json(created) = generate_url_handler(
             Extension(owner.clone()),
             Extension(pool.clone()),
+            None,
             Json(
                 serde_json::from_value(json!({
                     "minutes": 60, "layers": [layer], "update_url": previous_id.is_some(),

@@ -96,6 +96,17 @@ struct ApplicationInitSetupPartial {
     redis_connect_timeout_seconds: Option<String>,
     tile_cache_ttl_seconds: Option<String>,
     tile_cache_namespace: Option<String>,
+    tile_catalog_database_path: Option<String>,
+    tile_dataset_path: Option<String>,
+    tile_cache_path: Option<String>,
+    tile_work_path: Option<String>,
+    local_tile_workers: Option<String>,
+    local_tile_queue_capacity: Option<String>,
+    local_tile_max_subscribers: Option<String>,
+    local_tile_background_queue_capacity: Option<String>,
+    local_tile_job_timeout_seconds: Option<String>,
+    local_tile_http_timeout_seconds: Option<String>,
+    local_tile_precompute_max_tiles: Option<String>,
     marker_form_storage_quota_bytes: Option<String>,
     live_location_history_enabled: Option<String>,
     live_location_upload_interval_seconds: Option<String>,
@@ -122,6 +133,7 @@ struct EnvDefaults {
     redis_connect_timeout_seconds: String,
     tile_cache_ttl_seconds: String,
     tile_cache_namespace: String,
+    local_tiles: crate::local_tiles::config::LocalTileConfig,
     marker_form_storage_quota_bytes: String,
     live_location_history_enabled: String,
     live_location_upload_interval_seconds: String,
@@ -136,7 +148,16 @@ struct EnvDefaults {
 /// 設定ディレクトリに依存するパス系の値を含めて、現在の既定値を組み立てる。
 fn env_defaults(setup_dir: &std::path::Path) -> EnvDefaults {
     let database_path = setup_dir.join("geocode-web.sqlite");
-    let database_url = format!("sqlite:{}", database_path.to_string_lossy());
+    // SQLxは?より後を接続オプションとし、%を復号する。Windowsのverbatimパスも
+    // ファイル名として往復できるよう、パス内の区切り文字だけを符号化する。
+    let database_url = format!(
+        "sqlite:{}",
+        database_path
+            .to_string_lossy()
+            .replace('%', "%25")
+            .replace('?', "%3F")
+            .replace('#', "%23")
+    );
     let images_path = setup_dir.join("images").to_string_lossy().into_owned();
 
     EnvDefaults {
@@ -154,6 +175,7 @@ fn env_defaults(setup_dir: &std::path::Path) -> EnvDefaults {
         redis_connect_timeout_seconds: "3".to_string(),
         tile_cache_ttl_seconds: "604800".to_string(),
         tile_cache_namespace: "default".to_string(),
+        local_tiles: crate::local_tiles::config::LocalTileConfig::defaults(setup_dir),
         marker_form_storage_quota_bytes: "1073741824".to_string(),
         live_location_history_enabled: "false".to_string(),
         live_location_upload_interval_seconds: "5".to_string(),
@@ -182,6 +204,25 @@ pub fn get_application_user_setup_path() -> PathBuf {
 /// 設定JSONファイルを読み込み、追加済みの任意項目が欠けていれば補完して保存する。
 pub fn read_env_json(setup_dir: &PathBuf) -> Result<ApplicationInitSetup, EnvJsonReadError> {
     let env_json_path = setup_dir.join("geocode-web-single.env.json");
+    read_env_json_at(setup_dir, &env_json_path, true)
+}
+
+/// CLIの照会では任意項目をメモリ上で補完し、JSON・バックアップ・ディレクトリを作成しない。
+pub fn read_env_json_readonly(
+    env_json_path: &std::path::Path,
+) -> Result<ApplicationInitSetup, EnvJsonReadError> {
+    let setup_dir = env_json_path
+        .parent()
+        .ok_or_else(|| EnvJsonReadError::Io("設定ファイルの親ディレクトリがありません。".into()))?
+        .to_path_buf();
+    read_env_json_at(&setup_dir, env_json_path, false)
+}
+
+fn read_env_json_at(
+    setup_dir: &PathBuf,
+    env_json_path: &std::path::Path,
+    persist_defaults: bool,
+) -> Result<ApplicationInitSetup, EnvJsonReadError> {
     if !env_json_path.exists() {
         return Err(EnvJsonReadError::NotFound);
     }
@@ -197,14 +238,17 @@ pub fn read_env_json(setup_dir: &PathBuf) -> Result<ApplicationInitSetup, EnvJso
     let partial: ApplicationInitSetupPartial =
         serde_json::from_value(value).map_err(|e| EnvJsonReadError::InvalidJson(e.to_string()))?;
     let env = complete_env(setup_dir, partial)?;
+    crate::local_tiles::config::LocalTileConfig::from_setup(&env)
+        .map_err(EnvJsonReadError::InvalidJson)?;
 
-    if migrated {
+    if migrated && persist_defaults {
         let backup_path = setup_dir.join("geocode-web-single.env.json.bak");
         if !backup_path.exists() {
             fs::copy(&env_json_path, &backup_path)
                 .map_err(|e| EnvJsonReadError::Io(e.to_string()))?;
         }
-        write_to_json_file(env_json_path, &env).map_err(|e| EnvJsonReadError::Io(e.to_string()))?;
+        write_to_json_file(env_json_path.to_path_buf(), &env)
+            .map_err(|e| EnvJsonReadError::Io(e.to_string()))?;
     }
 
     Ok(env)
@@ -215,13 +259,44 @@ pub fn build_env_from_form(
     setup_dir: PathBuf,
     form: SetupForm,
 ) -> Result<ApplicationInitSetup, String> {
+    let env = build_env_settings(&setup_dir, form)?;
+    let env_json_path = setup_dir.join("geocode-web-single.env.json");
+    write_to_json_file(env_json_path, &env).map_err(|e| e.to_string())?;
+    Ok(env)
+}
+
+/// サーバ起動・環境変数・ファイル作成を伴わず、初期設定の入力だけを検証する。
+pub fn validate_setup_form(form: &SetupForm) -> Result<(), String> {
     crate::utils::validate_username(&form.admin_username).map_err(|error| error.to_string())?;
     if form.admin_password.chars().count() < 8
         || matches!(form.admin_password.as_str(), "password123" | "P@ssw0rd")
     {
         return Err("管理者パスワードは8文字以上の値を指定してください。".to_string());
     }
-    let defaults = env_defaults(&setup_dir);
+    for (name, value) in [
+        ("アカウントロック回数", &form.failed_account_lock),
+        ("次の試行までの分数", &form.next_challenge_minutes),
+        (
+            "試行時間制限の開始回数",
+            &form.challenge_limit_time_failed_count,
+        ),
+        ("アクセストークン有効分数", &form.access_token_exp_minutes),
+        ("更新トークン有効分数", &form.refresh_token_exp_minutes),
+    ] {
+        if value.parse::<u32>().ok().is_none_or(|number| number == 0) {
+            return Err(format!("{name}は1以上の整数で指定してください。"));
+        }
+    }
+    Ok(())
+}
+
+/// 初期設定値だけを構築する。保存とサーバ起動は呼出側の責務。
+pub fn build_env_settings(
+    setup_dir: &std::path::Path,
+    form: SetupForm,
+) -> Result<ApplicationInitSetup, String> {
+    validate_setup_form(&form)?;
+    let defaults = env_defaults(setup_dir);
     let secret_key = Uuid::new_v4().to_string();
 
     let env = ApplicationInitSetup {
@@ -266,6 +341,36 @@ pub fn build_env_from_form(
         redis_connect_timeout_seconds: defaults.redis_connect_timeout_seconds,
         tile_cache_ttl_seconds: defaults.tile_cache_ttl_seconds,
         tile_cache_namespace: defaults.tile_cache_namespace,
+        tile_catalog_database_path: defaults
+            .local_tiles
+            .catalog_database_path
+            .to_string_lossy()
+            .into_owned(),
+        tile_dataset_path: defaults
+            .local_tiles
+            .dataset_path
+            .to_string_lossy()
+            .into_owned(),
+        tile_cache_path: defaults
+            .local_tiles
+            .cache_path
+            .to_string_lossy()
+            .into_owned(),
+        tile_work_path: defaults
+            .local_tiles
+            .work_path
+            .to_string_lossy()
+            .into_owned(),
+        local_tile_workers: defaults.local_tiles.workers.to_string(),
+        local_tile_queue_capacity: defaults.local_tiles.queue_capacity.to_string(),
+        local_tile_max_subscribers: defaults.local_tiles.max_subscribers.to_string(),
+        local_tile_background_queue_capacity: defaults
+            .local_tiles
+            .background_queue_capacity
+            .to_string(),
+        local_tile_job_timeout_seconds: defaults.local_tiles.job_timeout_seconds.to_string(),
+        local_tile_http_timeout_seconds: defaults.local_tiles.http_timeout_seconds.to_string(),
+        local_tile_precompute_max_tiles: defaults.local_tiles.precompute_max_tiles.to_string(),
         marker_form_storage_quota_bytes: defaults.marker_form_storage_quota_bytes,
         live_location_history_enabled: defaults.live_location_history_enabled,
         live_location_upload_interval_seconds: defaults.live_location_upload_interval_seconds,
@@ -276,9 +381,7 @@ pub fn build_env_from_form(
         live_map_password_attempt_limit: defaults.live_map_password_attempt_limit,
         live_map_password_window_minutes: defaults.live_map_password_window_minutes,
     };
-    let env_json_path = setup_dir.join("geocode-web-single.env.json");
-    write_to_json_file(env_json_path, &env).map_err(|e| e.to_string())?;
-
+    crate::local_tiles::config::LocalTileConfig::from_setup(&env)?;
     Ok(env)
 }
 
@@ -322,6 +425,17 @@ fn env_json_requires_migration(value: &serde_json::Value) -> bool {
         "redis_connect_timeout_seconds",
         "tile_cache_ttl_seconds",
         "tile_cache_namespace",
+        "tile_catalog_database_path",
+        "tile_dataset_path",
+        "tile_cache_path",
+        "tile_work_path",
+        "local_tile_workers",
+        "local_tile_queue_capacity",
+        "local_tile_max_subscribers",
+        "local_tile_background_queue_capacity",
+        "local_tile_job_timeout_seconds",
+        "local_tile_http_timeout_seconds",
+        "local_tile_precompute_max_tiles",
         "marker_form_storage_quota_bytes",
         "live_location_history_enabled",
         "live_location_upload_interval_seconds",
@@ -336,6 +450,15 @@ fn env_json_requires_migration(value: &serde_json::Value) -> bool {
     .any(|field| {
         !object.contains_key(*field)
             || (*field == "tile_settings_encryption_key" && object[*field].is_null())
+            || ((field.starts_with("local_tile_")
+                || matches!(
+                    *field,
+                    "tile_catalog_database_path"
+                        | "tile_dataset_path"
+                        | "tile_cache_path"
+                        | "tile_work_path"
+                ))
+                && object[*field].is_null())
     })
 }
 
@@ -475,6 +598,55 @@ fn complete_env(
         tile_cache_namespace: partial
             .tile_cache_namespace
             .unwrap_or(defaults.tile_cache_namespace),
+        tile_catalog_database_path: partial.tile_catalog_database_path.unwrap_or_else(|| {
+            defaults
+                .local_tiles
+                .catalog_database_path
+                .to_string_lossy()
+                .into_owned()
+        }),
+        tile_dataset_path: partial.tile_dataset_path.unwrap_or_else(|| {
+            defaults
+                .local_tiles
+                .dataset_path
+                .to_string_lossy()
+                .into_owned()
+        }),
+        tile_cache_path: partial.tile_cache_path.unwrap_or_else(|| {
+            defaults
+                .local_tiles
+                .cache_path
+                .to_string_lossy()
+                .into_owned()
+        }),
+        tile_work_path: partial.tile_work_path.unwrap_or_else(|| {
+            defaults
+                .local_tiles
+                .work_path
+                .to_string_lossy()
+                .into_owned()
+        }),
+        local_tile_workers: partial
+            .local_tile_workers
+            .unwrap_or_else(|| defaults.local_tiles.workers.to_string()),
+        local_tile_queue_capacity: partial
+            .local_tile_queue_capacity
+            .unwrap_or_else(|| defaults.local_tiles.queue_capacity.to_string()),
+        local_tile_max_subscribers: partial
+            .local_tile_max_subscribers
+            .unwrap_or_else(|| defaults.local_tiles.max_subscribers.to_string()),
+        local_tile_background_queue_capacity: partial
+            .local_tile_background_queue_capacity
+            .unwrap_or_else(|| defaults.local_tiles.background_queue_capacity.to_string()),
+        local_tile_job_timeout_seconds: partial
+            .local_tile_job_timeout_seconds
+            .unwrap_or_else(|| defaults.local_tiles.job_timeout_seconds.to_string()),
+        local_tile_http_timeout_seconds: partial
+            .local_tile_http_timeout_seconds
+            .unwrap_or_else(|| defaults.local_tiles.http_timeout_seconds.to_string()),
+        local_tile_precompute_max_tiles: partial
+            .local_tile_precompute_max_tiles
+            .unwrap_or_else(|| defaults.local_tiles.precompute_max_tiles.to_string()),
         marker_form_storage_quota_bytes: partial
             .marker_form_storage_quota_bytes
             .unwrap_or(defaults.marker_form_storage_quota_bytes),

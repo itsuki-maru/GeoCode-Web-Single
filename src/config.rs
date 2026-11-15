@@ -3,6 +3,7 @@ use std::env;
 use std::str::FromStr;
 
 pub struct Config {
+    pub local_tiles: crate::local_tiles::config::LocalTileConfig,
     pub geocoder: crate::geocoding::GeocoderConfig,
     pub app_title: String,
     pub database_path: String,
@@ -43,6 +44,8 @@ pub struct Config {
 }
 
 pub static CONFIG: Lazy<Config> = Lazy::new(|| Config {
+    local_tiles: crate::local_tiles::config::LocalTileConfig::from_env()
+        .unwrap_or_else(|message| panic!("Invalid local tile configuration: {message}")),
     geocoder: crate::geocoding::GeocoderConfig::from_values(
         env::var("GEOCODER_PROVIDER").ok().as_deref(),
         env::var("GEOCODER_URL").ok().as_deref(),

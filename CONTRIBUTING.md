@@ -16,8 +16,8 @@ GeoCode-Web-Single への提案を歓迎します。大きな変更に入る前�
 
 推奨環境:
 
-- Rust stable
-- Node.js 20.x
+- Rust 1.99.1（ローカル地図の認定構成。更新時は画素・取り込み回帰と認定記録を確認）
+- Node.js 24.x（LTS）
 - npm
 - PowerShell 7 以上
 - `sqlx-cli` (`cargo install sqlx-cli --no-default-features --features sqlite`)
@@ -33,7 +33,9 @@ npm ci --prefix src_frontend/frontend
 npm ci --prefix src_frontend/frontend-mobile
 npm ci --prefix src_frontend/frontend-admin
 npm ci --prefix src_frontend/template-scripts
-./src_frontend/scripts/frontends-builder.ps1 -SkipCargoBuild
+./scripts/build-frontend-assets.ps1 -SkipCargoBuild -OutputRoot target/frontend-dist
+$env:GEOCODE_FRONTEND_DIST = (Resolve-Path target/frontend-dist).Path
+$env:TAURI_CONFIG = @{ build = @{ frontendDist = $env:GEOCODE_FRONTEND_DIST } } | ConvertTo-Json -Compress
 ```
 
 フロントエンドの型チェック:
@@ -58,6 +60,30 @@ Rust 側の検証:
 cargo fmt --check
 cargo test
 ```
+
+`ok` は実施して成功した試験、`FAILED` は失敗、`ignored` は未実施として分けて集計する。実exe・実資料・リンク作成権限などの前提が必要な試験を、前提不足のまま早期returnして成功にしない。個別試験を追加実行した場合は、同じ試験を重複加算しない。
+
+配布exeを使う合成データ試験は、リリースビルド後に次の2件を明示実行する。`GEOCODE_TEST_CLI_EXE`の指定は必須。実PBFを用いる長時間試験や基準画像更新までまとめて動かさないよう、`--ignored`には試験名と`--exact`を併用する。
+
+```powershell
+$env:GEOCODE_TEST_CLI_EXE = (Resolve-Path './target/release/geocode_web_single.exe').Path
+$distributionTests = @(
+  'generate_terrain_register_backgrounds_and_resume_with_the_selected_distribution_binary',
+  'import_the_new_format_and_render_with_another_configuration_after_removing_sources'
+)
+foreach ($distributionTest in $distributionTests) {
+  cargo test --offline --test local_tile_standard_exe $distributionTest -- --ignored --exact
+  if ($LASTEXITCODE -ne 0) { throw "配布exe試験に失敗しました: $distributionTest" }
+}
+```
+
+HTTP試験はローカルの模擬サーバーと、プロキシを使用しないテスト用クライアントを使う。子プロセス試験は有効な実行ファイルだけを使い、待機期限と失敗時の終了回収を備える。不正exeの起動や外部サービスへの実通信を、エラー再現の代用にしない。
+
+ローカル地図の描画・取り込みに関係する変更では、`node scripts/check-render-compatibility.mjs --offline`も実行する。コメント・Rustdocを除いた補助指紋、関連する解決済み推移依存、旧実装から固定した画像を照合する。補助指紋は描画世代には使用しない。
+
+画像を変える修正は`src/tilegen/identity.rs`の該当互換性版を更新する。同じ画素になる最適化・依存更新では、固定画像と取り込み・SDK・世代管理の回帰を確認し、据え置く理由を記録する。確認後の記録更新は`node scripts/check-render-compatibility.mjs --offline --record --reason "20文字以上の判断理由"`を使う。期待画像を変更後の実装から再生成して合格にしない。実行構成の認定には`res/tile-render-execution.json`も使い、未認定構成を環境変数で強制解除しない。
+
+検証では、専用の1領域を`CARGO_TARGET_DIR`へ指定し、`CARGO_PROFILE_DEV_DEBUG=0`・`CARGO_PROFILE_TEST_DEBUG=0`・`CARGO_INCREMENTAL=0`をプロセス限定で設定すると、大きなデバッグ情報や増分キャッシュの蓄積を抑えられる。既存アプリのexe・dist・利用者のDBを検証出力にしない。
 
 `cargo clippy` には既存コード由来の警告が残っているため、導入・全体解消は別途段階的に進める想定です。テストコードは現状、整備が進んでいるとは言えませんが、整備を行う方針です。
 

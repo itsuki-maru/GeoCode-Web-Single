@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::sync::{Mutex, Semaphore};
@@ -15,6 +16,57 @@ static REQUESTS: Semaphore = Semaphore::const_new(16);
 const CACHE_TTL: Duration = Duration::from_secs(30);
 const MAX_BODY: usize = 65536;
 
+/// TURN取得先とHTTPクライアントを、設定インスタンス単位で差し替える。
+/// 既定値では通常のCloudflare APIとシステムのプロキシ設定を使う。
+#[derive(Clone, Default)]
+pub struct CloudflareTurnClient {
+    transport: Option<Arc<Transport>>,
+}
+
+struct Transport {
+    client: reqwest::Client,
+    endpoint: reqwest::Url,
+}
+
+impl CloudflareTurnClient {
+    pub fn with_endpoint(
+        client: reqwest::Client,
+        mut endpoint: reqwest::Url,
+    ) -> Result<Self, &'static str> {
+        if !matches!(endpoint.scheme(), "http" | "https")
+            || endpoint.host_str().is_none()
+            || !endpoint.username().is_empty()
+            || endpoint.password().is_some()
+            || endpoint.query().is_some()
+            || endpoint.fragment().is_some()
+        {
+            return Err("invalid_turn_endpoint");
+        }
+        endpoint.set_path(&format!("{}/", endpoint.path().trim_end_matches('/')));
+        Ok(Self {
+            transport: Some(Arc::new(Transport { client, endpoint })),
+        })
+    }
+
+    pub(super) async fn credentials(
+        &self,
+        key: &str,
+        token: &str,
+        identity: Uuid,
+    ) -> Result<Value, &'static str> {
+        match &self.transport {
+            Some(transport) => {
+                let url = transport
+                    .endpoint
+                    .join(&format!("{key}/credentials/generate-ice-servers"))
+                    .map_err(|_| "invalid_turn_endpoint")?;
+                cached(url.as_str(), token, identity, Some(&transport.client)).await
+            },
+            None => credentials(key, token, identity).await,
+        }
+    }
+}
+
 pub(super) async fn credentials(
     key: &str,
     token: &str,
@@ -23,10 +75,15 @@ pub(super) async fn credentials(
     let url = format!(
         "https://rtc.live.cloudflare.com/v1/turn/keys/{key}/credentials/generate-ice-servers"
     );
-    cached(&url, token, identity).await
+    cached(&url, token, identity, None).await
 }
 
-async fn cached(url: &str, token: &str, identity: Uuid) -> Result<Value, &'static str> {
+async fn cached(
+    url: &str,
+    token: &str,
+    identity: Uuid,
+    client: Option<&reqwest::Client>,
+) -> Result<Value, &'static str> {
     let cache_key = format!(
         "{:x}",
         Sha256::digest(format!("{url}\0{token}\0{identity}"))
@@ -42,7 +99,10 @@ async fn cached(url: &str, token: &str, identity: Uuid) -> Result<Value, &'stati
     let started = Instant::now();
     let value = within_request_deadline(async {
         let _permit = REQUESTS.acquire().await.map_err(|_| "busy")?;
-        fetch(url, token).await
+        match client {
+            Some(client) => fetch_with_client(client, url, token).await,
+            None => fetch(url, token).await,
+        }
     })
     .await?;
     let mut cache = CACHE.lock().await;
@@ -74,6 +134,14 @@ async fn fetch(url: &str, token: &str) -> Result<Value, &'static str> {
         .timeout(Duration::from_millis(1500))
         .build()
         .map_err(|_| "client")?;
+    fetch_with_client(&client, url, token).await
+}
+
+async fn fetch_with_client(
+    client: &reqwest::Client,
+    url: &str,
+    token: &str,
+) -> Result<Value, &'static str> {
     let mut response = client
         .post(url)
         .bearer_auth(token)
@@ -163,6 +231,16 @@ mod tests {
             {"urls":["stun:stun.cloudflare.com:3478"]},
             {"urls":["turn:turn.cloudflare.com:3478?transport=udp", "turns:turn.cloudflare.com:443?transport=tcp"], "username":"temporary-user", "credential":"temporary-password", "extra":"discard"}
         ]})
+    }
+
+    async fn cached(url: &str, token: &str, identity: Uuid) -> Result<Value, &'static str> {
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_millis(1500))
+            .build()
+            .unwrap();
+        super::cached(url, token, identity, Some(&client)).await
     }
     async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

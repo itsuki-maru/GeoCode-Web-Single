@@ -205,7 +205,7 @@ mod tests {
     use serde_json::{Value, json};
 
     #[test]
-    fn 多数頂点でも終端まで不正な座標を検証する() {
+    fn validates_coordinates_through_the_last_vertex_in_large_shapes() {
         let mut ring: Vec<Value> = (0..20_000)
             .map(|n| json!([139.0 + f64::from(n) / 100_000.0, 35.0]))
             .collect();

@@ -2,6 +2,7 @@ use crate::{
     db::load_tile_servers,
     error::AppError,
     handler::live_map::require_superuser,
+    local_tiles::LocalTiles,
     model::{TileServers, is_valid_basemap_definition},
 };
 use axum::{
@@ -10,7 +11,10 @@ use axum::{
 };
 use serde::Deserialize;
 use sqlx::SqlitePool;
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 #[derive(Deserialize)]
 pub struct BackgroundMapInput {
@@ -31,6 +35,26 @@ fn default_kind() -> String {
     "raster".into()
 }
 
+/// 本体DBの書き込みトランザクション中に呼び出し、catalogの検査から本体DBへの
+/// コミットまでの間に、利用停止処理の参照確認が通過することを防ぐ。
+pub(crate) async fn validate_local_tile_url(
+    service: Option<&Arc<LocalTiles>>,
+    url: &str,
+) -> Result<(), AppError> {
+    if !crate::local_tiles::service::references_local_tiles(url) {
+        return Ok(());
+    }
+    let service = service.ok_or_else(|| {
+        AppError::ServiceUnavailable("ローカル地図の管理DBを利用できません。".into())
+    })?;
+    service.validate_background_url(url).await.map_err(|error| {
+        if error.status == 400 {
+            AppError::Validation(error.message)
+        } else {
+            AppError::ServiceUnavailable(error.message)
+        }
+    })
+}
 fn clean_attribution(value: &str) -> Result<String, AppError> {
     let cleaned = ammonia::Builder::default()
         .tags(HashSet::from([
@@ -169,16 +193,36 @@ pub async fn admin_list(
 pub async fn admin_create(
     Extension(user): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
+    local_tiles: Option<Extension<Arc<LocalTiles>>>,
     Json(input): Json<BackgroundMapInput>,
 ) -> Result<Json<TileServers>, AppError> {
     require_superuser(&user, &pool).await?;
     let mut input = input.validate(None)?;
     input.attribution = clean_attribution(&input.attribution)?;
+    // catalogの遅延初期化では本体DBの接続を調べる。本体プールの接続が1本でも
+    // 待ち合わないように、書き込みの排他を確保する前に初期化する。
+    validate_local_tile_url(
+        local_tiles.as_ref().map(|extension| &extension.0),
+        &input.url,
+    )
+    .await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    validate_local_tile_url(
+        local_tiles.as_ref().map(|extension| &extension.0),
+        &input.url,
+    )
+    .await?;
     // 読み取り前に書き込み権を確保し、ID・識別名の割り当てと更新を直列化する。
     if input.kind == "vector"
         && !sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM tileserver_model WHERE id=1 AND kind='raster')",
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM tileserver_model
+                WHERE id = 1
+                    AND kind = 'raster'
+            )
+            "#,
         )
         .fetch_one(&mut *tx)
         .await?
@@ -188,7 +232,13 @@ pub async fn admin_create(
         ));
     }
     if sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM tileserver_model WHERE layer_name=$1)",
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM tileserver_model
+            WHERE layer_name = $1
+        )
+        "#,
     )
     .bind(&input.layer_name)
     .fetch_one(&mut *tx)
@@ -196,18 +246,38 @@ pub async fn admin_create(
     {
         return Err(AppError::Conflict);
     }
-    let maximum: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id),0) FROM tileserver_model")
-        .fetch_one(&mut *tx)
-        .await?;
+    let maximum: i64 = sqlx::query_scalar(
+        r#"
+        SELECT
+            COALESCE(MAX(id), 0)
+        FROM tileserver_model
+        "#,
+    )
+    .fetch_one(&mut *tx)
+    .await?;
     let id = maximum
         .max(0)
         .checked_add(1)
         .ok_or_else(|| AppError::Validation("登録できる背景地図のID上限に達しました。".into()))?;
     let tile = sqlx::query_as::<_, TileServers>(
-        "INSERT INTO tileserver_model
-            (id,layer_name,label,url,attribution,include_foreign_tiles,min_zoom,max_zoom,kind,style_url,create_at,updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-         RETURNING *",
+        r#"
+        INSERT INTO tileserver_model (
+            id,
+            layer_name,
+            label,
+            url,
+            attribution,
+            include_foreign_tiles,
+            min_zoom,
+            max_zoom,
+            kind,
+            style_url,
+            create_at,
+            updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        RETURNING *
+        "#,
     )
     .bind(id)
     .bind(input.layer_name)
@@ -229,17 +299,35 @@ pub async fn admin_update(
     Extension(user): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
     Path(id): Path<i64>,
+    local_tiles: Option<Extension<Arc<LocalTiles>>>,
     Json(input): Json<BackgroundMapInput>,
 ) -> Result<Json<TileServers>, AppError> {
     require_superuser(&user, &pool).await?;
     let mut input = input.validate(Some(id))?;
+    validate_local_tile_url(
+        local_tiles.as_ref().map(|extension| &extension.0),
+        &input.url,
+    )
+    .await?;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    let (previous_name, previous_attribution): (String, String) =
-        sqlx::query_as("SELECT layer_name,attribution FROM tileserver_model WHERE id=$1")
-            .bind(id)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or(AppError::NotFound)?;
+    validate_local_tile_url(
+        local_tiles.as_ref().map(|extension| &extension.0),
+        &input.url,
+    )
+    .await?;
+    let (previous_name, previous_attribution): (String, String) = sqlx::query_as(
+        r#"
+            SELECT
+                layer_name,
+                attribution
+            FROM tileserver_model
+            WHERE id = $1
+            "#,
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
     // 他の項目を編集した場合は、既存ラスタの出典HTMLを原文のまま保持する。
     // 新規・変更したHTMLは、Leafletの出典表示へ渡す前に安全化する。
     if previous_attribution != input.attribution {
@@ -247,7 +335,14 @@ pub async fn admin_update(
     }
     if input.kind == "vector"
         && !sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM tileserver_model WHERE id=1 AND kind='raster')",
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM tileserver_model
+                WHERE id = 1
+                    AND kind = 'raster'
+            )
+            "#,
         )
         .fetch_one(&mut *tx)
         .await?
@@ -259,7 +354,14 @@ pub async fn admin_update(
     // 旧データの重複識別名は編集可能とし、新しいDOM IDの重複を防ぐ。
     if previous_name != input.layer_name
         && sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM tileserver_model WHERE id<>$1 AND layer_name=$2)",
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM tileserver_model
+                WHERE id <> $1
+                    AND layer_name = $2
+            )
+            "#,
         )
         .bind(id)
         .bind(&input.layer_name)
@@ -269,10 +371,22 @@ pub async fn admin_update(
         return Err(AppError::Conflict);
     }
     let tile = sqlx::query_as::<_, TileServers>(
-        "UPDATE tileserver_model SET
-            layer_name=$2,label=$3,url=$4,attribution=$5,include_foreign_tiles=$6,
-            min_zoom=$7,max_zoom=$8,kind=$9,style_url=$10,updated_at=CURRENT_TIMESTAMP
-         WHERE id=$1 RETURNING *",
+        r#"
+        UPDATE tileserver_model
+        SET
+            layer_name = $2,
+            label = $3,
+            url = $4,
+            attribution = $5,
+            include_foreign_tiles = $6,
+            min_zoom = $7,
+            max_zoom = $8,
+            kind = $9,
+            style_url = $10,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        RETURNING *
+        "#,
     )
     .bind(id)
     .bind(input.layer_name)
@@ -295,7 +409,7 @@ mod tests {
     use super::valid_image_url;
 
     #[test]
-    fn 画像_url_は従来の_http_と同一サイトと_leaflet_置換形式を許可する() {
+    fn accepts_http_same_origin_and_leaflet_placeholder_image_urls() {
         for url in [
             "/tile/{z}/{x}/{y}.png",
             "HTTP://tiles.example.test/fixed.png",

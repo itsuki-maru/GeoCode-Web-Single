@@ -226,7 +226,7 @@ impl tera::Filter for TimedJsonFilter {
 }
 
 async fn instrument_templates(templates: &Templates, trace: &InitialTrace) -> anyhow::Result<()> {
-    let source = include_str!("../dist/templates/form-answer-map.html");
+    let source = include_str!(env!("GEOCODE_ANSWER_MAP_TEMPLATE"));
     let context_names = [
         "popupBodies",
         "answerPreview",

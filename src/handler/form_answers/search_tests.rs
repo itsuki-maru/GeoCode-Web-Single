@@ -387,12 +387,27 @@ async fn projected_search_preserves_tied_type_ids_across_cursor_pages() {
         ..Default::default()
     };
     let mut seen = Vec::new();
+    let mut cursors = std::collections::HashSet::new();
+    let mut pages = 0;
     loop {
-        let page = compare_search(&f, q.clone()).await;
+        pages += 1;
+        assert!(pages <= 5, "four fixture rows did not finish paging");
+        let page = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            compare_search(&f, q.clone()),
+        )
+        .await
+        .expect("cursor page query did not finish");
         seen.extend(page.rows.into_iter().map(|row| (row.target_type, row.id)));
+        assert!(
+            seen.len() <= 4,
+            "paging returned more than four fixture rows"
+        );
         let Some(cursor) = page.next_cursor else {
             break;
         };
+        let cursor_key = serde_json::to_string(&cursor).unwrap();
+        assert!(cursors.insert(cursor_key), "paging repeated a cursor");
         q.cursor = Some(cursor);
     }
     assert_eq!(seen.len(), 4);

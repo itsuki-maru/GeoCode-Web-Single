@@ -47,8 +47,17 @@ struct SettingsRow {
     updated_at: DateTime<Utc>,
 }
 
-const SELECT_SETTINGS: &str = "SELECT revision, proxy_revision, proxy_base_url, \
-    encrypted_api_key, vector_origins, updated_at FROM tile_server_settings WHERE id = 1";
+const SELECT_SETTINGS: &str = r#"
+    SELECT
+        revision,
+        proxy_revision,
+        proxy_base_url,
+        encrypted_api_key,
+        vector_origins,
+        updated_at
+    FROM tile_server_settings
+    WHERE id = 1
+"#;
 
 struct ApiKeyCipher(LessSafeKey);
 
@@ -387,14 +396,29 @@ impl TileSettings {
         let snapshot = self.load_snapshot(&row)?;
         // 設定版の一致条件により、異なるプロセスからの同時初回保存にも対応する。
         let result = sqlx::query(
-            "INSERT INTO tile_server_settings (id, revision, proxy_revision, proxy_base_url,
-                encrypted_api_key, vector_origins, updated_by, updated_at)
-             VALUES (1, $1, $2, $3, $4, $5, $6, $7)
-             ON CONFLICT (id) DO UPDATE SET revision = EXCLUDED.revision,
-                proxy_revision = EXCLUDED.proxy_revision, proxy_base_url = EXCLUDED.proxy_base_url,
-                encrypted_api_key = EXCLUDED.encrypted_api_key, vector_origins = EXCLUDED.vector_origins,
-                updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at
-             WHERE tile_server_settings.revision = $8",
+            r#"
+            INSERT INTO tile_server_settings (
+                id,
+                revision,
+                proxy_revision,
+                proxy_base_url,
+                encrypted_api_key,
+                vector_origins,
+                updated_by,
+                updated_at
+            )
+            VALUES (1, $1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (id) DO UPDATE
+            SET
+                revision = EXCLUDED.revision,
+                proxy_revision = EXCLUDED.proxy_revision,
+                proxy_base_url = EXCLUDED.proxy_base_url,
+                encrypted_api_key = EXCLUDED.encrypted_api_key,
+                vector_origins = EXCLUDED.vector_origins,
+                updated_by = EXCLUDED.updated_by,
+                updated_at = EXCLUDED.updated_at
+            WHERE tile_server_settings.revision = $8
+            "#,
         )
         .bind(&row.revision)
         .bind(&row.proxy_revision)
@@ -606,11 +630,16 @@ mod tests {
                 .unwrap()
                 .contains("new-test-key")
         );
-        let stored =
-            sqlx::query_scalar::<_, Vec<u8>>("SELECT encrypted_api_key FROM tile_server_settings")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let stored = sqlx::query_scalar::<_, Vec<u8>>(
+            r#"
+                SELECT
+                    encrypted_api_key
+                FROM tile_server_settings
+                "#,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_ne!(stored.as_slice(), b"new-test-key");
         assert_eq!(
             settings
@@ -647,11 +676,16 @@ mod tests {
                 .contains("https://vector-env.example")
         );
 
-        sqlx::query("UPDATE tile_server_settings SET encrypted_api_key = $1")
-            .bind(vec![0_u8; 28])
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            r#"
+            UPDATE tile_server_settings
+            SET encrypted_api_key = $1
+            "#,
+        )
+        .bind(vec![0_u8; 28])
+        .execute(&pool)
+        .await
+        .unwrap();
         assert!(other_process.refresh(&pool).await.is_err());
         assert_eq!(other_process.snapshot().revision, managed.revision);
         assert_eq!(

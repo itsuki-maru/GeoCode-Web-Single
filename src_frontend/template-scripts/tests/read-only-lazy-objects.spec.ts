@@ -1080,33 +1080,97 @@ describe("lazy groups in the actual read-only map runtime", () => {
     },
   );
 
-  it("印刷は小図形を省略せず、生成バッチが終わるまで準備完了にしない", async () => {
-    const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
-    bootstrap.page = "form-answer-map";
-    bootstrap.shapes = Array.from({ length: 300 }, (_, index) => ({
-      ...shape("a"),
-      id: `print-${index}`,
-    }));
-    bootstrap.answerPreview = {
-      query: {},
-      targets: bootstrap.shapes.map((record: any) => `shape:${record.id}`),
-      parentOrigin: location.origin,
-      requestId: "lazy-print",
-    };
-    runtime = initializeReadOnlyMapPage("form-answer-map", {
-      view: { latitude: 35.68, longitude: 139.76, zoom: 5 },
-      tileServerId: "1",
-      layerIds: ["a"],
-      markersVisible: true,
-      shapesVisible: true,
-      shapeNamesVisible: false,
-      overlays: {},
-    });
-    expect(runtime.getObjectLoadStatus().loading).toBe(true);
-    await runtime.shapeRenderer.whenIdle();
-    expect(runtime.getObjectLoadStatus().loading).toBe(false);
-    expect(runtime.shapeRenderer.getStats().renderedCount).toBe(300);
-  });
+  it.each(["map-anather", "form-answer-map", "temporary-map"] as const)(
+    "%sの印刷も小図形を省略し、拡大・縮小後も原本と論理対象を保持する",
+    async (page) => {
+      const records = [7, 9].map((pixels, index) => {
+        const width = (pixels * 360) / (256 * 2 ** 12);
+        return {
+          ...shape("a"),
+          id: index === 0 ? "print-small" : "print-large",
+          name: "",
+          shape_type: "polyline",
+          geojson: {
+            type: "Feature",
+            properties: {},
+            geometry: {
+              type: "LineString",
+              coordinates: [[139.76, 35.68], [139.76 + width, 35.68]],
+            },
+          },
+        };
+      });
+      const original = JSON.stringify(records);
+      const ids = records.map((record) => record.id);
+      const state = {
+        view: { latitude: 35.68, longitude: 139.76, zoom: 12 },
+        tileServerId: "1",
+        layerIds: ["a"],
+        shapeIds: ids,
+        markersVisible: true,
+        shapesVisible: true,
+        shapeNamesVisible: false,
+        overlays: {},
+      };
+      const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
+      Object.assign(bootstrap, {
+        page,
+        shapes: page === "temporary-map"
+          ? Object.fromEntries(records.map((record) => [record.id, record]))
+          : records,
+      });
+      if (page === "form-answer-map") {
+        bootstrap.answerPreview = {
+          query: {},
+          targets: ids.map((id) => `shape:${id}`),
+          parentOrigin: location.origin,
+          requestId: "lazy-print",
+        };
+      } else if (page === "temporary-map") {
+        Object.assign(bootstrap, {
+          isMaster: false,
+          isChecked: false,
+          isMapUiHidden: false,
+          shareSnapshot: { version: 1, state, tileServers: bootstrap.tileServers, tileOverlays: [] },
+        });
+      }
+      fetchData.mockImplementation(
+        async (url) =>
+          new Response(JSON.stringify(String(url).startsWith("/shapes") ? records : {})),
+      );
+      runtime = initializeReadOnlyMapPage(
+        page,
+        state,
+        page === "temporary-map" ? bootstrap : undefined,
+      );
+      await vi.waitFor(() => expect(runtime!.getObjectLoadStatus().loading).toBe(false));
+      expect(runtime.shapeRenderer.getStats().renderedCount).toBe(1);
+      expect(runtime.shapeLayers["shape-print-small"]).toBeUndefined();
+      const large = runtime.shapeLayers["shape-print-large"];
+      const initialRequests = fetchData.mock.calls.length;
+      for (const [zoom, renderedCount] of [[13, 2], [14, 2], [12, 1]]) {
+        runtime.map.setView([35.68, 139.76], zoom, { animate: false });
+        expect(runtime.getObjectLoadStatus().loading).toBe(true);
+        await runtime.shapeRenderer.whenIdle();
+        expect(runtime.getObjectLoadStatus().loading).toBe(false);
+        expect(runtime.shapeRenderer.getStats()).toMatchObject({
+          recordCount: 2,
+          eligibleCount: 2,
+          renderedCount,
+          pendingCount: 0,
+        });
+        expect(runtime.getRenderableShapeIds()).toEqual(ids);
+        expect(runtime.getVisibleShapeIds()).toEqual(ids);
+        expect(runtime.map.hasLayer(large)).toBe(true);
+        expect(runtime.map.hasLayer(runtime.shapeLayers["shape-print-small"])).toBe(zoom !== 12);
+        expect(JSON.stringify(records)).toBe(original);
+      }
+      expect(runtime.shapeLayers["shape-print-large"]).toBe(large);
+      expect(runtime.shapeRenderer.getStats().createdCount).toBe(2);
+      expect(fetchData).toHaveBeenCalledTimes(initialRequests);
+      if (page === "temporary-map") expect(fetchData).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([false, true])(
     "登録地図はトップ地図の中心とズームを引き継ぎ、手動で対象全体にも移動できる（mobile=%s）",

@@ -49,6 +49,34 @@
 .leaflet-popup-content .geocode-content-popup .popup-content-body > :first-child {
   margin-top: 0;
 }
+@media screen {
+  .pc-map-popup-height .geocode-content-popup[data-content-key^="marker:"] {
+    display: flex;
+    flex-direction: column;
+    /* Leaflet の外枠 28px、アンカー・下余白など約 52〜58px に安全余白を加える。 */
+    --geocode-popup-content-height: max(0px, calc(var(--geocode-popup-map-height, 100vh) - 100px));
+    max-height: var(--geocode-popup-content-height);
+    /* 本文と見出しの幅を揃え、長い見出しだけで高さを使う場合も全体をスクロールできる。 */
+    width: 476px;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+  .pc-map-popup-height .geocode-content-popup[data-content-key^="marker:"] > * {
+    flex-shrink: 0;
+  }
+  .pc-map-popup-height .geocode-content-popup[data-content-key^="marker:"] > .popup-content-title {
+    overflow-wrap: anywhere;
+  }
+  .pc-map-popup-height .geocode-content-popup[data-content-key^="marker:"] > .popup-content-body {
+    flex-shrink: 1;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    min-height: min(1.3em, var(--geocode-popup-content-height));
+    max-height: 500px;
+    overflow-y: auto;
+  }
+}
 @media print {
   .geocode-content-popup .popup-content-toolbar {
     display: none;

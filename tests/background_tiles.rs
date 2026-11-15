@@ -12,7 +12,7 @@ const BACKGROUND_MIGRATION: &str =
     include_str!("../migrations/20261111090000_add_background_tile_kind.sql");
 
 #[test]
-fn スタイル_url_を検証し種別のない旧ラスタ定義を読める() {
+fn validate_style_urls_and_read_legacy_raster_definitions_without_kind() {
     for url in [
         "https://tiles.example.test/style.json",
         "HTTPS://tiles.example.test/v1/style.json?key=public",
@@ -59,7 +59,7 @@ fn スタイル_url_を検証し種別のない旧ラスタ定義を読める() 
 }
 
 #[tokio::test]
-async fn 背景列の追加で既存ラスタと保存済み共有_json_を保持する() {
+async fn preserve_existing_rasters_and_shared_json_when_adding_background_columns() {
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")
@@ -145,14 +145,27 @@ async fn 背景列の追加で既存ラスタと保存済み共有_json_を保�
 
 async fn insert_backgrounds(pool: &SqlitePool) {
     sqlx::query(
-        "INSERT INTO tileserver_model (id,layer_name,label,url,attribution,include_foreign_tiles,min_zoom,max_zoom,create_at,updated_at,kind,style_url)
-         VALUES (1,'raster','従来背景','/tile/{z}/{x}/{y}.png','出典',false,5,18,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,'raster',NULL),
-                (2,'vector','新背景','/fallback/{z}/{x}/{y}.png','出典',false,5,18,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,'vector','/styles/v1.json')",
-    ).execute(pool).await.unwrap();
+        r#"
+        INSERT INTO tileserver_model (
+            id, layer_name, label, url, attribution, include_foreign_tiles,
+            min_zoom, max_zoom, create_at, updated_at, kind, style_url
+        )
+        VALUES (
+            1, 'raster', '従来背景', '/tile/{z}/{x}/{y}.png', '出典', false,
+            5, 18, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'raster', NULL
+        ), (
+            2, 'vector', '新背景', '/fallback/{z}/{x}/{y}.png', '出典', false,
+            5, 18, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'vector', '/styles/v1.json'
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
-async fn 背景取得はラスタとベクタの種別とスタイルと画像_url_を保持する() {
+async fn preserve_raster_and_vector_kinds_styles_and_image_urls_when_reading_backgrounds() {
     let pool = common::test_pool().await;
     insert_backgrounds(&pool).await;
     let rows = load_tile_servers(&pool).await.unwrap();
@@ -166,11 +179,19 @@ async fn 背景取得はラスタとベクタの種別とスタイルと画像_u
 }
 
 #[tokio::test]
-async fn 背景取得は不正スタイル_url_を公開せずに拒否する() {
+async fn reject_invalid_style_urls_without_exposing_them() {
     let pool = common::test_pool().await;
     insert_backgrounds(&pool).await;
-    sqlx::query("UPDATE tileserver_model SET style_url='http://invalid.test/style.json?secret=private' WHERE id=2")
-        .execute(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        UPDATE tileserver_model
+        SET style_url='http://invalid.test/style.json?secret=private'
+        WHERE id=2
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     let error = load_tile_servers(&pool).await.unwrap_err().to_string();
     assert!(error.contains("Invalid background map definition"));
     assert!(!error.contains("private") && !error.contains("invalid.test"));

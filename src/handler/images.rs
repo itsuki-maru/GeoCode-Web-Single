@@ -85,7 +85,10 @@ async fn write_field_to_file_with_limit(
             .map_err(|_| AppError::InternalServerError)?;
     }
 
-    Ok(())
+    // 別のハンドルで読み込む前に、Tokio 内部の書き込み完了を待つ。
+    file.flush()
+        .await
+        .map_err(|_| AppError::InternalServerError)
 }
 
 async fn read_field_with_limit(
@@ -361,6 +364,7 @@ pub async fn upload_image_handler(
                 let _ = tokio::fs::remove_file(&temp_file_path).await;
                 return Err(error);
             }
+            drop(temp_file);
 
             let temp_file_data = tokio::fs::read(&temp_file_path)
                 .await
@@ -389,6 +393,11 @@ pub async fn upload_image_handler(
                 .write_all(&output_data)
                 .await
                 .map_err(|_| AppError::InternalServerError)?;
+            final_file
+                .flush()
+                .await
+                .map_err(|_| AppError::InternalServerError)?;
+            drop(final_file);
 
             let thumb_target = PathBuf::from(&temp_file_path);
             if let Err(_) = resizer(&thumb_target, thumb_dir.clone(), 450, &thumbnail_filename) {
@@ -421,13 +430,10 @@ pub async fn upload_image_handler(
                 let _ = tokio::fs::remove_file(&file_path).await;
                 return Err(error);
             }
-            file.flush()
-                .await
-                .map_err(|_| AppError::InternalServerError)?;
+            drop(file);
             if let Err(error) =
                 validate_saved_document(StdPath::new(&file_path), &normalized_ext).await
             {
-                drop(file);
                 let _ = tokio::fs::remove_file(&file_path).await;
                 return Err(error);
             }
@@ -455,6 +461,10 @@ pub async fn upload_image_handler(
                 .map_err(|_| AppError::InternalServerError)?;
             poster_file
                 .write_all(&encoded)
+                .await
+                .map_err(|_| AppError::InternalServerError)?;
+            poster_file
+                .flush()
                 .await
                 .map_err(|_| AppError::InternalServerError)?;
         }
@@ -566,5 +576,78 @@ pub async fn delete_image_handler(
             }));
         },
         Err(_) => return Err(AppError::InternalServerError),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_field_to_file_with_limit;
+    use axum::{
+        body::Body,
+        extract::{FromRequest, Multipart},
+        http::{Request, header::CONTENT_TYPE},
+    };
+    use std::{io::Cursor, task::Poll};
+    use tokio::{fs::File, io::AsyncWriteExt};
+
+    #[test]
+    fn multipart_write_waits_until_uploaded_bytes_are_readable() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("upload.png");
+        let mut png = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(1, 1)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let png = png.into_inner();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+
+        runtime.block_on(async {
+            let mut body = b"--completion-test\r\nContent-Disposition: form-data; name=\"upload_file\"; filename=\"upload.png\"\r\nContent-Type: image/png\r\n\r\n".to_vec();
+            body.extend_from_slice(&png);
+            body.extend_from_slice(b"\r\n--completion-test--\r\n");
+            let request = Request::builder()
+                .header(CONTENT_TYPE, "multipart/form-data; boundary=completion-test")
+                .body(Body::from(body))
+                .unwrap();
+            let mut multipart = Multipart::from_request(request, &()).await.unwrap();
+            let field = multipart.next_field().await.unwrap().unwrap();
+            let mut file = File::from_std(std::fs::File::create(&path).unwrap());
+
+            // 書き込み処理を止め、保存前に完了してしまう競合を確実に再現する。
+            let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+            let blocker = tokio::task::spawn_blocking(move || {
+                let _ = started_tx.send(());
+                // 途中でテストが失敗した場合も送信側の破棄で待機を終了する。
+                let _ = release_rx.recv();
+            });
+            started_rx.await.unwrap();
+
+            let mut write = Box::pin(write_field_to_file_with_limit(field, &mut file, png.len()));
+            let initial_poll = futures_util::poll!(write.as_mut());
+            let completed_before_write = initial_poll.is_ready();
+
+            // 検証の成否にかかわらず、待機中の処理を先に解放する。
+            drop(release_tx);
+            let result = match initial_poll {
+                Poll::Ready(result) => result,
+                Poll::Pending => write.as_mut().await,
+            };
+            drop(write);
+            blocker.await.unwrap();
+            file.flush().await.unwrap();
+            drop(file);
+
+            result.unwrap();
+            assert!(
+                !completed_before_write,
+                "書き込みが完了していないのにアップロード処理が完了しました"
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), png);
+        });
     }
 }

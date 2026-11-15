@@ -42,6 +42,7 @@ async fn create(pool: &SqlitePool, user: &str, value: Value) -> TileServers {
     admin_create(
         Extension(user.to_owned()),
         Extension(pool.clone()),
+        None,
         input(value),
     )
     .await
@@ -58,7 +59,7 @@ async fn rows(pool: &SqlitePool) -> Value {
 }
 
 #[tokio::test]
-async fn 旧ラスタ要求の既定値と未設定ズームを登録と編集で保持する() {
+async fn preserve_legacy_raster_defaults_and_unset_zoom_on_create_and_update() {
     let pool = common::test_pool().await;
     let admin = common::create_test_admin(&pool, "background-legacy-admin").await;
     let mut original = definition("既存ラスタ");
@@ -86,6 +87,7 @@ async fn 旧ラスタ要求の既定値と未設定ズームを登録と編集�
         Extension(admin.clone()),
         Extension(pool.clone()),
         Path(tile.id),
+        None,
         input(original),
     )
     .await
@@ -107,7 +109,7 @@ async fn 旧ラスタ要求の既定値と未設定ズームを登録と編集�
 }
 
 #[tokio::test]
-async fn ベクタとラスタの編集で背景_id_と作成日時を保持する() {
+async fn preserve_background_ids_and_creation_times_when_editing_raster_and_vector_maps() {
     let pool = common::test_pool().await;
     let admin = common::create_test_admin(&pool, "background-vector-admin").await;
     create(&pool, &admin, definition("既定ラスタ")).await;
@@ -130,6 +132,7 @@ async fn ベクタとラスタの編集で背景_id_と作成日時を保持す�
         Extension(admin.clone()),
         Extension(pool.clone()),
         Path(tile.id),
+        None,
         input(value.clone()),
     )
     .await
@@ -147,6 +150,7 @@ async fn ベクタとラスタの編集で背景_id_と作成日時を保持す�
         Extension(admin.clone()),
         Extension(pool.clone()),
         Path(tile.id),
+        None,
         input(value),
     )
     .await
@@ -166,7 +170,7 @@ async fn ベクタとラスタの編集で背景_id_と作成日時を保持す�
 }
 
 #[tokio::test]
-async fn 有効な管理者だけが背景設定を取得更新できる() {
+async fn allow_only_active_administrators_to_read_and_update_background_maps() {
     let pool = common::test_pool().await;
     let admin = common::create_test_admin(&pool, "background-authorized-admin").await;
     create(&pool, &admin, definition("保護されたラスタ")).await;
@@ -187,6 +191,7 @@ async fn 有効な管理者だけが背景設定を取得更新できる() {
             admin_create(
                 Extension(actor.clone()),
                 Extension(pool.clone()),
+                None,
                 input(definition("不許可"))
             )
             .await,
@@ -197,6 +202,7 @@ async fn 有効な管理者だけが背景設定を取得更新できる() {
                 Extension(actor.clone()),
                 Extension(pool.clone()),
                 Path(1),
+                None,
                 input(definition("不許可"))
             )
             .await,
@@ -207,7 +213,7 @@ async fn 有効な管理者だけが背景設定を取得更新できる() {
 }
 
 #[tokio::test]
-async fn 不正入力と既定背景のベクタ化で保存済み設定を変更しない() {
+async fn reject_invalid_input_and_vector_default_without_changing_settings() {
     let pool = common::test_pool().await;
     let admin = common::create_test_admin(&pool, "background-validation-admin").await;
     create(&pool, &admin, definition("既定背景")).await;
@@ -264,6 +270,7 @@ async fn 不正入力と既定背景のベクタ化で保存済み設定を変�
             Extension(admin.clone()),
             Extension(pool.clone()),
             Path(tile.id),
+            None,
             input(value),
         )
         .await
@@ -281,6 +288,7 @@ async fn 不正入力と既定背景のベクタ化で保存済み設定を変�
             Extension(admin.clone()),
             Extension(pool.clone()),
             Path(1),
+            None,
             input(vector("既定背景"))
         )
         .await,
@@ -291,6 +299,7 @@ async fn 不正入力と既定背景のベクタ化で保存済み設定を変�
             Extension(admin.clone()),
             Extension(pool.clone()),
             Path(9999),
+            None,
             input(definition("存在しない"))
         )
         .await,
@@ -300,13 +309,14 @@ async fn 不正入力と既定背景のベクタ化で保存済み設定を変�
 }
 
 #[tokio::test]
-async fn 既定ラスタ欠落と重複識別名を拒否し旧行を保持する() {
+async fn reject_missing_default_raster_and_duplicate_layer_names_without_changing_rows() {
     let pool = common::test_pool().await;
     let admin = common::create_test_admin(&pool, "background-constraints-admin").await;
     assert!(matches!(
         admin_create(
             Extension(admin.clone()),
             Extension(pool.clone()),
+            None,
             input(vector("先行ベクタ"))
         )
         .await,
@@ -321,6 +331,7 @@ async fn 既定ラスタ欠落と重複識別名を拒否し旧行を保持す�
         admin_create(
             Extension(admin.clone()),
             Extension(pool.clone()),
+            None,
             input(definition("同じ背景名"))
         )
         .await,
@@ -331,6 +342,7 @@ async fn 既定ラスタ欠落と重複識別名を拒否し旧行を保持す�
             Extension(admin.clone()),
             Extension(pool.clone()),
             Path(second.id),
+            None,
             input(definition("同じ背景名"))
         )
         .await,
@@ -350,6 +362,7 @@ async fn 既定ラスタ欠落と重複識別名を拒否し旧行を保持す�
         Extension(admin.clone()),
         Extension(pool.clone()),
         Path(second.id),
+        None,
         input(renamed_label),
     )
     .await
@@ -366,6 +379,7 @@ async fn 既定ラスタ欠落と重複識別名を拒否し旧行を保持す�
             Extension(admin.clone()),
             Extension(pool.clone()),
             Path(second.id),
+            None,
             input(vector("同じ背景名"))
         )
         .await,
@@ -374,25 +388,37 @@ async fn 既定ラスタ欠落と重複識別名を拒否し旧行を保持す�
 }
 
 #[tokio::test]
-async fn 手入力_id_と並行登録が既存背景_id_を再利用しない() {
+async fn avoid_reusing_background_ids_for_manual_ids_and_concurrent_creates() {
     let (pool, database_path) = common::file_test_pool().await;
     let admin = common::create_test_admin(&pool, "background-id-admin").await;
     create(&pool, &admin, definition("既定背景")).await;
-    sqlx::query("INSERT INTO tileserver_model (id,layer_name,label,url,attribution,create_at,updated_at) VALUES (100,'手動背景','手動背景','/legacy.png','旧出典',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO tileserver_model (
+            id, layer_name, label, url, attribution, create_at, updated_at
+        )
+        VALUES (
+            100, '手動背景', '手動背景', '/legacy.png', '旧出典',
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     let created = create(&pool, &admin, vector("採番同期ベクタ")).await;
     assert_eq!(created.id, 101);
     let (first, second) = tokio::join!(
         admin_create(
             Extension(admin.clone()),
             Extension(pool.clone()),
+            None,
             input(definition("並行A"))
         ),
         admin_create(
             Extension(admin.clone()),
             Extension(pool.clone()),
+            None,
             input(definition("並行B"))
         ),
     );
@@ -411,11 +437,13 @@ async fn 手入力_id_と並行登録が既存背景_id_を再利用しない() 
         admin_create(
             Extension(admin.clone()),
             Extension(pool.clone()),
+            None,
             input(definition("並行重複"))
         ),
         admin_create(
             Extension(admin.clone()),
             Extension(pool.clone()),
+            None,
             input(definition("並行重複"))
         ),
     );
@@ -425,7 +453,7 @@ async fn 手入力_id_と並行登録が既存背景_id_を再利用しない() 
 }
 
 #[tokio::test]
-async fn 新規変更した出典を安全化し未変更の旧_html_を保持する() {
+async fn sanitize_new_attribution_and_preserve_unchanged_legacy_html() {
     let pool = common::test_pool().await;
     let admin = common::create_test_admin(&pool, "background-attribution-admin").await;
     let mut value = definition("新しい出典");
@@ -452,6 +480,7 @@ async fn 新規変更した出典を安全化し未変更の旧_html_を保持�
         Extension(admin.clone()),
         Extension(pool.clone()),
         Path(tile.id),
+        None,
         input(value.clone()),
     )
     .await
@@ -472,6 +501,7 @@ async fn 新規変更した出典を安全化し未変更の旧_html_を保持�
         Extension(admin.clone()),
         Extension(pool.clone()),
         Path(tile.id),
+        None,
         input(value),
     )
     .await
@@ -486,6 +516,7 @@ async fn 新規変更した出典を安全化し未変更の旧_html_を保持�
         admin_create(
             Extension(admin.clone()),
             Extension(pool.clone()),
+            None,
             input(expanded.clone())
         )
         .await,
@@ -496,6 +527,7 @@ async fn 新規変更した出典を安全化し未変更の旧_html_を保持�
             Extension(admin.clone()),
             Extension(pool.clone()),
             Path(tile.id),
+            None,
             input(expanded)
         )
         .await,
@@ -505,7 +537,7 @@ async fn 新規変更した出典を安全化し未変更の旧_html_を保持�
 }
 
 #[tokio::test]
-async fn 管理ルートは認証を要求し不正な_json_型を拒否する() {
+async fn require_authentication_and_valid_json_types_for_admin_routes() {
     let pool = common::test_pool().await;
     let admin = common::create_test_admin(&pool, "background-router-admin").await;
     let app = geocode_web_single::router::build_router(

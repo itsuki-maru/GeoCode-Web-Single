@@ -274,9 +274,15 @@ mod tests {
             let config =
                 GeocoderConfig::from_values(Some(provider), Some(&url), Some("test-secret"))
                     .unwrap();
+            let client = Client::builder()
+                .no_proxy()
+                .timeout(Duration::from_secs(10))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .unwrap();
             assert!(
                 config
-                    .search(&GeocoderConfig::client(), "東京都千代田区")
+                    .search(&client, "東京都千代田区")
                     .await
                     .unwrap()
                     .is_empty()

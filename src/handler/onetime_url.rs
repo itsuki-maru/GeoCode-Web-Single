@@ -24,10 +24,28 @@ use uuid::Uuid;
 
 mod snapshot;
 
+async fn validate_snapshot_local_tiles(
+    service: Option<&Arc<crate::local_tiles::LocalTiles>>,
+    metadata: &serde_json::Value,
+) -> Result<(), AppError> {
+    for tile in metadata["tileServers"]
+        .as_object()
+        .into_iter()
+        .flat_map(|tiles| tiles.values())
+        .chain(metadata["tileOverlays"].as_array().into_iter().flatten())
+    {
+        if let Some(url) = tile["url"].as_str() {
+            super::background_maps::validate_local_tile_url(service, url).await?;
+        }
+    }
+    Ok(())
+}
+
 // 通常共有と全画面地図共有を、同じ1枠へ原子的に保存する。
 pub async fn generate_url_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
+    local_tiles: Option<Extension<Arc<crate::local_tiles::LocalTiles>>>,
     Json(payload): Json<GenarateUrlPayload>,
 ) -> Result<Json<CreateUpdatedTemporaryUrlResponse>, AppError> {
     if payload.layers.is_empty() && payload.snapshot.is_none() {
@@ -42,6 +60,15 @@ pub async fn generate_url_handler(
         .snapshot
         .map(|value| snapshot::parse(value, &user_id))
         .transpose()?;
+    // 本体DBの接続を確保する前に、復旧または遅延初期化が必要なcatalogを初期化する。
+    // 以下で書き込みの排他を保持した状態でも、有効状態を再検査する。
+    if let Some(captured) = &captured {
+        validate_snapshot_local_tiles(
+            local_tiles.as_ref().map(|extension| &extension.0),
+            &captured.metadata,
+        )
+        .await?;
+    }
     let mut tx = super::answer_sqlite::begin_write(&pool).await?;
     let owner_exists: bool = sqlx::query_scalar(
         r#"
@@ -60,6 +87,13 @@ pub async fn generate_url_handler(
     }
     let (layers, markers, shapes, map_snapshot) = if let Some(captured) = captured {
         snapshot::authorize(&mut tx, &user_id, &captured).await?;
+        // スナップショットの保存まで本体DBの書き込みの排他を保持する。利用停止処理も
+        // 同じ排他を使い、背景と共有からの参照を確認する。
+        validate_snapshot_local_tiles(
+            local_tiles.as_ref().map(|extension| &extension.0),
+            &captured.metadata,
+        )
+        .await?;
         let requested: std::collections::HashSet<_> = payload.layers.iter().cloned().collect();
         if requested != captured.layers.keys().cloned().collect() {
             return Err(AppError::Validation(

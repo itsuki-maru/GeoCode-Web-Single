@@ -196,7 +196,7 @@ describe("zoom-dependent shape visibility", () => {
     },
   );
 
-  it.each([0, 4, 6, 8, 12])("honors an explicit %s pixel override, including print", (minimum) => {
+  it.each([0, 4, 6, 8, 12])("honors an explicit %s pixel override, including zero", (minimum) => {
     const f = fixture({ minPixelSize: minimum });
     f.setBounds(localBounds);
     f.setZoom(12);
