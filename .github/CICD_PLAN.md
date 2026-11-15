@@ -116,6 +116,8 @@ $env:TAURI_CONFIG = @{ build = @{ frontendDist = $env:GEOCODE_FRONTEND_DIST } } 
 
 共通フロント全体を固定したPostgreSQL基準と比較し、差分や余剰ファイルがあれば失敗させる。3系統のVueと地図テンプレート用ES Modulesは`target/frontend-dist`内だけでビルド・集約し、`GEOCODE_FRONTEND_DIST`でRustへ渡す。`-SkipCargoBuild`でRust release buildを省略する。既存のルート`dist/`や`src_frontend`各`dist/`を消さず、未管理の既存出力・リンクされたパスも上書きしない。
 
+CI/releaseでは、出力先を`target/frontend-dist-<run_id>-<run_attempt>`として実行ごとに分け、後続の資材検査・Rust・Tauriには同じ`GEOCODE_FRONTEND_DIST`の絶対パスを渡す。`rust-cache`は保存時に所有マーカーを含む生成ファイルを除去し、空ディレクトリを残すため、固定の生成先を再利用すると次回の所有確認で停止する。既存キャッシュの削除や未管理ディレクトリの上書きは行わず、新しい出力先で回避する。
+
 隔離ビルドでも、共通frontendの`build-only`が行うvendor生成を省略しない。SQLite専用helperでLeaflet・markercluster・XSS・markedと必要なCSS/PNGの12ファイルを同じ隔離先に生成する。HTML/CSSから参照される資材の実HTTP配信は`local_manifest`試験でも検査し、既存distにだけ存在する資材で成功しないことを確認する。
 
 通常のCI/releaseは、リポジトリに保存した`tests/fixtures/frontend-compat-baseline.json`との照合を必須とする。非公開の移植元リポジトリを取得せず、`FRONTEND_SOURCE_TOKEN`等の追加Secretも要求しない。これにより、移植元へのアクセス権がない環境やforkのPRでも同じ固定基準を検査できる。内容差・欠落・余剰は引き続き失敗とし、CIで基準を自動更新しない。Tauri自身の埋込先も`TAURI_CONFIG`または`--config`で隔離先へ指定する。
