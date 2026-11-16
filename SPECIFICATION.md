@@ -22,7 +22,9 @@ PostgreSQL から SQLite を使用することによる差分吸収は **全て�
 
 - PostgreSQL の JSONB が使えないため、本体は `serde_json::Value` を使用するところ、 String 型となる場合は、テキストから JSON へのパースはフロントではなく、バックエンドで行ってから返却するといったもの。
 
-この方針はPostgreSQL版と共通の機能に適用する。本体に組み込むローカルOSMタイル生成の管理はSingle版のCLIだけへ置き、表示には共通フロントと通常のXYZ背景を使用する。
+この方針はPostgreSQL版と共通の機能に適用する。ローカルOSMタイルの生成・配信はSQLite版固有の機能で、PostgreSQL版への実装は予定しない。表示には共通の`src_frontend/`・`src/templates/`と通常のXYZ背景を使用する。
+
+タイル生成の管理は同じ本体exeの`local-tiles` CLIと、`local-tiles gui`で開く独立したTauri管理画面から行う。管理画面では通常アプリ・HTTPサーバー・タイル配信を起動しない。共通Webフロントに生成管理画面を追加せず、管理HTTP APIも設けない。操作方法は[ローカル地図](docs/LOCAL_TILES.md)を参照する。
 
 ## 2. システム構成
 
@@ -1313,7 +1315,7 @@ PostgreSQL版の `6d8123a..abd2578`（フォーム改善からセキュリティ
 
 ## ローカルOSMタイルの取り込みと生成
 
-OSM-Tile-Generatorの生成核を`src/tilegen/`へ移植し、本体の`src/local_tiles/`が保存・実行管理を担当する。独立SDKへのpath依存や外部生成CLIは使用しない。PBF取り込み、完成DB登録、事前生成、取消・状態照会は同じ本体exeの`local-tiles` CLIから行い、配信は通常のXYZエンドポイントで扱う。フロントとテンプレートはPostgreSQL版と共通にし、SQLite専用画面・管理HTTP APIを設けない。詳細な操作・設定は[ローカル地図](docs/LOCAL_TILES.md)を参照する。
+OSM-Tile-Generatorの生成核を`src/tilegen/`へ移植し、本体の`src/local_tiles/`が保存・実行管理を担当する。独立SDKへのpath依存や外部生成CLIは使用しない。PBF取り込み、完成DB登録、事前生成、取消・状態照会は同じ本体exeの`local-tiles` CLIまたは`local-tiles gui`の専用Tauri管理画面から行う。管理画面では通常アプリ・HTTPサーバー・タイル配信を起動せず、生成処理は同じexeの独立した非表示ワーカーで実行する。配信は通常アプリまたはサーバー単体モードのXYZエンドポイントで扱う。共通WebフロントとテンプレートはPostgreSQL版と共通にし、生成管理画面・管理HTTP APIを追加しない。詳細な操作・設定は[ローカル地図](docs/LOCAL_TILES.md)を参照する。
 
 - XYZ、Web Mercator、256px不透明PNG、z0〜22。旧schema/geometry=1/1の`roads-v1`と道路取り込みの既定動作・画素・IDを維持する。旧道路のz0〜5は背景のみ。
 - `import --features standard-v1`はschema/geometry=2/2の別完成DBを作り、建物・中庭・土地被覆・水域・島・水路・鉄道を格納する。PBFはRelation→Way→Nodeの3走査とディスクstagingで処理し、欠損面を直線で補完しない。標準地図の描画契約v3は道路のv2から分離する。
