@@ -143,8 +143,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/check-frontend-compat.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./scripts/build-frontend-assets.ps1 -SkipCargoBuild -OutputRoot target/frontend-dist
-          $assets = (Resolve-Path target/frontend-dist).Path
+          # CIと同じく、復元キャッシュ内の古い生成先を再利用しない。
+          $output = 'target/frontend-dist-${{ github.run_id }}-${{ github.run_attempt }}'
+          ./scripts/build-frontend-assets.ps1 -SkipCargoBuild -OutputRoot $output
+          $assets = (Resolve-Path -LiteralPath $output).Path
           "GEOCODE_FRONTEND_DIST=$assets" | Add-Content -Path $env:GITHUB_ENV -Encoding utf8
           $tauri = @{ build = @{ frontendDist = $assets } } | ConvertTo-Json -Compress
           "TAURI_CONFIG=$tauri" | Add-Content -Path $env:GITHUB_ENV -Encoding utf8

@@ -184,8 +184,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/check-frontend-compat.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./scripts/build-frontend-assets.ps1 -SkipCargoBuild -OutputRoot target/frontend-dist
-          $assets = (Resolve-Path target/frontend-dist).Path
+          # Rustキャッシュが空ディレクトリだけ復元するため、実行ごとに新しい生成先を選ぶ。
+          $output = 'target/frontend-dist-${{ github.run_id }}-${{ github.run_attempt }}'
+          ./scripts/build-frontend-assets.ps1 -SkipCargoBuild -OutputRoot $output
+          $assets = (Resolve-Path -LiteralPath $output).Path
           "GEOCODE_FRONTEND_DIST=$assets" | Add-Content -Path $env:GITHUB_ENV -Encoding utf8
           $tauri = @{ build = @{ frontendDist = $assets } } | ConvertTo-Json -Compress
           "TAURI_CONFIG=$tauri" | Add-Content -Path $env:GITHUB_ENV -Encoding utf8
@@ -216,15 +218,15 @@ jobs:
             "marked.min.js"
           )
           foreach ($asset in $requiredAssets) {
-            if (-Not (Test-Path "target/frontend-dist/assets/$asset" -PathType Leaf)) {
+            if (-Not (Test-Path (Join-Path $env:GEOCODE_FRONTEND_DIST "assets/$asset") -PathType Leaf)) {
               throw "Required template asset was not generated: $asset"
             }
           }
-          if (Get-ChildItem "target/frontend-dist/assets" -File -Filter "map-common-*.js") {
+          if (Get-ChildItem (Join-Path $env:GEOCODE_FRONTEND_DIST 'assets') -File -Filter "map-common-*.js") {
             throw "Removed compatibility scripts were included in dist/assets"
           }
-          if (Get-ChildItem "target/frontend-dist/templates" -File | Where-Object Extension -ne ".html") {
-            throw "target/frontend-dist/templates contains a non-HTML file"
+          if (Get-ChildItem (Join-Path $env:GEOCODE_FRONTEND_DIST 'templates') -File | Where-Object Extension -ne ".html") {
+            throw "Embedded templates contain a non-HTML file"
           }
 
       - name: Check Rust formatting
