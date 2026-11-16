@@ -11,6 +11,7 @@ use geocode_web_single::{
         runtime::{self, DatasetHandle, Engine},
     },
     tilegen::{
+        cancel::CancellationToken,
         dataset::Dataset,
         import::{self, ImportOptions, MissingNodes},
         tile::TileId,
@@ -228,6 +229,339 @@ async fn last_departure_retains_worker_slot_until_exit_and_next_request_recovers
     assert!(!fixture.path(fixture.tile).exists());
     checked(checked(subscribe())?.wait(Duration::from_secs(5)).await)?;
     assert!(fixture.path(fixture.tile).is_file());
+    Ok(())
+}
+
+#[tokio::test]
+async fn cancelling_the_last_background_waiter_joins_native_work_before_returning() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let engine = checked(Engine::start(&fixture.config))?;
+    let permit = fixture.handle.publication.lock().unwrap();
+    let subscribe = || {
+        engine.subscribe(
+            "background-cancel".into(),
+            fixture.handle.clone(),
+            fixture.tile,
+            fixture.path(fixture.tile),
+            true,
+        )
+    };
+    let subscription = checked(subscribe())?;
+    until(|| engine.counts().1 == 1).await;
+    let cancellation = CancellationToken::new();
+    cancellation.cancel();
+    let mut waiting =
+        Box::pin(subscription.wait_cancellable(Duration::from_secs(5), &cancellation));
+    assert!(futures_util::poll!(waiting.as_mut()).is_pending());
+    assert_eq!(engine.counts().1, 1);
+    assert_eq!(
+        subscribe()
+            .err()
+            .expect("native work is still draining")
+            .status,
+        503
+    );
+    assert!(!fixture.path(fixture.tile).exists());
+    drop(permit);
+    let stopped = waiting.await.unwrap_err();
+    assert_eq!(stopped.status, 499);
+    assert_eq!(engine.counts(), (0, 0, 0));
+    assert!(!fixture.path(fixture.tile).exists());
+    checked(checked(subscribe())?.wait(Duration::from_secs(5)).await)?;
+    assert_eq!(engine.counts().2, 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn cancelling_a_background_waiter_preserves_the_foreground_subscriber() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let engine = checked(Engine::start(&fixture.config))?;
+    let permit = fixture.handle.publication.lock().unwrap();
+    let path = fixture.path(fixture.tile);
+    let background = checked(engine.subscribe(
+        "background-shared".into(),
+        fixture.handle.clone(),
+        fixture.tile,
+        path.clone(),
+        true,
+    ))?;
+    until(|| engine.counts().1 == 1).await;
+    let foreground = checked(engine.subscribe(
+        "background-shared".into(),
+        fixture.handle.clone(),
+        fixture.tile,
+        path.clone(),
+        false,
+    ))?;
+    let cancellation = CancellationToken::new();
+    cancellation.cancel();
+    let stopped = tokio::time::timeout(
+        Duration::from_secs(5),
+        background.wait_cancellable(Duration::from_secs(5), &cancellation),
+    )
+    .await
+    .expect("a shared HTTP task must not delay background cancellation")
+    .unwrap_err();
+    assert_eq!(stopped.status, 499);
+    assert_eq!(engine.counts(), (0, 1, 0));
+    assert!(!path.exists());
+    drop(permit);
+    let png = checked(foreground.wait(Duration::from_secs(5)).await)?;
+    assert_eq!(
+        runtime::read_png(&path).map_err(|e| anyhow!(e.message))?,
+        Some(png.as_ref().clone())
+    );
+    assert_eq!(engine.counts(), (0, 0, 1));
+    Ok(())
+}
+
+async fn assert_queued_background_stop_releases_capacity(expired: bool) -> Result<()> {
+    let mut fixture = Fixture::new()?;
+    fixture.config.queue_capacity = 1;
+    fixture.config.max_subscribers = 2;
+    let engine = checked(Engine::start(&fixture.config))?;
+    let permit = fixture.handle.publication.lock().unwrap();
+    let running = checked(engine.subscribe(
+        "occupied-worker".into(),
+        fixture.handle.clone(),
+        fixture.tile,
+        fixture.path(fixture.tile),
+        false,
+    ))?;
+    until(|| engine.counts().1 == 1).await;
+    let tile = TileId::new(14, fixture.tile.x + 1, fixture.tile.y)?;
+    let subscribe = || {
+        engine.subscribe(
+            "queued-background".into(),
+            fixture.handle.clone(),
+            tile,
+            fixture.path(tile),
+            true,
+        )
+    };
+    let queued = checked(subscribe())?;
+    assert_eq!(engine.counts(), (1, 1, 0));
+    let cancellation = CancellationToken::new();
+    if !expired {
+        cancellation.cancel();
+    }
+    let timeout = if expired {
+        Duration::ZERO
+    } else {
+        Duration::from_secs(5)
+    };
+    let failure = tokio::time::timeout(
+        Duration::from_secs(5),
+        queued.wait_cancellable(timeout, &cancellation),
+    )
+    .await
+    .expect("a queued task must stop while the only worker remains occupied")
+    .unwrap_err();
+    assert_eq!(failure.status, if expired { 504 } else { 499 });
+    assert_eq!(engine.counts(), (0, 1, 0));
+    assert!(!fixture.path(tile).exists());
+    // 同じkeyも即座に再受付できることで、queue/inflight/購読数すべての解放を確かめる。
+    let replacement = checked(subscribe())?;
+    assert_eq!(engine.counts(), (1, 1, 0));
+    drop(replacement);
+    assert_eq!(engine.counts(), (0, 1, 0));
+    drop(permit);
+    checked(running.wait(Duration::from_secs(5)).await)?;
+    assert_eq!(engine.counts(), (0, 0, 1));
+    assert!(!fixture.path(tile).exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn cancelling_queued_background_work_releases_capacity_without_an_idle_worker() -> Result<()>
+{
+    assert_queued_background_stop_releases_capacity(false).await
+}
+
+#[tokio::test]
+async fn expiring_queued_background_work_releases_capacity_without_an_idle_worker() -> Result<()> {
+    assert_queued_background_stop_releases_capacity(true).await
+}
+
+#[tokio::test]
+async fn cancelling_a_queued_background_waiter_keeps_shared_foreground_work_until_last_departure()
+-> Result<()> {
+    let mut fixture = Fixture::new()?;
+    fixture.config.queue_capacity = 1;
+    fixture.config.max_subscribers = 3;
+    let engine = checked(Engine::start(&fixture.config))?;
+    let permit = fixture.handle.publication.lock().unwrap();
+    let running = checked(engine.subscribe(
+        "occupied-worker".into(),
+        fixture.handle.clone(),
+        fixture.tile,
+        fixture.path(fixture.tile),
+        false,
+    ))?;
+    until(|| engine.counts().1 == 1).await;
+    let tile = TileId::new(14, fixture.tile.x + 1, fixture.tile.y)?;
+    let background = checked(engine.subscribe(
+        "queued-shared".into(),
+        fixture.handle.clone(),
+        tile,
+        fixture.path(tile),
+        true,
+    ))?;
+    let foreground = checked(engine.subscribe(
+        "queued-shared".into(),
+        fixture.handle.clone(),
+        tile,
+        fixture.path(tile),
+        false,
+    ))?;
+    let cancellation = CancellationToken::new();
+    cancellation.cancel();
+    let failure = tokio::time::timeout(
+        Duration::from_secs(5),
+        background.wait_cancellable(Duration::from_secs(5), &cancellation),
+    )
+    .await
+    .expect("a shared queued task must only release the cancelled subscriber")
+    .unwrap_err();
+    assert_eq!(failure.status, 499);
+    assert_eq!(engine.counts(), (1, 1, 0));
+    // foregroundへ昇格した共有タスクは、最後の要求が離れた時だけ除去する。
+    drop(foreground);
+    assert_eq!(engine.counts(), (0, 1, 0));
+    let replacement = checked(engine.subscribe(
+        "queued-shared".into(),
+        fixture.handle.clone(),
+        tile,
+        fixture.path(tile),
+        false,
+    ))?;
+    assert_eq!(engine.counts(), (1, 1, 0));
+    assert!(!fixture.path(tile).exists());
+    drop(permit);
+    checked(running.wait(Duration::from_secs(5)).await)?;
+    checked(replacement.wait(Duration::from_secs(5)).await)?;
+    assert_eq!(engine.counts(), (0, 0, 2));
+    assert!(fixture.path(tile).is_file());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_published_background_result_wins_over_an_already_requested_cancellation() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let engine = checked(Engine::start(&fixture.config))?;
+    let path = fixture.path(fixture.tile);
+    let background = checked(engine.subscribe(
+        "background-complete".into(),
+        fixture.handle.clone(),
+        fixture.tile,
+        path.clone(),
+        true,
+    ))?;
+    let observer = checked(engine.subscribe(
+        "background-complete".into(),
+        fixture.handle.clone(),
+        fixture.tile,
+        path,
+        false,
+    ))?;
+    let published = checked(observer.wait(Duration::from_secs(5)).await)?;
+    let cancellation = CancellationToken::new();
+    cancellation.cancel();
+    let result = checked(
+        background
+            .wait_cancellable(Duration::ZERO, &cancellation)
+            .await,
+    )?;
+    assert_eq!(result.as_slice(), published.as_slice());
+    assert_eq!(engine.counts(), (0, 0, 1));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_background_wait_deadline_retains_the_native_slot_until_exit() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let engine = checked(Engine::start(&fixture.config))?;
+    let permit = fixture.handle.publication.lock().unwrap();
+    let background = checked(engine.subscribe(
+        "background-deadline".into(),
+        fixture.handle.clone(),
+        fixture.tile,
+        fixture.path(fixture.tile),
+        true,
+    ))?;
+    until(|| engine.counts().1 == 1).await;
+    tokio::time::pause();
+    let cancellation = CancellationToken::new();
+    let mut waiting = Box::pin(background.wait_cancellable(Duration::from_secs(1), &cancellation));
+    assert!(futures_util::poll!(waiting.as_mut()).is_pending());
+    tokio::time::advance(Duration::from_secs(1)).await;
+    assert!(futures_util::poll!(waiting.as_mut()).is_pending());
+    assert_eq!(engine.counts(), (0, 1, 0));
+    drop(permit);
+    let stopped = waiting.await.unwrap_err();
+    assert_eq!(stopped.status, 504);
+    assert_eq!(engine.counts(), (0, 0, 0));
+    assert!(!fixture.path(fixture.tile).exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn two_native_workers_render_distinct_tiles_while_respecting_the_waiting_limit() -> Result<()>
+{
+    let mut fixture = Fixture::new()?;
+    fixture.config.workers = 2;
+    fixture.config.queue_capacity = 1;
+    let engine = checked(Engine::start(&fixture.config))?;
+    let permit = fixture.handle.publication.lock().unwrap();
+    let second_tile = TileId::new(14, fixture.tile.x + 1, fixture.tile.y)?;
+    let third_tile = TileId::new(14, fixture.tile.x + 2, fixture.tile.y)?;
+    let fourth_tile = TileId::new(14, fixture.tile.x + 3, fixture.tile.y)?;
+    let first = checked(engine.subscribe(
+        "parallel-first".into(),
+        fixture.handle.clone(),
+        fixture.tile,
+        fixture.path(fixture.tile),
+        true,
+    ))?;
+    until(|| engine.counts().1 == 1).await;
+    let second = checked(engine.subscribe(
+        "parallel-second".into(),
+        fixture.handle.clone(),
+        second_tile,
+        fixture.path(second_tile),
+        true,
+    ))?;
+    until(|| engine.counts().1 == 2).await;
+    let third = checked(engine.subscribe(
+        "parallel-third".into(),
+        fixture.handle.clone(),
+        third_tile,
+        fixture.path(third_tile),
+        true,
+    ))?;
+    assert_eq!(engine.counts(), (1, 2, 0));
+    assert_eq!(
+        engine
+            .subscribe(
+                "parallel-overflow".into(),
+                fixture.handle.clone(),
+                fourth_tile,
+                fixture.path(fourth_tile),
+                true,
+            )
+            .err()
+            .expect("waiting capacity must be enforced with multiple workers")
+            .status,
+        503
+    );
+    drop(third);
+    drop(permit);
+    checked(first.wait(Duration::from_secs(5)).await)?;
+    checked(second.wait(Duration::from_secs(5)).await)?;
+    until(|| engine.counts().0 == 0 && engine.counts().1 == 0).await;
+    assert_eq!(engine.counts().2, 2);
+    assert!(!fixture.path(third_tile).exists());
+    assert!(!fixture.path(fourth_tile).exists());
     Ok(())
 }
 

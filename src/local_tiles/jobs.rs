@@ -13,9 +13,11 @@ use crate::tilegen::{
     operation::OperationContext,
     tile::{GeoBbox, TilePlan},
 };
+use futures_util::{StreamExt, stream::FuturesUnordered};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
+    future::Future,
     io::Write,
     path::{Path, PathBuf},
     sync::{Arc, atomic::Ordering},
@@ -111,7 +113,7 @@ pub struct PrecomputeRequest {
     pub render_id: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Manifest {
     version: u32,
     dataset_id: String,
@@ -295,7 +297,7 @@ impl LocalTiles {
             let outcome = app
                 .monitor_job_cancellation(&task_id, &token, operation)
                 .await;
-            finish_job(&app, &task_id, outcome, &token).await;
+            finish_job(&app, &task_id, outcome, None).await;
         });
         if !accepted {
             self.cancellations.lock().unwrap().remove(&id);
@@ -601,6 +603,7 @@ impl LocalTiles {
         let app = self.clone();
         let task_id = id.clone();
         let accepted = self.spawn_background_task(async move {
+            let mut final_progress = None;
             let operation = app.run_precompute(
                 &task_id,
                 plan,
@@ -608,11 +611,12 @@ impl LocalTiles {
                 manifest,
                 token.clone(),
                 admission,
+                &mut final_progress,
             );
             let outcome = app
                 .monitor_job_cancellation(&task_id, &token, operation)
                 .await;
-            finish_job(&app, &task_id, outcome, &token).await;
+            finish_job(&app, &task_id, outcome, final_progress).await;
         });
         if !accepted {
             self.cancellations.lock().unwrap().remove(&id);
@@ -749,29 +753,62 @@ impl LocalTiles {
         mut manifest: Manifest,
         token: CancellationToken,
         admission: JobAdmission,
+        final_progress: &mut Option<Value>,
     ) -> Result<Value> {
-        let mut last_flush = Instant::now() - Duration::from_secs(1);
+        // 回収と最終記録が終わるまで事前生成ジョブの枠を保持する。
+        let mut slot = None;
         let result: Result<Value> = async {
-            let _slot = self.acquire_job_slot(self.precompute_slot.clone(), &token, admission).await?;
+            slot = Some(
+                self.acquire_job_slot(self.precompute_slot.clone(), &token, admission)
+                    .await?,
+            );
             manifest.state = "running".into();
-            for tile in plan.iter() {
-                self.check_job_cancelled(&token)?;
-                let result = tokio::select! {
-                    result = self.render(&manifest.dataset_id, &manifest.render_id, tile, true) => result,
-                    _ = wait_for_cancel(token.clone()) => Err(Failure::new(499, "事前生成を取り消しました。")),
-                };
-                let (_, hit) = result?;
-                manifest.completed_tiles += 1;
-                manifest.reused_tiles += u64::from(hit);
-                if last_flush.elapsed() >= Duration::from_secs(1) {
-                    write_manifest(&path, &manifest).await?;
-                    catalog::update_job(&self.catalog, id, "running", &manifest_progress(&manifest).to_string(), None)
-                        .await.map_err(catalog_failure)?;
-                    last_flush = Instant::now();
-                }
-            }
+            let dataset_id = manifest.dataset_id.clone();
+            let render_id = manifest.render_id.clone();
+            let window = self
+                .config
+                .workers
+                .min(self.config.queue_capacity)
+                .min(self.config.max_subscribers);
+            run_precompute_window(
+                plan.iter(),
+                window,
+                &mut manifest,
+                &token,
+                |tile, cancellation| {
+                    let dataset_id = &dataset_id;
+                    let render_id = &render_id;
+                    async move {
+                        self.check_job_cancelled(&cancellation)?;
+                        let (_, hit) = self
+                            .render_precompute(dataset_id, render_id, tile, &cancellation)
+                            .await?;
+                        Ok(hit)
+                    }
+                },
+                |snapshot| {
+                    let path = &path;
+                    async move {
+                        write_manifest(path, &snapshot).await?;
+                        catalog::update_job(
+                            &self.catalog,
+                            id,
+                            "running",
+                            &manifest_progress(&snapshot).to_string(),
+                            None,
+                        )
+                        .await
+                        .map(|_| ())
+                        .map_err(catalog_failure)
+                    }
+                },
+            )
+            .await?;
             Ok(manifest_progress(&manifest))
-        }.await;
+        }
+        .await;
+        // エラー終端でも、直前の定期保存ではなく回収後の最新件数を使う。
+        *final_progress = Some(manifest_progress(&manifest));
         // 最後の公開が完了した場合は、その後の取消要求より成功を優先する。
         manifest.state = match &result {
             Ok(_) => "succeeded",
@@ -940,6 +977,84 @@ async fn wait_for_cancel(token: CancellationToken) {
     }
 }
 
+/// 未完了要求だけを保持し、完了した枠へ次の1枚を補充する。
+/// 停止は自分の購読へ伝え、全Futureの回収後に最初の原因を返す。
+async fn run_precompute_window<I, Render, RenderFuture, Checkpoint, CheckpointFuture>(
+    tiles: I,
+    window: usize,
+    manifest: &mut Manifest,
+    cancellation: &CancellationToken,
+    mut render: Render,
+    mut checkpoint: Checkpoint,
+) -> Result<()>
+where
+    I: Iterator<Item = crate::tilegen::tile::TileId>,
+    Render: FnMut(crate::tilegen::tile::TileId, CancellationToken) -> RenderFuture,
+    RenderFuture: Future<Output = Result<bool>>,
+    Checkpoint: FnMut(Manifest) -> CheckpointFuture,
+    CheckpointFuture: Future<Output = Result<()>>,
+{
+    if window == 0 {
+        return Err(Failure::new(400, "事前生成の並列数は1以上にしてください。"));
+    }
+    let mut tiles = tiles.peekable();
+    let mut pending = FuturesUnordered::new();
+    let stop = CancellationToken::new();
+    let mut failure: Option<Failure> = None;
+    let mut last_flush = Instant::now() - Duration::from_secs(1);
+    loop {
+        while failure.is_none() && !cancellation.is_cancelled() && pending.len() < window {
+            let Some(tile) = tiles.next() else { break };
+            pending.push(render(tile, stop.clone()));
+        }
+        if pending.is_empty() {
+            if let Some(error) = failure {
+                if error.status == 499 && manifest.completed_tiles == manifest.total_tiles {
+                    return Ok(());
+                }
+                return Err(error);
+            }
+            return if tiles.peek().is_none() {
+                Ok(())
+            } else {
+                Err(Failure::new(499, "事前生成を取り消しました。"))
+            };
+        }
+        let completed = if failure.is_some() {
+            pending.next().await
+        } else {
+            tokio::select! {
+                biased;
+                result = pending.next() => result,
+                _ = wait_for_cancel(cancellation.clone()) => {
+                    failure = Some(Failure::new(499, "事前生成を取り消しました。"));
+                    stop.cancel();
+                    continue;
+                }
+            }
+        };
+        match completed.expect("pending precompute request") {
+            Ok(hit) => {
+                manifest.completed_tiles += 1;
+                manifest.reused_tiles += u64::from(hit);
+            },
+            Err(error) => {
+                if failure.is_none() {
+                    failure = Some(error);
+                    stop.cancel();
+                }
+            },
+        }
+        if failure.is_none() && last_flush.elapsed() >= Duration::from_secs(1) {
+            if let Err(error) = checkpoint(manifest.clone()).await {
+                failure = Some(error);
+                stop.cancel();
+            }
+            last_flush = Instant::now();
+        }
+    }
+}
+
 fn new_job<T: Serialize>(
     id: &str,
     kind: &str,
@@ -999,7 +1114,7 @@ async fn finish_job(
     app: &LocalTiles,
     id: &str,
     outcome: Result<Value>,
-    _token: &CancellationToken,
+    final_progress: Option<Value>,
 ) {
     let (state, progress, error) = match outcome {
         Ok(progress) => ("succeeded", progress, None),
@@ -1011,12 +1126,16 @@ async fn finish_job(
             } else {
                 "failed"
             };
-            let progress = catalog::get_job(&app.catalog, id)
-                .await
-                .ok()
-                .flatten()
-                .and_then(|record| serde_json::from_str(&record.progress_json).ok())
-                .unwrap_or_else(|| json!({}));
+            let progress = if let Some(progress) = final_progress {
+                progress
+            } else {
+                catalog::get_job(&app.catalog, id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|record| serde_json::from_str(&record.progress_json).ok())
+                    .unwrap_or_else(|| json!({}))
+            };
             (state, progress, Some(error.message))
         },
     };
@@ -1032,6 +1151,207 @@ async fn finish_job(
         tracing::error!(%error, job_id = id, "Could not save final local tile job status");
     }
     app.cancellations.lock().unwrap().remove(id);
+}
+
+#[cfg(test)]
+mod precompute_window_tests {
+    use super::*;
+    use crate::tilegen::tile::TileId;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::{mpsc, oneshot};
+
+    fn manifest(total: u64) -> Manifest {
+        Manifest {
+            version: 1,
+            dataset_id: "dataset".into(),
+            render_id: "render".into(),
+            bbox: [0.0, 0.0, 1.0, 1.0],
+            min_zoom: 4,
+            max_zoom: 4,
+            total_tiles: total,
+            completed_tiles: 0,
+            reused_tiles: 0,
+            state: "running".into(),
+            resume_from: None,
+        }
+    }
+
+    fn tiles(count: u32) -> impl Iterator<Item = TileId> {
+        (0..count).map(|x| TileId { z: 4, x, y: 0 })
+    }
+
+    type Request = (u32, CancellationToken, oneshot::Sender<Result<bool>>);
+
+    async fn next_request(receiver: &mut mpsc::UnboundedReceiver<Request>) -> Request {
+        tokio::time::timeout(Duration::from_secs(5), receiver.recv())
+            .await
+            .expect("request was not submitted")
+            .expect("request channel closed")
+    }
+
+    async fn stopped(token: &CancellationToken) {
+        tokio::time::timeout(Duration::from_secs(5), wait_for_cancel(token.clone()))
+            .await
+            .expect("pending requests were not stopped");
+    }
+
+    fn controlled(
+        count: u32,
+        cancellation: CancellationToken,
+    ) -> (
+        tokio::task::JoinHandle<(Result<()>, Manifest)>,
+        mpsc::UnboundedReceiver<Request>,
+    ) {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        let task = tokio::spawn(async move {
+            let mut progress = manifest(u64::from(count));
+            let result = run_precompute_window(
+                tiles(count),
+                2,
+                &mut progress,
+                &cancellation,
+                move |tile, stop| {
+                    let (done, result) = oneshot::channel();
+                    sender.send((tile.x, stop, done)).unwrap();
+                    async move { result.await.unwrap() }
+                },
+                |_| std::future::ready(Ok(())),
+            )
+            .await;
+            (result, progress)
+        });
+        (task, receiver)
+    }
+
+    #[tokio::test]
+    async fn replenish_only_completed_slots_and_count_out_of_order_results() {
+        let (task, mut requests) = controlled(4, CancellationToken::new());
+        let (first, _, first_done) = next_request(&mut requests).await;
+        let (second, _, second_done) = next_request(&mut requests).await;
+        assert_eq!((first, second), (0, 1));
+        assert!(requests.try_recv().is_err());
+        second_done.send(Ok(true)).unwrap();
+        let (third, _, third_done) = next_request(&mut requests).await;
+        assert_eq!(third, 2);
+        assert!(requests.try_recv().is_err());
+        third_done.send(Ok(false)).unwrap();
+        let (fourth, _, fourth_done) = next_request(&mut requests).await;
+        assert_eq!(fourth, 3);
+        fourth_done.send(Ok(true)).unwrap();
+        assert!(!task.is_finished());
+        first_done.send(Ok(false)).unwrap();
+        let (result, progress) = task.await.unwrap();
+        result.unwrap();
+        assert_eq!((progress.completed_tiles, progress.reused_tiles), (4, 2));
+    }
+
+    #[tokio::test]
+    async fn failure_stops_submission_drains_pending_work_and_keeps_first_cause() {
+        let (task, mut requests) = controlled(20, CancellationToken::new());
+        let (_, _, failed) = next_request(&mut requests).await;
+        let (_, stop, pending) = next_request(&mut requests).await;
+        failed
+            .send(Err(Failure::new(500, "original render failure")))
+            .unwrap();
+        stopped(&stop).await;
+        assert!(requests.try_recv().is_err());
+        assert!(!task.is_finished(), "native completion must be collected");
+        pending.send(Ok(true)).unwrap();
+        let (result, progress) = task.await.unwrap();
+        assert_eq!(result.unwrap_err().message, "original render failure");
+        assert_eq!((progress.completed_tiles, progress.reused_tiles), (1, 1));
+    }
+
+    #[tokio::test]
+    async fn cancellation_collects_ready_success_and_waits_for_remaining_work() {
+        let cancellation = CancellationToken::new();
+        let (task, mut requests) = controlled(20, cancellation.clone());
+        let (_, _, first) = next_request(&mut requests).await;
+        let (_, stop, second) = next_request(&mut requests).await;
+        first.send(Ok(false)).unwrap();
+        let (_, _, third) = next_request(&mut requests).await;
+        cancellation.cancel();
+        stopped(&stop).await;
+        assert!(!task.is_finished());
+        assert!(requests.try_recv().is_err());
+        second.send(Ok(true)).unwrap();
+        third.send(Err(Failure::new(499, "stopped"))).unwrap();
+        let (result, progress) = task.await.unwrap();
+        assert_eq!(result.unwrap_err().status, 499);
+        assert_eq!((progress.completed_tiles, progress.reused_tiles), (2, 1));
+    }
+
+    #[tokio::test]
+    async fn bounded_window_does_not_materialize_a_large_plan() {
+        let submitted = AtomicUsize::new(0);
+        let mut progress = manifest(u64::from(u32::MAX));
+        let result = run_precompute_window(
+            tiles(u32::MAX),
+            2,
+            &mut progress,
+            &CancellationToken::new(),
+            |_, _| {
+                submitted.fetch_add(1, Ordering::Relaxed);
+                std::future::ready(Err(Failure::new(500, "stop")))
+            },
+            |_| std::future::ready(Ok(())),
+        )
+        .await;
+        assert_eq!(result.unwrap_err().status, 500);
+        assert_eq!(submitted.load(Ordering::Relaxed), 2);
+        assert_eq!(progress.completed_tiles, 0);
+    }
+
+    #[tokio::test]
+    async fn checkpoint_failure_drains_successes_without_replacing_its_cause() {
+        let mut progress = manifest(10);
+        let result = run_precompute_window(
+            tiles(10),
+            2,
+            &mut progress,
+            &CancellationToken::new(),
+            |_, _| std::future::ready(Ok(false)),
+            |_| std::future::ready(Err(Failure::new(500, "checkpoint failure"))),
+        )
+        .await;
+        assert_eq!(result.unwrap_err().message, "checkpoint failure");
+        assert_eq!(progress.completed_tiles, 2);
+    }
+
+    #[tokio::test]
+    async fn final_completed_tile_wins_a_simultaneous_cancel() {
+        let cancellation = CancellationToken::new();
+        let mut progress = manifest(1);
+        run_precompute_window(
+            tiles(1),
+            1,
+            &mut progress,
+            &cancellation,
+            |_, _| {
+                cancellation.cancel();
+                std::future::ready(Ok(false))
+            },
+            |_| std::future::ready(Ok(())),
+        )
+        .await
+        .unwrap();
+        assert_eq!(progress.completed_tiles, 1);
+    }
+
+    #[tokio::test]
+    async fn all_published_successes_collected_during_cancel_win_over_cancel() {
+        let cancellation = CancellationToken::new();
+        let (task, mut requests) = controlled(2, cancellation.clone());
+        let (_, stop, first) = next_request(&mut requests).await;
+        let (_, _, second) = next_request(&mut requests).await;
+        cancellation.cancel();
+        stopped(&stop).await;
+        first.send(Ok(false)).unwrap();
+        second.send(Ok(false)).unwrap();
+        let (result, progress) = task.await.unwrap();
+        result.unwrap();
+        assert_eq!(progress.completed_tiles, progress.total_tiles);
+    }
 }
 
 #[cfg(test)]

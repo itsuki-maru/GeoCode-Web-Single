@@ -578,6 +578,37 @@ impl LocalTiles {
         tile: TileId,
         background: bool,
     ) -> Result<(Arc<Vec<u8>>, bool)> {
+        self.render_request(dataset_id, render_id, tile, background, None)
+            .await
+    }
+
+    pub(super) async fn render_precompute(
+        self: &Arc<Self>,
+        dataset_id: &str,
+        render_id: &str,
+        tile: TileId,
+        cancellation: &CancellationToken,
+    ) -> Result<(Arc<Vec<u8>>, bool)> {
+        self.render_request(dataset_id, render_id, tile, true, Some(cancellation))
+            .await
+    }
+
+    async fn render_request(
+        self: &Arc<Self>,
+        dataset_id: &str,
+        render_id: &str,
+        tile: TileId,
+        background: bool,
+        cancellation: Option<&CancellationToken>,
+    ) -> Result<(Arc<Vec<u8>>, bool)> {
+        let check_cancelled = || {
+            if cancellation.is_some_and(CancellationToken::is_cancelled) {
+                Err(Failure::new(499, "事前生成を取り消しました。"))
+            } else {
+                Ok(())
+            }
+        };
+        check_cancelled()?;
         if !valid_id(dataset_id) || !valid_id(render_id) {
             return Err(Failure::new(404, "地図が見つかりません。"));
         }
@@ -607,6 +638,7 @@ impl LocalTiles {
         {
             return Ok((Arc::new(bytes), true));
         }
+        check_cancelled()?;
         if !profile::is_compatible(&profile) {
             return Err(Failure::new(
                 410,
@@ -636,6 +668,7 @@ impl LocalTiles {
             "{render_id}:{}",
             identity::tile_cache_key(dataset_id, &contract, tile.z, tile.x, tile.y)
         );
+        check_cancelled()?;
         let subscription = self
             .engine
             .lock()
@@ -648,10 +681,12 @@ impl LocalTiles {
         } else {
             self.config.http_timeout_seconds
         };
-        Ok((
-            subscription.wait(Duration::from_secs(timeout)).await?,
-            false,
-        ))
+        let timeout = Duration::from_secs(timeout);
+        let png = match cancellation {
+            Some(cancellation) => subscription.wait_cancellable(timeout, cancellation).await?,
+            None => subscription.wait(timeout).await?,
+        };
+        Ok((png, false))
     }
     async fn ensure_unreferenced(
         &self,

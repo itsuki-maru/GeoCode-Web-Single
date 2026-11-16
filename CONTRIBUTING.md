@@ -54,12 +54,18 @@ npm run test:run --prefix src_frontend/frontend
 npm test --prefix src_frontend/template-scripts
 ```
 
-Rust 側の検証:
+Rust 側の検証（テスト用のPowerShellで実行）:
 
 ```powershell
 cargo fmt --check
-cargo test
+$env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target/cargo-tests'
+$env:CARGO_PROFILE_DEV_DEBUG = '0'
+$env:CARGO_PROFILE_TEST_DEBUG = '0'
+$env:CARGO_INCREMENTAL = '0'
+cargo test --locked -j 2
 ```
+
+Tauri・画像処理等を含むライブラリと多数の統合テストを同時コンパイルすると、Windowsのコミット上限に達する場合がある。`os error 1455`、`failed to mmap`とともに`E0786`・rlib不足・マクロ解決失敗・コンパイラ内部エラーが出た場合は、まず上記の軽量設定で再実行する。`-j 2`はビルドの同時実行数であり、テスト実行スレッド数や`local_tile_workers`とは別。デバッグ情報の省略はデバッグアサートやオーバーフロー検査を無効にしない。環境変数はこのPowerShellプロセス内だけに適用され、release設定・OSのページング設定は変更しない。デバッガーで変数等を調べる場合は、別のPowerShellでデバッグ情報を有効にし、対象を絞って`-j 1`で実行する。
 
 `ok` は実施して成功した試験、`FAILED` は失敗、`ignored` は未実施として分けて集計する。実exe・実資料・リンク作成権限などの前提が必要な試験を、前提不足のまま早期returnして成功にしない。個別試験を追加実行した場合は、同じ試験を重複加算しない。
 
