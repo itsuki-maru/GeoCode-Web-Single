@@ -69,6 +69,7 @@ pub struct Subscription {
     receiver: watch::Receiver<Option<RenderResult>>,
     total: Arc<AtomicUsize>,
     shared: Arc<Shared>,
+    active: bool,
 }
 impl Subscription {
     pub async fn wait(mut self, timeout: Duration) -> RenderResult {
@@ -86,16 +87,97 @@ impl Subscription {
         .await
         .map_err(|_| Failure::new(504, "タイルの待機期限を超過しました。"))?
     }
+
+    /// 自分の待機だけを取り消す。最後の購読なら実ワーカーの終了も回収する。
+    /// 他のHTTP要求が同じタイルを待つ場合は、その生成を中断しない。
+    pub async fn wait_cancellable(
+        mut self,
+        timeout: Duration,
+        cancellation: &CancellationToken,
+    ) -> RenderResult {
+        let stopped = tokio::select! {
+            biased;
+            result = Self::receive_result(&mut self.receiver) => return result,
+            _ = async {
+                while !cancellation.is_cancelled() {
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                }
+            } => Failure::new(499, "事前生成を取り消しました。"),
+            _ = tokio::time::sleep(timeout) => Failure::new(504, "タイルの待機期限を超過しました。"),
+        };
+        // 取消・期限の成立直後に公開が完了した場合も、公開済み成功を優先する。
+        if let Some(result) = self.receiver.borrow_and_update().clone() {
+            return result;
+        }
+        if self.release() {
+            // Futureを捨てるだけではnative描画は止まらない。worker_loopがキューと
+            // running数を更新した後の通知まで待ち、事前生成の実行枠を保持する。
+            if let Ok(png) = Self::receive_result(&mut self.receiver).await {
+                return Ok(png);
+            }
+        }
+        Err(stopped)
+    }
+
+    async fn receive_result(receiver: &mut watch::Receiver<Option<RenderResult>>) -> RenderResult {
+        loop {
+            if let Some(result) = receiver.borrow_and_update().clone() {
+                return result;
+            }
+            receiver
+                .changed()
+                .await
+                .map_err(|_| Failure::unavailable())?;
+        }
+    }
+
+    fn release(&mut self) -> bool {
+        if !self.active {
+            return false;
+        }
+        // Engine::subscribeと同じロックを保持し、最後の減算と取消の間への参加を防ぐ。
+        let mut queue = self.shared.queue.lock().unwrap();
+        self.active = false;
+        self.total.fetch_sub(1, Ordering::AcqRel);
+        let last = self.task.subscribers.fetch_sub(1, Ordering::AcqRel) == 1;
+        if last {
+            self.task.context.cancellation_token().cancel();
+            // 未開始なら、HTTPの優先要求が途切れるまで実ワーカーを待つ必要はない。
+            // worker_loopの取出しと同じロックで保護し、既に稼働中の枠には触れない。
+            let queued = if let Some(index) = queue
+                .foreground
+                .iter()
+                .position(|task| Arc::ptr_eq(task, &self.task))
+            {
+                queue.foreground.remove(index)
+            } else if let Some(index) = queue
+                .background
+                .iter()
+                .position(|task| Arc::ptr_eq(task, &self.task))
+            {
+                queue.background.remove(index)
+            } else {
+                None
+            };
+            if queued.is_some() {
+                if queue
+                    .inflight
+                    .get(&self.task.key)
+                    .is_some_and(|task| Arc::ptr_eq(task, &self.task))
+                {
+                    queue.inflight.remove(&self.task.key);
+                }
+                self.task
+                    .result
+                    .send_replace(Some(Err(Failure::new(499, "タイル生成を取り消しました。"))));
+            }
+        }
+        last
+    }
 }
 impl Drop for Subscription {
     fn drop(&mut self) {
-        // 購読者数の最後の減算から取消までの間に、新しい購読者を受け付けない。
-        // Engine::subscribeと同じロックを保持して保護する。
-        let _queue = self.shared.queue.lock().unwrap();
-        self.total.fetch_sub(1, Ordering::AcqRel);
-        if self.task.subscribers.fetch_sub(1, Ordering::AcqRel) == 1 {
-            self.task.context.cancellation_token().cancel();
-        }
+        self.release();
     }
 }
 #[derive(Default)]
@@ -292,6 +374,7 @@ impl Engine {
             task,
             total: self.shared.subscribers.clone(),
             shared: self.shared.clone(),
+            active: true,
         })
     }
     pub fn counts(&self) -> (usize, usize, usize) {
