@@ -58,7 +58,8 @@ export function useMapObjectTableRows(active: Ref<boolean>) {
           );
         const attributeAllowed =
           kind !== "shape" || !markers.attributeShapeIds || markers.attributeShapeIds.has(id);
-        if (record && included && attributeAllowed) index.upsert(kind, record);
+        const aiAllowed = !markers.aiFilterTargets || markers.aiFilterTargets.has(`${kind}:${id}`);
+        if (record && included && attributeAllowed && aiAllowed) index.upsert(kind, record);
         else index.remove(kind, id);
       }
     }

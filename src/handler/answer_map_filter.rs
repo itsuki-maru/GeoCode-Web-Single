@@ -232,6 +232,14 @@ async fn fields(
 }
 
 fn append_map_field_definitions(b: &mut QueryBuilder<'static, Sqlite>, form: &str) {
+    append_map_field_definitions_projection(b, form, false);
+}
+
+fn append_map_field_definitions_projection(
+    b: &mut QueryBuilder<'static, Sqlite>,
+    form: &str,
+    budget_only: bool,
+) {
     // BINARY で比較する JSON テキストによるグループ化は、配列だけに適用する。文字列からも同じテキストが
     // 抽出され得るため、null・欠落・オブジェクト・スカラー値は従来どおり展開する。
     b.push(
@@ -250,6 +258,13 @@ fn append_map_field_definitions(b: &mut QueryBuilder<'static, Sqlite>, form: &st
     .push(
         r#"
         )
+        "#,
+    );
+    if budget_only {
+        b.push("SELECT count(*),COALESCE(sum(length(CAST(field AS BLOB))),0) FROM (");
+    }
+    b.push(
+        r#"
         SELECT field
         FROM (
             SELECT
@@ -294,9 +309,112 @@ fn append_map_field_definitions(b: &mut QueryBuilder<'static, Sqlite>, form: &st
         ) definitions
         WHERE definition_rank = 1
         ORDER BY create_at COLLATE answer_time DESC, position, field
-        LIMIT 10001
+        LIMIT
         "#,
-    );
+    )
+    .push(if budget_only { "201" } else { "10001" });
+    if budget_only {
+        b.push(") candidate_definitions");
+    }
+}
+
+/// 自動入力例では、手動検索の定義集合を件数・バイト数の独立した上限内で共有する。
+pub(crate) async fn suggestion_fields(
+    tx: &mut Transaction<'_, Sqlite>,
+    user: &str,
+    form: Uuid,
+    layer_ids: &Option<Vec<Uuid>>,
+    at: DateTime<Utc>,
+) -> Result<Vec<FieldOption>, AppError> {
+    let (revisions, bytes): (i64, i64) = sqlx::query_as(
+        r#"
+        SELECT
+            count(*),
+            COALESCE(sum(length(CAST(form_schema AS BLOB))),0)
+        FROM (
+            SELECT r.form_schema
+            FROM common_form_revision_model r
+            JOIN common_form_model f ON f.id = r.form_id
+            WHERE f.id = $1
+                AND f.user_id = $2
+            ORDER BY r.version DESC
+            LIMIT 201
+        ) definitions
+        "#,
+    )
+    .bind(form.to_string())
+    .bind(user)
+    .fetch_one(&mut **tx)
+    .await?;
+    if revisions > 200 || bytes > 120_000 {
+        return Err(invalid("入力候補に使うフォーム定義が多すぎます。"));
+    }
+    let request = MapFilterRequest {
+        query: AnswerQuery {
+            mode: "latest".into(),
+            as_of: Some(at),
+            ..Default::default()
+        },
+        targets: vec![],
+        scope: Some(MapLayerScope::Layers {
+            layer_ids: layer_ids.clone(),
+        }),
+        common_form_id: Some(form.to_string()),
+        conditions: vec![],
+        options_only: true,
+    };
+    let scope = Scope {
+        markers: vec![],
+        shapes: vec![],
+        layers: Some(
+            layer_ids
+                .as_ref()
+                .map(|ids| ids.iter().map(Uuid::to_string).collect()),
+        ),
+    };
+    // 配列以外や不正な項目は自動候補だけを省略し、通常入力・手動検索の許容量を変えない。
+    let invalid_definition: bool = base(user, &request.query, at, &scope)
+        .push(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM map_scope s
+                WHERE s.source_form->>'id' =
+            "#,
+        )
+        .push_bind(form.to_string())
+        .push(
+            r#"
+                    AND (
+                        json_type(s.form_snapshot,'$.form_schema.fields') NOT IN ('array','null')
+                        OR EXISTS(
+                            SELECT 1
+                            FROM json_each(
+                                CASE
+                                    WHEN json_type(s.form_snapshot,'$.form_schema.fields') = 'array'
+                                    THEN json_extract(s.form_snapshot,'$.form_schema.fields')
+                                    ELSE '[]'
+                                END
+                            ) d
+                            WHERE d.type <> 'object'
+                        )
+                    )
+            )
+            "#,
+        )
+        .build_query_scalar()
+        .fetch_one(&mut **tx)
+        .await?;
+    if invalid_definition {
+        return Err(invalid("入力候補に使う投稿時の項目定義が不正です。"));
+    }
+    let mut budget = base(user, &request.query, at, &scope);
+    append_map_field_definitions_projection(&mut budget, &form.to_string(), true);
+    let (definitions, bytes): (i64, i64) = budget.build_query_as().fetch_one(&mut **tx).await?;
+    if definitions > 200 || bytes > 120_000 {
+        return Err(invalid("入力候補に使う投稿時の項目定義が多すぎます。"));
+    }
+    fields(tx, user, &request, at, &scope).await
 }
 
 pub(super) fn validate_request(r: &MapFilterRequest) -> Result<DateTime<Utc>, AppError> {

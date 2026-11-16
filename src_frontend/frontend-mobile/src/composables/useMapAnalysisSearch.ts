@@ -20,6 +20,7 @@ export function useMapAnalysisSearch(
   message: (text: string) => void,
   colorMap: (value: AnswerColoring | null) => Promise<boolean>,
   discardColors: () => Promise<boolean> = () => colorMap(null),
+  applyAiPreset?: (id: string, signal: AbortSignal) => Promise<void>,
 ) {
   const markers = useMapObjectStore(),
     shapes = useShapeStore(),
@@ -163,6 +164,7 @@ export function useMapAnalysisSearch(
       getApplied: () => markers.attributeSearch,
       getLayerIds: layerIds,
       getContext: context,
+      applyAiPreset,
       analysis: {
         getSpecification: () => specification,
         getColoring: () => coloring,

@@ -26,6 +26,7 @@ it("ログイン時は管理ナビゲーションを隠し、ログイン後に�
     "タイルサーバ設定",
     "タイル追加設定",
     "地図表示設定",
+    "AI設定",
   ]);
   expect(w.get("main").classes()).not.toContain("login-content");
   w.unmount();

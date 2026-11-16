@@ -137,6 +137,8 @@ PostgreSQL から SQLite を使用することによる差分吸収は **全て�
 - `LIVE_MAP_PASSWORD_ATTEMPT_LIMIT`（未設定時は5回）
 - `LIVE_MAP_PASSWORD_WINDOW_MINUTES`（未設定時は10分）
 
+AIの配備鍵は設定JSONの `ai_encryption_key` に保存し、通常起動・サーバー単体モードとも未設定・`null` なら補完する。既存の環境変数 `AI_ENCRYPTION_KEY` があれば同じ値を採用し、なければ暗号学的乱数で32バイトを生成してBase64で保存する。実行時は環境変数を優先するが、既存JSON鍵は上書きしない。不正な明示鍵や、全鍵不在で本体DBに暗号化APIキーがある場合は再生成せず拒否する。読み取り専用のタイルCLIでは鍵の生成・保存をしない。`AI_ALLOWED_ORIGINS` は引き続き起動プロセスの環境変数で、配布アプリは `.env` を自動読込しない。[AIの導入](docs/AI_ASSISTANT.md#管理者による導入)を参照する。
+
 設定 JSON は `src/model/common.rs` の `ApplicationInitSetup` に対応する。起動時の読み込みは `src/init.rs` の `read_env_json` が行い、環境変数への注入は `src/main.rs` の `apply_env_vars` が行う。
 
 Redisは現在位置共有機能の必須構成ではない。接続がない場合はSQLiteを直接参照し、接続できる場合だけ公開位置スナップショットの短時間キャッシュに使用する。`LIVE_MAP_SNAPSHOT_CACHE_SECONDS=0` では新規キャッシュ保存を無効化する。
@@ -175,6 +177,7 @@ Redisは現在位置共有機能の必須構成ではない。接続がない場
 - `vector_tile_allowed_origins`（既定空、HTTPSオリジンをカンマ区切りで指定）
 - `tile_proxy_allowed_origins`（既定空、HTTP・LANの中継先を許可する場合に指定）
 - `tile_settings_encryption_key`（項目省略・`null`の場合は生成して設定JSONへ保存。不正な文字列は起動時に拒否）
+- `ai_encryption_key`（項目省略・`null`の場合は既存の環境変数から継承、または安全を確認して生成・保存。不正な明示鍵は起動時に拒否）
 - `redis_url`
 - `redis_connect_timeout_seconds`
 - `tile_cache_ttl_seconds`
@@ -362,6 +365,12 @@ JSON として不正な場合、または必須項目が欠落している場合
 - `window_started_at` / `attempt_count`
 
 接続元IPアドレスとUser-Agentから生成したキーにより、共有パスワードの試行回数を接続元単位で保持する。
+
+### 6.11 `ai_settings` / `ai_operation_model`
+
+起動時マイグレーション26・27が、SQLx用と同じSQLファイルから追加する。通常利用のDBへの手動適用は不要。`ai_settings` は1行の接続設定JSON（TEXT）、設定版UUID（TEXT）、暗号化したLLM・音声キー（BLOB）、更新者とUTC日時を保存する。`ai_operation_model` は操作ID、所有者、設定版、確認対象・要求ハッシュ・期限・確定結果を保持する。
+
+ユーザーIDは既存の文字列形式を保持し、APIの設定版・新規操作IDはUUIDを維持する。設定保存・永続操作は `BEGIN IMMEDIATE` で書き込み権を確保し、設定競合と同じ操作IDの二重確定を防ぐ。APIキーの暗号化はAES-256-GCMと接続先に結び付けたAADを使い、復元にはDBと、暗号化に使った `ai_encryption_key` または `AI_ENCRYPTION_KEY` が必要。自動生成への変更で暗号文形式・AAD・DBマイグレーションは変更しない。詳細は [AIアシスタント](docs/AI_ASSISTANT.md) を参照する。
 
 ## 7. 認証とセキュリティ
 
@@ -726,6 +735,16 @@ cargo test --lib middleware::security::tests
 
 利用と検証は[地図印刷・PDF出力](docs/MAP_PRINTING.md)を参照する。
 
+### 9.12 AIアシスタント
+
+PC・モバイル・別画面地図で自然言語検索・色分け・座標移動・操作案内を提供する。対象はログイン中の利用者が所有するレイヤーとフォーム。AI・音声入力・作成保存は初期無効とし、管理者が有効化する。検索・表示操作は元データを変更せず、レイヤー作成・条件保存は確認準備と利用者の確定を分ける。保存条件はversion 1・2の互換性を維持し、旧一覧へ新形式を混入させない。
+
+実データの最新登録から最大3件の入力例を定型生成し、空欄のTabまたは「例を入力」で文章だけを挿入する。候補APIはLLM・外部通信・APIキー復号を行わず、通常チャットと独立した要求枠を使う。SQLiteでは `query_only`、5秒期限とSQL中断、定義の件数・容量予算、既存の十進数比較を使い、接続設定を復元する。候補のキャッシュ・対象変更・遅延応答破棄は共通フロントの契約を維持する。
+
+全AI APIは認証を要求し、管理APIはスーパーユーザー権限を検証する。利用者の操作APIでは `X-AI-Account-ID` とCookieの文字列IDを照合し、不一致・未指定は409で拒否する。外部接続先のSSRF・DNS検証、キーの非配布、独立した音声認識を維持する。録音はHTTPSまたはlocalhostと端末のマイク許可を必要とする。
+
+移植元はPostgreSQL版の `7f604ee^..f793ada` のAI本体・入力例・共通UIを対象とし、PostgreSQL専用CI修正は含めない。SQLite版のバージョン1.14.0とTauri・ローカル地図の構成を維持する。API契約、上限、処理フロー、検証手順は [AIアシスタント](docs/AI_ASSISTANT.md)、実モデルの日本語解釈の評価は [受入評価](docs/AI_EVALUATION.md) を参照する。
+
 ## 10. 画面仕様
 
 ### 10.1 主画面一覧
@@ -901,6 +920,10 @@ cargo test --lib middleware::security::tests
 成功応答は`{id,url,expiration}`、`GET /onetimeurl/current`の応答はこれらと`is_password_protected`。現在URLの取得では対象データや表示設定全体を返さない。`DELETE /onetimeurl/delete/{id_url}`は認証ユーザーの共有枠を停止し、パスのIDで他ユーザーの共有を操作しない。公開閲覧とパスワード認証は`GET/POST /onetime/{url_id}`を使用する。
 
 保存型・表示状態のキー・認可・SQLiteの移行手順は[一時共有URL](docs/TEMPORARY_SHARING.md)を参照する。
+
+### 11.8 AIアシスタントAPI
+
+`/admin/ai-settings` の取得・保存・接続確認、`/ai/capabilities`、`/ai/suggestions`、`/ai/chat`、旧 `/ai/execute`、protocol 2の `/ai/assist/execute`、`/ai/operations/prepare`・`commit`・`{id}`、`/ai/transcribe` を提供する。応答は `Cache-Control: no-store` とし、認証・所有者・設定版・許可操作をサーバーで再検証する。要求・応答形式と権限の一覧は [AIのAPI仕様](docs/AI_ASSISTANT.md#apiと権限) を参照する。
 
 ## 12. エラー応答
 

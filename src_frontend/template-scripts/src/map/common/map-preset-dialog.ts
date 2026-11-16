@@ -3,16 +3,18 @@ import { createMapMessageDialog } from "./map-message-dialog";
 import { renderMapPresetsTable } from "./map-presets-table";
 import {
   clonePresetDraft,
+  cloneSavedMapPreset,
   isSavedMapPreset,
+  isAnySavedMapPreset,
   type MapPresetDraft,
-  type SavedMapPreset,
+  type AnySavedMapPreset,
 } from "./answer-map-presets";
 import type { AttributeTransport } from "./advanced-map-search";
 import { createProgressDialog, awaitWithAbort } from "./progress-spinner";
 
 export function createMapPresetDialogs(
   transport: AttributeTransport,
-  restore: (preset: SavedMapPreset, signal: AbortSignal) => Promise<void>,
+  restore: (preset: AnySavedMapPreset, signal: AbortSignal) => Promise<void>,
   options: { filterOnly?: boolean } = {},
 ) {
   const noticeDialog = createMapMessageDialog(() => syncBusy());
@@ -30,7 +32,7 @@ export function createMapPresetDialogs(
     busy = false,
     lockClose = false,
     previous: HTMLElement | null = null;
-  let items: SavedMapPreset[] = [],
+  let items: AnySavedMapPreset[] = [],
     total = 0,
     page = 1;
   const endpoint = "/form-answers/map-presets";
@@ -156,15 +158,15 @@ export function createMapPresetDialogs(
   const load = async (requestedPage: number, signal: AbortSignal) => {
     const current = seq;
     const data = (await transport(
-      `${endpoint}?page=${requestedPage}&page_size=20`,
+      `${endpoint}?page=${requestedPage}&page_size=20&versions=1,2`,
       undefined,
       signal,
-    )) as { items: SavedMapPreset[]; total: number };
+    )) as { items: AnySavedMapPreset[]; total: number };
     if (!dialog.open || signal.aborted || current !== seq) return;
     if (
       !data ||
       !Array.isArray(data.items) ||
-      !data.items.every(isSavedMapPreset) ||
+      !data.items.every(isAnySavedMapPreset) ||
       !Number.isSafeInteger(data.total) ||
       data.total < 0
     )
@@ -174,7 +176,7 @@ export function createMapPresetDialogs(
     page = requestedPage;
     renderList();
   };
-  const confirmDelete = (preset: SavedMapPreset) => {
+  const confirmDelete = (preset: AnySavedMapPreset) => {
     const message = node("p");
     message.className = "preset-confirm-message";
     message.append(node("strong", "削除しますか？"));
@@ -238,14 +240,19 @@ export function createMapPresetDialogs(
         restore: (preset) =>
           void request(
             async (signal) => {
-              await restore({ ...preset, ...clonePresetDraft(preset) }, signal);
+              await restore(cloneSavedMapPreset(preset), signal);
               if (!signal.aborted && dialog.open) {
                 // スピナーを解除してから、一覧を残したまま完了メッセージを表示する。
                 progressDialog.clear();
-                noticeDialog.show("呼び出しが完了しました。", "呼び出し完了");
+                noticeDialog.show(
+                  preset.schema_version === 2
+                    ? "AI条件を地図へ適用しました。"
+                    : "呼び出しが完了しました。",
+                  "呼び出し完了",
+                );
               }
             },
-            "検索条件を呼び出しています…",
+            preset.schema_version === 2 ? "AI条件を適用しています…" : "検索条件を呼び出しています…",
             true,
             true,
           ),

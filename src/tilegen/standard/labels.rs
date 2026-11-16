@@ -209,17 +209,92 @@ pub fn candidate(
 }
 
 pub fn initialize(conn: &Connection) -> Result<()> {
-    conn.execute_batch("CREATE TABLE map_labels(id INTEGER PRIMARY KEY,osm_type INTEGER NOT NULL,osm_id INTEGER NOT NULL,category TEXT NOT NULL,names TEXT NOT NULL,x REAL NOT NULL,y REAL NOT NULL,importance INTEGER NOT NULL,population INTEGER,admin_level INTEGER,capital INTEGER NOT NULL,UNIQUE(osm_type,osm_id,category));
-        CREATE VIRTUAL TABLE map_label_rtree USING rtree(id,min_x,max_x,min_y,max_y);
-        CREATE INDEX map_labels_source ON map_labels(osm_type,osm_id);
-        CREATE TABLE map_label_members(relation_id INTEGER NOT NULL,way_id INTEGER NOT NULL,PRIMARY KEY(relation_id,way_id)) WITHOUT ROWID;
-        CREATE TABLE map_feature_attributes(osm_type INTEGER NOT NULL,osm_id INTEGER NOT NULL,attributes TEXT NOT NULL,PRIMARY KEY(osm_type,osm_id)) WITHOUT ROWID;")?;
+    conn.execute_batch(
+        r#"
+            CREATE TABLE map_labels (
+                id INTEGER PRIMARY KEY,
+                osm_type INTEGER NOT NULL,
+                osm_id INTEGER NOT NULL,
+                category TEXT NOT NULL,
+                names TEXT NOT NULL,
+                x REAL NOT NULL,
+                y REAL NOT NULL,
+                importance INTEGER NOT NULL,
+                population INTEGER,
+                admin_level INTEGER,
+                capital INTEGER NOT NULL,
+                UNIQUE(osm_type, osm_id, category)
+            );
+
+            CREATE VIRTUAL TABLE map_label_rtree USING rtree (
+                id,
+                min_x,
+                max_x,
+                min_y,
+                max_y
+            );
+
+            CREATE INDEX map_labels_source ON map_labels(osm_type, osm_id);
+
+            CREATE TABLE map_label_members (
+                relation_id INTEGER NOT NULL,
+                way_id INTEGER NOT NULL,
+                PRIMARY KEY(relation_id, way_id)
+            ) WITHOUT ROWID;
+
+            CREATE TABLE map_feature_attributes (
+                osm_type INTEGER NOT NULL,
+                osm_id INTEGER NOT NULL,
+                attributes TEXT NOT NULL,
+                PRIMARY KEY(osm_type, osm_id)
+            ) WITHOUT ROWID;
+        "#,
+    )?;
     Ok(())
 }
 
 pub fn insert(conn: &Connection, label: &LabelCandidate) -> Result<()> {
     validate(label)?;
-    conn.execute("INSERT INTO map_labels(osm_type,osm_id,category,names,x,y,importance,population,admin_level,capital) VALUES(?,?,?,?,?,?,?,?,?,?)", params![label.osm_type,label.osm_id,label.category,serde_json::to_string(&label.names)?,label.anchor.x,label.anchor.y,label.importance,label.population,label.admin_level,label.capital])?;
+    conn.execute(
+        r#"
+            INSERT INTO map_labels (
+                osm_type,
+                osm_id,
+                category,
+                names,
+                x,
+                y,
+                importance,
+                population,
+                admin_level,
+                capital
+            )
+            VALUES (
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?
+            )
+        "#,
+        params![
+            label.osm_type,
+            label.osm_id,
+            label.category,
+            serde_json::to_string(&label.names)?,
+            label.anchor.x,
+            label.anchor.y,
+            label.importance,
+            label.population,
+            label.admin_level,
+            label.capital
+        ],
+    )?;
     let id = conn.last_insert_rowid();
     conn.execute(
         "INSERT INTO map_label_rtree VALUES(?,?,?,?,?)",
@@ -266,7 +341,21 @@ pub fn attributes(
     osm_id: i64,
 ) -> Result<BTreeMap<String, String>> {
     use rusqlite::OptionalExtension;
-    let text: Option<String> = conn.query_row("SELECT attributes FROM map_feature_attributes WHERE osm_type=? AND osm_id=? AND length(CAST(attributes AS BLOB))<=8192",params![osm_type,osm_id],|r|r.get(0)).optional()?;
+    let text: Option<String> = conn
+        .query_row(
+            r#"
+            SELECT
+                attributes
+            FROM map_feature_attributes
+            WHERE
+                osm_type = ?
+                AND osm_id = ?
+                AND length(CAST(attributes AS BLOB)) <= 8192
+        "#,
+            params![osm_type, osm_id],
+            |r| r.get(0),
+        )
+        .optional()?;
     text.map(|s| serde_json::from_str(&s).context("詳細属性の形式が不正です"))
         .transpose()
         .map(Option::unwrap_or_default)
@@ -337,7 +426,28 @@ fn query_labels_inner(
     categories: Option<&[&str]>,
 ) -> Result<Vec<LabelCandidate>> {
     let mut sql = String::from(
-        "SELECT l.osm_type,l.osm_id,l.category,l.names,l.x,l.y,l.importance,l.population,l.admin_level,l.capital,length(CAST(l.names AS BLOB)),length(CAST(l.category AS BLOB)) FROM map_label_rtree r JOIN map_labels l ON l.id=r.id WHERE r.min_x<=? AND r.max_x>=? AND r.min_y<=? AND r.max_y>=?",
+        r#"
+            SELECT
+                l.osm_type,
+                l.osm_id,
+                l.category,
+                l.names,
+                l.x,
+                l.y,
+                l.importance,
+                l.population,
+                l.admin_level,
+                l.capital,
+                length(CAST(l.names AS BLOB)),
+                length(CAST(l.category AS BLOB))
+            FROM map_label_rtree r
+            JOIN map_labels l ON l.id = r.id
+            WHERE
+                r.min_x <= ?
+                AND r.max_x >= ?
+                AND r.min_y <= ?
+                AND r.max_y >= ?
+        "#,
     );
     let mut values: Vec<rusqlite::types::Value> = vec![
         bounds.max_x.into(),
@@ -412,11 +522,92 @@ pub fn deduplicate(conn: &Connection, context: &OperationContext) -> Result<u64>
     let before: u64 = conn.query_row("SELECT count(*) FROM map_labels", [], |row| row.get(0))?;
     // Relationとそのmember Wayは、代表位置が離れていても同じ名称なら一方へまとめる。
     // JSON内の優先名を比較し、同名の無関係なWayには適用しない。
-    conn.execute_batch("CREATE TEMP TABLE relation_duplicate_label_ids AS SELECT w.id FROM map_labels w JOIN map_label_members m ON w.osm_type=1 AND w.osm_id=m.way_id JOIN map_labels r ON r.osm_type=2 AND r.osm_id=m.relation_id WHERE w.category=r.category AND coalesce(json_extract(w.names,'$.\"name:ja\"'),json_extract(w.names,'$.name'),json_extract(w.names,'$.int_name'),json_extract(w.names,'$.\"name:en\"'),json_extract(w.names,'$.short_name'))=coalesce(json_extract(r.names,'$.\"name:ja\"'),json_extract(r.names,'$.name'),json_extract(r.names,'$.int_name'),json_extract(r.names,'$.\"name:en\"'),json_extract(r.names,'$.short_name')); DELETE FROM map_label_rtree WHERE id IN(SELECT id FROM relation_duplicate_label_ids); DELETE FROM map_labels WHERE id IN(SELECT id FROM relation_duplicate_label_ids); DROP TABLE relation_duplicate_label_ids;")?;
-    let mut statement=conn.prepare("SELECT id,category,names,x,y,importance,osm_type,osm_id FROM map_labels ORDER BY importance DESC,osm_type,osm_id,category")?;
+    conn.execute_batch(
+        r#"
+            CREATE TEMP TABLE relation_duplicate_label_ids AS
+            SELECT
+                w.id
+            FROM map_labels w
+            JOIN map_label_members m ON w.osm_type = 1
+            AND w.osm_id = m.way_id
+            JOIN map_labels r ON r.osm_type = 2
+            AND r.osm_id = m.relation_id
+            WHERE
+                w.category = r.category
+                AND coalesce(
+                    json_extract(w.names, '$."name:ja"'),
+                    json_extract(w.names, '$.name'),
+                    json_extract(w.names, '$.int_name'),
+                    json_extract(w.names, '$."name:en"'),
+                    json_extract(w.names, '$.short_name')
+                ) = coalesce(
+                    json_extract(r.names, '$."name:ja"'),
+                    json_extract(r.names, '$.name'),
+                    json_extract(r.names, '$.int_name'),
+                    json_extract(r.names, '$."name:en"'),
+                    json_extract(r.names, '$.short_name')
+                );
+
+            DELETE
+            FROM map_label_rtree
+            WHERE
+                id IN (
+                    SELECT
+                        id
+                    FROM relation_duplicate_label_ids
+                );
+
+            DELETE
+            FROM map_labels
+            WHERE
+                id IN (
+                    SELECT
+                        id
+                    FROM relation_duplicate_label_ids
+                );
+
+            DROP TABLE relation_duplicate_label_ids;
+        "#,
+    )?;
+    let mut statement = conn.prepare(
+        r#"
+            SELECT
+                id,
+                category,
+                names,
+                x,
+                y,
+                importance,
+                osm_type,
+                osm_id
+            FROM map_labels
+            ORDER BY
+                importance DESC,
+                osm_type,
+                osm_id,
+                category
+        "#,
+    )?;
     let mut rows = statement.query([])?;
     // 全国の候補を保持せず、採用済み候補を一時表の固定位置セルで検索する。
-    conn.execute_batch("CREATE TEMP TABLE accepted_label_names(id INTEGER PRIMARY KEY,name TEXT,group_name TEXT,cx INTEGER,cy INTEGER,x REAL,y REAL); CREATE INDEX accepted_label_names_position ON accepted_label_names(name,group_name,cx,cy); CREATE TEMP TABLE duplicate_label_ids(id INTEGER PRIMARY KEY);")?;
+    conn.execute_batch(
+r#"
+            CREATE TEMP TABLE accepted_label_names (
+                id INTEGER PRIMARY KEY,
+                name TEXT,
+                group_name TEXT,
+                cx INTEGER,
+                cy INTEGER,
+                x REAL,
+                y REAL
+            );
+
+            CREATE INDEX accepted_label_names_position ON accepted_label_names(name, group_name, cx, cy);
+
+            CREATE TEMP TABLE duplicate_label_ids (
+                id INTEGER PRIMARY KEY
+            );
+        "#,)?;
     while let Some(row) = rows.next()? {
         context.check()?;
         let id: i64 = row.get(0)?;
@@ -439,7 +630,36 @@ pub fn deduplicate(conn: &Connection, context: &OperationContext) -> Result<u64>
         let radius = 0.000002;
         let cx = (x / radius).floor() as i64;
         let cy = (y / radius).floor() as i64;
-        let duplicate:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM accepted_label_names WHERE name=? AND group_name=? AND cx BETWEEN ? AND ? AND cy BETWEEN ? AND ? AND (x-?)*(x-?)+(y-?)*(y-?)<=?)",params![name,group,cx-1,cx+1,cy-1,cy+1,x,x,y,y,radius*radius],|r|r.get(0))?;
+        let duplicate: bool = conn.query_row(
+            r#"
+                SELECT
+                    EXISTS (
+                        SELECT
+                            1
+                        FROM accepted_label_names
+                        WHERE
+                            name = ?
+                            AND group_name = ?
+                            AND cx BETWEEN ? AND ?
+                            AND cy BETWEEN ? AND ?
+                            AND(x - ?) * (x - ?) + (y - ?) * (y - ?) <= ?
+                    )
+            "#,
+            params![
+                name,
+                group,
+                cx - 1,
+                cx + 1,
+                cy - 1,
+                cy + 1,
+                x,
+                x,
+                y,
+                y,
+                radius * radius
+            ],
+            |r| r.get(0),
+        )?;
         if duplicate {
             conn.execute("INSERT INTO duplicate_label_ids VALUES(?)", [id])?;
         } else {
@@ -451,7 +671,31 @@ pub fn deduplicate(conn: &Connection, context: &OperationContext) -> Result<u64>
     }
     drop(rows);
     drop(statement);
-    conn.execute_batch("DELETE FROM map_label_rtree WHERE id IN(SELECT id FROM duplicate_label_ids); DELETE FROM map_labels WHERE id IN(SELECT id FROM duplicate_label_ids); DROP TABLE accepted_label_names; DROP TABLE duplicate_label_ids;")?;
+    conn.execute_batch(
+        r#"
+            DELETE
+            FROM map_label_rtree
+            WHERE
+                id IN (
+                    SELECT
+                        id
+                    FROM duplicate_label_ids
+                );
+
+            DELETE
+            FROM map_labels
+            WHERE
+                id IN (
+                    SELECT
+                        id
+                    FROM duplicate_label_ids
+                );
+
+            DROP TABLE accepted_label_names;
+
+            DROP TABLE duplicate_label_ids;
+        "#,
+    )?;
     let after: u64 = conn.query_row("SELECT count(*) FROM map_labels", [], |row| row.get(0))?;
     Ok(before - after)
 }
@@ -463,10 +707,56 @@ pub fn validate_stored(conn: &Connection, expected: &LabelMetadata) -> Result<()
     );
     let check: String = conn.query_row("SELECT rtreecheck('map_label_rtree')", [], |r| r.get(0))?;
     ensure!(check == "ok", "名称候補の空間索引が不正です");
-    let bad: bool = conn.query_row("SELECT (SELECT count(*) FROM map_labels)<>(SELECT count(*) FROM map_label_rtree) OR EXISTS(SELECT 1 FROM map_labels l LEFT JOIN map_label_rtree r ON r.id=l.id WHERE r.id IS NULL OR r.min_x>l.x OR r.max_x<l.x OR r.min_y>l.y OR r.max_y<l.y)",[],|r|r.get(0))?;
+    let bad: bool = conn.query_row(
+        r#"
+            SELECT
+                (
+                    SELECT
+                        count(*)
+                    FROM map_labels
+                ) <> (
+                    SELECT
+                        count(*)
+                    FROM map_label_rtree
+                )
+                OR EXISTS (
+                    SELECT
+                        1
+                    FROM map_labels l
+                    LEFT JOIN map_label_rtree r ON r.id = l.id
+                    WHERE
+                        r.id IS NULL
+                        OR r.min_x > l.x
+                        OR r.max_x < l.x
+                        OR r.min_y > l.y
+                        OR r.max_y < l.y
+                )
+        "#,
+        [],
+        |r| r.get(0),
+    )?;
     ensure!(!bad, "名称候補と空間索引が一致しません");
     // 全体を一括ロードせず、1候補ずつ保存値の検証を行う。
-    let mut statement=conn.prepare("SELECT osm_type,osm_id,category,names,x,y,importance,population,admin_level,capital,length(CAST(names AS BLOB)),length(CAST(category AS BLOB)) FROM map_labels ORDER BY id")?;
+    let mut statement = conn.prepare(
+        r#"
+            SELECT
+                osm_type,
+                osm_id,
+                category,
+                names,
+                x,
+                y,
+                importance,
+                population,
+                admin_level,
+                capital,
+                length(CAST(names AS BLOB)),
+                length(CAST(category AS BLOB))
+            FROM map_labels
+            ORDER BY
+                id
+        "#,
+    )?;
     let mut rows = statement.query([])?;
     while let Some(row) = rows.next()? {
         ensure!(
@@ -493,7 +783,19 @@ pub fn validate_stored(conn: &Connection, expected: &LabelMetadata) -> Result<()
     }
     drop(rows);
     drop(statement);
-    let mut statement=conn.prepare("SELECT osm_type,osm_id,length(CAST(attributes AS BLOB)),attributes FROM map_feature_attributes ORDER BY osm_type,osm_id")?;
+    let mut statement = conn.prepare(
+        r#"
+            SELECT
+                osm_type,
+                osm_id,
+                length(CAST(attributes AS BLOB)),
+                attributes
+            FROM map_feature_attributes
+            ORDER BY
+                osm_type,
+                osm_id
+        "#,
+    )?;
     let mut rows = statement.query([])?;
     while let Some(row) = rows.next()? {
         ensure!(

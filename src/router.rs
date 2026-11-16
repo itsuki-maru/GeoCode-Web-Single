@@ -136,6 +136,7 @@ pub fn build_router_with_local_tiles(
             HeaderName::from_str("X-Requested-With").unwrap(),
             HeaderName::from_static("idempotency-key"),
             HeaderName::from_static("x-import-account"),
+            HeaderName::from_static("x-ai-account-id"),
         ])
         .allow_credentials(true)
         .expose_headers(vec![header::CONTENT_TYPE]);
@@ -174,6 +175,34 @@ pub fn build_router_with_local_tiles(
     // アクセストークンによる認可を要する
     let mut secured_routes = Router::new()
         .merge(tile_settings_routes)
+        .merge(
+            Router::new()
+                .route(
+                    "/admin/ai-settings",
+                    get(crate::handler::ai::admin_get).put(crate::handler::ai::admin_update),
+                )
+                .route(
+                    "/admin/ai-settings/check",
+                    post(crate::handler::ai::admin_check),
+                )
+                .route("/ai/capabilities", get(crate::handler::ai::capabilities))
+                .route("/ai/chat", post(crate::handler::ai::chat))
+                .route("/ai/suggestions", post(crate::ai::suggestions::suggest))
+                .route("/ai/execute", post(crate::ai::actions::execute))
+                .route("/ai/assist/execute", post(crate::ai::assistant::execute))
+                .route(
+                    "/ai/operations/prepare",
+                    post(crate::ai::operations::prepare),
+                )
+                .route("/ai/operations/commit", post(crate::ai::operations::commit))
+                .route("/ai/operations/{id}", get(crate::ai::operations::status))
+                .layer(DefaultBodyLimit::max(256 * 1024)),
+        )
+        .merge(
+            Router::new()
+                .route("/ai/transcribe", post(crate::handler::ai::transcribe))
+                .layer(DefaultBodyLimit::max(11 * 1024 * 1024)),
+        )
         .route(
             "/admin/map-display-settings",
             get(get_map_display_settings).put(update_map_display_settings),
@@ -233,7 +262,15 @@ pub fn build_router_with_local_tiles(
             "/marker-icons/{icon_id}",
             delete(delete_marker_icon_handler),
         )
-        .route("/layer/read/all", get(get_all_layers_handler))
+        .route(
+            "/layer/read/all",
+            get(get_all_layers_handler).layer(
+                tower_http::set_header::SetResponseHeaderLayer::overriding(
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static("no-store"),
+                ),
+            ),
+        )
         .route(
             "/layer/{layer_id}/input-policy",
             put(crate::handler::layer_input_policy::update_handler),

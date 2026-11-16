@@ -50,6 +50,118 @@ beforeEach(() => {
     },
   });
 });
+
+describe("AI保存条件の適用", () => {
+  const preset = {
+    id: "saved-ai",
+    kind: "filter",
+    name: "関連語",
+    schema_version: 2,
+    definition: {
+      type: "filter",
+      expression: {
+        op: "or",
+        children: [
+          { op: "text", query1: "学校" },
+          { op: "text", query1: "教育" },
+        ],
+      },
+    },
+    display: { form_label: null, fields: [] },
+    create_at: "2026-11-16T00:00:00Z",
+  };
+  it.each([
+    { enabled: true, protocol_version: 2, succeeds: true, error: "" },
+    { enabled: false, protocol_version: 2, succeeds: false, error: "AI機能を無効" },
+    { enabled: true, protocol_version: 1, succeeds: false, error: "サーバーへ更新" },
+  ])(
+    "既存の編集条件を維持し、対応状態でのみ適用する: $enabled/$protocol_version",
+    async (state) => {
+      const apply = vi.fn(),
+        applyAiPreset = vi.fn().mockResolvedValue(undefined);
+      const transport = vi.fn(async (path: string) => {
+        if (path === "/common-forms") return forms;
+        if (path === "/ai/capabilities")
+          return {
+            enabled: state.enabled,
+            voice_enabled: false,
+            revision: "r",
+            protocol_version: state.protocol_version,
+          };
+        if (path.startsWith("/form-answers/map-presets")) return { items: [preset], total: 1 };
+        throw Error("unexpected request: " + path);
+      });
+      modal = createAdvancedMapSearchModal({
+        transport,
+        savedFilters: true,
+        getApplied: () => ({
+          ...request,
+          conditions: [{ field_id: "n", field_type: "number", op: "eq", value: "7" }],
+        }),
+        getLayerIds: () => null,
+        getContext: () => "account",
+        onApply: apply,
+        applyAiPreset,
+      });
+      await modal.open();
+      click("保存した検索条件");
+      await vi.waitFor(() => expect(document.querySelector("tbody tr")).not.toBeNull());
+      click("適用");
+      if (state.succeeds) {
+        await vi.waitFor(() =>
+          expect(applyAiPreset).toHaveBeenCalledWith("saved-ai", expect.any(AbortSignal)),
+        );
+        await vi.waitFor(() =>
+          expect(document.body.textContent).toContain("AI条件を地図へ適用しました。"),
+        );
+      } else {
+        await vi.waitFor(() =>
+          expect(document.querySelector('[role="alert"]')?.textContent).toContain(state.error),
+        );
+        expect(applyAiPreset).not.toHaveBeenCalled();
+      }
+      expect(apply).not.toHaveBeenCalled();
+      expect(document.querySelector<HTMLInputElement>(".advanced-map-search input")!.value).toBe(
+        "7",
+      );
+    },
+  );
+
+  it("AI設定の取得中に対象が変わった場合は保存条件を適用しない", async () => {
+    let context = "old";
+    let resolve!: (value: unknown) => void;
+    const applyAiPreset = vi.fn();
+    const transport = vi.fn(async (path: string) => {
+      if (path === "/common-forms") return forms;
+      if (path === "/ai/capabilities")
+        return new Promise((done) => {
+          resolve = done;
+        });
+      return { items: [preset], total: 1 };
+    });
+    modal = createAdvancedMapSearchModal({
+      transport,
+      savedFilters: true,
+      getApplied: () => null,
+      getLayerIds: () => null,
+      getContext: () => context,
+      onApply: vi.fn(),
+      applyAiPreset,
+    });
+    await modal.open();
+    click("保存した検索条件");
+    await vi.waitFor(() => expect(document.querySelector("tbody tr")).not.toBeNull());
+    click("適用");
+    context = "new";
+    resolve({ enabled: true, voice_enabled: false, revision: "r", protocol_version: 2 });
+    await vi.waitFor(() =>
+      expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+        "地図の対象が変わりました",
+      ),
+    );
+    expect(applyAiPreset).not.toHaveBeenCalled();
+  });
+});
 afterEach(() => {
   modal?.dispose();
   document.body.replaceChildren();

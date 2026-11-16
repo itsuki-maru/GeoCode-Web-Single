@@ -1,13 +1,19 @@
-use crate::model::ApplicationInitSetup;
+use crate::model::{AiEncryptionKey, ApplicationInitSetup};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use dirs::home_dir;
 use rand::RngCore;
 use serde::Deserialize;
-use serde::Serialize;
 use std::fs;
 use std::io::{self};
 use std::path::PathBuf;
 use uuid::Uuid;
+
+mod ai_key;
+mod persistence;
+use persistence::{
+    backup_configuration, create_json_file, lock_configuration, reject_non_regular_file,
+    write_to_json_file,
+};
 
 /// セットアップフォームの入力フィールド（Tauriコマンドで受け取る）
 #[derive(Debug, Deserialize)]
@@ -81,6 +87,7 @@ struct ApplicationInitSetupPartial {
     vector_tile_allowed_origins: Option<String>,
     tile_proxy_allowed_origins: Option<String>,
     tile_settings_encryption_key: Option<String>,
+    ai_encryption_key: Option<AiEncryptionKey>,
     camera_sharing_enabled: Option<String>,
     camera_turn_provider: Option<String>,
     camera_stun_urls: Option<String>,
@@ -223,30 +230,57 @@ fn read_env_json_at(
     env_json_path: &std::path::Path,
     persist_defaults: bool,
 ) -> Result<ApplicationInitSetup, EnvJsonReadError> {
-    if !env_json_path.exists() {
-        return Err(EnvJsonReadError::NotFound);
-    }
+    let inherited = persist_defaults
+        .then(|| std::env::var_os("AI_ENCRYPTION_KEY"))
+        .flatten();
+    read_env_json_with_key(
+        setup_dir,
+        env_json_path,
+        persist_defaults,
+        inherited.as_deref(),
+    )
+}
 
-    let file = fs::File::open(&env_json_path).map_err(|e| EnvJsonReadError::Io(e.to_string()))?;
-    let reader = io::BufReader::new(file);
-    let value: serde_json::Value = serde_json::from_reader(reader)
-        .map_err(|e| EnvJsonReadError::InvalidJson(e.to_string()))?;
+fn read_env_json_with_key(
+    setup_dir: &PathBuf,
+    env_json_path: &std::path::Path,
+    persist_defaults: bool,
+    inherited: Option<&std::ffi::OsStr>,
+) -> Result<ApplicationInitSetup, EnvJsonReadError> {
+    let mut value = read_env_value(env_json_path)?;
+    // 移行が必要な場合だけ生成から保存までを直列化する。完成済み設定では
+    // 読取り専用の設定ディレクトリでも起動でき、照会CLIも何も作成しない。
+    let _lock = if persist_defaults && env_json_requires_migration(&value) {
+        let lock = lock_configuration(env_json_path)
+            .map_err(|error| EnvJsonReadError::Io(error.to_string()))?;
+        // 待っている間に他の起動処理が保存した鍵を必ず再読込する。
+        value = read_env_value(env_json_path)?;
+        Some(lock)
+    } else {
+        None
+    };
 
     // 直接 ApplicationInitSetup に変換する前に、不足項目の有無を判定しておく。
     // 補完が必要な場合は、読み込み成功後にバックアップを取って書き戻す。
     let migrated = env_json_requires_migration(&value);
     let partial: ApplicationInitSetupPartial =
         serde_json::from_value(value).map_err(|e| EnvJsonReadError::InvalidJson(e.to_string()))?;
-    let env = complete_env(setup_dir, partial)?;
+    let mut env = complete_env(setup_dir, partial)?;
     crate::local_tiles::config::LocalTileConfig::from_setup(&env)
         .map_err(EnvJsonReadError::InvalidJson)?;
 
+    if persist_defaults {
+        env.ai_encryption_key = Some(ai_key::complete(
+            env.ai_encryption_key.take(),
+            inherited,
+            &env.database_url,
+        )?);
+    }
+
     if migrated && persist_defaults {
         let backup_path = setup_dir.join("geocode-web-single.env.json.bak");
-        if !backup_path.exists() {
-            fs::copy(&env_json_path, &backup_path)
-                .map_err(|e| EnvJsonReadError::Io(e.to_string()))?;
-        }
+        backup_configuration(env_json_path, &backup_path)
+            .map_err(|error| EnvJsonReadError::Io(error.to_string()))?;
         write_to_json_file(env_json_path.to_path_buf(), &env)
             .map_err(|e| EnvJsonReadError::Io(e.to_string()))?;
     }
@@ -254,14 +288,35 @@ fn read_env_json_at(
     Ok(env)
 }
 
+fn read_env_value(path: &std::path::Path) -> Result<serde_json::Value, EnvJsonReadError> {
+    reject_non_regular_file(path).map_err(|error| EnvJsonReadError::Io(error.to_string()))?;
+    let file = fs::File::open(path).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            EnvJsonReadError::NotFound
+        } else {
+            EnvJsonReadError::Io(error.to_string())
+        }
+    })?;
+    serde_json::from_reader(io::BufReader::new(file))
+        .map_err(|error| EnvJsonReadError::InvalidJson(error.to_string()))
+}
+
 /// セットアップフォームの入力値から ApplicationInitSetup を構築し、JSONに保存する。
 pub fn build_env_from_form(
     setup_dir: PathBuf,
     form: SetupForm,
 ) -> Result<ApplicationInitSetup, String> {
-    let env = build_env_settings(&setup_dir, form)?;
+    // 入力エラーの場合はlockも設定JSONも作らない。
+    validate_setup_form(&form)?;
     let env_json_path = setup_dir.join("geocode-web-single.env.json");
-    write_to_json_file(env_json_path, &env).map_err(|e| e.to_string())?;
+    let _lock = lock_configuration(&env_json_path).map_err(|error| error.to_string())?;
+    match fs::symlink_metadata(&env_json_path) {
+        Ok(_) => return Err("設定JSONが既に存在します。既存設定は上書きしません。".into()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {},
+        Err(error) => return Err(error.to_string()),
+    }
+    let env = build_env_settings(&setup_dir, form)?;
+    create_json_file(env_json_path, &env).map_err(|e| e.to_string())?;
     Ok(env)
 }
 
@@ -298,6 +353,11 @@ pub fn build_env_settings(
     validate_setup_form(&form)?;
     let defaults = env_defaults(setup_dir);
     let secret_key = Uuid::new_v4().to_string();
+    let inherited = std::env::var_os("AI_ENCRYPTION_KEY");
+    let ai_encryption_key = Some(
+        ai_key::complete(None, inherited.as_deref(), &defaults.database_url)
+            .map_err(|error| error.to_string())?,
+    );
 
     let env = ApplicationInitSetup {
         app_title: form.app_title.clone(),
@@ -326,6 +386,7 @@ pub fn build_env_settings(
         vector_tile_allowed_origins: String::new(),
         tile_proxy_allowed_origins: String::new(),
         tile_settings_encryption_key: generate_tile_settings_key(),
+        ai_encryption_key,
         camera_sharing_enabled: None,
         camera_turn_provider: None,
         camera_stun_urls: None,
@@ -410,6 +471,7 @@ fn env_json_requires_migration(value: &serde_json::Value) -> bool {
         "vector_tile_allowed_origins",
         "tile_proxy_allowed_origins",
         "tile_settings_encryption_key",
+        "ai_encryption_key",
         "camera_sharing_enabled",
         "camera_turn_provider",
         "camera_stun_urls",
@@ -449,7 +511,8 @@ fn env_json_requires_migration(value: &serde_json::Value) -> bool {
     .iter()
     .any(|field| {
         !object.contains_key(*field)
-            || (*field == "tile_settings_encryption_key" && object[*field].is_null())
+            || (matches!(*field, "tile_settings_encryption_key" | "ai_encryption_key")
+                && object[*field].is_null())
             || ((field.starts_with("local_tile_")
                 || matches!(
                     *field,
@@ -577,6 +640,7 @@ fn complete_env(
         vector_tile_allowed_origins,
         tile_proxy_allowed_origins,
         tile_settings_encryption_key,
+        ai_encryption_key: partial.ai_encryption_key,
         camera_sharing_enabled: partial.camera_sharing_enabled,
         camera_turn_provider: partial.camera_turn_provider,
         camera_stun_urls: partial.camera_stun_urls,
@@ -677,13 +741,6 @@ fn complete_env(
     })
 }
 
-/// 設定JSONを見やすい形式で保存する。
-fn write_to_json_file<T: Serialize>(file_path: PathBuf, data: &T) -> io::Result<()> {
-    let file = fs::File::create(file_path)?;
-    serde_json::to_writer_pretty(file, data).map_err(io::Error::other)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -719,6 +776,81 @@ mod tests {
             "next_challenge_minutes": "10",
             "challenge_limit_time_failed_count": "3"
         })
+    }
+
+    #[test]
+    fn concurrent_startup_persists_one_shared_ai_key_and_keeps_original_backup() {
+        let directory = tempfile::tempdir().unwrap();
+        let setup_dir = directory.path().to_path_buf();
+        write_env_json(&setup_dir, minimum_required_env_json());
+        let path = setup_dir.join("geocode-web-single.env.json");
+        let original = fs::read(&path).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let mut threads = Vec::new();
+        for _ in 0..8 {
+            let setup_dir = setup_dir.clone();
+            let path = path.clone();
+            let barrier = barrier.clone();
+            threads.push(std::thread::spawn(move || {
+                barrier.wait();
+                read_env_json_with_key(&setup_dir, &path, true, None)
+                    .unwrap()
+                    .ai_encryption_key
+                    .unwrap()
+            }));
+        }
+        let keys: Vec<_> = threads
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .collect();
+        assert!(keys.iter().all(|key| key == &keys[0]));
+        let saved: ApplicationInitSetup = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        assert_eq!(saved.ai_encryption_key.as_ref(), Some(&keys[0]));
+        assert_eq!(
+            fs::read(setup_dir.join("geocode-web-single.env.json.bak")).unwrap(),
+            original
+        );
+        assert!(!setup_dir.join("geocode-web.sqlite").exists());
+    }
+
+    #[test]
+    fn readonly_and_failed_persistence_do_not_publish_a_generated_key() {
+        let directory = tempfile::tempdir().unwrap();
+        let setup_dir = directory.path().to_path_buf();
+        write_env_json(&setup_dir, minimum_required_env_json());
+        let path = setup_dir.join("geocode-web-single.env.json");
+        let original = fs::read(&path).unwrap();
+        let readonly = read_env_json_with_key(
+            &setup_dir,
+            &path,
+            false,
+            Some(std::ffi::OsStr::new("invalid-environment-key")),
+        )
+        .unwrap();
+        assert!(readonly.ai_encryption_key.is_none());
+        assert_eq!(fs::read_dir(&setup_dir).unwrap().count(), 1);
+        let backup = setup_dir.join("geocode-web-single.env.json.bak");
+        fs::create_dir(&backup).unwrap();
+        assert!(read_env_json_with_key(&setup_dir, &path, true, None).is_err());
+        assert_eq!(fs::read(path).unwrap(), original);
+        assert!(!setup_dir.join("geocode-web.sqlite").exists());
+    }
+
+    #[test]
+    fn complete_configuration_does_not_need_to_create_or_open_a_lock() {
+        let directory = tempfile::tempdir().unwrap();
+        let setup_dir = directory.path().to_path_buf();
+        write_env_json(&setup_dir, minimum_required_env_json());
+        let path = setup_dir.join("geocode-web-single.env.json");
+        let first = read_env_json_with_key(&setup_dir, &path, true, None).unwrap();
+        let lock = setup_dir.join("geocode-web-single.env.json.lock");
+        fs::remove_file(&lock).unwrap();
+        // lockを作れない環境でも、移行済み設定を読み取れることを検証する。
+        fs::create_dir(&lock).unwrap();
+        let original = fs::read(&path).unwrap();
+        let reloaded = read_env_json_with_key(&setup_dir, &path, true, None).unwrap();
+        assert_eq!(first.ai_encryption_key, reloaded.ai_encryption_key);
+        assert_eq!(fs::read(path).unwrap(), original);
     }
 
     #[test]

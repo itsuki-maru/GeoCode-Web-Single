@@ -24,13 +24,42 @@ pub fn initialize(conn: &Connection) -> Result<()> {
         "UPDATE metadata SET value='2' WHERE key='schema_version'",
         [],
     )?;
-    conn.execute_batch("CREATE TABLE standard_features(
-      id INTEGER PRIMARY KEY,osm_type INTEGER NOT NULL,osm_id INTEGER NOT NULL,role INTEGER NOT NULL,
-      kind INTEGER NOT NULL,layer INTEGER NOT NULL,structure INTEGER NOT NULL,
-      min_zoom INTEGER NOT NULL,min_x REAL NOT NULL,max_x REAL NOT NULL,min_y REAL NOT NULL,max_y REAL NOT NULL,
-      point_count INTEGER NOT NULL,geometry BLOB NOT NULL,UNIQUE(osm_type,osm_id,role,kind));
-      CREATE VIRTUAL TABLE standard_rtree USING rtree(id,min_x,max_x,min_y,max_y);
-      CREATE TABLE standard_geometry_lod(feature_id INTEGER NOT NULL REFERENCES standard_features(id),zoom INTEGER NOT NULL,geometry BLOB NOT NULL,PRIMARY KEY(feature_id,zoom)) WITHOUT ROWID;")?;
+    conn.execute_batch(
+        r#"
+            CREATE TABLE standard_features (
+                id INTEGER PRIMARY KEY,
+                osm_type INTEGER NOT NULL,
+                osm_id INTEGER NOT NULL,
+                role INTEGER NOT NULL,
+                kind INTEGER NOT NULL,
+                layer INTEGER NOT NULL,
+                structure INTEGER NOT NULL,
+                min_zoom INTEGER NOT NULL,
+                min_x REAL NOT NULL,
+                max_x REAL NOT NULL,
+                min_y REAL NOT NULL,
+                max_y REAL NOT NULL,
+                point_count INTEGER NOT NULL,
+                geometry BLOB NOT NULL,
+                UNIQUE(osm_type, osm_id, role, kind)
+            );
+
+            CREATE VIRTUAL TABLE standard_rtree USING rtree (
+                id,
+                min_x,
+                max_x,
+                min_y,
+                max_y
+            );
+
+            CREATE TABLE standard_geometry_lod (
+                feature_id INTEGER NOT NULL REFERENCES standard_features(id),
+                zoom INTEGER NOT NULL,
+                geometry BLOB NOT NULL,
+                PRIMARY KEY(feature_id, zoom)
+            ) WITHOUT ROWID;
+        "#,
+    )?;
     super::elevation::initialize(conn)?;
     Ok(())
 }
@@ -236,8 +265,55 @@ pub fn insert_feature_with_context(
         },
         _ => None,
     };
-    conn.execute("INSERT INTO standard_features(osm_type,osm_id,role,kind,layer,structure,min_zoom,min_x,max_x,min_y,max_y,point_count,geometry) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        params![f.osm_type,f.osm_id,f.role,f.kind as i64,f.layer,f.structure,min_zoom,b.min_x,b.max_x,b.min_y,b.max_y,points as i64,data])?;
+    conn.execute(
+        r#"
+            INSERT INTO standard_features (
+                osm_type,
+                osm_id,
+                role,
+                kind,
+                layer,
+                structure,
+                min_zoom,
+                min_x,
+                max_x,
+                min_y,
+                max_y,
+                point_count,
+                geometry
+            )
+            VALUES (
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?
+            )
+        "#,
+        params![
+            f.osm_type,
+            f.osm_id,
+            f.role,
+            f.kind as i64,
+            f.layer,
+            f.structure,
+            min_zoom,
+            b.min_x,
+            b.max_x,
+            b.min_y,
+            b.max_y,
+            points as i64,
+            data
+        ],
+    )?;
     let id = conn.last_insert_rowid();
     conn.execute(
         "INSERT INTO standard_rtree VALUES(?,?,?,?,?)",
@@ -492,8 +568,49 @@ pub fn insert_road_with_context(
     context.check()?;
     let b = Rect::from_points(points)?;
     let data = roads::encode_points(points)?;
-    conn.execute("INSERT INTO features(osm_way_id,road_class,is_link,effective_layer,structure_rank,min_x,max_x,min_y,max_y,point_count,points) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-        params![id,attrs.road_class as i64,attrs.is_link,attrs.effective_layer,attrs.structure_rank,b.min_x,b.max_x,b.min_y,b.max_y,points.len() as i64,data])?;
+    conn.execute(
+        r#"
+            INSERT INTO features (
+                osm_way_id,
+                road_class,
+                is_link,
+                effective_layer,
+                structure_rank,
+                min_x,
+                max_x,
+                min_y,
+                max_y,
+                point_count,
+                points
+            )
+            VALUES (
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?
+            )
+        "#,
+        params![
+            id,
+            attrs.road_class as i64,
+            attrs.is_link,
+            attrs.effective_layer,
+            attrs.structure_rank,
+            b.min_x,
+            b.max_x,
+            b.min_y,
+            b.max_y,
+            points.len() as i64,
+            data
+        ],
+    )?;
     let fid = conn.last_insert_rowid();
     conn.execute(
         "INSERT INTO feature_rtree VALUES(?,?,?,?,?)",
@@ -517,7 +634,37 @@ pub fn insert_road_with_context(
     Ok(())
 }
 pub fn query_features(conn: &Connection, b: Rect, zoom: u8) -> Result<Vec<Feature>> {
-    let mut q=conn.prepare("SELECT f.osm_type,f.osm_id,f.role,f.kind,f.layer,f.structure,length(coalesce(l.geometry,f.geometry)),coalesce(l.geometry,f.geometry) FROM standard_rtree r JOIN standard_features f ON f.id=r.id LEFT JOIN standard_geometry_lod l ON l.feature_id=f.id AND l.zoom=? WHERE r.min_x<=? AND r.max_x>=? AND r.min_y<=? AND r.max_y>=? AND f.min_zoom<=? ORDER BY f.kind,f.layer,f.structure,f.osm_type,f.osm_id,f.role,f.id")?;
+    let mut q = conn.prepare(
+        r#"
+            SELECT
+                f.osm_type,
+                f.osm_id,
+                f.role,
+                f.kind,
+                f.layer,
+                f.structure,
+                length(coalesce(l.geometry, f.geometry)),
+                coalesce(l.geometry, f.geometry)
+            FROM standard_rtree r
+            JOIN standard_features f ON f.id = r.id
+            LEFT JOIN standard_geometry_lod l ON l.feature_id = f.id
+            AND l.zoom = ?
+            WHERE
+                r.min_x <= ?
+                AND r.max_x >= ?
+                AND r.min_y <= ?
+                AND r.max_y >= ?
+                AND f.min_zoom <= ?
+            ORDER BY
+                f.kind,
+                f.layer,
+                f.structure,
+                f.osm_type,
+                f.osm_id,
+                f.role,
+                f.id
+        "#,
+    )?;
     let mut rows = q.query(params![zoom, b.max_x, b.min_x, b.max_y, b.min_y, zoom])?;
     let mut out = Vec::new();
     let mut bytes = 0usize;
@@ -647,40 +794,132 @@ fn render_feature_sql(conn: &Connection, b: Rect, kinds: &[i64], pass: u8) -> Re
     {
         let quoted_index = index.replace('"', "\"\"");
         (
-            format!("WITH visible_ids AS MATERIALIZED (SELECT id FROM standard_features INDEXED BY \"{quoted_index}\" WHERE {kind_filter}), "),
+            format!(
+                r#"
+                    WITH visible_ids AS MATERIALIZED (
+                        SELECT
+                            id
+                        FROM standard_features INDEXED BY "{quoted_index}"
+                        WHERE
+                            {kind_filter}
+                    ),
+                "#,
+            ),
             // 範囲外のidはR-treeだけで除外し、大きな形状を含む本体行を読まない。
-            "visible_ids v CROSS JOIN standard_rtree r CROSS JOIN standard_features f WHERE r.id=v.id AND f.id=v.id AND".to_owned(),
+            r#"
+                visible_ids v
+                CROSS JOIN standard_rtree r
+                CROSS JOIN standard_features f
+                WHERE r.id = v.id
+                    AND f.id = v.id
+                    AND
+            "#
+            .to_owned(),
         )
     } else {
         (
             "WITH ".to_owned(),
             format!(
-                "standard_rtree r JOIN standard_features f ON f.id=r.id WHERE {kind_filter} AND"
+                r#"
+                    standard_rtree r
+                    JOIN standard_features f ON f.id = r.id
+                    WHERE {kind_filter} AND
+                "#
             ),
         )
     };
     // paint::phaseと同じphase順。その後の段階分けも旧描画ループと一致させる。
-    let phase = "CASE f.kind WHEN 1 THEN 0 WHEN 110 THEN 40 WHEN 120 THEN 45 \
-        WHEN 150 THEN 30 WHEN 130 THEN CASE f.structure WHEN 0 THEN 25 WHEN 1 THEN 40 ELSE 60 END \
-        WHEN 140 THEN CASE f.structure WHEN 0 THEN 25 ELSE 50 END ELSE 10 END";
+    let phase = r#"
+        CASE f.kind
+            WHEN 1 THEN 0
+            WHEN 110 THEN 40
+            WHEN 120 THEN 45
+            WHEN 150 THEN 30
+            WHEN 130 THEN
+                CASE f.structure
+                    WHEN 0 THEN 25
+                    WHEN 1 THEN 40
+                    ELSE 60
+                END
+            WHEN 140 THEN
+                CASE f.structure
+                    WHEN 0 THEN 25
+                    ELSE 50
+                END
+            ELSE 10
+        END
+    "#;
     Ok(format!(
-        "{prefix} candidates AS (
-          SELECT f.id,f.osm_type,f.osm_id,f.role,f.kind,f.layer,f.structure,({phase}) AS phase
-          FROM {source} r.min_x<=? AND r.max_x>=? AND r.min_y<=? AND r.max_y>=? AND f.min_zoom<=?
-        ) SELECT id,osm_type,osm_id,role,kind,layer,structure FROM candidates
-          WHERE (CASE WHEN phase<30 THEN 0 WHEN phase<50 THEN 1
-            WHEN phase=50 AND structure=0 THEN 2 WHEN phase=50 AND structure=1 THEN 3 ELSE 4 END)=?
-          ORDER BY phase,layer,structure,kind,osm_type,osm_id,role,id"
+        r#"
+            {prefix} candidates AS (
+                SELECT
+                    f.id,
+                    f.osm_type,
+                    f.osm_id,
+                    f.role,
+                    f.kind,
+                    f.layer,
+                    f.structure,
+                    ({phase}) AS phase
+                FROM {source}
+                    r.min_x <= ?
+                    AND r.max_x >= ?
+                    AND r.min_y <= ?
+                    AND r.max_y >= ?
+                    AND f.min_zoom <= ?
+            )
+            SELECT
+                id,
+                osm_type,
+                osm_id,
+                role,
+                kind,
+                layer,
+                structure
+            FROM candidates
+            WHERE
+                (
+                    CASE
+                        WHEN phase < 30 THEN 0
+                        WHEN phase < 50 THEN 1
+                        WHEN phase = 50 AND structure = 0 THEN 2
+                        WHEN phase = 50 AND structure = 1 THEN 3
+                        ELSE 4
+                    END
+                ) = ?
+            ORDER BY
+                phase,
+                layer,
+                structure,
+                kind,
+                osm_type,
+                osm_id,
+                role,
+                id
+        "#,
     ))
 }
 
 // 縮約形状がある場合は、大きな原形状を含む本体行を再読しない。
 // UNION ALLの左側を先に評価し、LIMIT 1で従来のcoalesceと同じ優先順位にする。
-const RENDER_GEOMETRY_SQL: &str = "SELECT length(geometry),geometry FROM standard_geometry_lod
-       WHERE feature_id=?2 AND zoom=?1 AND geometry IS NOT NULL
-     UNION ALL
-     SELECT length(geometry),geometry FROM standard_features WHERE id=?2
-     LIMIT 1";
+const RENDER_GEOMETRY_SQL: &str = r#"
+    SELECT
+        length(geometry),
+        geometry
+    FROM standard_geometry_lod
+    WHERE
+        feature_id = ?2
+        AND zoom = ?1
+        AND geometry IS NOT NULL
+    UNION ALL
+    SELECT
+        length(geometry),
+        geometry
+    FROM standard_features
+    WHERE
+        id = ?2
+    LIMIT 1
+"#;
 
 /// 描画段階の中を従来と同じ順序で走査し、形状は1地物ずつ読み出す。
 /// 全件を返すAPIの件数・合計容量制限を、広域タイルの地物省略には使わない。
@@ -703,8 +942,21 @@ pub(crate) fn visit_render_features(
     if broad_render_query(b) {
         // 世界の反対側など候補のない広域窓で、全分類索引を走査しない。
         let exists: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM standard_rtree WHERE min_x<=? AND max_x>=? AND min_y<=? AND max_y>=?)",
-            params![b.max_x, b.min_x, b.max_y, b.min_y], |row| row.get(0),
+            r#"
+                SELECT
+                    EXISTS (
+                        SELECT
+                            1
+                        FROM standard_rtree
+                        WHERE
+                            min_x <= ?
+                            AND max_x >= ?
+                            AND min_y <= ?
+                            AND max_y >= ?
+                    )
+            "#,
+            params![b.max_x, b.min_x, b.max_y, b.min_y],
+            |row| row.get(0),
         )?;
         if !exists {
             return context.check();
@@ -740,7 +992,20 @@ pub(crate) fn visit_render_features(
 }
 
 pub fn details(conn: &Connection) -> Result<Option<StandardMetadata>> {
-    let data:Option<String>=conn.query_row("SELECT value FROM metadata WHERE key='standard_document' AND length(CAST(value AS BLOB))<=1048576",[],|r|r.get(0)).optional()?;
+    let data: Option<String> = conn
+        .query_row(
+            r#"
+            SELECT
+                value
+            FROM metadata
+            WHERE
+                key = 'standard_document'
+                AND length(CAST(value AS BLOB)) <= 1048576
+        "#,
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
     data.map(|s| {
         let m: StandardMetadata = serde_json::from_str(&s)?;
         validate_metadata(&m)?;
@@ -1049,9 +1314,67 @@ pub fn summary(conn: &Connection) -> Result<(u64, Rect, u64, BTreeMap<u8, u64>)>
         |r| r.get(0),
     )?;
     let query = if extended {
-        "SELECT count(*),min(min_x),max(max_x),min(min_y),max(max_y),coalesce(sum(point_count),0) FROM (SELECT min_x,max_x,min_y,max_y,point_count FROM features UNION ALL SELECT min_x,max_x,min_y,max_y,point_count FROM standard_features UNION ALL SELECT x,x,y,y,1 FROM map_labels)"
+        r#"
+            SELECT
+                count(*),
+                min(min_x),
+                max(max_x),
+                min(min_y),
+                max(max_y),
+                coalesce(sum(point_count), 0)
+            FROM (
+                SELECT
+                    min_x,
+                    max_x,
+                    min_y,
+                    max_y,
+                    point_count
+                FROM features
+                UNION ALL
+                SELECT
+                    min_x,
+                    max_x,
+                    min_y,
+                    max_y,
+                    point_count
+                FROM standard_features
+                UNION ALL
+                SELECT
+                    x,
+                    x,
+                    y,
+                    y,
+                    1
+                FROM map_labels
+            )
+        "#
     } else {
-        "SELECT count(*),min(min_x),max(max_x),min(min_y),max(max_y),coalesce(sum(point_count),0) FROM (SELECT min_x,max_x,min_y,max_y,point_count FROM features UNION ALL SELECT min_x,max_x,min_y,max_y,point_count FROM standard_features)"
+        r#"
+            SELECT
+                count(*),
+                min(min_x),
+                max(max_x),
+                min(min_y),
+                max(max_y),
+                coalesce(sum(point_count), 0)
+            FROM (
+                SELECT
+                    min_x,
+                    max_x,
+                    min_y,
+                    max_y,
+                    point_count
+                FROM features
+                UNION ALL
+                SELECT
+                    min_x,
+                    max_x,
+                    min_y,
+                    max_y,
+                    point_count
+                FROM standard_features
+            )
+        "#
     };
     let (n, minx, maxx, miny, maxy, points): (
         u64,
@@ -1094,7 +1417,14 @@ pub fn finish(conn: &Connection, metadata: &StoreMetadata, extra: &StandardMetad
         Some(elevation) if elevation["revision"] == 2 => {
             let stored: Option<String> = conn
                 .query_row(
-                    "SELECT value FROM standard_dem_metadata WHERE key='document' AND length(CAST(value AS BLOB))<=1048576",
+                    r#"
+                        SELECT
+                            value
+                        FROM standard_dem_metadata
+                        WHERE
+                            key = 'document'
+                            AND length(CAST(value AS BLOB)) <= 1048576
+                    "#,
                     [],
                     |row| row.get(0),
                 )
@@ -1110,7 +1440,19 @@ pub fn finish(conn: &Connection, metadata: &StoreMetadata, extra: &StandardMetad
         },
         None => {
             let has_elevation: bool = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM standard_dem_chunks) OR EXISTS(SELECT 1 FROM standard_dem_metadata)",
+                r#"
+                    SELECT
+                        EXISTS (
+                            SELECT
+                                1
+                            FROM standard_dem_chunks
+                        )
+                        OR EXISTS (
+                            SELECT
+                                1
+                            FROM standard_dem_metadata
+                        )
+                "#,
                 [],
                 |row| row.get(0),
             )?;
@@ -1156,7 +1498,36 @@ pub fn finish(conn: &Connection, metadata: &StoreMetadata, extra: &StandardMetad
         } else {
             "id"
         };
-        let mismatch:bool=conn.query_row(&format!("SELECT (SELECT count(*) FROM {features})<>(SELECT count(*) FROM {index}) OR EXISTS(SELECT 1 FROM {features} f LEFT JOIN {index} r ON r.{key}=f.{key} WHERE r.{key} IS NULL OR r.min_x>f.min_x OR r.max_x<f.max_x OR r.min_y>f.min_y OR r.max_y<f.max_y)"),[],|r|r.get(0))?;
+        let mismatch: bool = conn.query_row(
+            &format!(
+                r#"
+                SELECT
+                    (
+                        SELECT
+                            count(*)
+                        FROM {features}
+                    ) <> (
+                        SELECT
+                            count(*)
+                        FROM {index}
+                    )
+                    OR EXISTS (
+                        SELECT
+                            1
+                        FROM {features} f
+                        LEFT JOIN {index} r ON r.{key} = f.{key}
+                        WHERE
+                            r.{key} IS NULL
+                            OR r.min_x > f.min_x
+                            OR r.max_x < f.max_x
+                            OR r.min_y > f.min_y
+                            OR r.max_y < f.max_y
+                    )
+            "#,
+            ),
+            [],
+            |r| r.get(0),
+        )?;
         ensure!(!mismatch, "地物と空間索引の件数・範囲が一致しません");
     }
     let foreign_keys: bool = conn.query_row(
@@ -1165,7 +1536,49 @@ pub fn finish(conn: &Connection, metadata: &StoreMetadata, extra: &StandardMetad
         |r| r.get(0),
     )?;
     ensure!(!foreign_keys, "完成DBの外部キーが不正です");
-    let invalid_lod:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM features f WHERE (SELECT count(*) FROM geometry_lod l WHERE l.feature_id=f.feature_id)<>10) OR EXISTS(SELECT 1 FROM standard_features f WHERE (SELECT count(*) FROM standard_geometry_lod l WHERE l.feature_id=f.id)<>max(0,14-f.min_zoom)) OR EXISTS(SELECT 1 FROM standard_geometry_lod l JOIN standard_features f ON f.id=l.feature_id WHERE l.zoom<f.min_zoom OR l.zoom>13 OR length(l.geometry) NOT BETWEEN 1 AND 33554432)",[],|r|r.get(0))?;
+    let invalid_lod: bool = conn.query_row(
+        r#"
+            SELECT
+                EXISTS (
+                    SELECT
+                        1
+                    FROM features f
+                    WHERE
+                        (
+                            SELECT
+                                count(*)
+                            FROM geometry_lod l
+                            WHERE
+                                l.feature_id = f.feature_id
+                        ) <> 10
+                )
+                OR EXISTS (
+                    SELECT
+                        1
+                    FROM standard_features f
+                    WHERE
+                        (
+                            SELECT
+                                count(*)
+                            FROM standard_geometry_lod l
+                            WHERE
+                                l.feature_id = f.id
+                        ) <> max(0, 14 - f.min_zoom)
+                )
+                OR EXISTS (
+                    SELECT
+                        1
+                    FROM standard_geometry_lod l
+                    JOIN standard_features f ON f.id = l.feature_id
+                    WHERE
+                        l.zoom < f.min_zoom
+                        OR l.zoom > 13
+                        OR length(l.geometry) NOT BETWEEN 1 AND 33554432
+                )
+        "#,
+        [],
+        |r| r.get(0),
+    )?;
     ensure!(!invalid_lod, "完成DBのLODが不足しているか不正です");
     let (n, _, _, _) = summary(conn)?;
     ensure!(n == metadata.feature_count, "地物数が一致しません");
@@ -1663,12 +2076,22 @@ mod tests {
         .unwrap();
         let compare = || {
             for zoom in 0..=22 {
-                let old: (i64, Vec<u8>) = conn.query_row(
-                    "SELECT length(coalesce(l.geometry,f.geometry)),coalesce(l.geometry,f.geometry)
-                     FROM standard_features f LEFT JOIN standard_geometry_lod l
-                     ON l.feature_id=f.id AND l.zoom=?1 WHERE f.id=?2",
-                    params![zoom, id], |row| Ok((row.get(0)?, row.get(1)?)),
-                ).unwrap();
+                let old: (i64, Vec<u8>) = conn
+                    .query_row(
+                        r#"
+                        SELECT
+                            length(coalesce(l.geometry, f.geometry)),
+                            coalesce(l.geometry, f.geometry)
+                        FROM standard_features f
+                        LEFT JOIN standard_geometry_lod l ON l.feature_id = f.id
+                        AND l.zoom = ?1
+                        WHERE
+                            f.id = ?2
+                    "#,
+                        params![zoom, id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .unwrap();
                 let actual: (i64, Vec<u8>) = conn
                     .query_row(RENDER_GEOMETRY_SQL, params![zoom, id], |row| {
                         Ok((row.get(0)?, row.get(1)?))
@@ -1912,7 +2335,21 @@ mod tests {
         f.kind = FeatureKind::Land;
         insert_feature(&conn, &f).unwrap();
         // 任意の外部完成DBは既存のUNIQUE索引名・配置を持つとは限らない。
-        conn.execute_batch("PRAGMA foreign_keys=OFF; CREATE TABLE feature_copy AS SELECT * FROM standard_features; DROP TABLE standard_features; ALTER TABLE feature_copy RENAME TO standard_features;").unwrap();
+        conn.execute_batch(
+            r#"
+                PRAGMA foreign_keys = OFF;
+
+                CREATE TABLE feature_copy AS
+                SELECT
+                    *
+                FROM standard_features;
+
+                DROP TABLE standard_features;
+
+                ALTER TABLE feature_copy RENAME TO standard_features;
+            "#,
+        )
+        .unwrap();
         assert!(render_kind_index(&conn).unwrap().is_none());
         let mut count = 0;
         visit_render_features(
@@ -1972,7 +2409,44 @@ mod tests {
         // 取り込み/LOD構築ではなく描画readerの全件保持制約だけを再現する。
         conn.execute_batch("BEGIN").unwrap();
         {
-            let mut insert = conn.prepare("INSERT INTO standard_features(id,osm_type,osm_id,role,kind,layer,structure,min_zoom,min_x,max_x,min_y,max_y,point_count,geometry) VALUES(?,1,?,0,10,0,1,6,0.4,0.6,0.4,0.6,?,?)").unwrap();
+            let mut insert = conn
+                .prepare(
+                    r#"
+                    INSERT INTO standard_features (
+                        id,
+                        osm_type,
+                        osm_id,
+                        role,
+                        kind,
+                        layer,
+                        structure,
+                        min_zoom,
+                        min_x,
+                        max_x,
+                        min_y,
+                        max_y,
+                        point_count,
+                        geometry
+                    )
+                    VALUES (
+                        ?,
+                        1,
+                        ?,
+                        0,
+                        10,
+                        0,
+                        1,
+                        6,
+                        0.4,
+                        0.6,
+                        0.4,
+                        0.6,
+                        ?,
+                        ?
+                    )
+                "#,
+                )
+                .unwrap();
             let mut index = conn
                 .prepare("INSERT INTO standard_rtree VALUES(?,0.4,0.6,0.4,0.6)")
                 .unwrap();

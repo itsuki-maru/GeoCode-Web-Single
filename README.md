@@ -9,6 +9,7 @@
 - レイヤ（グループ）による情報整理
 - 浸水想定区域などの重ね合わせタイルの表示
 - 期限付き共有 URL の発行
+- 管理者が設定したLLMによる自然言語検索・色分け、実データの入力例とTab入力
 - OSM PBFの道路・建物・土地被覆と、DEMによる陰影・等高線のローカルタイル生成・配信
 
 Rust/Axum 製 API サーバーと Vue 3 製フロントエンドを Tauri 2 でラップし、SQLite データベースとともに Windows 向けアプリケーションとして配布します。
@@ -21,6 +22,8 @@ Rust/Axum 製 API サーバーと Vue 3 製フロントエンドを Tauri 2 で�
 
 - ユーザーガイド: [USER-GUIDE.md](https://project.geocode-web.com/USER-GUIDE.md)
 - 仕様書: [SPECIFICATION.md](SPECIFICATION.md)
+- 機能別の案内: [ドキュメント索引](docs/README.md)
+- AIアシスタント: [設定・利用・SQLiteでの導入](docs/AI_ASSISTANT.md)、[日本語指示の受入評価](docs/AI_EVALUATION.md)
 - ローカル地図: [専用管理画面・CLI・PBF取り込み・オフライン利用](docs/LOCAL_TILES.md)
 - 気象庁ナウキャストの登録: [仕様書 9.10](SPECIFICATION.md#910-気象庁ナウキャスト)
 - 変更履歴: [CHANGELOG.md](CHANGELOG.md), [release_notes.md](release_notes.md)
@@ -47,6 +50,12 @@ Rust/Axum 製 API サーバーと Vue 3 製フロントエンドを Tauri 2 で�
   - マスターレイヤでは全レイヤの図形を表示し、個別レイヤでは当該レイヤの図形のみ表示
 
 ![8-2_geocode-web.gif](https://project.geocode-web.com/userguide/images/8-2_geocode-web.gif)
+
+### AIアシスタント
+
+PC・モバイル・別画面地図で、自然言語による検索・色分け・座標移動・操作案内を利用できます。表示中の所有レイヤーの実データに合う入力例を示し、空欄でTabまたは「例を入力」を押すと文章を挿入します。挿入だけでは送信しません。管理者が作成・保存を許可した場合は、名称・内容の確認後にレイヤー作成や検索・色分け条件の保存を行えます。
+
+AI・音声入力・作成保存は初期無効です。管理者が接続先とモデルを設定し、APIキーはバックエンドで暗号化して保存します。起動時マイグレーション26・27を自動適用するため、利用中DBへの手動適用は不要です。AI用暗号鍵は未設定時に自動生成して設定JSONの `ai_encryption_key` へ保存します。従来の環境変数 `AI_ENCRYPTION_KEY` は優先設定として維持し、JSON鍵がなければ同じ値を保存します。HTTP・LAN接続等の例外許可には、引き続き環境変数 `AI_ALLOWED_ORIGINS` を使います。導入・鍵の保管と復元・料金・送信情報・音声の制約は [AIアシスタント](docs/AI_ASSISTANT.md) を参照してください。
 
 ### レイヤ（グループ）管理
 
@@ -267,6 +276,7 @@ POST    /forms/{public_id}
 - アカウントロック解除
 - 現在位置共有の許可・取り消し、ライブマップの作成・更新・失効
 - 重ね合わせタイルの登録・編集・削除、有効・無効の切り替え
+- AI接続・音声認識と、AIによるレイヤー作成・条件保存の許可設定
 
 ### 権限モデル
 
@@ -379,7 +389,7 @@ Ctrl+C でグレースフルシャットダウンする。
 - `tauri-cli`
 - Windows では WebView2 が利用可能であること
 
-まず `.env.example` を `.env` としてコピーする。
+開発ツール用に `.env.example` を `.env` としてコピーする。配布アプリはこの `.env` を読み込まず、通常の実行時設定は `~/.geocode-web-single/geocode-web-single.env.json` を使用する。AIの配備鍵・接続例外許可は同JSONの項目ではなく、起動プロセスへ環境変数で供給する。詳しくは [AIの導入](docs/AI_ASSISTANT.md#管理者による導入) を参照する。
 
 ```powershell
 Copy-Item .env.example .env
@@ -410,6 +420,8 @@ VITE_ASSET_PATH=/assets/
 現在位置共有関連の値はすべて任意で、上記が既定値となる。`LIVE_MAP_SNAPSHOT_CACHE_SECONDS` はRedisを利用できる場合の公開位置キャッシュ時間であり、Redisがない場合は無視される。`0` を指定すると新しい位置スナップショットをキャッシュしない。
 
 ### 2. SQLite データベースの作成
+
+次はSQLxの開発・コンパイル検証用DBを用意する手順である。通常利用のDBはアプリ起動時に自動更新するため、この手順の対象にしない。
 
 ```bash
 sqlx database create
@@ -576,7 +588,7 @@ APIキーはブラウザーに渡さず、接続先は管理者の環境変数�
 
 ### カメラ共有
 
-Androidからライブマップへ映像を共有できます。既定では無効です。SQLite版の設定と運用手順は [カメラ共有](CAMERA_SHARING.md) を参照してください。
+Androidからライブマップへ映像を共有できます。既定では無効です。SQLite版の設定と運用手順は [カメラ共有](docs/CAMERA_SHARING.md) を参照してください。
 
 
 ## Raspberry PiなどのMJPEGカメラ表示
@@ -616,4 +628,4 @@ LAN内のHTTPカメラを利用する場合は、`~/.geocode-web-single/geocode-
 
 共通フロントエンドから、地図の絞り込み条件と色分け条件をアカウント単位で保存・呼び出し・削除できます。呼び出しは入力欄を復元し、実行ボタンで地図へ反映します。更新・共有は提供しません。
 
-起動時マイグレーション22で `answer_map_saved_condition_model` を追加します。CLI/CIと同じ `migrations/20261025120000_answer_map_saved_conditions.sql` を使い、既存DBと保存済みデータを保持して更新・再起動できます。利用中DBへの手動適用は不要です。詳細は [フォーム回答](docs/FORM_ANSWERS.md#地図の色分けと検索条件の保存) を参照してください。
+起動時マイグレーション22で `answer_map_saved_condition_model` を追加します。CLI/CIと同じ `migrations/20261025120000_answer_map_saved_conditions.sql` を使い、既存DBと保存済みデータを保持して更新・再起動できます。利用中DBへの手動適用は不要です。詳細は [フォーム回答](docs/FORM_ANSWERS.md#検索条件を保存呼び出すpostgresql版sqlite版) を参照してください。

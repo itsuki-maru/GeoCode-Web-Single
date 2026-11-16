@@ -54,7 +54,7 @@ async fn migrations_create_schema_and_record_versions() {
     .fetch_one(&pool)
     .await
     .expect("migration count should be returned");
-    assert_eq!(migration_count, 25);
+    assert_eq!(migration_count, 27);
 
     let live_location_table_count: i64 = sqlx::query_scalar(
         r#"
@@ -185,7 +185,7 @@ async fn migrations_are_idempotent() {
     .fetch_one(&pool)
     .await
     .expect("migration count should be returned");
-    assert_eq!(migration_count, 25);
+    assert_eq!(migration_count, 27);
 }
 
 #[tokio::test]
@@ -267,7 +267,7 @@ async fn migrations_record_versions_for_existing_schema() {
     .await
     .expect("migration rows should be returned");
 
-    assert_eq!(rows.len(), 25);
+    assert_eq!(rows.len(), 27);
     assert_eq!(rows[0].get::<i64, _>("version"), 1);
     assert_eq!(rows[0].get::<String, _>("name"), "create_initial_schema");
     assert_eq!(rows[1].get::<i64, _>("version"), 2);
@@ -863,7 +863,7 @@ async fn common_form_upgrade_preserves_legacy_config_answers_and_markdown() {
         .fetch_one(&pool)
         .await
         .unwrap(),
-        25
+        27
     );
 }
 
@@ -1216,7 +1216,7 @@ async fn receipt_upgrade_from_version_twenty_preserves_data_and_is_repeatable() 
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(after.len(), 25);
+    assert_eq!(after.len(), 27);
     assert_eq!(&after[..20], before);
     let detail: String = sqlx::query_scalar(
         r#"
@@ -1359,7 +1359,7 @@ async fn receipt_upgrade_preserves_receipts_when_sql_was_applied_before_runtime_
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(total, 25);
+    assert_eq!(total, 27);
     let detail: String = sqlx::query_scalar(
         r#"
         SELECT
@@ -1949,7 +1949,7 @@ async fn saved_condition_upgrade_from_twenty_one_preserves_all_existing_data_and
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(migrations_after.len(), 25);
+    assert_eq!(migrations_after.len(), 27);
     assert_eq!(&migrations_after[..21], migrations_before);
     assert_eq!(migrations_after[21].0, 22);
     assert_eq!(existing_data_snapshot(&pool).await, before);
@@ -2025,7 +2025,7 @@ async fn saved_condition_upgrade_keeps_rows_when_sql_was_applied_before_runtime_
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(versions, (1..=25).collect::<Vec<_>>());
+    assert_eq!(versions, (1..=27).collect::<Vec<_>>());
 }
 
 #[tokio::test]
@@ -2271,7 +2271,7 @@ async fn preserve_legacy_background_and_tile_settings_across_sql_first_migration
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(versions, (1..=25).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=27).collect::<Vec<_>>());
         let settings_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tile_server_settings")
             .fetch_one(&pool)
             .await
@@ -2315,7 +2315,7 @@ async fn application_migrations_never_create_tile_catalog_tables() {
             .fetch_all(&pool)
             .await
             .unwrap();
-    assert_eq!(versions, (1..=25).collect::<Vec<_>>());
+    assert_eq!(versions, (1..=27).collect::<Vec<_>>());
     let existing: (String, String) =
         sqlx::query_as("SELECT url,attribution FROM tileserver_model WHERE id=42")
             .fetch_one(&pool)
@@ -2329,4 +2329,451 @@ async fn application_migrations_never_create_tile_catalog_tables() {
         )
     );
     pool.close().await;
+}
+
+// 実行時移行とSQLx移行の両方で、JSON・暗号BLOB・操作完了状態の保存契約を検証する。
+async fn assert_ai_storage_constraints(pool: &SqlitePool) {
+    let initial: (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM ai_settings),(SELECT count(*) FROM ai_operation_model)",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(initial, (0, 0), "初期状態ではAI設定と操作を作成しない");
+
+    let owner = common::create_test_user(pool, "ai-migration-owner").await;
+    let admin = common::create_test_user(pool, "ai-migration-admin").await;
+    let revision = uuid::Uuid::new_v4().to_string();
+    let operation = uuid::Uuid::new_v4().to_string();
+    let config = r#"{"enabled":true,"writeEnabled":true,"model":"移行試験"}"#;
+    let payload =
+        r#"{"action":{"type":"create_layer","name":"試験用"},"context":{"layer_ids":null}}"#;
+    let encrypted_key = vec![0_u8, 255, 17, 128, 42];
+    let encrypted_speech_key = vec![254_u8, 0, 129, 15];
+    sqlx::query(
+        "INSERT INTO ai_settings(id,revision,config,encrypted_api_key,encrypted_speech_api_key,updated_by) VALUES(1,$1,$2,$3,$4,$5)",
+    )
+    .bind(&revision)
+    .bind(config)
+    .bind(&encrypted_key)
+    .bind(&encrypted_speech_key)
+    .bind(&admin)
+    .execute(pool)
+    .await
+    .unwrap();
+    let stored: (String, String, Vec<u8>, Vec<u8>, String, String, String, String) =
+        sqlx::query_as(
+            "SELECT revision,config,encrypted_api_key,encrypted_speech_api_key,typeof(revision),typeof(config),typeof(encrypted_api_key),typeof(encrypted_speech_api_key) FROM ai_settings",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(stored.0, revision);
+    assert_eq!(stored.1, config);
+    assert_eq!(stored.2, encrypted_key);
+    assert_eq!(stored.3, encrypted_speech_key);
+    assert_eq!(
+        (
+            stored.4.as_str(),
+            stored.5.as_str(),
+            stored.6.as_str(),
+            stored.7.as_str()
+        ),
+        ("text", "text", "blob", "blob")
+    );
+    assert!(
+        sqlx::query("INSERT INTO ai_settings(id,revision,config) VALUES(2,$1,'{}')")
+            .bind(&revision)
+            .execute(pool)
+            .await
+            .is_err(),
+        "設定行はid=1の一件に制限する"
+    );
+    for invalid_json in ["broken", "[]", "null", "false", "\"文字列\""] {
+        assert!(
+            sqlx::query("UPDATE ai_settings SET config=$1 WHERE id=1")
+                .bind(invalid_json)
+                .execute(pool)
+                .await
+                .is_err(),
+            "設定はJSONオブジェクトのみ許可する: {invalid_json}"
+        );
+    }
+
+    sqlx::query(
+        "INSERT INTO ai_operation_model(id,user_id,settings_revision,request_hash,payload,expires_at) VALUES($1,$2,$3,'request-hash',$4,'2099-01-01T00:00:00Z')",
+    )
+    .bind(&operation)
+    .bind(&owner)
+    .bind(&revision)
+    .bind(payload)
+    .execute(pool)
+    .await
+    .unwrap();
+    let pending: (String, String, String, bool, bool, String, String, String) = sqlx::query_as(
+        "SELECT id,settings_revision,payload,result IS NULL,completed_at IS NULL,typeof(id),typeof(settings_revision),typeof(payload) FROM ai_operation_model",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        (&pending.0, &pending.1, &pending.2),
+        (&operation, &revision, &payload.to_string())
+    );
+    assert!(pending.3 && pending.4);
+    assert_eq!(
+        (pending.5.as_str(), pending.6.as_str(), pending.7.as_str()),
+        ("text", "text", "text")
+    );
+    for invalid_json in ["broken", "[]", "null", "0"] {
+        assert!(
+            sqlx::query("UPDATE ai_operation_model SET payload=$1 WHERE id=$2")
+                .bind(invalid_json)
+                .bind(&operation)
+                .execute(pool)
+                .await
+                .is_err(),
+            "操作内容はJSONオブジェクトのみ許可する: {invalid_json}"
+        );
+        assert!(
+            sqlx::query(
+                "UPDATE ai_operation_model SET result=$1,completed_at=CURRENT_TIMESTAMP WHERE id=$2"
+            )
+            .bind(invalid_json)
+            .bind(&operation)
+            .execute(pool)
+            .await
+            .is_err(),
+            "操作結果はJSONオブジェクトのみ許可する: {invalid_json}"
+        );
+    }
+    for update in [
+        "UPDATE ai_operation_model SET result='{}' WHERE id=$1",
+        "UPDATE ai_operation_model SET completed_at=CURRENT_TIMESTAMP WHERE id=$1",
+    ] {
+        assert!(
+            sqlx::query(update)
+                .bind(&operation)
+                .execute(pool)
+                .await
+                .is_err(),
+            "結果と完了日時は同時に保存する"
+        );
+    }
+    let result = r#"{"type":"create_layer","id":"保存された結果"}"#;
+    sqlx::query("UPDATE ai_operation_model SET result=$1,completed_at='2026-11-16T12:34:56.789Z' WHERE id=$2")
+        .bind(result)
+        .bind(&operation)
+        .execute(pool)
+        .await
+        .unwrap();
+    let completed: (String, String, String) = sqlx::query_as(
+        "SELECT result,completed_at,typeof(result) FROM ai_operation_model WHERE id=$1",
+    )
+    .bind(&operation)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        completed,
+        (
+            result.into(),
+            "2026-11-16T12:34:56.789Z".into(),
+            "text".into()
+        )
+    );
+
+    // 設定の更新者削除は設定を残し、所有者削除はその操作履歴を削除する。
+    sqlx::query("DELETE FROM user_model WHERE id=$1")
+        .bind(&admin)
+        .execute(pool)
+        .await
+        .unwrap();
+    assert!(
+        sqlx::query_scalar::<_, bool>("SELECT updated_by IS NULL FROM ai_settings")
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    );
+    sqlx::query("DELETE FROM user_model WHERE id=$1")
+        .bind(&owner)
+        .execute(pool)
+        .await
+        .unwrap();
+    let remaining: (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM ai_settings),(SELECT count(*) FROM ai_operation_model)",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(remaining, (1, 0));
+}
+
+#[tokio::test]
+async fn runtime_and_sqlx_ai_schemas_match_and_enforce_storage_constraints() {
+    let runtime = memory_pool().await;
+    run_migrations(&runtime).await.unwrap();
+    let prepared = memory_pool().await;
+    sqlx::migrate::Migrator::new(std::path::Path::new("./migrations"))
+        .await
+        .unwrap()
+        .run(&prepared)
+        .await
+        .unwrap();
+    let schema_query = "SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE tbl_name IN ('ai_settings','ai_operation_model') AND sql IS NOT NULL ORDER BY type,name";
+    let runtime_schema: Vec<(String, String, String, String)> = sqlx::query_as(schema_query)
+        .fetch_all(&runtime)
+        .await
+        .unwrap();
+    let prepared_schema: Vec<(String, String, String, String)> = sqlx::query_as(schema_query)
+        .fetch_all(&prepared)
+        .await
+        .unwrap();
+    assert_eq!(runtime_schema, prepared_schema);
+    assert_eq!(runtime_schema.len(), 3, "二つの表と所有者索引を作成する");
+    assert_ai_storage_constraints(&runtime).await;
+    assert_ai_storage_constraints(&prepared).await;
+}
+
+// quote()でSQLite内の格納型も比較し、再適用時のJSON・暗号BLOBの書き換えを検出する。
+async fn ai_migration_snapshot(pool: &SqlitePool) -> Vec<Vec<String>> {
+    let mut snapshot = vec![];
+    for query in [
+        "SELECT json_array(quote(id),quote(revision),quote(config),quote(encrypted_api_key),quote(encrypted_speech_api_key),quote(updated_by),quote(updated_at)) FROM ai_settings ORDER BY id",
+        "SELECT json_array(quote(id),quote(user_id),quote(settings_revision),quote(request_hash),quote(payload),quote(result),quote(created_at),quote(expires_at),quote(completed_at)) FROM ai_operation_model ORDER BY id",
+    ] {
+        snapshot.push(sqlx::query_scalar(query).fetch_all(pool).await.unwrap());
+    }
+    snapshot
+}
+
+#[tokio::test]
+async fn ai_upgrade_from_twenty_five_preserves_existing_data_and_survives_reconnect() {
+    for sql_first in [false, true] {
+        let (pool, path) = common::file_test_pool().await;
+        // AI導入前の版25を再現する。通常利用DBは操作しない。
+        sqlx::raw_sql("DROP TABLE ai_operation_model; DROP TABLE ai_settings; DELETE FROM schema_migrations WHERE version>=26;")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let owner = seed_pre_preset_data(&pool).await;
+        insert_saved_condition(
+            &pool,
+            &owner,
+            &uuid::Uuid::new_v4().to_string(),
+            "filter",
+            "AI導入前の保存条件",
+            1,
+            r#"{"common_form_id":null,"conditions":[]}"#,
+            r#"{"form_label":null,"fields":[]}"#,
+        )
+        .await
+        .unwrap();
+        let existing_before = existing_data_snapshot(&pool).await;
+        let preset_query = "SELECT id,user_id,kind,name,schema_version,definition,display,create_at FROM answer_map_saved_condition_model ORDER BY id";
+        let presets_before: Vec<(String, String, String, String, i64, String, String, String)> =
+            sqlx::query_as(preset_query).fetch_all(&pool).await.unwrap();
+        let migrations_before: Vec<(i64, String, String)> = sqlx::query_as(
+            "SELECT version,name,applied_at FROM schema_migrations ORDER BY version",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(migrations_before.len(), 25);
+
+        if sql_first {
+            // SQLx相当の先行適用後に保存した設定・確定結果も実行時移行で維持する。
+            sqlx::raw_sql(include_str!(
+                "../migrations/20261116120000_add_ai_settings.sql"
+            ))
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::raw_sql(include_str!(
+                "../migrations/20261117120000_ai_operations.sql"
+            ))
+            .execute(&pool)
+            .await
+            .unwrap();
+        } else {
+            run_migrations(&pool).await.unwrap();
+        }
+        let empty: (i64, i64) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM ai_settings),(SELECT count(*) FROM ai_operation_model)",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(empty, (0, 0));
+        let revision = uuid::Uuid::new_v4().to_string();
+        sqlx::query("INSERT INTO ai_settings(id,revision,config,encrypted_api_key,encrypted_speech_api_key,updated_by) VALUES(1,$1,'{\"enabled\":false}',X'00FF1020',X'FF0011',$2)")
+            .bind(&revision)
+            .bind(&owner)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO ai_operation_model(id,user_id,settings_revision,request_hash,payload,result,created_at,expires_at,completed_at) VALUES($1,$2,$3,'retained-hash','{\"action\":{\"type\":\"create_layer\",\"name\":\"維持する名称\"}}','{\"type\":\"create_layer\",\"id\":\"維持する結果\"}','2026-11-16T01:02:03Z','2099-01-01T00:00:00Z','2026-11-16T01:02:04Z')")
+            .bind(uuid::Uuid::new_v4().to_string())
+            .bind(&owner)
+            .bind(&revision)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let ai_before = ai_migration_snapshot(&pool).await;
+        run_migrations(&pool).await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        assert_eq!(ai_migration_snapshot(&pool).await, ai_before);
+
+        pool.close().await;
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(&path)
+                    .foreign_keys(true)
+                    .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+            )
+            .await
+            .unwrap();
+        run_migrations(&pool).await.unwrap();
+        assert_eq!(existing_data_snapshot(&pool).await, existing_before);
+        let presets_after: Vec<(String, String, String, String, i64, String, String, String)> =
+            sqlx::query_as(preset_query).fetch_all(&pool).await.unwrap();
+        assert_eq!(presets_after, presets_before);
+        assert_eq!(ai_migration_snapshot(&pool).await, ai_before);
+        let migrations_after: Vec<(i64, String, String)> = sqlx::query_as(
+            "SELECT version,name,applied_at FROM schema_migrations ORDER BY version",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(migrations_after.len(), 27);
+        assert_eq!(&migrations_after[..25], migrations_before);
+        assert_eq!(
+            (migrations_after[25].0, migrations_after[25].1.as_str()),
+            (26, "add_ai_settings")
+        );
+        assert_eq!(
+            (migrations_after[26].0, migrations_after[26].1.as_str()),
+            (27, "ai_operations")
+        );
+        common::close_file_test_pool(pool, path).await;
+    }
+}
+
+// 実際の移行中の書込ロックを保持し、独立接続による同時起動を再現する。
+#[tokio::test]
+async fn concurrent_ai_upgrade_waits_before_reading_versions_and_preserves_existing_data() {
+    use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
+    use std::{sync::mpsc, time::Duration};
+    use tokio::sync::oneshot;
+
+    for journal_mode in [SqliteJournalMode::Wal, SqliteJournalMode::Delete] {
+        let (seed, path) = common::file_test_pool().await;
+        sqlx::raw_sql("DROP TABLE ai_operation_model; DROP TABLE ai_settings; DELETE FROM schema_migrations WHERE version>=26;")
+            .execute(&seed).await.unwrap();
+        seed_pre_preset_data(&seed).await;
+        let before = existing_data_snapshot(&seed).await;
+        seed.close().await;
+        drop(seed);
+        let options = SqliteConnectOptions::new()
+            .filename(&path)
+            .journal_mode(journal_mode)
+            .foreign_keys(true)
+            .busy_timeout(Duration::from_secs(5));
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options.clone())
+            .await
+            .unwrap();
+        let first = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options.clone())
+            .await
+            .unwrap();
+        let second = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        let (writer_ready, writer_wait) = oneshot::channel();
+        let (release_writer, release_wait) = mpsc::channel();
+        {
+            let mut connection = first.acquire().await.unwrap();
+            let mut ready = Some(writer_ready);
+            connection
+                .lock_handle()
+                .await
+                .unwrap()
+                .set_update_hook(move |update| {
+                    // 版26のDDLと履歴INSERTまで実行し、commit前の実ロックを保持する。
+                    if update.table == "schema_migrations" && update.rowid == 26 {
+                        if let Some(ready) = ready.take() {
+                            let _ = ready.send(());
+                            let _ = release_wait.recv_timeout(Duration::from_secs(10));
+                        }
+                    }
+                });
+        }
+        let first_task_pool = first.clone();
+        let first_run = tokio::spawn(async move { run_migrations(&first_task_pool).await });
+        tokio::time::timeout(Duration::from_secs(5), writer_wait)
+            .await
+            .expect("最初の移行が版26の書込まで到達する")
+            .unwrap();
+        let visible: (i64, i64) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM schema_migrations),(SELECT count(*) FROM sqlite_schema WHERE name='ai_settings')",
+        ).fetch_one(&pool).await.unwrap();
+        assert_eq!(visible, (25, 0), "別接続には移行途中の版と表を公開しない");
+        let (second_started, second_wait) = oneshot::channel();
+        let second_task_pool = second.clone();
+        let mut second_run = tokio::spawn(async move {
+            let _ = second_started.send(());
+            run_migrations(&second_task_pool).await
+        });
+        second_wait.await.unwrap();
+        // 書込中の接続を実際に確保してから待機を検査する。遅延BEGINではここでBUSYになる。
+        let early_result = tokio::time::timeout(Duration::from_millis(250), &mut second_run).await;
+        let waited_for_writer = early_result.is_err();
+        release_writer.send(()).unwrap();
+        let first_result = tokio::time::timeout(Duration::from_secs(10), first_run)
+            .await
+            .expect("最初の移行を回収する")
+            .unwrap();
+        let second_result = match early_result {
+            Ok(result) => result.unwrap(),
+            Err(_) => tokio::time::timeout(Duration::from_secs(10), second_run)
+                .await
+                .expect("待機した移行を回収する")
+                .unwrap(),
+        };
+        assert!(first_result.is_ok(), "最初の移行: {first_result:?}");
+        assert!(second_result.is_ok(), "同時起動した移行: {second_result:?}");
+        assert!(
+            waited_for_writer,
+            "既適用版を読む前に先行writerの確定を待つ"
+        );
+        let versions: Vec<i64> =
+            sqlx::query_scalar("SELECT version FROM schema_migrations ORDER BY version")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            versions,
+            (1..=27).collect::<Vec<_>>(),
+            "各移行を一度だけ適用する"
+        );
+        assert_eq!(existing_data_snapshot(&pool).await, before);
+        let empty: (i64, i64) = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM ai_settings),(SELECT count(*) FROM ai_operation_model)",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(empty, (0, 0));
+        run_migrations(&pool).await.unwrap();
+        first.close().await;
+        second.close().await;
+        common::close_file_test_pool(pool, path).await;
+    }
 }

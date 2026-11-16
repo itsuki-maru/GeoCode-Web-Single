@@ -25,6 +25,7 @@ const isLoginView = computed(() => route.name === "login");
           <RouterLink to="/tile-server-settings">タイルサーバ設定</RouterLink>
           <RouterLink to="/tile-overlays">タイル追加設定</RouterLink>
           <RouterLink to="/map-display-settings">地図表示設定</RouterLink>
+          <RouterLink to="/ai-settings">AI設定</RouterLink>
         </nav>
       </div>
     </header>

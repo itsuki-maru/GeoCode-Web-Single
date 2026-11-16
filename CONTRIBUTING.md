@@ -23,7 +23,7 @@ GeoCode-Web-Single への提案を歓迎します。大きな変更に入る前�
 - `sqlx-cli` (`cargo install sqlx-cli --no-default-features --features sqlite`)
 - `tauri-cli` (`cargo install tauri-cli --locked --version "^2"`)
 
-`.env.example` を `.env` にコピーして、必要に応じてパスを調整してください。
+`.env.example` を `.env` にコピーして、開発・SQLx検証用DBのパスを調整してください。通常利用のDBはアプリ起動時に自動更新するため、以下の `sqlx` コマンドの対象にしないでください。配布アプリは `.env` を読み込まず、通常の実行時設定は設定JSONを使います。AIの配備鍵はJSONの `ai_encryption_key` へ自動生成・保存し、従来の環境変数 `AI_ENCRYPTION_KEY` がある場合は優先します。接続例外許可の `AI_ALLOWED_ORIGINS` は引き続き起動プロセスの環境変数から読み取ります。導入方法は [AIアシスタント](docs/AI_ASSISTANT.md#管理者による導入) を参照してください。
 
 ```powershell
 Copy-Item .env.example .env
@@ -62,8 +62,11 @@ $env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target/cargo-tests'
 $env:CARGO_PROFILE_DEV_DEBUG = '0'
 $env:CARGO_PROFILE_TEST_DEBUG = '0'
 $env:CARGO_INCREMENTAL = '0'
-cargo test --locked -j 2
+cargo check --locked --all-targets -j 2
+cargo test --locked -j 2 --no-fail-fast -- --test-threads=1
 ```
+
+AIの対象試験は `ai_features`・`ai_provider_flow`・`ai_operations`・`ai_suggestions` です。[検証手順](docs/AI_ASSISTANT.md#検証手順)に従い、一時メモリーDB・`target/`配下のファイルDBとローカル模擬HTTPサーバーを使います。実LLMへ送信せず、通常利用のDB・設定JSON・ `.env` をテスト値で変更しません。実アプリ起動・ブラウザー・録音・日本語解釈精度の確認は [受入評価](docs/AI_EVALUATION.md) を利用し、自動試験と実施結果を分けて記録してください。
 
 Tauri・画像処理等を含むライブラリと多数の統合テストを同時コンパイルすると、Windowsのコミット上限に達する場合がある。`os error 1455`、`failed to mmap`とともに`E0786`・rlib不足・マクロ解決失敗・コンパイラ内部エラーが出た場合は、まず上記の軽量設定で再実行する。`-j 2`はビルドの同時実行数であり、テスト実行スレッド数や`local_tile_workers`とは別。デバッグ情報の省略はデバッグアサートやオーバーフロー検査を無効にしない。環境変数はこのPowerShellプロセス内だけに適用され、release設定・OSのページング設定は変更しない。デバッガーで変数等を調べる場合は、別のPowerShellでデバッグ情報を有効にし、対象を絞って`-j 1`で実行する。
 

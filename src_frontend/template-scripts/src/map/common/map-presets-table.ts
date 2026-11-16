@@ -1,15 +1,19 @@
 import css from "./map-presets-table.css?inline";
 import { node, action } from "./coloring-editor";
-import { describeMapPreset, mapPresetKindLabel, type SavedMapPreset } from "./answer-map-presets";
+import {
+  describeMapPreset,
+  mapPresetKindLabel,
+  type AnySavedMapPreset,
+} from "./answer-map-presets";
 
-export function renderMapPresetsTable(
+export function renderMapPresetsTable<T extends AnySavedMapPreset>(
   host: HTMLElement,
   options: {
-    items: SavedMapPreset[];
+    items: T[];
     disabled: boolean;
-    restoreDisabledReason?(preset: SavedMapPreset): string | undefined;
-    restore(preset: SavedMapPreset): void;
-    remove(preset: SavedMapPreset): void;
+    restoreDisabledReason?(preset: T): string | undefined;
+    restore(preset: T): void;
+    remove(preset: T): void;
   },
 ) {
   if (!document.getElementById("map-presets-table-style")) {
@@ -33,7 +37,7 @@ export function renderMapPresetsTable(
         /(?:Z|[+-]\d\d:\d\d)$/i.test(preset.create_at) ? preset.create_at : `${preset.create_at}Z`,
       );
     const values = [
-      mapPresetKindLabel(preset.kind),
+      mapPresetKindLabel(preset.kind) + (preset.schema_version === 2 ? "（AI条件）" : ""),
       preset.name,
       preset.display.form_label || "一覧と同じ範囲",
       describeMapPreset(preset),
@@ -48,12 +52,12 @@ export function renderMapPresetsTable(
       controls = node("div");
     controls.className = "row-actions";
     for (const [label, handler] of [
-      ["呼び出し", options.restore],
+      [preset.schema_version === 2 ? "適用" : "呼び出し", options.restore],
       ["削除", options.remove],
     ] as const) {
       const button = action(label, () => handler(preset));
       button.className = "btn-close";
-      const reason = label === "呼び出し" ? options.restoreDisabledReason?.(preset) : undefined;
+      const reason = label !== "削除" ? options.restoreDisabledReason?.(preset) : undefined;
       button.disabled = options.disabled || !!reason;
       if (reason) {
         button.title = reason;

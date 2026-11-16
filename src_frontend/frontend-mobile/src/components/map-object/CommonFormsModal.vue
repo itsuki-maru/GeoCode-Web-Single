@@ -6,6 +6,8 @@ import BaseModal from "@/components/common/BaseModal.vue";
 import FormAnswersModal from "./FormAnswersModal.vue";
 import MapObjectFormSettingsModal from "./MapObjectFormSettingsModal.vue";
 import apiClient from "@/axiosClient";
+import { useAuthStore } from "@/stores/auth";
+import { notifyAiSuggestionDataChanged } from "../../../../template-scripts/src/ai/suggestion-events";
 const props = defineProps<{ isOpen: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 const tab = ref<"create" | "list">("create");
@@ -60,8 +62,10 @@ const remove = async () => {
   if (!id || busy.value) return;
   deletingId.value = "";
   busy.value = true;
+  const accountId = useAuthStore().accountId;
   try {
     await apiClient.delete(`/common-forms/${id}`);
+    notifyAiSuggestionDataChanged(accountId);
     await load();
     message.value = "削除しました。";
   } catch {

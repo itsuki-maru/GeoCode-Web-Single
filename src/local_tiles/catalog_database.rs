@@ -552,12 +552,18 @@ fn prepare(
     }
     tx.execute_batch(SCHEMA).map_err(message)?;
     tx.execute(
-        "INSERT INTO tile_catalog_schema(version,checksum) VALUES (?,?)",
+        r#"
+        INSERT INTO tile_catalog_schema (version, checksum)
+        VALUES (?, ?)
+        "#,
         (VERSION, checksum()),
     )
     .map_err(message)?;
     tx.execute(
-        "INSERT INTO tile_catalog_binding(id,app_database_path,app_file_id) VALUES (1,?,?)",
+        r#"
+        INSERT INTO tile_catalog_binding (id, app_database_path, app_file_id)
+        VALUES (1, ?, ?)
+        "#,
         (&app_path, &app_id),
     )
     .map_err(message)?;
@@ -600,7 +606,16 @@ fn empty_database(connection: &Connection) -> Result<bool, String> {
 }
 
 fn schema(connection: &Connection) -> Result<Vec<SchemaEntry>, String> {
-    let mut statement = connection.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' ORDER BY type,name").map_err(message)?;
+    let mut statement = connection
+        .prepare(
+            r#"
+            SELECT type, name, tbl_name, sql
+            FROM sqlite_schema
+            WHERE name NOT GLOB 'sqlite_*'
+            ORDER BY type, name
+            "#,
+        )
+        .map_err(message)?;
     statement
         .query_map([], |row| {
             let sql: Option<String> = row.get(3)?;
@@ -656,7 +671,11 @@ fn inspect(path: &Path, app_path: &str, app_id: &str) -> Result<Existing, String
     }
     let stored_checksum: String = connection
         .query_row(
-            "SELECT checksum FROM tile_catalog_schema WHERE version = ?",
+            r#"
+            SELECT checksum
+            FROM tile_catalog_schema
+            WHERE version = ?
+            "#,
             [VERSION],
             |row| row.get(0),
         )
@@ -666,7 +685,11 @@ fn inspect(path: &Path, app_path: &str, app_id: &str) -> Result<Existing, String
     }
     let binding: (String, String) = connection
         .query_row(
-            "SELECT app_database_path,app_file_id FROM tile_catalog_binding WHERE id = 1",
+            r#"
+            SELECT app_database_path, app_file_id
+            FROM tile_catalog_binding
+            WHERE id = 1
+            "#,
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )

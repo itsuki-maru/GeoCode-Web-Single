@@ -5,6 +5,8 @@ import FormAnswersModal from "./FormAnswersModal.vue";
 import MessageModal from "@/components/common/MessageModal.vue";
 import BaseModal from "@/components/common/BaseModal.vue";
 import apiClient from "@/axiosClient";
+import { useAuthStore } from "@/stores/auth";
+import { notifyAiSuggestionDataChanged } from "../../../../template-scripts/src/ai/suggestion-events";
 
 type FieldType =
   "text" | "textarea" | "number" | "date" | "select" | "radio" | "checkbox" | "image";
@@ -329,6 +331,7 @@ const persist = async (): Promise<void> => {
     return;
   }
   saving.value = true;
+  const accountId = useAuthStore().accountId;
   try {
     const response = await apiClient.request<FormConfig>({
       url: formBaseUrl.value,
@@ -346,6 +349,7 @@ const persist = async (): Promise<void> => {
         password: passwordMode.value === "set" ? password.value : null,
       },
     });
+    notifyAiSuggestionDataChanged(accountId);
     applyConfig(response.data);
     if (!props.commonMode)
       showSaveMessage(

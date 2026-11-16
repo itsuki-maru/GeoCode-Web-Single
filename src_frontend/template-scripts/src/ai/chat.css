@@ -1,0 +1,343 @@
+.geocode-ai-chat {
+  --ai-gap-top: 16px;
+  --ai-gap-right: 16px;
+  --ai-gap-bottom: 16px;
+  --ai-gap-left: 16px;
+  box-sizing: border-box;
+  position: fixed;
+  top: calc(var(--ai-viewport-top, 0px) + var(--ai-gap-top));
+  right: calc(
+    100vw - var(--ai-viewport-left, 0px) - var(--ai-viewport-width, 100vw) + var(--ai-gap-right)
+  );
+  bottom: auto;
+  left: auto;
+  margin: 0;
+  width: min(
+    460px,
+    calc(var(--ai-viewport-width, 100vw) - var(--ai-gap-left) - var(--ai-gap-right))
+  );
+  height: calc(var(--ai-viewport-height, 100dvh) - var(--ai-gap-top) - var(--ai-gap-bottom));
+  max-width: none;
+  max-height: none;
+  overflow: auto;
+  scroll-padding-top: var(--ai-scroll-padding-top, 0px);
+  padding: 0;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  color: #172033;
+  background: whitesmoke;
+  box-shadow: 0 12px 36px #0003;
+  font: 16px/1.4 sans-serif;
+  z-index: 20000;
+}
+.geocode-ai-chat[open] {
+  display: var(--ai-layout, flex);
+  flex-direction: column;
+}
+.geocode-ai-chat::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+.geocode-ai-chat *,
+.geocode-ai-chat *::before,
+.geocode-ai-chat *::after {
+  box-sizing: border-box;
+}
+.geocode-ai-chat .ai-header {
+  position: var(--ai-header-position, static);
+  top: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 16px;
+  background: whitesmoke;
+}
+.geocode-ai-chat .ai-header h2 {
+  margin: 0;
+  grid-column: 2;
+  border-bottom: 0;
+  text-align: center;
+  font-size: 24px;
+  line-height: 1.4;
+}
+.geocode-ai-chat button {
+  min-height: 42px;
+  max-width: 100%;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.6em 1.2em;
+  background: #5f5f5f;
+  color: #fff;
+  font: inherit;
+  font-weight: 500;
+  line-height: 1.4;
+  box-shadow: 0 2px 2px #0003;
+  transition: border-color 0.25s;
+  cursor: pointer;
+}
+.geocode-ai-chat .ai-close {
+  grid-column: 3;
+  justify-self: end;
+  min-width: max-content;
+}
+.geocode-ai-chat:not([data-mode="mobile"]) .ai-close {
+  min-height: 36px;
+  padding: 0.35em 0.8em;
+  font-size: 14px;
+}
+.geocode-ai-chat button:enabled:hover {
+  border-color: #396cd8;
+}
+.geocode-ai-chat button:enabled:active {
+  border-color: #396cd8;
+  background: #e8e8e8;
+  color: #172033;
+}
+.geocode-ai-chat button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.geocode-ai-chat button:focus-visible,
+.geocode-ai-chat textarea:focus-visible {
+  outline: 3px solid #396cd8;
+  outline-offset: 2px;
+}
+.geocode-ai-chat .ai-note {
+  margin: 0;
+  flex: none;
+  padding: 10px 16px;
+  font-size: 12px;
+  color: #555;
+}
+.geocode-ai-chat .ai-log {
+  flex: 1;
+  min-height: var(--ai-log-min-height, 0px);
+  max-height: var(--ai-log-max-height, none);
+  overflow: var(--ai-content-overflow, auto);
+  padding: 4px 16px 12px;
+  overscroll-behavior: var(--ai-log-overscroll, contain);
+}
+.geocode-ai-chat .ai-message {
+  margin: 10px 0;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #d1d1d1;
+  border-radius: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.geocode-ai-chat .ai-message[data-role="user"] {
+  margin-left: 28px;
+  background: #e8e8e8;
+  border-color: #ccc;
+}
+.geocode-ai-chat .ai-message-label {
+  display: block;
+  color: #5f5f5f;
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+.geocode-ai-chat .ai-status {
+  min-height: 25px;
+  flex: none;
+  margin: 0;
+  padding: 0 16px;
+  border: 0;
+  font-size: 13px;
+  color: #555;
+  white-space: pre-wrap;
+}
+.geocode-ai-chat .ai-status[data-error="true"] {
+  color: #7c3f00;
+}
+.geocode-ai-chat .ai-status[hidden] {
+  display: none;
+}
+.geocode-ai-chat .ai-progress {
+  position: fixed;
+  top: var(--ai-viewport-top, 0px);
+  left: var(--ai-viewport-left, 0px);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ai-viewport-width, 100vw);
+  height: var(--ai-viewport-height, 100dvh);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: rgba(0, 0, 0, 0.35);
+  /* 待機中も中止・閉じる・外側タップを操作できる。 */
+  pointer-events: none;
+}
+.geocode-ai-chat .ai-progress[hidden] {
+  display: none;
+}
+.geocode-ai-chat .ai-progress svg {
+  flex: none;
+  width: 50px;
+  height: 50px;
+}
+.geocode-ai-chat .ai-panel {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: var(--ai-panel-max-height, calc(var(--ai-viewport-height, 100dvh) * 0.42));
+  overflow: var(--ai-content-overflow, auto);
+  padding: 0 16px;
+  overflow-wrap: anywhere;
+}
+.geocode-ai-chat .ai-panel:empty {
+  display: none;
+}
+.geocode-ai-chat .ai-panel h3 {
+  font-size: 16px;
+  margin: 8px 0;
+}
+.geocode-ai-chat .ai-panel button {
+  margin: 4px 6px 8px 0;
+}
+.geocode-ai-chat .ai-preset {
+  padding: 8px 0;
+  border-bottom: 1px solid #ccc;
+}
+.geocode-ai-chat .ai-preset p,
+.geocode-ai-chat .ai-definition {
+  margin: 4px 0;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+.geocode-ai-chat .ai-form {
+  flex: none;
+  padding: 12px 16px 16px;
+  border: 0;
+  background: whitesmoke;
+}
+.geocode-ai-chat textarea {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  min-height: 82px;
+  max-height: calc(var(--ai-viewport-height, 100dvh) * 0.25);
+  margin: 0;
+  border: 1px solid #acacac;
+  border-radius: 6px;
+  padding: 10px;
+  font:
+    16px/1.5 system-ui,
+    sans-serif;
+  color: #172033;
+  background: #fff;
+}
+.geocode-ai-chat .ai-suggestion-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.geocode-ai-chat .ai-suggestion-tools[hidden] {
+  display: none;
+}
+.geocode-ai-chat .ai-suggestion-hint {
+  margin: 0;
+  color: #555;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.geocode-ai-chat .ai-use-suggestion {
+  flex: none;
+  padding: 0.4em 0.75em;
+  font-size: 13px;
+}
+.geocode-ai-chat .ai-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.geocode-ai-chat .ai-send {
+  font-weight: 600;
+}
+.geocode-ai-chat .ai-record[aria-pressed="true"] {
+  background: #fff0ed;
+  border-color: #b94835;
+  color: #9e2c1d;
+}
+@media (max-width: 600px) {
+  .geocode-ai-chat {
+    --ai-gap-top: max(16px, env(safe-area-inset-top));
+    --ai-gap-right: max(16px, env(safe-area-inset-right));
+    --ai-gap-bottom: max(16px, env(safe-area-inset-bottom));
+    --ai-gap-left: max(16px, env(safe-area-inset-left));
+    width: calc(var(--ai-viewport-width, 100vw) - var(--ai-gap-left) - var(--ai-gap-right));
+  }
+  .geocode-ai-chat .ai-header {
+    padding: 10px 12px;
+  }
+  .geocode-ai-chat .ai-header h2 {
+    font-size: 20px;
+  }
+  .geocode-ai-chat .ai-note {
+    padding-block: 6px;
+  }
+  .geocode-ai-chat .ai-form {
+    padding-bottom: 12px;
+  }
+}
+/* 横向き・拡大表示・ソフトキーボードでは、確認欄や履歴を0pxへ縮めず
+   ダイアログ全体をスクロールする。閉じる操作は常に上端に残す。 */
+.geocode-ai-chat[data-compact] {
+  --ai-layout: block;
+  --ai-header-position: sticky;
+  --ai-scroll-padding-top: var(--ai-header-scroll-padding, 72px);
+  --ai-log-min-height: 96px;
+  --ai-log-max-height: none;
+  --ai-panel-max-height: none;
+  --ai-content-overflow: visible;
+  --ai-log-overscroll: auto;
+}
+@media (max-width: 380px) {
+  .geocode-ai-chat .ai-header h2 {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  .geocode-ai-chat .ai-close {
+    grid-row: 2;
+  }
+  .geocode-ai-chat {
+    --ai-header-scroll-padding: 108px;
+  }
+}
+@media (max-height: 600px) {
+  .geocode-ai-chat {
+    --ai-layout: block;
+    --ai-header-position: sticky;
+    --ai-scroll-padding-top: var(--ai-header-scroll-padding, 72px);
+    --ai-log-min-height: 96px;
+    --ai-log-max-height: none;
+    --ai-panel-max-height: none;
+    --ai-content-overflow: visible;
+    --ai-log-overscroll: auto;
+  }
+}
+@media (max-height: 480px) {
+  .geocode-ai-chat .ai-header {
+    padding-block: 8px;
+  }
+  .geocode-ai-chat .ai-note {
+    max-height: 52px;
+    overflow: auto;
+    padding-block: 6px;
+  }
+  .geocode-ai-chat .ai-form {
+    padding-block: 8px;
+  }
+  .geocode-ai-chat textarea {
+    min-height: 62px;
+  }
+}

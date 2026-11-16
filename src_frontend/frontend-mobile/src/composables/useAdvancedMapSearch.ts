@@ -15,6 +15,7 @@ export function useAdvancedMapSearch(
   master: Ref<string>,
   apply: () => void,
   message: (text: string) => void,
+  applyAiPreset?: (id: string, signal: AbortSignal) => Promise<void>,
 ) {
   const markers = useMapObjectStore(),
     shapes = useShapeStore();
@@ -66,6 +67,7 @@ export function useAdvancedMapSearch(
       getApplied: () => markers.attributeSearch,
       getLayerIds: () => (layer.value === master.value ? null : [layer.value]),
       getContext: context,
+      applyAiPreset,
       onApply: (request, result) => {
         applyingFromModal = true;
         try {

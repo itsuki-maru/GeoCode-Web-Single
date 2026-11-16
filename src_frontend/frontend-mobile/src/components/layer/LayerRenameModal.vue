@@ -6,6 +6,8 @@ import MessageModal from "@/components/common/MessageModal.vue";
 import apiClient from "@/axiosClient";
 import BaseModal from "@/components/common/BaseModal.vue";
 import { useLayersStore } from "@/stores/layers";
+import { useAuthStore } from "@/stores/auth";
+import { notifyAiSuggestionDataChanged } from "../../../../template-scripts/src/ai/suggestion-events";
 import MarkerIconPicker from "@/components/layer/MarkerIconPicker.vue";
 
 const props = defineProps<{
@@ -63,7 +65,8 @@ const saveLayer = async (formPayload: Record<string, unknown>) => {
   if (saving.value) return;
   saving.value = true;
   const savedLayerId = props.layerId,
-    savedName = editName.value;
+    savedName = editName.value,
+    accountId = useAuthStore().accountId;
   confirmOpen.value = false;
   try {
     await apiClient.put(`/layer/update/${savedLayerId}`, {
@@ -72,6 +75,7 @@ const saveLayer = async (formPayload: Record<string, unknown>) => {
       update_marker_icon: true,
       ...formPayload,
     });
+    if (formPayload.update_common_form === true) notifyAiSuggestionDataChanged(accountId);
     const refreshed = await layersStore.initList();
     if (props.isOpen && props.layerId === savedLayerId) emit("renamed", savedLayerId, savedName);
     if (props.isOpen && props.layerId === savedLayerId) emit("close");

@@ -767,7 +767,46 @@ mod tests {
     fn low_zoom_ignores_over_hundred_thousand_hidden_facilities_while_enforcing_visible_limits() {
         let conn = connection(&[]);
         let count = super::super::labels::MAX_QUERY_LABELS as i64 + 1;
-        conn.execute("WITH RECURSIVE ids(id) AS (SELECT 1 UNION ALL SELECT id+1 FROM ids WHERE id<?) INSERT INTO map_labels(osm_type,osm_id,category,names,x,y,importance,population,admin_level,capital) SELECT 0,id,'landmark.park','{\"name\":\"公園\"}',0.515625,0.515625,400000000,NULL,NULL,0 FROM ids", [count]).unwrap();
+        conn.execute(
+            r#"
+                WITH RECURSIVE ids(id) AS (
+                    SELECT
+                        1
+                    UNION ALL
+                    SELECT
+                        id + 1
+                    FROM ids
+                    WHERE
+                        id < ?
+                )
+                INSERT INTO map_labels (
+                    osm_type,
+                    osm_id,
+                    category,
+                    names,
+                    x,
+                    y,
+                    importance,
+                    population,
+                    admin_level,
+                    capital
+                )
+                SELECT
+                    0,
+                    id,
+                    'landmark.park',
+                    '{"name":"公園"}',
+                    0.515625,
+                    0.515625,
+                    400000000,
+                    NULL,
+                    NULL,
+                    0
+                FROM ids
+            "#,
+            [count],
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO map_label_rtree SELECT id,x,x,y,y FROM map_labels",
             [],

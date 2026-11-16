@@ -10,7 +10,7 @@ use std::{
     },
 };
 
-pub(super) async fn begin_read(
+pub(crate) async fn begin_read(
     pool: &SqlitePool,
 ) -> Result<Transaction<'static, Sqlite>, sqlx::Error> {
     let mut tx = pool.begin().await?;
@@ -27,7 +27,7 @@ pub(super) async fn begin_read(
 }
 
 /// 遅延トランザクションからの昇格を避けるため、読み取り前に書き込み権を確保する。
-pub(super) async fn begin_write(
+pub(crate) async fn begin_write(
     pool: &SqlitePool,
 ) -> Result<Transaction<'static, Sqlite>, sqlx::Error> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
@@ -216,7 +216,7 @@ fn decimal(raw: &str) -> Option<(bool, String, i32)> {
     ))
 }
 
-pub(super) fn compare_numbers(a: &str, b: &str) -> Ordering {
+pub(crate) fn compare_numbers(a: &str, b: &str) -> Ordering {
     match (decimal(a), decimal(b)) {
         (None, None) => Ordering::Equal,
         (None, Some(_)) => Ordering::Less,

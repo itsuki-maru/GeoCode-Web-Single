@@ -65,12 +65,20 @@ impl Store {
         )
         .with_context(|| format!("open read-only feature store {}", path.display()))?;
         connection.execute_batch(
-            "PRAGMA query_only=ON; PRAGMA cache_size=-16384; PRAGMA temp_store=FILE;",
+            r#"
+            PRAGMA query_only = ON;
+            PRAGMA cache_size = -16384;
+            PRAGMA temp_store = FILE;
+            "#,
         )?;
         let version: Option<String> = connection
             .query_row(
-                "SELECT value FROM metadata WHERE key='schema_version'
-                 AND length(CAST(value AS BLOB))<=32",
+                r#"
+                SELECT value
+                FROM metadata
+                WHERE key = 'schema_version'
+                    AND length(CAST(value AS BLOB)) <= 32
+                "#,
                 [],
                 |row| row.get(0),
             )
@@ -82,8 +90,12 @@ impl Store {
         );
         let complete: Option<String> = connection
             .query_row(
-                "SELECT value FROM metadata WHERE key='complete'
-                 AND length(CAST(value AS BLOB))<=5",
+                r#"
+                SELECT value
+                FROM metadata
+                WHERE key = 'complete'
+                    AND length(CAST(value AS BLOB)) <= 5
+                "#,
                 [],
                 |row| row.get(0),
             )
@@ -91,7 +103,11 @@ impl Store {
         ensure!(complete.as_deref() == Some("true"), "store is incomplete");
         let document: String = {
             let mut statement = connection.prepare(
-                "SELECT length(CAST(value AS BLOB)),value FROM metadata WHERE key='document'",
+                r#"
+                SELECT length(CAST(value AS BLOB)), value
+                FROM metadata
+                WHERE key = 'document'
+                "#,
             )?;
             let mut rows = statement.query([])?;
             let row = rows.next()?.context("missing feature-store metadata")?;
@@ -132,8 +148,14 @@ impl Store {
             "store metadata is missing LOD levels"
         );
         let has_render_attributes_index = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_index_list('features')
-             WHERE name='feature_render_attributes' AND partial=0)",
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM pragma_index_list('features')
+                WHERE name = 'feature_render_attributes'
+                    AND partial = 0
+            )
+            "#,
             [],
             |row| row.get(0),
         )?;
@@ -173,16 +195,38 @@ impl Store {
         // 任意のカバリングインデックスにより、属性検索ではズームにかかわらず
         // 元の形状BLOBを含む地物行へアクセスすることを避ける。
         let query = if self.has_render_attributes_index {
-            "SELECT f.feature_id,f.osm_way_id,f.road_class,f.is_link,
-                    f.effective_layer,f.structure_rank
-             FROM feature_rtree r JOIN features f INDEXED BY feature_render_attributes
-                  ON f.feature_id=r.feature_id
-             WHERE r.min_x<=?1 AND r.max_x>=?2 AND r.min_y<=?3 AND r.max_y>=?4"
+            r#"
+            SELECT
+                f.feature_id,
+                f.osm_way_id,
+                f.road_class,
+                f.is_link,
+                f.effective_layer,
+                f.structure_rank
+            FROM feature_rtree r
+            JOIN features f INDEXED BY feature_render_attributes
+                ON f.feature_id = r.feature_id
+            WHERE r.min_x <= ?1
+                AND r.max_x >= ?2
+                AND r.min_y <= ?3
+                AND r.max_y >= ?4
+            "#
         } else {
-            "SELECT f.feature_id,f.osm_way_id,f.road_class,f.is_link,
-                    f.effective_layer,f.structure_rank
-             FROM feature_rtree r JOIN features f ON f.feature_id=r.feature_id
-             WHERE r.min_x<=?1 AND r.max_x>=?2 AND r.min_y<=?3 AND r.max_y>=?4"
+            r#"
+            SELECT
+                f.feature_id,
+                f.osm_way_id,
+                f.road_class,
+                f.is_link,
+                f.effective_layer,
+                f.structure_rank
+            FROM feature_rtree r
+            JOIN features f ON f.feature_id = r.feature_id
+            WHERE r.min_x <= ?1
+                AND r.max_x >= ?2
+                AND r.min_y <= ?3
+                AND r.max_y >= ?4
+            "#
         };
         let mut statement = self.connection.prepare_cached(query)?;
         let mut rows = statement.query(params![bbox.max_x, bbox.min_x, bbox.max_y, bbox.min_y])?;
@@ -243,13 +287,20 @@ impl Store {
         ensure!(zoom <= 22, "zoom must be <= 22");
         let (query, has_zoom) = if (6..=15).contains(&zoom) {
             (
-                "SELECT point_count,length(points),points FROM geometry_lod
-                 WHERE feature_id=?1 AND zoom=?2",
+                r#"
+                SELECT point_count, length(points), points
+                FROM geometry_lod
+                WHERE feature_id = ?1 AND zoom = ?2
+                "#,
                 true,
             )
         } else {
             (
-                "SELECT point_count,length(points),points FROM features WHERE feature_id=?1",
+                r#"
+                SELECT point_count, length(points), points
+                FROM features
+                WHERE feature_id = ?1
+                "#,
                 false,
             )
         };
@@ -298,11 +349,13 @@ impl Drop for StoreOperation<'_> {
 
 pub(crate) fn configure_writer(connection: &Connection) -> Result<()> {
     connection.execute_batch(
-        "PRAGMA journal_mode=DELETE;
-         PRAGMA synchronous=FULL;
-         PRAGMA temp_store=FILE;
-         PRAGMA cache_size=-65536;
-         PRAGMA foreign_keys=ON;",
+        r#"
+        PRAGMA journal_mode = DELETE;
+        PRAGMA synchronous = FULL;
+        PRAGMA temp_store = FILE;
+        PRAGMA cache_size = -65536;
+        PRAGMA foreign_keys = ON;
+        "#,
     )?;
     Ok(())
 }
@@ -310,34 +363,42 @@ pub(crate) fn configure_writer(connection: &Connection) -> Result<()> {
 pub(crate) fn initialize(connection: &Connection) -> Result<()> {
     configure_writer(connection)?;
     connection.execute_batch(
-        "CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-         CREATE TABLE features(
-           feature_id INTEGER PRIMARY KEY,
-           osm_way_id INTEGER NOT NULL UNIQUE,
-           road_class INTEGER NOT NULL CHECK(road_class IN (10,20,30,40,50,60,70,80)),
-           is_link INTEGER NOT NULL CHECK(is_link IN (0,1)),
-           effective_layer INTEGER NOT NULL CHECK(effective_layer BETWEEN -32768 AND 32767),
-           structure_rank INTEGER NOT NULL CHECK(structure_rank BETWEEN 0 AND 2),
-           min_x REAL NOT NULL,max_x REAL NOT NULL,min_y REAL NOT NULL,max_y REAL NOT NULL,
-           point_count INTEGER NOT NULL CHECK(point_count BETWEEN 2 AND 1000000),
-           points BLOB NOT NULL CHECK(length(points)=point_count*16),
-           CHECK(min_x<=max_x AND min_y<=max_y),
-           CHECK(min_x>=0 AND max_x<=1 AND min_y>=0 AND max_y<=1)
-         );
-         CREATE VIRTUAL TABLE feature_rtree USING rtree(
-           feature_id,min_x,max_x,min_y,max_y
-         );
-         CREATE INDEX feature_render_attributes ON features(
-           feature_id,osm_way_id,road_class,is_link,effective_layer,structure_rank
-         );
-         CREATE TABLE geometry_lod(
-           feature_id INTEGER NOT NULL REFERENCES features(feature_id),
-           zoom INTEGER NOT NULL CHECK(zoom BETWEEN 6 AND 15),
-           point_count INTEGER NOT NULL CHECK(point_count BETWEEN 2 AND 1000000),
-           points BLOB NOT NULL CHECK(length(points)=point_count*16),
-           PRIMARY KEY(feature_id,zoom)
-         ) WITHOUT ROWID;
-         INSERT INTO metadata VALUES('complete','false');",
+        r#"
+        CREATE TABLE metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        CREATE TABLE features (
+            feature_id INTEGER PRIMARY KEY,
+            osm_way_id INTEGER NOT NULL UNIQUE,
+            road_class INTEGER NOT NULL CHECK (road_class IN (10, 20, 30, 40, 50, 60, 70, 80)),
+            is_link INTEGER NOT NULL CHECK (is_link IN (0, 1)),
+            effective_layer INTEGER NOT NULL CHECK (effective_layer BETWEEN -32768 AND 32767),
+            structure_rank INTEGER NOT NULL CHECK (structure_rank BETWEEN 0 AND 2),
+            min_x REAL NOT NULL,
+            max_x REAL NOT NULL,
+            min_y REAL NOT NULL,
+            max_y REAL NOT NULL,
+            point_count INTEGER NOT NULL CHECK (point_count BETWEEN 2 AND 1000000),
+            points BLOB NOT NULL CHECK (length(points) = point_count * 16),
+            CHECK (min_x <= max_x AND min_y <= max_y),
+            CHECK (min_x >= 0 AND max_x <= 1 AND min_y >= 0 AND max_y <= 1)
+        );
+        CREATE VIRTUAL TABLE feature_rtree USING rtree (
+            feature_id, min_x, max_x, min_y, max_y
+        );
+        CREATE INDEX feature_render_attributes ON features (
+            feature_id, osm_way_id, road_class, is_link, effective_layer, structure_rank
+        );
+        CREATE TABLE geometry_lod (
+            feature_id INTEGER NOT NULL REFERENCES features(feature_id),
+            zoom INTEGER NOT NULL CHECK (zoom BETWEEN 6 AND 15),
+            point_count INTEGER NOT NULL CHECK (point_count BETWEEN 2 AND 1000000),
+            points BLOB NOT NULL CHECK (length(points) = point_count * 16),
+            PRIMARY KEY (feature_id, zoom)
+        ) WITHOUT ROWID;
+        INSERT INTO metadata VALUES ('complete', 'false');
+        "#,
     )?;
     connection.execute(
         "INSERT INTO metadata VALUES('schema_version',?1)",
@@ -375,8 +436,14 @@ pub(crate) fn finish(connection: &Connection, metadata: &StoreMetadata) -> Resul
         "incomplete feature / R-tree / LOD records"
     );
     let missing_index: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM features f
-         LEFT JOIN feature_rtree r ON r.feature_id=f.feature_id WHERE r.feature_id IS NULL)",
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM features f
+            LEFT JOIN feature_rtree r ON r.feature_id = f.feature_id
+            WHERE r.feature_id IS NULL
+        )
+        "#,
         [],
         |r| r.get(0),
     )?;
@@ -453,9 +520,14 @@ fn validate_rect(rect: Rect) -> Result<()> {
 mod tests {
     use super::*;
 
-    const LONG_RECURSIVE_SQL: &str = "WITH RECURSIVE work(n) AS (
-           VALUES(0) UNION ALL SELECT n+1 FROM work WHERE n<1000000000
-         ) SELECT sum(n) FROM work";
+    const LONG_RECURSIVE_SQL: &str = r#"
+        WITH RECURSIVE work(n) AS (
+            VALUES (0)
+            UNION ALL
+            SELECT n + 1 FROM work WHERE n < 1000000000
+        )
+        SELECT sum(n) FROM work
+    "#;
 
     fn assert_sql_vm_interrupts(connection: &Connection) {
         use std::sync::{
@@ -498,9 +570,14 @@ mod tests {
         // これは10,000回を大きく超えるVM操作を実行する。取消済みの進捗フックが残っていれば、
         // 通常のSELECT 1では成功しても、この処理では中断される。
         let result: i64 = connection.query_row(
-            "WITH RECURSIVE work(n) AS (
-               VALUES(0) UNION ALL SELECT n+1 FROM work WHERE n<20000
-             ) SELECT sum(n) FROM work",
+            r#"
+            WITH RECURSIVE work(n) AS (
+                VALUES (0)
+                UNION ALL
+                SELECT n + 1 FROM work WHERE n < 20000
+            )
+            SELECT sum(n) FROM work
+            "#,
             [],
             |row| row.get(0),
         )?;
@@ -576,7 +653,10 @@ mod tests {
                 },
             ];
             connection.execute(
-                "INSERT INTO features VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,2,?11)",
+                r#"
+                INSERT INTO features
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 2, ?11)
+                "#,
                 params![
                     id,
                     10_000 - id,
@@ -592,7 +672,10 @@ mod tests {
                 ],
             )?;
             connection.execute(
-                "INSERT INTO feature_rtree VALUES(?1,?2,?3,?4,?5)",
+                r#"
+                INSERT INTO feature_rtree
+                VALUES (?1, ?2, ?3, ?4, ?5)
+                "#,
                 params![id, bbox.min_x, bbox.max_x, bbox.min_y, bbox.max_y],
             )?;
             Ok(())
@@ -700,10 +783,21 @@ mod tests {
         for indexed in [false, true] {
             let store = candidate_store_fixture(indexed)?;
             let mut legacy = store.connection.prepare(
-                "SELECT f.feature_id,f.osm_way_id,f.road_class,f.is_link,
-                    f.effective_layer,f.structure_rank
-             FROM feature_rtree r JOIN features f ON f.feature_id=r.feature_id
-             WHERE r.min_x<=?1 AND r.max_x>=?2 AND r.min_y<=?3 AND r.max_y>=?4",
+                r#"
+                SELECT
+                    f.feature_id,
+                    f.osm_way_id,
+                    f.road_class,
+                    f.is_link,
+                    f.effective_layer,
+                    f.structure_rank
+                FROM feature_rtree r
+                JOIN features f ON f.feature_id = r.feature_id
+                WHERE r.min_x <= ?1
+                    AND r.max_x >= ?2
+                    AND r.min_y <= ?3
+                    AND r.max_y >= ?4
+                "#,
             )?;
             for bbox in windows {
                 for zoom in 6..=22 {
@@ -820,10 +914,19 @@ mod tests {
         let points = [Point { x: 0.1, y: 0.5 }, Point { x: 0.9, y: 0.5 }];
         let geometry = encode_points(&points)?;
         connection.execute(
-            "INSERT INTO features VALUES(1,42,80,0,0,1,0.1,0.9,0.5,0.5,2,?1)",
+            r#"
+            INSERT INTO features
+            VALUES (1, 42, 80, 0, 0, 1, 0.1, 0.9, 0.5, 0.5, 2, ?1)
+            "#,
             [&geometry],
         )?;
-        connection.execute("INSERT INTO feature_rtree VALUES(1,0.1,0.9,0.5,0.5)", [])?;
+        connection.execute(
+            r#"
+            INSERT INTO feature_rtree
+            VALUES (1, 0.1, 0.9, 0.5, 0.5)
+            "#,
+            [],
+        )?;
         for zoom in 6..=15 {
             connection.execute(
                 "INSERT INTO geometry_lod VALUES(1,?1,2,?2)",
@@ -883,7 +986,10 @@ mod tests {
         drop(store);
         let connection = Connection::open(&path)?;
         connection.execute_batch(
-            "CREATE INDEX feature_render_attributes ON features(feature_id) WHERE feature_id<0;",
+            r#"
+            CREATE INDEX feature_render_attributes ON features(feature_id)
+            WHERE feature_id < 0;
+            "#,
         )?;
         connection.close().map_err(|(_, error)| error)?;
         let store = Store::open(&path)?;

@@ -91,13 +91,21 @@ impl Drop for WriteBatch<'_> {
 
 pub fn initialize(connection: &Connection) -> Result<()> {
     connection.execute_batch(
-        "CREATE TABLE standard_dem_chunks(
-           resolution INTEGER NOT NULL CHECK(resolution BETWEEN 1 AND 36000),
-           level INTEGER NOT NULL CHECK(level BETWEEN 0 AND 14),
-           cx INTEGER NOT NULL,cy INTEGER NOT NULL,data BLOB NOT NULL,
-           PRIMARY KEY(resolution,level,cx,cy)
-         ) WITHOUT ROWID;
-         CREATE TABLE standard_dem_metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);",
+        r#"
+            CREATE TABLE standard_dem_chunks (
+                resolution INTEGER NOT NULL CHECK(resolution BETWEEN 1 AND 36000),
+                level INTEGER NOT NULL CHECK(level BETWEEN 0 AND 14),
+                cx INTEGER NOT NULL,
+                cy INTEGER NOT NULL,
+                data BLOB NOT NULL,
+                PRIMARY KEY(resolution, level, cx, cy)
+            ) WITHOUT ROWID;
+
+            CREATE TABLE standard_dem_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+        "#,
     )?;
     Ok(())
 }
@@ -155,7 +163,19 @@ fn load_chunk(
     cx: i64,
     cy: i64,
 ) -> Result<Option<Chunk>> {
-    let mut statement=connection.prepare("SELECT length(data),data FROM standard_dem_chunks WHERE resolution=? AND level=? AND cx=? AND cy=?")?;
+    let mut statement = connection.prepare(
+        r#"
+            SELECT
+                length(data),
+                data
+            FROM standard_dem_chunks
+            WHERE
+                resolution = ?
+                AND level = ?
+                AND cx = ?
+                AND cy = ?
+        "#,
+    )?;
     let mut rows = statement.query(params![resolution, level, cx, cy])?;
     let Some(row) = rows.next()? else {
         return Ok(None);
@@ -1259,7 +1279,23 @@ fn build_pyramid(
 ) -> Result<()> {
     for level in 1..=MAX_LEVEL {
         context.check()?;
-        let mut statement=connection.prepare("SELECT cx/2,cy/2 FROM standard_dem_chunks WHERE resolution=? AND level=? GROUP BY cx/2,cy/2 ORDER BY cx/2,cy/2")?;
+        let mut statement = connection.prepare(
+            r#"
+                SELECT
+                    cx / 2,
+                    cy / 2
+                FROM standard_dem_chunks
+                WHERE
+                    resolution = ?
+                    AND level = ?
+                GROUP BY
+                    cx / 2,
+                    cy / 2
+                ORDER BY
+                    cx / 2,
+                    cy / 2
+            "#,
+        )?;
         let mut rows = statement.query(params![resolution, level - 1])?;
         while let Some(row) = rows.next()? {
             let cx: i64 = row.get(0)?;
@@ -1568,7 +1604,25 @@ impl Sampler {
             let cx1 = (((east + 180.0) / degrees + 3.0).ceil() as i64).div_euclid(SIDE as i64);
             let cy0 = (((90.0 - north) / degrees - 3.0).floor() as i64).div_euclid(SIDE as i64);
             let cy1 = (((90.0 - south) / degrees + 3.0).ceil() as i64).div_euclid(SIDE as i64);
-            let mut s=connection.prepare("SELECT cx,cy,length(data),data FROM standard_dem_chunks WHERE resolution=? AND level=? AND cx BETWEEN ? AND ? AND cy BETWEEN ? AND ? ORDER BY cx,cy LIMIT 1025")?;
+            let mut s = connection.prepare(
+                r#"
+                    SELECT
+                        cx,
+                        cy,
+                        length(data),
+                        data
+                    FROM standard_dem_chunks
+                    WHERE
+                        resolution = ?
+                        AND level = ?
+                        AND cx BETWEEN ? AND ?
+                        AND cy BETWEEN ? AND ?
+                    ORDER BY
+                        cx,
+                        cy
+                    LIMIT 1025
+                "#,
+            )?;
             let mut rows = s.query(params![resolution, level, cx0, cx1, cy0, cy1])?;
             let mut chunks = BTreeMap::new();
             while let Some(row) = rows.next()? {
@@ -1845,10 +1899,31 @@ fn generate_contours(
             .all(|r| r % resolution == 0 && (r / resolution).is_power_of_two()),
         "混在DEMの解像度比は2の累乗に限ります"
     );
-    connection.execute_batch("CREATE TEMP TABLE standard_contour_chunks(cx INTEGER,cy INTEGER,PRIMARY KEY(cx,cy)) WITHOUT ROWID")?;
+    connection.execute_batch(
+        r#"
+            CREATE TEMP TABLE standard_contour_chunks (
+                cx INTEGER,
+                cy INTEGER,
+                PRIMARY KEY(cx, cy)
+            ) WITHOUT ROWID
+        "#,
+    )?;
     for &r in resolutions {
         let level = (r / resolution).trailing_zeros() as u8;
-        connection.execute("INSERT OR IGNORE INTO standard_contour_chunks SELECT cx,cy FROM standard_dem_chunks WHERE resolution=? AND level=?",params![r,level])?;
+        connection.execute(
+            r#"
+                INSERT
+                OR IGNORE INTO standard_contour_chunks
+                SELECT
+                    cx,
+                    cy
+                FROM standard_dem_chunks
+                WHERE
+                    resolution = ?
+                    AND level = ?
+            "#,
+            params![r, level],
+        )?;
     }
     // 一度に扱うのは128四方のセルと、その境界用近傍だけ。
     let mut next_id = 0_i64;

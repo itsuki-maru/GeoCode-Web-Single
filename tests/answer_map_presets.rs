@@ -9,7 +9,8 @@ use axum::{
 use geocode_web_single::{
     error::AppError,
     handler::answer_map_presets::{
-        CreatePreset, ListQuery, create_preset, delete_preset, list_presets,
+        CreatePreset, ListQuery, PresetKind, create_preset, create_preset_tx, delete_preset,
+        get_preset, list_presets, preset_action, validate_preset_tx, validate_saved_preset,
     },
 };
 use serde_json::{Value, json};
@@ -355,7 +356,7 @@ async fn rejects_invalid_names_versions_types_operators_values_and_limits() {
     for (key, value) in [
         ("name", json!(" \n ")),
         ("name", json!("あ".repeat(101))),
-        ("schema_version", json!(2)),
+        ("schema_version", json!(3)),
     ] {
         let mut input = base.clone();
         input[key] = value;
@@ -444,8 +445,20 @@ async fn image_presence_presets_keep_the_portable_format_and_execute() {
     let pool = common::test_pool().await;
     let f = fixture(&pool).await;
     sqlx::query(
-        "INSERT OR IGNORE INTO common_form_revision_model (form_id,version,form_schema) \
-        SELECT id,version,form_schema FROM common_form_model WHERE id=$1",
+        r#"
+        INSERT
+            OR IGNORE INTO common_form_revision_model (
+            form_id,
+            version,
+            form_schema
+        )
+        SELECT
+            id,
+            version,
+            form_schema
+        FROM common_form_model
+        WHERE id = $1
+        "#,
     )
     .bind(f.form.to_string())
     .execute(&pool)
@@ -637,6 +650,7 @@ async fn pagination_is_stable_owner_scoped_and_account_deletion_cascades() {
         ListQuery {
             page: Some(1),
             page_size: Some(2),
+            ..Default::default()
         },
     )
     .await
@@ -647,6 +661,7 @@ async fn pagination_is_stable_owner_scoped_and_account_deletion_cascades() {
         ListQuery {
             page: Some(2),
             page_size: Some(2),
+            ..Default::default()
         },
     )
     .await
@@ -662,18 +677,22 @@ async fn pagination_is_stable_owner_scoped_and_account_deletion_cascades() {
         ListQuery {
             page: Some(0),
             page_size: None,
+            ..Default::default()
         },
         ListQuery {
             page: None,
             page_size: Some(0),
+            ..Default::default()
         },
         ListQuery {
             page: None,
             page_size: Some(101),
+            ..Default::default()
         },
         ListQuery {
             page: Some(i64::MAX),
             page_size: Some(100),
+            ..Default::default()
         },
     ] {
         assert!(matches!(
@@ -977,6 +996,7 @@ async fn concurrent_file_database_changes_keep_total_and_page_in_the_same_snapsh
             ListQuery {
                 page: Some(1),
                 page_size: Some(100),
+                ..Default::default()
             },
         )
         .await
@@ -994,4 +1014,327 @@ async fn concurrent_file_database_changes_keep_total_and_page_in_the_same_snapsh
         1
     );
     common::close_file_test_pool(pool, path).await;
+}
+
+fn ai_filter(form: Uuid) -> Value {
+    json!({"name":"AI complex","kind":"filter","schema_version":2,"definition":{
+        "type":"filter","expression":{"op":"or","children":[
+            {"op":"text","query1":"  点検  ","query2":""},
+            {"op":"not","child":{"op":"attribute","common_form_id":form,"conditions":[
+                {"field_id":"n","field_type":"number","op":"gte","value":"9007199254740993.00000000000000000001"}
+            ]}}
+        ]}
+    }})
+}
+
+#[tokio::test]
+async fn ai_definitions_round_trip_without_losing_expression_semantics() {
+    let pool = common::test_pool().await;
+    let f = fixture(&pool).await;
+    let input = ai_filter(f.form);
+    let saved = save(&pool, f.owner, input.clone()).await.unwrap();
+    assert_eq!(
+        saved["definition"]["expression"]["children"][0]["query1"],
+        "  点検  "
+    );
+    assert_eq!(
+        saved["definition"]["expression"]["children"][1]["child"]["conditions"][0]["value"],
+        "9007199254740993.00000000000000000001"
+    );
+    let id = Uuid::parse_str(saved["id"].as_str().unwrap()).unwrap();
+    let preset = get_preset(&pool, &f.owner.to_string(), &id.to_string())
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(preset_action(&preset).unwrap()).unwrap(),
+        saved["definition"]
+    );
+    assert_eq!(
+        serde_json::to_value(
+            validate_saved_preset(&pool, &f.owner.to_string(), &preset)
+                .await
+                .unwrap()
+        )
+        .unwrap(),
+        saved["definition"]
+    );
+    assert!(matches!(
+        get_preset(&pool, &f.other.to_string(), &id.to_string()).await,
+        Err(AppError::NotFound)
+    ));
+    assert!(matches!(
+        validate_saved_preset(&pool, &f.other.to_string(), &preset).await,
+        Err(AppError::NotFound)
+    ));
+
+    // v2は条件なしの全件分類を許可し、v1の編集画面向け制約は維持する。
+    let colors = json!({"name":"全件分類","kind":"coloring","schema_version":2,"definition":{
+        "type":"color","common_form_id":f.form,"rules":[{"id":"all","label":"すべて","color":"#123456","conditions":[]}]
+    }});
+    assert_eq!(
+        save(&pool, f.owner, colors).await.unwrap()["definition"]["rules"][0]["conditions"],
+        json!([])
+    );
+    let mut legacy = coloring(f.form);
+    legacy["definition"]["rules"][0]["id"] = json!("🚧".repeat(50));
+    let legacy = save(&pool, f.owner, legacy).await.unwrap();
+    let preset = get_preset(&pool, &f.owner.to_string(), legacy["id"].as_str().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(preset_action(&preset).unwrap()).unwrap()["rules"][0]["id"],
+        "preset-0"
+    );
+    assert_eq!(preset.definition["rules"][0]["id"], "🚧".repeat(50));
+}
+
+#[tokio::test]
+async fn legacy_lists_remain_v1_only_and_all_filters_affect_totals_and_paging() {
+    let pool = common::test_pool().await;
+    let f = fixture(&pool).await;
+    save(&pool, f.owner, filter(None, json!([]))).await.unwrap();
+    save(&pool, f.owner, coloring(f.form)).await.unwrap();
+    for _ in 0..2 {
+        save(&pool, f.owner, ai_filter(f.form)).await.unwrap();
+    }
+    let mut other = ai_filter(f.form);
+    other["definition"] = json!({"type":"filter","expression":{"op":"all"}});
+    save(&pool, f.other, other).await.unwrap();
+    let legacy = list_presets(&pool, &f.owner.to_string(), ListQuery::default())
+        .await
+        .unwrap();
+    assert_eq!(legacy.total, 2);
+    assert!(legacy.items.iter().all(|item| item.schema_version == 1));
+    let combined = list_presets(
+        &pool,
+        &f.owner.to_string(),
+        ListQuery {
+            versions: Some("1,2".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(combined.total, 4);
+    let filtered = list_presets(
+        &pool,
+        &f.owner.to_string(),
+        ListQuery {
+            versions: Some("1,2".into()),
+            kind: Some(PresetKind::Filter),
+            name: Some("AI complex".into()),
+            page: Some(2),
+            page_size: Some(1),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        (filtered.total, filtered.items.len(), filtered.page),
+        (2, 1, 2)
+    );
+    let mismatched = list_presets(
+        &pool,
+        &f.owner.to_string(),
+        ListQuery {
+            versions: Some("2".into()),
+            kind: Some(PresetKind::Coloring),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(mismatched.total, 0);
+    let absent = list_presets(
+        &pool,
+        &f.owner.to_string(),
+        ListQuery {
+            versions: Some("1,2".into()),
+            name: Some("' OR true --".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(absent.total, 0);
+    for versions in ["", "0", "1,3", "2,", "invalid"] {
+        assert!(matches!(
+            list_presets(
+                &pool,
+                &f.owner.to_string(),
+                ListQuery {
+                    versions: Some(versions.into()),
+                    ..Default::default()
+                }
+            )
+            .await,
+            Err(AppError::Validation(_))
+        ));
+    }
+}
+
+#[tokio::test]
+async fn ai_presets_reject_non_display_operations_foreign_forms_and_invalid_fields() {
+    let pool = common::test_pool().await;
+    let f = fixture(&pool).await;
+    for definition in [
+        json!({"type":"create_layer","name":"forbidden"}),
+        json!({"type":"reset"}),
+        json!({"type":"focus","latitude":35,"longitude":139,"zoom":10}),
+        json!({"type":"filter","expression":{"op":"all"},"url":"https://example.invalid"}),
+        json!({"type":"filter","expression":{"op":"attribute","common_form_id":f.form,
+            "conditions":[{"field_id":"unknown","field_type":"number","op":"eq","value":"1"}]}}),
+        json!({"type":"filter","expression":{"op":"attribute","common_form_id":f.form,
+            "conditions":[{"field_id":"material","field_type":"select","op":"in","value":["not-a-choice"]}]}}),
+        json!({"type":"filter","expression":{"op":"text","query1":"x".repeat(128 * 1024)}}),
+    ] {
+        let input =
+            json!({"name":"bad","kind":"filter","schema_version":2,"definition":definition});
+        assert!(matches!(
+            save(&pool, f.owner, input).await,
+            Err(AppError::Validation(_))
+        ));
+    }
+    assert!(matches!(
+        save(&pool, f.other, ai_filter(f.form)).await,
+        Err(AppError::NotFound)
+    ));
+    let mut mismatch = ai_filter(f.form);
+    mismatch["kind"] = json!("coloring");
+    assert!(matches!(
+        save(&pool, f.owner, mismatch).await,
+        Err(AppError::Validation(_))
+    ));
+
+    let saved = save(&pool, f.owner, ai_filter(f.form)).await.unwrap();
+    let id = Uuid::parse_str(saved["id"].as_str().unwrap()).unwrap();
+    let preset = get_preset(&pool, &f.owner.to_string(), &id.to_string())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE answer_map_saved_condition_model SET definition=$2 WHERE id=$1")
+        .bind(id.to_string())
+        .bind(
+            json!({"type":"filter","expression":{"op":"attribute","common_form_id":f.form,
+            "conditions":[{"field_id":"unknown","field_type":"number","op":"eq","value":"1"}]}}),
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(matches!(
+        validate_saved_preset(&pool, &f.owner.to_string(), &preset).await,
+        Err(AppError::Validation(_))
+    ));
+}
+
+#[tokio::test]
+async fn prepared_preset_validation_does_not_insert_and_caller_transaction_controls_creation() {
+    let pool = common::test_pool().await;
+    let f = fixture(&pool).await;
+    let input: CreatePreset = serde_json::from_value(ai_filter(f.form)).unwrap();
+    // 公開APIで照合関数を登録した同一接続から、呼び出し元管理のtxへ渡す。
+    list_presets(&pool, &f.owner.to_string(), ListQuery::default())
+        .await
+        .unwrap();
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+    validate_preset_tx(&mut tx, &f.owner.to_string(), &input)
+        .await
+        .unwrap();
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM answer_map_saved_condition_model")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+    let saved = create_preset_tx(&mut tx, &f.owner.to_string(), input)
+        .await
+        .unwrap();
+    tx.rollback().await.unwrap();
+    assert!(matches!(
+        get_preset(&pool, &f.owner.to_string(), &saved.id).await,
+        Err(AppError::NotFound)
+    ));
+}
+
+#[tokio::test]
+async fn v2_numeric_json_literals_remain_exact_strings_through_http_storage_listing_and_apply() {
+    let pool = common::test_pool().await;
+    let f = fixture(&pool).await;
+    let low = "9007199254740993.00000000000000000001";
+    let high = "9007199254740993.00000000000000000002";
+    let number_low: Value = serde_json::from_str(low).unwrap();
+    let number_high: Value = serde_json::from_str(high).unwrap();
+    let input = json!({
+        "name":"precise-v2","kind":"filter","schema_version":2,"definition":{
+            "type":"filter","expression":{"op":"or","children":[
+                {"op":"text","query1":"  点検  ","query2":""},
+                {"op":"attribute","common_form_id":f.form,"conditions":[
+                    {"field_id":"n","field_type":"number","op":"between",
+                     "value":number_low,"upper":number_high}
+                ]}
+            ]}
+        }
+    });
+    let app = geocode_web_single::router::build_router(
+        pool.clone(),
+        geocode_web_single::build_tera_extension().unwrap(),
+        None,
+    );
+    let (status, saved, _) = http(
+        &app,
+        "POST",
+        "/form-answers/map-presets",
+        Some(f.owner),
+        Some(input),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    let condition = &saved["definition"]["expression"]["children"][1]["conditions"][0];
+    assert_eq!(condition["value"], low);
+    assert_eq!(condition["upper"], high);
+    assert_eq!(
+        saved["definition"]["expression"]["children"][0]["query1"],
+        "  点検  "
+    );
+    let (_, listed, _) = http(
+        &app,
+        "GET",
+        "/form-answers/map-presets?versions=1,2",
+        Some(f.owner),
+        None,
+    )
+    .await;
+    assert_eq!(listed["items"][0]["definition"], saved["definition"]);
+    let id = Uuid::parse_str(saved["id"].as_str().unwrap()).unwrap();
+    let stored = get_preset(&pool, &f.owner.to_string(), &id.to_string())
+        .await
+        .unwrap();
+    let action = validate_saved_preset(&pool, &f.owner.to_string(), &stored)
+        .await
+        .unwrap();
+    assert_eq!(serde_json::to_value(action).unwrap(), saved["definition"]);
+    let raw: Value =
+        sqlx::query_scalar("SELECT definition FROM answer_map_saved_condition_model WHERE id=$1")
+            .bind(id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(raw, saved["definition"]);
+
+    let colors = json!({
+        "name":"precise-colors-v2","kind":"coloring","schema_version":2,"definition":{
+            "type":"color","common_form_id":f.form,"rules":[
+                {"id":"older","label":" 高年数 ","color":"#123456","conditions":[
+                    {"field_id":"n","field_type":"number","op":"gte","value":number_low}
+                ]},
+                {"id":"rest","label":"その他","color":"#654321","conditions":[]}
+            ]
+        }
+    });
+    let saved = save(&pool, f.owner, colors).await.unwrap();
+    assert_eq!(
+        saved["definition"]["rules"][0]["conditions"][0]["value"],
+        low
+    );
+    assert_eq!(saved["definition"]["rules"][0]["id"], "older");
+    assert_eq!(saved["definition"]["rules"][0]["label"], " 高年数 ");
+    assert_eq!(saved["definition"]["rules"][1]["id"], "rest");
 }

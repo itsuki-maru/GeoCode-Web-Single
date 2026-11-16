@@ -15,6 +15,11 @@ import { createAnswerPrintSnapshot } from "../src/map/print/answer-print-state";
 import { installAnswerFilter } from "../src/map/answer-filter";
 import { readMapBootstrap } from "../src/map/bootstrap";
 
+// このスイートは地物の遅延取得だけを計測する。AI通信とライフサイクルはai-chatで検証する。
+vi.mock("../src/ai/chat", () => ({
+  createAiChat: () => ({ open: vi.fn(), dispose: vi.fn() }),
+}));
+
 // アプリケーションと同じ Leaflet を使用し、jsdom に必要な SVG 機能を補う。
 Object.assign(SVGSVGElement.prototype, { createSVGRect: () => ({}) });
 const require = createRequire(import.meta.url);
@@ -1095,7 +1100,10 @@ describe("lazy groups in the actual read-only map runtime", () => {
             properties: {},
             geometry: {
               type: "LineString",
-              coordinates: [[139.76, 35.68], [139.76 + width, 35.68]],
+              coordinates: [
+                [139.76, 35.68],
+                [139.76 + width, 35.68],
+              ],
             },
           },
         };
@@ -1115,9 +1123,10 @@ describe("lazy groups in the actual read-only map runtime", () => {
       const bootstrap = window.__GEOCODE_MAP_BOOTSTRAP__ as any;
       Object.assign(bootstrap, {
         page,
-        shapes: page === "temporary-map"
-          ? Object.fromEntries(records.map((record) => [record.id, record]))
-          : records,
+        shapes:
+          page === "temporary-map"
+            ? Object.fromEntries(records.map((record) => [record.id, record]))
+            : records,
       });
       if (page === "form-answer-map") {
         bootstrap.answerPreview = {
@@ -1131,7 +1140,12 @@ describe("lazy groups in the actual read-only map runtime", () => {
           isMaster: false,
           isChecked: false,
           isMapUiHidden: false,
-          shareSnapshot: { version: 1, state, tileServers: bootstrap.tileServers, tileOverlays: [] },
+          shareSnapshot: {
+            version: 1,
+            state,
+            tileServers: bootstrap.tileServers,
+            tileOverlays: [],
+          },
         });
       }
       fetchData.mockImplementation(
@@ -1148,7 +1162,11 @@ describe("lazy groups in the actual read-only map runtime", () => {
       expect(runtime.shapeLayers["shape-print-small"]).toBeUndefined();
       const large = runtime.shapeLayers["shape-print-large"];
       const initialRequests = fetchData.mock.calls.length;
-      for (const [zoom, renderedCount] of [[13, 2], [14, 2], [12, 1]]) {
+      for (const [zoom, renderedCount] of [
+        [13, 2],
+        [14, 2],
+        [12, 1],
+      ]) {
         runtime.map.setView([35.68, 139.76], zoom, { animate: false });
         expect(runtime.getObjectLoadStatus().loading).toBe(true);
         await runtime.shapeRenderer.whenIdle();

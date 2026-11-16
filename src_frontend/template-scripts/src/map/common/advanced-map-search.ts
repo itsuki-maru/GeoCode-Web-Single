@@ -4,7 +4,8 @@ import { createColoringEditor, action, node } from "./coloring-editor";
 import { createMapPresetDialogs } from "./map-preset-dialog";
 import { createMapMessageDialog } from "./map-message-dialog";
 import { evaluateMapAnalysis, mapFilterPath, mapOperationMessages } from "./map-analysis";
-import { validatePresetDraft, type SavedMapPreset } from "./answer-map-presets";
+import { validatePresetDraft, type AnySavedMapPreset } from "./answer-map-presets";
+import { validateCapabilities } from "../../ai/types";
 import type { AnswerColorSpecification, AnswerColoring, AnswerField } from "./answer-coloring";
 /** Vue の地図ページと、単独で開く全画面の地図で共有する。 */
 export interface AttributeCondition {
@@ -146,6 +147,7 @@ interface ModalOptions {
   getLayerIds(): string[] | null;
   getContext(): string;
   savedFilters?: boolean;
+  applyAiPreset?(id: string, signal: AbortSignal): Promise<void>;
   onApply(
     request: AttributeSearchRequest | null,
     result: AttributeSearchResult | null,
@@ -330,7 +332,29 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
     options.analysis || options.savedFilters
       ? createMapPresetDialogs(
           options.transport,
-          async (preset: SavedMapPreset, signal) => {
+          async (preset: AnySavedMapPreset, signal) => {
+            if (preset.schema_version === 2) {
+              if (!options.applyAiPreset)
+                throw Error(
+                  "この画面ではAI条件を適用できません。AIアシスタントから適用してください。",
+                );
+              const current = sequence,
+                context = options.getContext();
+              const capabilities = validateCapabilities(
+                await options.transport("/ai/capabilities", undefined, signal),
+              );
+              if (signal.aborted || disposed || !dialog.open || current !== sequence) return;
+              if (context !== options.getContext())
+                throw Error("地図の対象が変わりました。もう一度適用してください。");
+              if (!capabilities.enabled)
+                throw Error("管理者がAI機能を無効にしているため、AI条件を適用できません。");
+              if ((capabilities.protocol_version ?? 1) < 2)
+                throw Error("AI条件に対応したサーバーへ更新してください。");
+              await options.applyAiPreset(preset.id, signal);
+              if (signal.aborted || disposed || !dialog.open || current !== sequence) return;
+              status.textContent = "AI条件を地図へ適用しました。";
+              return;
+            }
             validatePresetDraft(preset);
             if (!options.analysis) {
               if (preset.kind !== "filter") throw Error("この画面では色分け条件を呼び出せません。");

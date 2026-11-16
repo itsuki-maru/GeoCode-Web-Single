@@ -12,6 +12,7 @@ import type {
   MapObjectUpdatePayload,
 } from "@/interface";
 import { useMapAnalysisSearch } from "@/composables/useMapAnalysisSearch";
+import { useAiAssistant } from "@/composables/useAiAssistant";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useShapeStore } from "@/stores/shapes";
 import { useAuthStore } from "@/stores/auth";
@@ -229,6 +230,7 @@ const reloadMap = async (
 ): Promise<boolean> => {
   const selectedLayerId = activeLayer.value;
   if (!selectedLayerId || disposed) return false;
+  clearAi();
   const isMaster = selectedLayerId === masterLayerId.value;
   const sequence = ++mapReloadSequence;
   mapReloadController?.abort();
@@ -574,7 +576,12 @@ const focusObject = (type: "marker" | "shape", id: string, lat: number, lng: num
 };
 
 const filterMapObjects = (): void => {
-  if (!mapobjStore.search?.query1 && !mapobjStore.search?.query2 && !mapobjStore.attributeSearch) {
+  if (
+    !mapobjStore.search?.query1 &&
+    !mapobjStore.search?.query2 &&
+    !mapobjStore.attributeSearch &&
+    !mapobjStore.aiFilterTargets
+  ) {
     mapIframeRef.value?.filterMapObjects(null, null);
     return;
   }
@@ -608,6 +615,32 @@ const handleMapObjectSearch = async (query: QueryForm, reset: boolean = false): 
     showMessage("検索結果を取得できませんでした。再試行してください。");
   }
 };
+const applyMapFilter = async () => {
+  const active =
+    !!mapobjStore.search?.query1 ||
+    !!mapobjStore.search?.query2 ||
+    !!mapobjStore.attributeSearch ||
+    !!mapobjStore.aiFilterTargets;
+  return (
+    (await mapIframeRef.value?.filterMapObjectsAndWait(
+      active ? [...mapobjStore.mapObjectList.keys()] : null,
+      active ? mapobjStore.filteredShapeIds : null,
+    )) ?? false
+  );
+};
+const {
+  clearAi,
+  applyManualColoring,
+  applyPreset: applyAiPreset,
+} = useAiAssistant(activeLayer, masterLayerId, {
+  filter: applyMapFilter,
+  color: async (value) => (await mapIframeRef.value?.setColoring(value)) ?? false,
+  resetColor: async () => (await mapIframeRef.value?.discardColoring()) ?? false,
+  focus: async (latitude, longitude, zoom) =>
+    (await mapIframeRef.value?.setMapView(latitude, longitude, zoom)) ?? false,
+  view: async () => (await mapIframeRef.value?.getMapView()) ?? null,
+  identity: () => String(mapReloadSequence),
+});
 const {
   openAdvancedSearch,
   closeAdvancedSearch,
@@ -620,20 +653,17 @@ const {
   activeLayer,
   masterLayerId,
   async () => {
-    const active =
-      !!mapobjStore.search?.query1 || !!mapobjStore.search?.query2 || !!mapobjStore.attributeSearch;
-    const success = await mapIframeRef.value?.filterMapObjectsAndWait(
-      active ? [...mapobjStore.mapObjectList.keys()] : null,
-      active ? mapobjStore.filteredShapeIds : null,
-    );
+    const success = await applyMapFilter();
     if (!success) throw Error("地図への絞り込みの反映を確認できませんでした。再試行してください。");
   },
   (text) => showMessage(text),
-  async (coloring) => (await mapIframeRef.value?.setColoring?.(coloring)) ?? false,
-  async () => (await mapIframeRef.value?.discardColoring()) ?? false,
+  applyManualColoring,
+  () => applyManualColoring(null),
+  applyAiPreset,
 );
 watch(activeLayer, () => closeAdvancedSearch());
 watch(() => mapobjStore.attributeRevision, filterMapObjects);
+watch(() => mapobjStore.aiFilterRevision, filterMapObjects);
 
 // --- ログイン画面への遷移 ---
 async function loginRedirect(): Promise<void> {

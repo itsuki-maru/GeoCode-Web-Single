@@ -11,6 +11,8 @@ GeoCode-Web-Singleの主要機能について、利用手順、現在の処理�
 | [レイヤとマーカー](LAYERS_AND_MARKERS.md) | 作成・編集・削除、マーカーアイコン |
 | [図形と測定](SHAPES_AND_MEASUREMENT.md) | 描画、形状編集、スタイル、距離・面積 |
 | [検索とジオコーディング](SEARCH_AND_GEOCODING.md) | オブジェクト検索、住所・座標検索 |
+| [AIアシスタント](AI_ASSISTANT.md) | LLM接続設定、自然言語検索・色分け、実データの入力例とTab入力、確認付き作成・保存、SQLiteの移行・鍵保管 |
+| [AIの受入評価](AI_EVALUATION.md) | 架空データによる日本語指示・入力例の評価、SQLite・Tauriでの確認項目 |
 | [ファイル管理](FILE_MANAGEMENT.md) | 画像・PDF・動画、埋め込み、閲覧制御 |
 | [データ入出力](DATA_IMPORT_EXPORT.md) | JSON形式、旧形式互換、取り込みの制約 |
 
