@@ -31,6 +31,11 @@ pub fn init_test_env() {
         std::env::set_var("ALLOW_ORIGINS", "http://localhost:3000");
         std::env::set_var("TILE_SERVER_BASE_URL", "http://localhost");
         std::env::set_var("TILE_SERVER_API_KEY", "test-api-key");
+        std::env::set_var(
+            "AI_ENCRYPTION_KEY",
+            "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+        );
+        std::env::set_var("AI_ALLOWED_ORIGINS", "");
     });
 }
 

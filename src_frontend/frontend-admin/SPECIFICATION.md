@@ -2,7 +2,7 @@
 
 ## 1. 概要
 
-ユーザー管理、現在位置共有マップ、重ね合わせタイル、地図表示を設定する独立したVueアプリ。関連は [全体構成](../SPECIFICATION.md)、[全体の権限・API仕様](../../SPECIFICATION.md)、[公開地図テンプレート](../../src/templates/SPECIFICATION.md)。
+ユーザー管理、現在位置共有マップ、重ね合わせタイル、地図表示、AIを設定する独立したVueアプリ。関連は [全体構成](../SPECIFICATION.md)、[全体の権限・API仕様](../../SPECIFICATION.md)、[公開地図テンプレート](../../src/templates/SPECIFICATION.md)。
 
 ## 2. ディレクトリ構成
 
@@ -19,6 +19,7 @@ frontend-admin/
 │   │   ├── users/            ユーザー管理
 │   │   ├── live/             位置共有マップ管理
 │   │   ├── TileOverlays.vue   重ね合わせタイル設定
+│   │   ├── AiSettings.vue     AI・LLM・音声認識設定
 │   │   └── NotFoundAdmin.vue  Vue内の未定義ルート
 │   ├── components/common/    モーダル・通知・確認
 │   ├── stores/               appInits、auth、users
@@ -42,6 +43,7 @@ frontend-admin/
 | `/account/login` | `LoginViewAdmin.vue` |
 | `/live-maps` | `AdminLiveMaps.vue` |
 | `/tile-overlays` | `TileOverlays.vue` |
+| `/ai-settings` | `AiSettings.vue` |
 | その他 | `NotFoundAdmin.vue` |
 
 保護画面のルートガードは `/account/auth` を呼ぶ。これは認証確認であり、Vueルーター自体で管理者権限を保証しない。管理APIの権限確認はRustが行う。
@@ -90,12 +92,32 @@ frontend-admin/
 
 ユーザーへの表示・選択、HTTPS URL等の検証、出典HTMLの扱いは [全体機能仕様](../../SPECIFICATION.md) を参照。無効化と削除は異なり、削除すると各アカウントの登録も解除される。画面は再読み込みによる地図への反映を案内する。
 
+### 4.4 AI設定
+
+[AiSettings.vue](src/views/AiSettings.vue) はAI機能の有効化、LLMの接続方式・ベースURL・モデル、音声入力の有効化と独立した文字起こしサービス、通信・出力・要求回数の制限を扱う。AI・音声・作成保存の許可は初期無効。`writeEnabled` はレイヤー作成・検索条件保存を別途許可する設定で、既存設定にない場合はfalseとして扱う。有効時も利用者の確認後に確定し、検索・表示操作とは別の実行経路を使う。対応範囲と配備手順は [AIアシスタント](../../docs/AI_ASSISTANT.md) を参照する。
+
+| 操作 | API |
+| --- | --- |
+| 設定取得 | GET `/admin/ai-settings` |
+| 設定保存 | PUT `/admin/ai-settings` |
+| LLM接続・応答形式確認 | POST `/admin/ai-settings/check` |
+
+設定のJSONキーはcamelCase。LLMの `provider` は `openai`・`anthropic`・`gemini`、音声はOpenAI互換の `audio/transcriptions` を利用する。接続方式の変更時には標準のベースURLを入力し、モデルとキーを選び直す。ローカル・LAN内の接続先はサーバーの `AI_ALLOWED_ORIGINS` への許可が別途必要。
+
+取得結果の `hasApiKey`・`hasSpeechApiKey` だけで設定有無を表示し、キー原文を受け取らない。維持・置換・削除を選択し、接続先・方式が変わった場合は維持を拒否する。保存成功後や権限エラー・設定競合時には入力キーを消去する。`keyStorageConfigured:false` の場合は保存を無効にし、`AI_ENCRYPTION_KEY` の設定を案内する。設定の版が競合した場合は最新設定の取得を求め、その後に必要な変更を入力し直す。
+
+認証・競合以外の失敗では、固定の案内にサーバーの安全なエラー文言を追記する。文字列以外は表示せず、入力中のLLM・音声APIキーをマスクして1200文字以内へ制限し、HTMLとして描画しない。詳細のない失敗では従来の案内を維持する。
+
+接続確認は入力中の設定に対して行い、保存とは分離する。外部サービスへ試験要求を送るため、料金が発生し得ることを表示する。成功は接続と応答形式の確認であり、実データの検索・音声認識・地図反映の確認結果ではない。音声設定は無効時も編集・キー削除ができ、実際の録音は利用者のチャット画面で確認する。
+
+追加機能の配布は、`20261117120000_ai_operations.sql` の適用、全バックエンド更新、フロント配布、作成保存の許可の順に行う。作成保存の許可を無効にしても、確定済み操作の所有者による結果確認は可能。既に確定したレイヤーや保存条件を削除する設定ではない。AI全体を無効にする場合も、外部送信済みの情報や確定済み変更を取り消すものではない。
+
 ## 5. 状態とエラー処理
 
 - `stores/appInits.ts`: アプリ名などの初期設定。
 - `stores/auth.ts`: UIの認証状態。PC版の再認証・トークン切り替えフラグは持たない。
 - `stores/users.ts`: ユーザー一覧など。
-- 位置共有マップ・タイルの編集状態と処理中フラグは各Vue画面のref等で管理する。
+- 位置共有マップ・タイル・AIの編集状態と処理中フラグは各Vue画面のref等で管理する。
 
 [axiosClient.ts](src/axiosClient.ts) はCookie付き通信を行い、token期限切れでrefreshして元の要求を再試行する。refresh失敗時はログアウト状態とログイン遷移を処理する。画面側は処理中の入力・送信抑止、通知や再試行を実装する。
 
@@ -115,4 +137,4 @@ npm run build
 
 Viteの環境変数はルートのものを使用する。個別出力の `dist/index.html` は統合時に `index-admin.html` に改名する。詳細は [統合ビルド](../SPECIFICATION.md) を参照。
 
-テストは `src/**/__tests__/` にあり、router、Axios、ストア、ログイン、ユーザー管理、位置共有マップ、タイル設定を対象とする。管理者／非管理者のサーバー認可は、Vueのモックテストだけで検証済みとはしない。
+テストは `src/**/__tests__/` にあり、router、Axios、ストア、ログイン、ユーザー管理、位置共有マップ、タイル・AI設定を対象とする。AI設定ではキーの非表示・維持・置換・削除、接続先変更、入力制限、設定競合、権限エラーを確認する。管理者／非管理者のサーバー認可は、Vueのモックテストだけで検証済みとはしない。

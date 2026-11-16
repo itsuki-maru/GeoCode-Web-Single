@@ -143,7 +143,7 @@ fn number(value: &Value) -> Result<String, AppError> {
     Ok(raw)
 }
 
-pub(super) fn validate(query: &AnswerQuery) -> Result<(), AppError> {
+pub(crate) fn validate(query: &AnswerQuery) -> Result<(), AppError> {
     for id in [&query.common_form_id, &query.target_id, &query.layer_id] {
         if id
             .as_deref()
@@ -345,7 +345,7 @@ fn bound_value(b: &mut QueryBuilder<'_, Sqlite>, c: &AnswerCondition, value: &Va
 }
 
 /// 最新登録の決定後に、版・期間・登録条件を適用する。
-pub(super) fn build_query(
+pub(crate) fn build_query(
     user: &str,
     q: &AnswerQuery,
     at: DateTime<Utc>,

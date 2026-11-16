@@ -107,13 +107,50 @@ fn run(
     crate::tilegen::store::configure_writer(&staging)?;
     let operation = context.clone();
     staging.progress_handler(10_000, Some(move || operation.check().is_err()));
-    staging.execute_batch("CREATE TABLE relations(id INTEGER PRIMARY KEY,document TEXT NOT NULL);
-        CREATE TABLE member_ways(id INTEGER PRIMARY KEY);
-        CREATE TABLE selected_ways(id INTEGER PRIMARY KEY,node_ids BLOB NOT NULL,tags TEXT NOT NULL);
-        CREATE TABLE nodes(id INTEGER PRIMARY KEY,x REAL,y REAL);
-        CREATE TABLE used_areas(id INTEGER NOT NULL,kind TEXT NOT NULL,PRIMARY KEY(id,kind));")?;
+    staging.execute_batch(
+        r#"
+            CREATE TABLE relations (
+                id INTEGER PRIMARY KEY,
+                document TEXT NOT NULL
+            );
+
+            CREATE TABLE member_ways (
+                id INTEGER PRIMARY KEY
+            );
+
+            CREATE TABLE selected_ways (
+                id INTEGER PRIMARY KEY,
+                node_ids BLOB NOT NULL,
+                tags TEXT NOT NULL
+            );
+
+            CREATE TABLE nodes (
+                id INTEGER PRIMARY KEY,
+                x REAL,
+                y REAL
+            );
+
+            CREATE TABLE used_areas (
+                id INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                PRIMARY KEY(id, kind)
+            );
+        "#,
+    )?;
     if extended {
-        staging.execute_batch("CREATE TABLE node_labels(id INTEGER PRIMARY KEY,document TEXT NOT NULL); CREATE TABLE label_relations(id INTEGER PRIMARY KEY,document TEXT NOT NULL);")?;
+        staging.execute_batch(
+            r#"
+                CREATE TABLE node_labels (
+                    id INTEGER PRIMARY KEY,
+                    document TEXT NOT NULL
+                );
+
+                CREATE TABLE label_relations (
+                    id INTEGER PRIMARY KEY,
+                    document TEXT NOT NULL
+                );
+            "#,
+        )?;
     }
     let mut label_skipped = BTreeMap::<String, u64>::new();
     let mut metadata = StandardMetadata {

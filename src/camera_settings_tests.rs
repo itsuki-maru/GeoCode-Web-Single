@@ -151,5 +151,6 @@ fn json_is_only_camera_configuration_source() {
     if backup.exists() {
         std::fs::remove_file(backup).unwrap();
     }
+    std::fs::remove_file(directory.join("geocode-web-single.env.json.lock")).unwrap();
     std::fs::remove_dir(directory).unwrap();
 }

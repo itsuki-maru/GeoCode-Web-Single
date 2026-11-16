@@ -1,5 +1,9 @@
 /target
 .env
+geocode-web-single.env.json
+geocode-web-single.env.json.bak
+geocode-web-single.env.json.lock
+.geocode-settings-*.tmp
 /src_frontend/frontend/node_modules/
 /src_frontend/frontend/dist/
 /src_frontend/frontend-admin/node_modules/

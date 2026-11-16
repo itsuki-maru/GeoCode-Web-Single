@@ -434,6 +434,10 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
   vi.stubGlobal("window", dom.window);
   vi.stubGlobal("document", dom.window.document);
   vi.stubGlobal("navigator", dom.window.navigator);
+  // DOMを差し替えたら、要素を受け取るAPIと保存領域も同じJSDOMへ揃える。
+  // 別パッケージのJSDOMのgetComputedStyleは、このページのElementを受け付けない。
+  vi.stubGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window));
+  vi.stubGlobal("localStorage", dom.window.localStorage);
   // 遅延コンテンツやメディアの初期化時に instanceof で判定できるよう、インポートしたモジュールと
   // 外部ライブラリのスクリプトには同じ DOM の実行環境を使う。
   for (const name of [
@@ -464,10 +468,7 @@ function smokeLoadPage(page: SmokePage, options: SmokeLoadOptions = {}) {
   if (usesTypeScriptReadOnlyEntry) {
     const result = initializeReadOnlyMapPage(
       readOnlyPageName as
-        | "map-anather"
-        | "form-answer-map"
-        | "temporary-map"
-        | "temporary-map-mobile",
+        "map-anather" | "form-answer-map" | "temporary-map" | "temporary-map-mobile",
     );
     if (readOnlyPageName === "form-answer-map") {
       finishAnswerPreview(result, bootstrap as any, (dom.window as any).L);
@@ -674,9 +675,12 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
   it("埋め込みPC地図のCtrl+Pを親に通知し、長押しとモバイルでは通知しない", () => {
     for (const templateName of ["map.html", "map-mobile.html"]) {
       const parentWindow = { postMessage: vi.fn() };
-      const dom = smokeLoadPage(pages.find((page) => page.templateName === templateName)!, {
-        parentWindow,
-      });
+      const dom = smokeLoadPage(
+        pages.find((page) => page.templateName === templateName)!,
+        {
+          parentWindow,
+        },
+      );
       parentWindow.postMessage.mockClear();
       const press = (extra = {}) => {
         const event = new dom.window.KeyboardEvent("keydown", {
@@ -1498,6 +1502,57 @@ describe("各地図テンプレートJavaScriptのランタイム初期化", () 
       );
     },
   );
+
+  it.each(["map.html", "map-mobile.html"])("%sはAIの地図移動を検証し完了を返す", (templateName) => {
+    const dom = smokeLoadPage(pages.find((page) => page.templateName === templateName)!);
+    const map = (dom.window as any).__templateSmokeMap;
+    const post = vi.spyOn(dom.window, "postMessage").mockImplementation(() => {});
+    const request = (data: Record<string, unknown>, origin = "https://example.test") =>
+      dom.window.dispatchEvent(
+        new dom.window.MessageEvent("message", { origin, source: dom.window, data }),
+      );
+    const runtimeId = new Script("editorRuntimeId").runInContext(dom.getInternalVMContext());
+    post.mockClear();
+    request({
+      type: "mapViewApply",
+      requestId: "wrong",
+      runtimeId: "old",
+      latitude: 35,
+      longitude: 139,
+      zoom: 12,
+    });
+    request(
+      { type: "mapViewApply", requestId: "bad-origin", runtimeId, latitude: 35, longitude: 139 },
+      "https://untrusted.test",
+    );
+    expect(post).not.toHaveBeenCalled();
+    request({
+      type: "mapViewApply",
+      requestId: "move",
+      runtimeId,
+      latitude: 35,
+      longitude: 139,
+      zoom: 12,
+    });
+    expect(post).toHaveBeenLastCalledWith(
+      { type: "mapViewApplyResult", requestId: "move", runtimeId, success: true },
+      "https://example.test",
+    );
+    expect(map.getCenter().lat).toBe(35);
+    expect(map.getZoom()).toBe(12);
+    request({
+      type: "mapViewApply",
+      requestId: "invalid",
+      runtimeId,
+      latitude: 100,
+      longitude: 139,
+    });
+    expect(post).toHaveBeenLastCalledWith(
+      { type: "mapViewApplyResult", requestId: "invalid", runtimeId, success: false },
+      "https://example.test",
+    );
+    expect(map.getCenter().lat).toBe(35);
+  });
 
   it("PC地図は親画面からの要求に現在の印刷用状態を返す", () => {
     const dom = smokeLoadPage(pages.find((page) => page.templateName === "map.html")!);

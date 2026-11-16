@@ -13,6 +13,7 @@ vi.mock("@/views/TileOverlays.vue", () => ({ default: { render: () => null } }))
 vi.mock("@/views/MapDisplaySettings.vue", () => ({ default: { render: () => null } }));
 vi.mock("@/views/BackgroundMaps.vue", () => ({ default: { render: () => null } }));
 vi.mock("@/views/TileServerSettings.vue", () => ({ default: { render: () => null } }));
+vi.mock("@/views/AiSettings.vue", () => ({ default: { render: () => null } }));
 
 import router from "@/router";
 
@@ -27,6 +28,7 @@ describe("管理者ルートの認証ガード", () => {
     "/map-display-settings",
     "/background-maps",
     "/tile-server-settings",
+    "/ai-settings",
   ])("%sでも認証を確認して、失敗時はログインへ戻す", async (path) => {
     authCheck.mockResolvedValue({});
     await router.push(path);

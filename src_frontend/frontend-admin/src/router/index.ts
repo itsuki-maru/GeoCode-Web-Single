@@ -106,6 +106,19 @@ const routeSettings: RouteRecordRaw[] = [
     },
   },
   {
+    path: "/ai-settings",
+    name: "AiSettings",
+    component: () => import("@/views/AiSettings.vue"),
+    beforeEnter: async (_to, _from, next) => {
+      try {
+        await apiClient.get(getUserUrl);
+        next();
+      } catch {
+        next({ name: "login" });
+      }
+    },
+  },
+  {
     path: "/:pathMatch(.*)*",
     name: "NotFound",
     component: () => import("@/views/NotFoundAdmin.vue"),

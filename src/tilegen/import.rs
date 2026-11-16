@@ -177,15 +177,22 @@ fn run_checked(
     install_progress(&mut stage, context);
     store::configure_writer(&stage)?;
     stage.execute_batch(
-        "CREATE TABLE selected_ways(
-           way_id INTEGER PRIMARY KEY,node_ids BLOB NOT NULL,
-           road_class INTEGER NOT NULL,is_link INTEGER NOT NULL,
-           effective_layer INTEGER NOT NULL,structure_rank INTEGER NOT NULL
-         );
-         CREATE TABLE needed_nodes(
-           node_id INTEGER PRIMARY KEY,reference_count INTEGER NOT NULL,
-           lon REAL,lat REAL
-         );",
+        r#"
+        CREATE TABLE selected_ways (
+            way_id INTEGER PRIMARY KEY,
+            node_ids BLOB NOT NULL,
+            road_class INTEGER NOT NULL,
+            is_link INTEGER NOT NULL,
+            effective_layer INTEGER NOT NULL,
+            structure_rank INTEGER NOT NULL
+        );
+        CREATE TABLE needed_nodes (
+            node_id INTEGER PRIMARY KEY,
+            reference_count INTEGER NOT NULL,
+            lon REAL,
+            lat REAL
+        );
+        "#,
     )?;
 
     let mut highway_counts = BTreeMap::new();
@@ -201,13 +208,17 @@ fn run_checked(
     stage.execute_batch("BEGIN IMMEDIATE")?;
     let first = {
         let mut insert_way = stage.prepare(
-            "INSERT INTO selected_ways
-             (way_id,node_ids,road_class,is_link,effective_layer,structure_rank)
-             VALUES(?1,?2,?3,?4,?5,?6)",
+            r#"
+            INSERT INTO selected_ways (
+                way_id, node_ids, road_class, is_link, effective_layer, structure_rank
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
         )?;
         let mut insert_node = stage.prepare(
-            "INSERT INTO needed_nodes(node_id,reference_count) VALUES(?1,1)
-             ON CONFLICT(node_id) DO UPDATE SET reference_count=reference_count+1",
+            r#"
+            INSERT INTO needed_nodes (node_id, reference_count) VALUES (?1, 1)
+            ON CONFLICT (node_id) DO UPDATE SET reference_count = reference_count + 1
+            "#,
         )?;
         let mut batch = Batch::new(&staging_path);
         let mut visited_objects = 0_u64;
@@ -290,9 +301,20 @@ fn run_checked(
     );
     stage.execute_batch("BEGIN IMMEDIATE")?;
     let second = {
-        let mut lookup =
-            stage.prepare("SELECT lon IS NOT NULL FROM needed_nodes WHERE node_id=?1")?;
-        let mut update = stage.prepare("UPDATE needed_nodes SET lon=?1,lat=?2 WHERE node_id=?3")?;
+        let mut lookup = stage.prepare(
+            r#"
+            SELECT lon IS NOT NULL
+            FROM needed_nodes
+            WHERE node_id = ?1
+            "#,
+        )?;
+        let mut update = stage.prepare(
+            r#"
+            UPDATE needed_nodes
+            SET lon = ?1, lat = ?2
+            WHERE node_id = ?3
+            "#,
+        )?;
         let mut batch = Batch::new(&staging_path);
         let mut resolved_nodes = 0_u64;
         let report = pbf::scan_with_check(
@@ -369,23 +391,39 @@ fn run_checked(
     );
     {
         let mut ways = stage.prepare(
-            "SELECT way_id,node_ids,road_class,is_link,effective_layer,structure_rank
-             FROM selected_ways ORDER BY way_id",
+            r#"
+            SELECT way_id, node_ids, road_class, is_link, effective_layer, structure_rank
+            FROM selected_ways
+            ORDER BY way_id
+            "#,
         )?;
         let mut rows = ways.query([])?;
-        let mut node_lookup =
-            stage.prepare("SELECT lon,lat,reference_count FROM needed_nodes WHERE node_id=?1")?;
+        let mut node_lookup = stage.prepare(
+            r#"
+            SELECT lon, lat, reference_count
+            FROM needed_nodes
+            WHERE node_id = ?1
+            "#,
+        )?;
         let mut feature_insert = output.prepare(
-            "INSERT INTO features(osm_way_id,road_class,is_link,effective_layer,structure_rank,
-              min_x,max_x,min_y,max_y,point_count,points)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+            r#"
+            INSERT INTO features (
+                osm_way_id, road_class, is_link, effective_layer, structure_rank,
+                min_x, max_x, min_y, max_y, point_count, points
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            "#,
         )?;
         let mut index_insert = output.prepare(
-            "INSERT INTO feature_rtree(feature_id,min_x,max_x,min_y,max_y)
-             VALUES(?1,?2,?3,?4,?5)",
+            r#"
+            INSERT INTO feature_rtree (feature_id, min_x, max_x, min_y, max_y)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            "#,
         )?;
         let mut lod_insert = output.prepare(
-            "INSERT INTO geometry_lod(feature_id,zoom,point_count,points) VALUES(?1,?2,?3,?4)",
+            r#"
+            INSERT INTO geometry_lod (feature_id, zoom, point_count, points)
+            VALUES (?1, ?2, ?3, ?4)
+            "#,
         )?;
         let mut batch = Batch::new(&building_path);
         let mut processed_ways = 0_u64;
@@ -858,11 +896,20 @@ mod tests {
             assert_eq!(monitor.snapshot().stage, Stage::FinalValidation);
             token.cancel();
             connection.query_row(
-                "WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<1000000) SELECT sum(x) FROM n",
-                [], |row| row.get::<_, i64>(0),
+                r#"
+                WITH RECURSIVE n(x) AS (
+                    VALUES (0)
+                    UNION ALL
+                    SELECT x + 1 FROM n WHERE x < 1000000
+                )
+                SELECT sum(x) FROM n
+                "#,
+                [],
+                |row| row.get::<_, i64>(0),
             )?;
             anyhow::bail!("SQL should be interrupted before completion")
-        }).unwrap_err();
+        })
+        .unwrap_err();
         assert!(crate::tilegen::cancel::is_interrupted(&error), "{error:#}");
         assert_eq!(
             monitor.snapshot().status,
@@ -878,10 +925,20 @@ mod tests {
         let context = OperationContext::new(CancellationToken::new()).with_deadline(Instant::now());
         let mut connection = Connection::open_in_memory()?;
         install_progress(&mut connection, &context);
-        let error = connection.query_row(
-            "WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<1000000) SELECT sum(x) FROM n",
-            [], |row| row.get::<_, i64>(0),
-        ).unwrap_err();
+        let error = connection
+            .query_row(
+                r#"
+            WITH RECURSIVE n(x) AS (
+                VALUES (0)
+                UNION ALL
+                SELECT x + 1 FROM n WHERE x < 1000000
+            )
+            SELECT sum(x) FROM n
+            "#,
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_err();
         let error = interruption_reason(error.into(), &context);
         assert!(
             crate::tilegen::operation::is_deadline_exceeded(&error),

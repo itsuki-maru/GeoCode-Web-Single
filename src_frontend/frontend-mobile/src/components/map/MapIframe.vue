@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch, toRaw } from "vue";
 import type { AnswerColoring } from "../../../../template-scripts/src/map/answer-coloring";
+import type { AiMapView } from "../../../../template-scripts/src/ai/types";
 import type { MapObjectUpdatePayload, MapObjectData, ShapeData } from "@/interface";
 
 type MapObjectChange = {
@@ -72,10 +73,19 @@ const cancelPending = () => {
     resolve(false);
   });
   pendingMapObjectRequests.clear();
+  pendingMapViewRequests.forEach(({ resolve, timer }) => {
+    window.clearTimeout(timer);
+    resolve(null);
+  });
+  pendingMapViewRequests.clear();
 };
 const pendingMapObjectRequests = new Map<
   string,
   { resolve: (updated: boolean) => void; timer: number }
+>();
+const pendingMapViewRequests = new Map<
+  string,
+  { resolve: (view: AiMapView | null) => void; timer: number }
 >();
 
 const getMapIframe = (): HTMLIFrameElement | null => {
@@ -137,6 +147,7 @@ const requestMapObjectMutation = (
     | "tileOverlaysUpdate"
     | "mapObjectsInitialize"
     | "mapColoringApply"
+    | "mapViewApply"
     | "mapObjectFilter",
   messageData: Record<string, unknown>,
   timeoutMs = 2000,
@@ -263,6 +274,23 @@ const filterMapObjectsAndWait = (
   filteredObjectIds.value = state;
   return requestMapObjectMutation("mapObjectFilter", state, 10000);
 };
+const setMapView = (latitude: number, longitude: number, zoom?: number): Promise<boolean> =>
+  requestMapObjectMutation("mapViewApply", { latitude, longitude, zoom }, 10000);
+const getMapView = (): Promise<AiMapView | null> => {
+  const requestId = `map-view-${++mapObjectRequestSequence}`;
+  return new Promise((resolve) => {
+    const timer = window.setTimeout(() => {
+      pendingMapViewRequests.delete(requestId);
+      resolve(null);
+    }, 2000);
+    pendingMapViewRequests.set(requestId, { resolve, timer });
+    if (!postMessageToMap({ type: "mapViewRequest", requestId, runtimeId })) {
+      window.clearTimeout(timer);
+      pendingMapViewRequests.delete(requestId);
+      resolve(null);
+    }
+  });
+};
 
 const setColoring = async (coloring: AnswerColoring | null): Promise<boolean> => {
   const sequence = ++coloringSequence;
@@ -350,10 +378,31 @@ const handleMessage = (event: MessageEvent): void => {
   }
   if (event.data.runtimeId && event.data.runtimeId !== runtimeId) return;
   if (
-    ["mapColoringApplyResult", "mapObjectFilterResult"].includes(event.data.type) &&
+    [
+      "mapColoringApplyResult",
+      "mapObjectFilterResult",
+      "mapViewApplyResult",
+      "mapViewResult",
+    ].includes(event.data.type) &&
     event.data.runtimeId !== runtimeId
   )
     return;
+  if (event.data.type === "mapViewResult") {
+    const pending = pendingMapViewRequests.get(event.data.requestId);
+    const view = event.data.view;
+    if (!pending) return;
+    window.clearTimeout(pending.timer);
+    pendingMapViewRequests.delete(event.data.requestId);
+    pending.resolve(
+      view &&
+        Number.isFinite(view.latitude) &&
+        Number.isFinite(view.longitude) &&
+        Number.isFinite(view.zoom)
+        ? view
+        : null,
+    );
+    return;
+  }
   if (event.data.type === "mapObjectWriteRequested") {
     if (!runtimeId || event.data.runtimeId !== runtimeId) return;
     const request = event.data.request;
@@ -414,6 +463,7 @@ const handleMessage = (event: MessageEvent): void => {
     emit("previewImage", event.data.message);
   } else if (
     event.data.type === "mapColoringApplyResult" ||
+    event.data.type === "mapViewApplyResult" ||
     event.data.type === "mapObjectFilterResult" ||
     event.data.type === "mapObjectsInitializeResult" ||
     event.data.type === "tileOverlaysUpdateResult" ||
@@ -446,6 +496,8 @@ const updateTileOverlays = (tiles: unknown[]): Promise<boolean> =>
   requestMapObjectMutation("tileOverlaysUpdate", { tiles: JSON.parse(JSON.stringify(tiles)) });
 
 defineExpose({
+  setMapView,
+  getMapView,
   setColoring,
   discardColoring,
   initializeMapObjects,

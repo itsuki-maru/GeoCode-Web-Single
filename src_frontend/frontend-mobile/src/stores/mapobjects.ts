@@ -41,6 +41,8 @@ export const useMapObjectStore = defineStore("mapobjects", {
     attributeMarkerIds: null as Set<string> | null,
     attributeShapeIds: null as Set<string> | null,
     attributeRevision: 0,
+    aiFilterTargets: null as Set<string> | null,
+    aiFilterRevision: 0,
     activeLayerId: "",
     activeIsMaster: true,
     search: null as MapSearch | null,
@@ -69,6 +71,8 @@ export const useMapObjectStore = defineStore("mapobjects", {
     },
     clearSearch() {
       this.search = null;
+      this.aiFilterTargets = null;
+      ++this.aiFilterRevision;
       this.attributeSearch = null;
       this.attributeMarkerIds = null;
       this.attributeShapeIds = null;
@@ -109,10 +113,16 @@ export const useMapObjectStore = defineStore("mapobjects", {
       ++this.attributeRevision;
       this.refreshSearchResults(true);
     },
+    setAiFilter(targets: string[] | null) {
+      this.aiFilterTargets = targets ? markRaw(new Set(targets)) : null;
+      ++this.aiFilterRevision;
+      this.refreshSearchResults(true);
+    },
     refreshSearchResults(rebuild = false) {
       const shapes = useShapeStore();
       const terms = [this.search?.query1 ?? "", this.search?.query2 ?? ""];
       const matchesMarker = (record: MapObjectData) =>
+        (!this.aiFilterTargets || this.aiFilterTargets.has(`marker:${record.id}`)) &&
         (!this.attributeMarkerIds || this.attributeMarkerIds.has(record.id)) &&
         (this.search?.markerMatches?.matches(
           record.id,
@@ -122,6 +132,7 @@ export const useMapObjectStore = defineStore("mapobjects", {
         ) ??
           matchesMapSearch(markerText(record), terms));
       const matchesShape = (record: ShapeData) =>
+        (!this.aiFilterTargets || this.aiFilterTargets.has(`shape:${record.id}`)) &&
         (!this.attributeShapeIds || this.attributeShapeIds.has(record.id)) &&
         (this.search?.shapeMatches?.matches(record.id, record.layer_id, shapeText(record), terms) ??
           matchesMapSearch(shapeText(record), terms));
@@ -137,7 +148,8 @@ export const useMapObjectStore = defineStore("mapobjects", {
             this.mapObjectList.set(id, record);
           else this.mapObjectList.delete(id);
         }
-      if (!this.search && !this.attributeSearch) this.filteredShapeIds = null;
+      if (!this.search && !this.attributeSearch && !this.aiFilterTargets)
+        this.filteredShapeIds = null;
       else if (rebuild || this.filteredShapeIds === null) {
         this.filteredShapeIds = shapes
           .getScopeRecords(this.activeLayerId, this.activeIsMaster)
@@ -295,11 +307,15 @@ export const useMapObjectStore = defineStore("mapobjects", {
         };
         this.mapObjectList = ordered(
           [...records.values()].filter(
-            (record) => !this.attributeMarkerIds || this.attributeMarkerIds.has(record.id),
+            (record) =>
+              (!this.attributeMarkerIds || this.attributeMarkerIds.has(record.id)) &&
+              (!this.aiFilterTargets || this.aiFilterTargets.has(`marker:${record.id}`)),
           ),
         );
         this.filteredShapeIds = [...shapeIds].filter(
-          (id) => !this.attributeShapeIds || this.attributeShapeIds.has(id),
+          (id) =>
+            (!this.attributeShapeIds || this.attributeShapeIds.has(id)) &&
+            (!this.aiFilterTargets || this.aiFilterTargets.has(`shape:${id}`)),
         );
         this.refreshSearchResults();
         this.tableChanges.emit({ type: "reset" });

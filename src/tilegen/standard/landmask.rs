@@ -33,8 +33,34 @@ pub fn import_into(
         before.is_file(),
         "陸域入力はPolygon Shapefileを指定してください"
     );
-    let raw_scope:(Option<f64>,Option<f64>,Option<f64>,Option<f64>)=connection.query_row(
-        "SELECT min(min_x),max(max_x),min(min_y),max(max_y) FROM (SELECT min_x,max_x,min_y,max_y FROM features UNION ALL SELECT min_x,max_x,min_y,max_y FROM standard_features WHERE osm_type IN (1,2))",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+    let raw_scope: (Option<f64>, Option<f64>, Option<f64>, Option<f64>) = connection.query_row(
+        r#"
+            SELECT
+                min(min_x),
+                max(max_x),
+                min(min_y),
+                max(max_y)
+            FROM (
+                SELECT
+                    min_x,
+                    max_x,
+                    min_y,
+                    max_y
+                FROM features
+                UNION ALL
+                SELECT
+                    min_x,
+                    max_x,
+                    min_y,
+                    max_y
+                FROM standard_features
+                WHERE
+                    osm_type IN (1, 2)
+            )
+        "#,
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    )?;
     let coverage = match raw_scope {
         (Some(x0), Some(x1), Some(y0), Some(y1)) => {
             let b = Rect::new(x0, x1, y0, y1)?.expand(1.0 / 360.0);

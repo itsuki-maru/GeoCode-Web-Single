@@ -7,11 +7,12 @@ use crate::utils::vec_to_hashmap;
 use axum::{
     Json,
     extract::{Extension, Path, Query},
+    http::HeaderMap,
     response::IntoResponse,
 };
 use chrono::Utc;
 use sqlx::sqlite::SqlitePool;
-use sqlx::{Result, query, query_as};
+use sqlx::{Result, Sqlite, Transaction, query, query_as};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -47,7 +48,12 @@ pub async fn master_layer_get_handler(
 pub async fn get_all_layers_handler(
     Extension(user_id): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
+    headers: HeaderMap,
 ) -> Result<Json<HashMap<String, LayerObject>>, AppError> {
+    // AI作成後の同期だけ元の利用者を照合し、従来の手動取得契約は維持する。
+    if headers.contains_key("x-ai-account-id") {
+        crate::handler::ai::validate_account(&user_id, &headers)?;
+    }
     let layer_objects = sqlx::query_as::<_, LayerObject>(
         r#"
         SELECT
@@ -81,56 +87,63 @@ pub async fn create_layer_handler(
     Extension(pool): Extension<SqlitePool>,
     Query(params): Query<LayerCreateQueryParams>,
 ) -> Result<Json<LayerCreatedResponse>, AppError> {
-    // 新規ID
-    let new_layer_id = Uuid::now_v7().to_string();
+    let name = params
+        .name
+        .as_deref()
+        .ok_or_else(|| AppError::Validation("レイヤ名を指定してください。".into()))?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let id = create_layer_tx(&mut tx, &user_id, name).await?;
+    tx.commit().await?;
+    Ok(Json(LayerCreatedResponse {
+        id,
+        message: "Layer Created.".into(),
+    }))
+}
 
-    // 現在時刻を取得
-    let now = Utc::now().naive_utc();
-
-    match params.name {
-        Some(name) => {
-            let new_layer_id = query_as!(
-                ReturningId,
-                r#"
-                INSERT INTO layer_model (
-                    id,
-                    user_id,
-                    layer_name,
-                    is_master,
-                    create_at,
-                    update_at
-                ) VALUES (
-                    $1,
-                    $2,
-                    $3,
-                    $4,
-                    $5,
-                    $6
-                )
-                RETURNING
-                    id
-                "#,
-                new_layer_id,
-                user_id,
-                name,
-                false,
-                now,
-                now,
-            )
-            .fetch_one(&pool)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "database error.");
-                AppError::Sqlx(e)
-            })?;
-
-            Ok(Json(LayerCreatedResponse {
-                id: new_layer_id.id,
-                message: "Layer Created.".to_string(),
-            }))
-        },
-        None => Err(AppError::InternalServerError),
+pub(crate) fn validate_layer_name(name: &str) -> Result<String, AppError> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 100 || name.chars().any(char::is_control) {
+        return Err(AppError::Validation(
+            "レイヤ名は制御文字を含まない1〜100文字で入力してください。".into(),
+        ));
     }
+    Ok(name.to_owned())
+}
+
+/// 手動APIと確認済みAI操作で、名前の検証と所有者を固定した作成を共有する。
+pub(crate) async fn create_layer_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    user: &str,
+    name: &str,
+) -> Result<String, AppError> {
+    let name = validate_layer_name(name)?;
+    let now = Utc::now().naive_utc();
+    Ok(sqlx::query_scalar(
+        r#"
+        INSERT INTO layer_model (
+            id,
+            user_id,
+            layer_name,
+            is_master,
+            create_at,
+            update_at
+        ) VALUES (
+            $1,
+            $2,
+            $3,
+            false,
+            $4,
+            $4
+        )
+        RETURNING id
+        "#,
+    )
+    .bind(Uuid::now_v7().to_string())
+    .bind(user)
+    .bind(name)
+    .bind(now)
+    .fetch_one(&mut **tx)
+    .await?)
 }
 
 // レイヤ削除ハンドラー

@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tera::Tera;
 use tokio::sync::Mutex as TokioMutex;
 
+pub mod ai;
 pub mod auth;
 pub mod config;
 pub mod db;

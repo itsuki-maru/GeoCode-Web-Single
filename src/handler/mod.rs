@@ -1,5 +1,6 @@
 pub mod account;
 pub mod admin;
+pub mod ai;
 pub mod assets;
 mod camera_turn;
 pub mod external_site;
@@ -29,7 +30,7 @@ pub mod answer_map_presets;
 mod answer_map_transport;
 pub mod form_answers;
 
-mod answer_sqlite;
+pub(crate) mod answer_sqlite;
 pub mod layer_forms;
 
 pub mod layer_input_policy;

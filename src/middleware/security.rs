@@ -58,6 +58,11 @@ pub fn content_security_policy_for_origins(
 }
 
 pub async fn security_headers_and_origin(req: Request, next: Next) -> Response<Body> {
+    // マイクは認証済みの親画面と別画面地図だけで使い、公開地図には許可しない。
+    let microphone_allowed = matches!(req.uri().path(), "/index" | "/map-another");
+    let ai_response = req.uri().path().starts_with("/ai/")
+        || req.uri().path() == "/admin/ai-settings"
+        || req.uri().path().starts_with("/admin/ai-settings/");
     if is_state_changing(req.method()) {
         if let Some(origin) = req
             .headers()
@@ -83,6 +88,9 @@ pub async fn security_headers_and_origin(req: Request, next: Next) -> Response<B
         .map(|settings| settings.snapshot().vector_policy);
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
+    if ai_response {
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
     headers.insert(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
@@ -94,7 +102,11 @@ pub async fn security_headers_and_origin(req: Request, next: Next) -> Response<B
     headers.insert("X-Frame-Options", HeaderValue::from_static("SAMEORIGIN"));
     headers.insert(
         "Permissions-Policy",
-        HeaderValue::from_static("camera=(), microphone=(), geolocation=(self)"),
+        HeaderValue::from_static(if microphone_allowed {
+            "camera=(), microphone=(self), geolocation=(self)"
+        } else {
+            "camera=(), microphone=(), geolocation=(self)"
+        }),
     );
     headers.insert(
         header::CONTENT_SECURITY_POLICY,

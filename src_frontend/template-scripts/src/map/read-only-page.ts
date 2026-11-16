@@ -1,5 +1,10 @@
 // @ts-nocheck -- この統合境界では Leaflet プラグイン間の型定義に互換性がないため、型チェックを省略する。
 import { evaluateMapAnalysis } from "./common/map-analysis";
+import { createAiChat } from "../ai/chat";
+import { createAiLauncher } from "../ai/launcher";
+import { observeAiSuggestionDataChanges } from "../ai/suggestion-events";
+import { aiFetchTransport } from "../ai/types";
+import { intersectTargetMasks, mergeAiColoring } from "../ai/map-state";
 import { installAnswerColoring, type AnswerColoring } from "./answer-coloring";
 import { createAdvancedMapSearchModal, attributeTransport } from "./common/advanced-map-search";
 import { createTileOverlayManager } from "./common/tile-overlays";
@@ -360,6 +365,14 @@ export function initializeReadOnlyMapPage(
   let shapeRenderStatus: HTMLElement | null = null;
   let shapeSearchQuery = initialState?.objectQuery || "";
   let coloringController;
+  let manualMapColoring = null;
+  let aiMapColoring = null;
+  let aiForPresets: ReturnType<typeof createAiChat> | undefined;
+  const applyManualMapColoring = (value) => {
+    const next = mergeAiColoring(value, aiMapColoring);
+    coloringController.apply(next);
+    manualMapColoring = value;
+  };
   let refreshColorLegend: (() => void) | undefined;
   let colorSpecification = null;
   let analysisRevision = 0;
@@ -568,11 +581,13 @@ export function initializeReadOnlyMapPage(
     return result;
   };
   let attributeTargetMask = null;
+  let aiTargetMask = null;
   const isShapeRecordVisible = (record) =>
     map.hasLayer(shapeVisibilityLayer) &&
     layeredMarkerDisplay.isLayerVisible(record.layer_id) &&
     (!printShapeIds || printShapeIds.has(String(record.id))) &&
     answerVisibility.allows(`shape:${record.id}`) &&
+    (!aiTargetMask || aiTargetMask.has(`shape:${record.id}`)) &&
     (!attributeTargetMask || attributeTargetMask.has(`shape:${record.id}`)) &&
     matchesCurrentShapeSearch(record);
   const isShapeLogicallyVisible = (id) => {
@@ -586,6 +601,7 @@ export function initializeReadOnlyMapPage(
     (!printMarkerIds || printMarkerIds.has(String(record.id))) &&
     matchesMarkerSearch(record, printState?.objectQuery || "") &&
     answerVisibility.allows(`marker:${record.id}`) &&
+    (!aiTargetMask || aiTargetMask.has(`marker:${record.id}`)) &&
     (!attributeTargetMask || attributeTargetMask.has(`marker:${record.id}`));
 
   // 共有・印刷・凡例は、画面内の描画結果ではなく同じレコードの表示条件を使う。
@@ -864,14 +880,18 @@ export function initializeReadOnlyMapPage(
     button.setAttribute("aria-pressed", "false");
     const modal = createAdvancedMapSearchModal({
       transport: attributeTransport,
+      applyAiPreset: async (id, signal) => {
+        if (!aiForPresets) throw Error("AIアシスタントの準備ができていません。");
+        await aiForPresets.applyPreset(id, signal);
+      },
       getApplied: () => appliedAttributeSearch,
       getLayerIds: () => null,
       getContext: () => `${bootstrap.tileVisibilityAccountId || ""}:${analysisRevision}`,
       analysis: {
         getSpecification: () => colorSpecification,
-        getColoring: () => coloringController?.getState() || null,
+        getColoring: () => manualMapColoring,
         apply: async (specification, coloring) => {
-          coloringController.apply(coloring);
+          applyManualMapColoring(coloring);
           colorSpecification = specification;
           button.setAttribute("aria-pressed", String(!!specification || !!appliedAttributeSearch));
           button.textContent = specification
@@ -893,9 +913,9 @@ export function initializeReadOnlyMapPage(
             signal || new AbortController().signal,
           );
           if (signal?.aborted || current !== analysisRevision) return;
-          coloringController.apply(colors.coloring);
+          applyManualMapColoring(colors.coloring);
         }
-        if (result?.coloring !== undefined) coloringController.apply(result.coloring);
+        if (result?.coloring !== undefined) applyManualMapColoring(result.coloring);
         appliedAttributeSearch = request;
         ++analysisRevision;
         attributeTargetMask = result
@@ -1113,17 +1133,18 @@ export function initializeReadOnlyMapPage(
     popupContent,
     getPrintState: (): PrintMapState => {
       const center = map.getCenter();
+      const targetMask = intersectTargetMasks(attributeTargetMask, aiTargetMask);
       return {
         view: { latitude: center.lat, longitude: center.lng, zoom: map.getZoom() },
         tileServerId: basemapController.getSelectedId(),
         overlays: tileOverlayManager.getVisibility(),
         coloring: coloringController?.getState() || undefined,
         objectQuery: shapeSearchQuery,
-        markerIds: attributeTargetMask
-          ? [...attributeTargetMask].filter((k) => k.startsWith("marker:")).map((k) => k.slice(7))
+        markerIds: targetMask
+          ? [...targetMask].filter((k) => k.startsWith("marker:")).map((k) => k.slice(7))
           : null,
-        shapeIds: attributeTargetMask
-          ? [...attributeTargetMask].filter((k) => k.startsWith("shape:")).map((k) => k.slice(6))
+        shapeIds: targetMask
+          ? [...targetMask].filter((k) => k.startsWith("shape:")).map((k) => k.slice(6))
           : null,
         clusteringEnabled: markerClustering?.getEnabled() ?? true,
         clusteringAllowed,
@@ -1192,7 +1213,7 @@ export function initializeReadOnlyMapPage(
       coloring = state;
       refreshColorLegend?.();
     });
-    if (sharedSnapshot) coloringController.apply(initialState.coloring || null);
+    if (sharedSnapshot) applyManualMapColoring(initialState.coloring || null);
     const onVisibilityChange = ({ layer }) => {
       if (
         layer === visibleMarkerGroup ||
@@ -1214,6 +1235,101 @@ export function initializeReadOnlyMapPage(
     if (input) input.value = initialState.objectQuery;
   }
   if (expectedPage === "map-anather" && !isAnswerPreview && !isPrint) {
+    let aiDisposed = false;
+    let suggestionRevision = 0;
+    const synchronizedAiLayers = new Set(Object.keys(layerVisibilityGroups));
+    let aiChat;
+    const aiLauncher = createAiLauncher({
+      mode: "standalone",
+      iconUrl: "/assets/ai_assistant.png",
+      onActivate: (button) => aiChat?.open(button),
+    });
+    const refreshAiDisplay = () => {
+      coloringController.apply(mergeAiColoring(manualMapColoring, aiMapColoring));
+      layeredMarkerDisplay.rebuildVisibleMarkers();
+      layeredShapeDisplay.rebuildVisibleShapes();
+      groups.syncAllShapeGroupsVisibility();
+      shapeNameLabelManager?.scheduleRefresh();
+      shapeMeasurementManager?.scheduleRefresh();
+      refreshColorLegend?.();
+    };
+    aiChat = createAiChat({
+      mode: "standalone",
+      transport: (path, body, signal) =>
+        aiFetchTransport(path, body, signal, bootstrap.tileVisibilityAccountId),
+      getContext: () => ({ layer_ids: null }),
+      getContextKey: () => `${bootstrap.tileVisibilityAccountId || ""}:${aiDisposed}`,
+      getSuggestionContextKey: () =>
+        `${bootstrap.tileVisibilityAccountId || ""}:${aiDisposed}:${suggestionRevision}`,
+      onEnabledChange: (enabled) => {
+        aiLauncher.setEnabled(enabled);
+      },
+      onAccountChanged: () => {
+        aiTargetMask = null;
+        aiMapColoring = null;
+        refreshAiDisplay();
+      },
+      onLayerCreated: async (layer, signal) => {
+        if (signal.aborted || aiDisposed) throw Error("地図の操作を中止しました。");
+        if (synchronizedAiLayers.has(layer.id)) return;
+        layers[layer.id] = { id: layer.id, layer_name: layer.name, is_master: false };
+        layerNames[layer.id] = layer.name;
+        groups.createMarkerGroupForLayer(layer.id);
+        const group = layerVisibilityGroups[layer.id];
+        // 前回の描画途中で失敗した場合にも、同じグループを二重登録しない。
+        markerLayerControl.layersControl.removeLayer?.(group);
+        markerLayerControl.layersControl.addOverlay(group, escapeHtml(layer.name));
+        if (!markerLayerControl.layerControlOverlayLayers.includes(group))
+          markerLayerControl.layerControlOverlayLayers.push(group);
+        synchronizedAiLayers.add(layer.id);
+      },
+      apply: async (result, signal) => {
+        if (signal.aborted || aiDisposed) throw Error("地図の操作を中止しました。");
+        if (result.type === "focus") {
+          const before = map.getCenter(),
+            zoom = map.getZoom();
+          map.setView([result.latitude, result.longitude], result.zoom ?? zoom, { animate: false });
+          return async () => {
+            if (aiDisposed) throw Error("地図が閉じられました。");
+            map.setView(before, zoom, { animate: false });
+          };
+        }
+        const before = { targets: aiTargetMask, coloring: aiMapColoring };
+        const restore = async () => {
+          if (aiDisposed) throw Error("地図が閉じられました。");
+          aiTargetMask = before.targets;
+          aiMapColoring = before.coloring;
+          refreshAiDisplay();
+        };
+        try {
+          if (result.type === "filter") aiTargetMask = new Set(result.targets);
+          else if (result.type === "color") aiMapColoring = result.coloring;
+          else {
+            aiTargetMask = null;
+            aiMapColoring = null;
+          }
+          refreshAiDisplay();
+          return restore;
+        } catch (error) {
+          await restore();
+          throw error;
+        }
+      },
+    });
+    const stopSuggestionUpdates = observeAiSuggestionDataChanges(
+      () => bootstrap.tileVisibilityAccountId || "",
+      () => {
+        ++suggestionRevision;
+        aiChat.invalidateSuggestions();
+      },
+    );
+    aiForPresets = aiChat;
+    map.once("unload", () => {
+      aiDisposed = true;
+      stopSuggestionUpdates();
+      aiLauncher.dispose();
+      aiChat.dispose();
+    });
     const disposeClose = installReadOnlyFullscreenClose(bootstrap.shareParentOrigins || []);
     if (disposeClose) map.once("unload", disposeClose);
     const messages = createMapMessageDialog();

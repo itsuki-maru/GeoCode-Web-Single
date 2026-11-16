@@ -40,7 +40,7 @@ anyhow = "1.0"
 rexif = "0.7.5"
 dirs = "5.0"
 open = "5"
-windows = { version = "0.60", features = ["Win32_UI_WindowsAndMessaging", "Win32_System_Console", "Win32_Storage_FileSystem", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_System_Com"] }
+windows = { version = "0.60", features = ["Win32_UI_WindowsAndMessaging", "Win32_System_Console", "Win32_Storage_FileSystem", "Win32_Security", "Win32_Security_Authorization", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_System_Com"] }
 reqwest = "0.12"
 roxmltree = "0.20"
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }

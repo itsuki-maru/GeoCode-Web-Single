@@ -35,17 +35,14 @@ export async function awaitWithAbort<T>(
   }
 }
 
-/** native dialogの最前面にも表示できる、既存スピナーの表示先。 */
-export function createProgressDialog() {
+/** Vueとテンプレート画面で共用するスピナー。表示先のモーダルは呼び出し元が選ぶ。 */
+export function createProgressSpinner() {
   if (!document.getElementById("shared-progress-spinner-style")) {
     const style = document.createElement("style");
     style.id = "shared-progress-spinner-style";
     style.textContent = css;
     document.head.append(style);
   }
-  const dialog = document.createElement("dialog");
-  dialog.className = "map-progress-dialog";
-  dialog.setAttribute("aria-label", "処理中");
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("class", "spinner shared-progress-spinner");
   svg.setAttribute("width", "50");
@@ -58,7 +55,15 @@ export function createProgressDialog() {
   for (const [key, value] of Object.entries(progressSpinnerCircle)) circle.setAttribute(key, value);
   group.append(circle);
   svg.append(group);
-  dialog.append(svg);
+  return svg;
+}
+
+/** native dialogの最前面にも表示できる、既存スピナーの表示先。 */
+export function createProgressDialog() {
+  const dialog = document.createElement("dialog");
+  dialog.className = "map-progress-dialog";
+  dialog.setAttribute("aria-label", "処理中");
+  dialog.append(createProgressSpinner());
   document.body.append(dialog);
   const tokens = new Set<symbol>();
   const clear = () => {

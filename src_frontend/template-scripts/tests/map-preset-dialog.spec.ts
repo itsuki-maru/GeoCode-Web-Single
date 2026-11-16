@@ -119,6 +119,37 @@ it("既存の再利用可能な定義を保存し、地図に適用せずに呼�
   );
 });
 
+it("v1とAI複合条件を同じ一覧に表示し、AI定義を改変せず適用へ渡す", async () => {
+  const ai = {
+    ...preset,
+    id: "ai-saved",
+    name: "<img src=x onerror=alert(1)>",
+    schema_version: 2,
+    definition: {
+      type: "filter",
+      expression: {
+        op: "or",
+        children: [
+          { op: "text", query1: "点検" },
+          { op: "text", query1: "修繕" },
+        ],
+      },
+    },
+  };
+  const transport = vi.fn().mockResolvedValue({ items: [preset, ai], total: 2 });
+  const restore = vi.fn();
+  dialogs = createMapPresetDialogs(transport, restore);
+  dialogs.list();
+  await vi.waitFor(() => expect(document.querySelectorAll("tbody tr")).toHaveLength(2));
+  expect(transport.mock.calls[0]![0]).toContain("versions=1,2");
+  expect(document.querySelectorAll("tbody tr")[1]!.textContent).toContain("点検");
+  expect(document.querySelectorAll("tbody tr")[1]!.textContent).toContain(" または ");
+  expect(document.querySelector("tbody img")).toBeNull();
+  click("適用");
+  await vi.waitFor(() => expect(restore).toHaveBeenCalledWith(ai, expect.any(AbortSignal)));
+  expect(document.body.textContent).toContain("AI条件を地図へ適用しました。");
+});
+
 it("復元待ちや復元失敗時も一覧と入力中の内容を維持し、再試行できる", async () => {
   let fail!: (error: Error) => void;
   const restore = vi

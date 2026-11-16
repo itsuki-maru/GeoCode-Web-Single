@@ -416,7 +416,35 @@ window.addEventListener("message", function (event) {
     editorParentOrigin = event.origin;
     const messageData = event.data;
     if (!messageData || typeof messageData !== "object") return;
-    if (messageData.type === "mapColoringApply") {
+    if (messageData.type === "mapViewApply") {
+      if (messageData.runtimeId !== editorRuntimeId || !messageData.requestId || !editorDataReady)
+        return;
+      let success = false;
+      const { latitude, longitude, zoom } = messageData;
+      if (
+        Number.isFinite(latitude) &&
+        Math.abs(latitude) <= 90 &&
+        Number.isFinite(longitude) &&
+        Math.abs(longitude) <= 180 &&
+        (zoom === undefined || (Number.isInteger(zoom) && zoom >= 0 && zoom <= 22))
+      ) {
+        try {
+          map.setView([latitude, longitude], zoom ?? map.getZoom(), { animate: false });
+          success = true;
+        } catch {
+          /* 直前の地図を維持する。 */
+        }
+      }
+      event.source.postMessage(
+        {
+          type: "mapViewApplyResult",
+          requestId: messageData.requestId,
+          runtimeId: editorRuntimeId,
+          success,
+        },
+        event.origin,
+      );
+    } else if (messageData.type === "mapColoringApply") {
       if (messageData.runtimeId !== editorRuntimeId || !messageData.requestId || !editorDataReady)
         return;
       let success = false;
@@ -494,6 +522,7 @@ window.addEventListener("message", function (event) {
         {
           type: "mapViewResult",
           requestId: messageData.requestId,
+          ...(messageData.runtimeId ? { runtimeId: editorRuntimeId } : {}),
           view: { latitude: center.lat, longitude: center.lng, zoom: map.getZoom() },
         },
         event.origin,

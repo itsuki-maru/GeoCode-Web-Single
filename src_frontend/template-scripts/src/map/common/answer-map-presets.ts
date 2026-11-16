@@ -6,6 +6,7 @@ import {
   type AnswerField,
   type AnswerMapFilter,
 } from "./answer-coloring";
+import { validateDefinition, type AiDefinition } from "../../ai/types";
 
 export type MapPresetDraft =
   | { kind: "filter"; definition: AnswerMapFilter }
@@ -17,10 +18,16 @@ export type SavedMapPreset = MapPresetDraft & {
   schema_version: 1;
   display: {
     form_label: string | null;
-    fields: { id: string; field_type: string; label: string }[];
+    fields: { id: string; field_type: string; label: string; form_id?: string }[];
   };
   create_at: string;
 };
+
+export type SavedAiMapPreset = Omit<SavedMapPreset, "schema_version" | "definition"> & {
+  schema_version: 2;
+  definition: AiDefinition;
+};
+export type AnySavedMapPreset = SavedMapPreset | SavedAiMapPreset;
 
 export interface MapPresetPage {
   items: SavedMapPreset[];
@@ -223,15 +230,183 @@ export function isSavedMapPreset(value: unknown): value is SavedMapPreset {
   }
 }
 
+function validateAiPresetDefinition(value: unknown): AiDefinition {
+  const definition = validateDefinition(value);
+  const only = (value: Record<string, unknown>, keys: string[]) =>
+    Object.keys(value).every((key) => keys.includes(key));
+  const conditions = (values: unknown) => {
+    if (!Array.isArray(values) || values.length > 10) throw Error("登録条件を確認してください。");
+    for (const condition of values) {
+      if (
+        !record(condition) ||
+        !only(condition, ["field_id", "field_type", "op", "value", "upper"]) ||
+        !text(condition.field_id, 40) ||
+        !/^[a-zA-Z0-9_]+$/.test(condition.field_id) ||
+        typeof condition.field_type !== "string" ||
+        !supported.has(condition.field_type) ||
+        !answerConditionOperations(condition.field_type).some(
+          (operation) => operation.value === condition.op,
+        )
+      )
+        throw Error("登録条件を確認してください。");
+      if (noValue.has(String(condition.op))) continue;
+      if (condition.field_type === "checkbox") {
+        if (typeof condition.value !== "boolean") throw Error("真偽条件を確認してください。");
+      } else if (condition.field_type === "select" || condition.field_type === "radio") {
+        if (
+          !Array.isArray(condition.value) ||
+          !condition.value.length ||
+          condition.value.length > 100 ||
+          condition.value.some((value) => typeof value !== "string")
+        )
+          throw Error("選択条件を確認してください。");
+      } else {
+        const validValue = (value: unknown) =>
+          typeof value === "string" ||
+          (condition.field_type === "number" &&
+            typeof value === "number" &&
+            Number.isFinite(value));
+        if (
+          !validValue(condition.value) ||
+          (condition.op === "between" && !validValue(condition.upper))
+        )
+          throw Error("条件の値を確認してください。");
+      }
+    }
+  };
+  let leaves = 0;
+  const expression = (value: unknown, depth: number) => {
+    if (!record(value) || depth > 5) throw Error("検索式を確認してください。");
+    switch (value.op) {
+      case "all":
+        if (!only(value, ["op"])) throw Error("検索式を確認してください。");
+        leaves++;
+        break;
+      case "text":
+        if (
+          !only(value, ["op", "query1", "query2"]) ||
+          typeof value.query1 !== "string" ||
+          [...value.query1].length > 100 ||
+          (value.query2 !== undefined &&
+            (typeof value.query2 !== "string" || [...value.query2].length > 100))
+        )
+          throw Error("検索語を確認してください。");
+        leaves++;
+        break;
+      case "attribute":
+        if (!only(value, ["op", "common_form_id", "conditions"]) || !formId(value.common_form_id))
+          throw Error("共通フォームを確認してください。");
+        conditions(value.conditions);
+        leaves++;
+        break;
+      case "and":
+      case "or":
+        if (
+          !only(value, ["op", "children"]) ||
+          !Array.isArray(value.children) ||
+          !value.children.length ||
+          value.children.length > 10
+        )
+          throw Error("検索式を確認してください。");
+        value.children.forEach((child) => expression(child, depth + 1));
+        break;
+      case "not":
+        if (!only(value, ["op", "child"])) throw Error("検索式を確認してください。");
+        expression(value.child, depth + 1);
+        break;
+      default:
+        throw Error("対応しない検索式です。");
+    }
+    if (leaves > 24) throw Error("検索条件が多すぎます。");
+  };
+  if (definition.type === "filter") {
+    if (!only(definition, ["type", "expression"])) throw Error("検索式を確認してください。");
+    expression(definition.expression, 0);
+  } else {
+    if (
+      !only(definition, ["type", "common_form_id", "rules"]) ||
+      !formId(definition.common_form_id)
+    )
+      throw Error("色分け条件を確認してください。");
+    const ids = new Set<string>();
+    for (const rule of definition.rules as unknown[]) {
+      if (
+        !record(rule) ||
+        !only(rule, ["id", "label", "color", "conditions"]) ||
+        !text(rule.id, 40) ||
+        !rule.id ||
+        ids.has(rule.id) ||
+        typeof rule.label !== "string" ||
+        !rule.label ||
+        [...rule.label].length > 100 ||
+        typeof rule.color !== "string" ||
+        !/^#[0-9a-f]{6}$/i.test(rule.color)
+      )
+        throw Error("分類条件を確認してください。");
+      ids.add(rule.id);
+      conditions(rule.conditions);
+    }
+  }
+  return definition;
+}
+
+/** 旧画面のv1判定を変えず、新しい共通一覧だけでv2を受け付ける。 */
+export function isAnySavedMapPreset(value: unknown): value is AnySavedMapPreset {
+  if (isSavedMapPreset(value)) return true;
+  if (
+    !record(value) ||
+    value.schema_version !== 2 ||
+    !["filter", "coloring"].includes(String(value.kind)) ||
+    !text(value.id, 128) ||
+    !value.id ||
+    typeof value.name !== "string" ||
+    !value.name.trim() ||
+    [...value.name].length > 100 ||
+    !text(value.create_at, 100) ||
+    !record(value.display) ||
+    (value.display.form_label !== null && !text(value.display.form_label, 10000)) ||
+    !Array.isArray(value.display.fields) ||
+    value.display.fields.length > 240 ||
+    value.display.fields.some(
+      (field) =>
+        !record(field) ||
+        !text(field.id, 40) ||
+        !text(field.field_type, 30) ||
+        !text(field.label, 10000) ||
+        (field.form_id !== undefined && !formId(field.form_id)),
+    )
+  )
+    return false;
+  try {
+    const definition = validateAiPresetDefinition(value.definition);
+    return (
+      (value.kind === "filter" && definition.type === "filter") ||
+      (value.kind === "coloring" && definition.type === "color")
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function cloneSavedMapPreset(preset: AnySavedMapPreset): AnySavedMapPreset {
+  if (!isAnySavedMapPreset(preset)) throw Error("保存条件を確認できませんでした。");
+  return preset.schema_version === 1
+    ? { ...preset, ...clonePresetDraft(preset) }
+    : structuredClone(preset);
+}
+
 export function mapPresetKindLabel(kind: MapPresetDraft["kind"]): string {
   return kind === "filter" ? "地図上で絞り込み" : "地図で色分け";
 }
 
-export function describeMapPreset(preset: SavedMapPreset): string {
-  const describe = (condition: Record<string, unknown>) => {
+export function describeMapPreset(preset: AnySavedMapPreset): string {
+  const describe = (condition: Record<string, unknown>, form?: string) => {
     const label =
       preset.display.fields.find(
-        (field) => field.id === condition.field_id && field.field_type === condition.field_type,
+        (field) =>
+          field.id === condition.field_id &&
+          field.field_type === condition.field_type &&
+          (!form || !field.form_id || field.form_id === form),
       )?.label || String(condition.field_id);
     const operation =
       answerConditionOperations(String(condition.field_type)).find(
@@ -248,10 +423,56 @@ export function describeMapPreset(preset: SavedMapPreset): string {
           : String(condition.value ?? "");
     return `${label} ${operation}${value ? ` ${value}` : ""}${condition.op === "between" ? `〜${condition.upper}` : ""}`;
   };
+  if (preset.schema_version === 2) {
+    const expression = (value: unknown): string => {
+      const part = value as Record<string, unknown>;
+      if (part.op === "all") return "すべての対象";
+      if (part.op === "text")
+        return (
+          "名前・本文・メモに「" +
+          String(part.query1) +
+          "」" +
+          (part.query2 ? "かつ「" + String(part.query2) + "」" : "")
+        );
+      if (part.op === "attribute")
+        return (
+          (part.conditions as Record<string, unknown>[])
+            .map((condition) => describe(condition, String(part.common_form_id)))
+            .join(" かつ ") || "指定フォームの登録あり"
+        );
+      if (part.op === "not") return "除外（" + expression(part.child) + "）";
+      return (
+        "（" +
+        (part.children as unknown[])
+          .map(expression)
+          .join(part.op === "or" ? " または " : " かつ ") +
+        "）"
+      );
+    };
+    if (preset.definition.type === "filter")
+      return "AI条件：" + expression(preset.definition.expression);
+    return (
+      "AI条件：" +
+      (preset.definition.rules as Record<string, unknown>[])
+        .map(
+          (rule) =>
+            String(rule.label) +
+            "：" +
+            ((rule.conditions as Record<string, unknown>[])
+              .map((condition) => describe(condition, String(preset.definition.common_form_id)))
+              .join(" ／ ") || "すべての対象"),
+        )
+        .join("\n")
+    );
+  }
   return preset.kind === "filter"
-    ? preset.definition.conditions.map(describe).join(" ／ ") || "登録条件なし"
+    ? preset.definition.conditions.map((condition) => describe(condition)).join(" ／ ") ||
+        "登録条件なし"
     : preset.definition.rules
-        .map((rule) => `${rule.label}：${rule.conditions.map(describe).join(" ／ ")}`)
+        .map(
+          (rule) =>
+            `${rule.label}：${rule.conditions.map((condition) => describe(condition)).join(" ／ ")}`,
+        )
         .join("\n");
 }
 

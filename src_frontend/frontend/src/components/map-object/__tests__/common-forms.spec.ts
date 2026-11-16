@@ -1,8 +1,11 @@
 import { mount, flushPromises } from "@vue/test-utils";
+import { createPinia, setActivePinia } from "pinia";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import MessageModal from "@/components/common/MessageModal.vue";
 import CommonFormsModal from "@/components/map-object/CommonFormsModal.vue";
 import FormSettings from "@/components/map-object/MapObjectFormSettingsModal.vue";
+import { useAuthStore } from "@/stores/auth";
+import { observeAiSuggestionDataChanges } from "../../../../../template-scripts/src/ai/suggestion-events";
 const api = vi.hoisted(() => ({
   get: vi.fn(),
   request: vi.fn(),
@@ -35,6 +38,7 @@ const existing = {
   public_path: "/forms/existing",
 };
 beforeEach(() => {
+  setActivePinia(createPinia());
   api.isAxiosError.mockReturnValue(false);
   api.get.mockImplementation(async (url: string) => ({
     data: url === "/common-forms" ? [common] : url.startsWith("/common-forms/") ? common : existing,
@@ -55,6 +59,36 @@ const click = async (wrapper: ReturnType<typeof mount>, text: string) => {
   await button!.trigger("click");
   await flushPromises();
 };
+
+it("uses the account at save start when invalidating examples after a delayed response", async () => {
+  const auth = useAuthStore();
+  auth.accountId = "saving-owner";
+  const oldAccount = vi.fn(),
+    currentAccount = vi.fn();
+  const stopOld = observeAiSuggestionDataChanges(() => "saving-owner", oldAccount);
+  const stopCurrent = observeAiSuggestionDataChanges(() => auth.accountId, currentAccount);
+  const wrapper = await open();
+  let finish!: (value: unknown) => void;
+  api.request.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  try {
+    await click(wrapper, "フォーム設定を保存");
+    expect(oldAccount).not.toHaveBeenCalled();
+    auth.accountId = "different-owner";
+    finish({ data: existing });
+    await flushPromises();
+    expect(oldAccount).toHaveBeenCalledOnce();
+    expect(currentAccount).not.toHaveBeenCalled();
+  } finally {
+    stopOld();
+    stopCurrent();
+    wrapper.unmount();
+  }
+});
 describe("設定読み込みの対象切替と遅延応答", () => {
   const deferred = () => {
     let resolve!: (value: any) => void, reject!: (error: unknown) => void;

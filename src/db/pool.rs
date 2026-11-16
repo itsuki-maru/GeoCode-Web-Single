@@ -557,6 +557,20 @@ const MIGRATIONS: &[Migration] = &[
             "../../migrations/20261111100000_add_tile_server_settings.sql"
         )],
     },
+    Migration {
+        version: 26,
+        name: "add_ai_settings",
+        statements: &[include_str!(
+            "../../migrations/20261116120000_add_ai_settings.sql"
+        )],
+    },
+    Migration {
+        version: 27,
+        name: "ai_operations",
+        statements: &[include_str!(
+            "../../migrations/20261117120000_ai_operations.sql"
+        )],
+    },
 ];
 
 // データベース接続の確立
@@ -706,7 +720,8 @@ pub async fn validate_existing_schema(pool: &SqlitePool) -> Result<(), Error> {
 
 // データベースのマイグレーション
 pub async fn run_migrations(pool: &SqlitePool) -> Result<(), Error> {
-    let mut tx = pool.begin().await?;
+    // 同時起動でも既適用版の読取前に書込権を確保し、ロック昇格時のBUSYを避ける。
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS schema_migrations (

@@ -35,6 +35,7 @@ interface MarkerLayerMap {}
 
 interface LayerControl {
   addOverlay(layer: LayerGroup, name: string): void;
+  removeLayer?(layer: LayerGroup): void;
   addTo(map: MarkerLayerMap): unknown;
 }
 

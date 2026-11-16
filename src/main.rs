@@ -119,6 +119,13 @@ unsafe fn apply_env_vars(env: &ApplicationInitSetup, server_addr: &str) {
             "TILE_SETTINGS_ENCRYPTION_KEY",
             &env.tile_settings_encryption_key,
         );
+        // 従来の配備環境変数を優先し、未指定の場合だけ保存済みのAI用暗号鍵を使う。
+        // 設定の読込時に検証・永続化を済ませてから、単一スレッドの起動処理で反映する。
+        if env::var_os("AI_ENCRYPTION_KEY").is_none() {
+            if let Some(key) = &env.ai_encryption_key {
+                env::set_var("AI_ENCRYPTION_KEY", key.as_ref());
+            }
+        }
         for (name, value) in [
             // 設定元はJSONだけ。未指定項目は削除し、外部環境変数を引き継がない。
             ("CAMERA_SHARING_ENABLED", &env.camera_sharing_enabled),
@@ -878,3 +885,6 @@ async fn setup_tile_cache() -> Option<redis::aio::ConnectionManager> {
         },
     }
 }
+
+#[cfg(test)]
+mod ai_key_settings_tests;

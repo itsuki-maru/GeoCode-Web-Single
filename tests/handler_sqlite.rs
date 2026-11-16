@@ -239,9 +239,13 @@ async fn layer_handlers_cover_create_read_update_delete() {
     .await
     .expect("layer should be updated");
 
-    let Json(layers) = get_all_layers_handler(Extension(user_id.clone()), Extension(pool.clone()))
-        .await
-        .expect("layers should be returned");
+    let Json(layers) = get_all_layers_handler(
+        Extension(user_id.clone()),
+        Extension(pool.clone()),
+        HeaderMap::new(),
+    )
+    .await
+    .expect("layers should be returned");
     assert_eq!(layers.get(&created.id).unwrap().layer_name, "renamed layer");
 
     delete_layer_handler(

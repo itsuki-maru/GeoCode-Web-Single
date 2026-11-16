@@ -22,13 +22,45 @@ export const useLayersStore = defineStore("layers", {
     },
   },
   actions: {
-    async initList(): Promise<boolean> {
+    async initList(
+      options: {
+        signal?: AbortSignal;
+        isCurrent?: () => boolean;
+        accountId?: string;
+      } = {},
+    ): Promise<boolean> {
       try {
-        const response = await apiClient.get(getLayersUrl);
-        this.layersList.clear();
+        const current = () => !options.signal?.aborted && options.isCurrent?.() !== false;
+        if (!current()) return false;
+        const config = {
+          ...(options.signal ? { signal: options.signal } : {}),
+          ...(options.accountId !== undefined
+            ? { headers: { "X-AI-Account-ID": options.accountId } }
+            : {}),
+        };
+        const response = Object.keys(config).length
+          ? await apiClient.get(getLayersUrl, config)
+          : await apiClient.get(getLayersUrl);
+        if (!current()) return false;
         const layersData = response.data;
+        if (options.accountId !== undefined) {
+          if (
+            !options.accountId ||
+            !layersData ||
+            typeof layersData !== "object" ||
+            !Object.keys(layersData).length ||
+            Object.values(layersData).some(
+              (layer) =>
+                !layer ||
+                typeof layer !== "object" ||
+                (layer as { user_id?: unknown }).user_id !== options.accountId,
+            )
+          )
+            return false;
+        }
+        const next = new Map<string, LayersData>();
         for (let key in layersData) {
-          this.layersList.set(layersData[key]["id"], {
+          next.set(layersData[key]["id"], {
             id: layersData[key]["id"],
             user_id: layersData[key]["user_id"],
             name: layersData[key]["layer_name"],
@@ -38,9 +70,8 @@ export const useLayersStore = defineStore("layers", {
             marker_icon_filename: layersData[key]["marker_icon_filename"],
           });
         }
-        let sortedDsc = new Map(
-          [...this.layersList.entries()].sort((a, b) => (a[0] > b[0] ? 1 : -1)),
-        );
+        let sortedDsc = new Map([...next.entries()].sort((a, b) => (a[0] > b[0] ? 1 : -1)));
+        if (!current()) return false;
         this.layersList = sortedDsc;
         return true;
       } catch (error) {
