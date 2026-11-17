@@ -12,6 +12,7 @@ vi.mock("@/axiosClient", () => ({ default: api }));
 import { useAdvancedMapSearch } from "../useAdvancedMapSearch";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useShapeStore } from "@/stores/shapes";
+import { useAuthStore } from "@/stores/auth";
 const criteria = { common_form_id: "form", definition_version: 1, layer_ids: null, conditions: [] };
 const result = (shape_ids: string[]) => ({
   common_form_id: "form",
@@ -54,6 +55,37 @@ beforeEach(() => {
   });
 });
 afterEach(() => wrapper?.unmount());
+
+it.each(["account", "layer"])(
+  "定義取得中の%s切替で編集画面を即時に閉じ、遅延応答でも再表示しない",
+  async (change) => {
+    let finish!: (value: unknown) => void;
+    api.get.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const layer = ref("a");
+    let search!: ReturnType<typeof useAdvancedMapSearch>;
+    wrapper = mount(
+      defineComponent({
+        setup() {
+          search = useAdvancedMapSearch(layer, ref("master"), vi.fn(), vi.fn());
+          return () => null;
+        },
+      }),
+    );
+    search.openAdvancedSearch();
+    const dialog = document.querySelector<HTMLDialogElement>(".advanced-map-search")!;
+    expect(dialog.open).toBe(true);
+    if (change === "account") useAuthStore().accountId = "next-account";
+    else layer.value = "next-layer";
+    expect(dialog.open).toBe(false);
+    finish({ data: [] });
+    await flushPromises();
+    expect(dialog.open).toBe(false);
+  },
+);
 
 it("rechecks a saved answer only for changed IDs and updates the shape filter", async () => {
   const markers = useMapObjectStore(),
@@ -134,6 +166,7 @@ function pendingResult() {
 }
 
 it("保存条件一覧から削除するとDELETEで送信し、一覧を更新する", async () => {
+  useAuthStore().accountId = "saved-condition-owner";
   const { search } = mountSearch();
   const preset = {
     id: "saved",
@@ -170,6 +203,7 @@ it("保存条件一覧から削除するとDELETEで送信し、一覧を更新�
   expect(api.delete).toHaveBeenCalledWith("/form-answers/map-presets/saved", {
     signal: expect.any(AbortSignal),
     timeout: 60000,
+    headers: { "X-AI-Account-ID": "saved-condition-owner" },
   });
   expect(api.post).not.toHaveBeenCalled();
   expect(list.textContent).toContain("保存した検索条件はありません。");

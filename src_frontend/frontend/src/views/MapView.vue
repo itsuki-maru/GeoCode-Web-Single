@@ -632,17 +632,31 @@ const {
   clearAi,
   applyManualColoring,
   applyPreset: applyAiPreset,
-} = useAiAssistant(activeLayer, masterLayerId, {
-  filter: applyMapFilter,
-  color: async (value) => (await mapIframeRef.value?.setColoring(value)) ?? false,
-  resetColor: async () => (await mapIframeRef.value?.discardColoring()) ?? false,
-  focus: async (latitude, longitude, zoom) =>
-    (await mapIframeRef.value?.setMapView(latitude, longitude, zoom)) ?? false,
-  view: async () => (await mapIframeRef.value?.getMapView()) ?? null,
-  identity: () => String(mapReloadSequence),
-});
+  applyDefinition: applyAiDefinition,
+  clearDefinition: clearAiDefinition,
+} = useAiAssistant(
+  activeLayer,
+  masterLayerId,
+  {
+    filter: applyMapFilter,
+    color: async (value) => (await mapIframeRef.value?.setColoring(value)) ?? false,
+    resetColor: async () => (await mapIframeRef.value?.discardColoring()) ?? false,
+    focus: async (latitude, longitude, zoom) =>
+      (await mapIframeRef.value?.setMapView(latitude, longitude, zoom)) ?? false,
+    view: async () => (await mapIframeRef.value?.getMapView()) ?? null,
+    identity: () => String(mapReloadSequence),
+  },
+  async (preset): Promise<void> => {
+    await recallSavedPreset(preset);
+  },
+  () => {
+    invalidateAdvancedSearchAccount();
+  },
+);
 const {
   openAdvancedSearch,
+  recallSavedPreset,
+  invalidateAccount: invalidateAdvancedSearchAccount,
   closeAdvancedSearch,
   refreshAttributeSearch,
   resetAnalysis,
@@ -660,6 +674,8 @@ const {
   applyManualColoring,
   () => applyManualColoring(null),
   applyAiPreset,
+  applyAiDefinition,
+  clearAiDefinition,
 );
 watch(activeLayer, () => closeAdvancedSearch());
 watch(() => mapobjStore.attributeRevision, filterMapObjects);

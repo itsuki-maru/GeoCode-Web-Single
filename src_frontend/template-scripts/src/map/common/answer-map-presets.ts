@@ -29,6 +29,28 @@ export type SavedAiMapPreset = Omit<SavedMapPreset, "schema_version" | "definiti
 };
 export type AnySavedMapPreset = SavedMapPreset | SavedAiMapPreset;
 
+/** 編集中のAI定義も元の形式を保ち、保存済みレコードとは分離する。 */
+export type AiMapPresetDraft = {
+  schema_version: 2;
+  kind: "filter" | "coloring";
+  definition: AiDefinition;
+};
+export type AnyMapPresetDraft = MapPresetDraft | AiMapPresetDraft;
+
+export function cloneAnyPresetDraft(value: AnyMapPresetDraft): AnyMapPresetDraft {
+  if ("schema_version" in value && value.schema_version === 2) {
+    const definition = validateAiPresetDefinition(value.definition);
+    if (
+      (value.kind === "filter" && definition.type !== "filter") ||
+      (value.kind === "coloring" && definition.type !== "color") ||
+      !["filter", "coloring"].includes(value.kind)
+    )
+      throw Error("保存する条件の種類を確認してください。");
+    return { schema_version: 2, kind: value.kind, definition };
+  }
+  return clonePresetDraft(value as MapPresetDraft);
+}
+
 export interface MapPresetPage {
   items: SavedMapPreset[];
   total: number;
@@ -230,7 +252,7 @@ export function isSavedMapPreset(value: unknown): value is SavedMapPreset {
   }
 }
 
-function validateAiPresetDefinition(value: unknown): AiDefinition {
+export function validateAiPresetDefinition(value: unknown): AiDefinition {
   const definition = validateDefinition(value);
   const only = (value: Record<string, unknown>, keys: string[]) =>
     Object.keys(value).every((key) => keys.includes(key));

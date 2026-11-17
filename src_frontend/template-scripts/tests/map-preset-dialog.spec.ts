@@ -119,7 +119,7 @@ it("既存の再利用可能な定義を保存し、地図に適用せずに呼�
   );
 });
 
-it("v1とAI複合条件を同じ一覧に表示し、AI定義を改変せず適用へ渡す", async () => {
+it("v1とAI複合条件を同じ呼び出し操作に揃え、AI定義を改変せず編集へ渡す", async () => {
   const ai = {
     ...preset,
     id: "ai-saved",
@@ -145,9 +145,18 @@ it("v1とAI複合条件を同じ一覧に表示し、AI定義を改変せず適�
   expect(document.querySelectorAll("tbody tr")[1]!.textContent).toContain("点検");
   expect(document.querySelectorAll("tbody tr")[1]!.textContent).toContain(" または ");
   expect(document.querySelector("tbody img")).toBeNull();
-  click("適用");
+  const row = document.querySelectorAll("tbody tr")[1]!;
+  const recall = row.querySelector<HTMLButtonElement>("button")!;
+  expect(recall.textContent).toBe("呼び出し");
+  expect(document.querySelectorAll("tbody tr")[0]!.querySelector("button")!.textContent).toBe(
+    "呼び出し",
+  );
+  recall.click();
   await vi.waitFor(() => expect(restore).toHaveBeenCalledWith(ai, expect.any(AbortSignal)));
-  expect(document.body.textContent).toContain("AI条件を地図へ適用しました。");
+  expect(restore.mock.calls[0]![0]).not.toBe(ai);
+  await vi.waitFor(() =>
+    expect(document.body.textContent).toContain("実行ボタンで地図に反映します。"),
+  );
 });
 
 it("復元待ちや復元失敗時も一覧と入力中の内容を維持し、再試行できる", async () => {

@@ -28,6 +28,10 @@ let wrapper: VueWrapper;
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.clearAllMocks();
+  api.get.mockReset();
+  api.post.mockReset();
+  api.delete.mockReset();
+  api.isAxiosError.mockReturnValue(false);
 });
 afterEach(() => wrapper?.unmount());
 const shape = (id: string, at = "1") => ({
@@ -99,6 +103,50 @@ function pending() {
   });
   return { promise, resolve };
 }
+it("保存条件の取得・保存・削除をactorへ結び付け、不一致後はリロードまで要求しない", async () => {
+  const { search, message } = setup();
+  const auth = useAuthStore();
+  auth.accountId = "account-a";
+  const signal = new AbortController().signal;
+  api.get.mockResolvedValue({ data: { items: [] } });
+  api.post.mockResolvedValue({ data: {} });
+  api.delete.mockResolvedValue({ data: null });
+  await modal.options.transport("/form-answers/map-presets?versions=1,2", undefined, signal);
+  await modal.options.transport("/form-answers/map-presets", { name: "変更後" }, signal);
+  await modal.options.transport("/form-answers/map-presets/saved-a", undefined, signal, "DELETE");
+  for (const mock of [api.get, api.post, api.delete]) {
+    const config = mock.mock.calls.at(-1)!.at(-1);
+    expect(config).toMatchObject({ signal, headers: { "X-AI-Account-ID": "account-a" } });
+  }
+  api.isAxiosError.mockReturnValue(true);
+  api.post.mockRejectedValueOnce({
+    response: { status: 409, data: { code: "ai_account_changed" } },
+  });
+  const closed = modal.close.mock.calls.length;
+  await expect(
+    modal.options.transport("/form-answers/map-presets", { name: "漏らさない" }, signal),
+  ).rejects.toThrow("ai_account_changed");
+  expect(auth.accountId).toBe("account-a");
+  expect(modal.close.mock.calls.length).toBeGreaterThan(closed);
+  expect(message).toHaveBeenCalledWith(expect.stringContaining("再読み込み"));
+  const count = api.post.mock.calls.length;
+  auth.accountId = "account-b";
+  await expect(
+    modal.options.transport("/form-answers/map-presets", { name: "再送禁止" }, signal),
+  ).rejects.toThrow("再読み込み");
+  await expect(search.recallSavedPreset({} as any)).rejects.toThrow("再読み込み");
+  expect(api.post.mock.calls.length).toBe(count);
+  expect(message).toHaveBeenCalledOnce();
+});
+
+it.each(["account", "layer"])("詳しい検索は%s切替と同時に閉じる", (change) => {
+  const { layer } = setup();
+  const before = modal.close.mock.calls.length;
+  if (change === "account") useAuthStore().accountId = "next-account";
+  else layer.value = "next-layer";
+  expect(modal.close.mock.calls.length).toBeGreaterThan(before);
+});
+
 it("色分けのみの適用時は属性検索による表示制限を作らずに変更対象を再判定する", async () => {
   const { markers, shapes, colorMap } = setup();
   await modal.options.analysis.apply(specification, state);

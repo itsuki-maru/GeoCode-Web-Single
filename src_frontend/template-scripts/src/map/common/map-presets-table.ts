@@ -52,7 +52,7 @@ export function renderMapPresetsTable<T extends AnySavedMapPreset>(
       controls = node("div");
     controls.className = "row-actions";
     for (const [label, handler] of [
-      [preset.schema_version === 2 ? "適用" : "呼び出し", options.restore],
+      ["呼び出し", options.restore],
       ["削除", options.remove],
     ] as const) {
       const button = action(label, () => handler(preset));

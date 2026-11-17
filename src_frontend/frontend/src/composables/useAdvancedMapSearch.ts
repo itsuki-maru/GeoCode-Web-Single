@@ -2,6 +2,9 @@ import { markRaw, onMounted, onUnmounted, watch, type Ref } from "vue";
 import apiClient from "@/axiosClient";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useShapeStore } from "@/stores/shapes";
+import { useAuthStore } from "@/stores/auth";
+import type { AiDefinition } from "../../../template-scripts/src/ai/types";
+import type { AnySavedMapPreset } from "../../../template-scripts/src/map/common/answer-map-presets";
 import {
   attributeSearchPath,
   createAdvancedMapSearchModal,
@@ -16,10 +19,14 @@ export function useAdvancedMapSearch(
   apply: () => void,
   message: (text: string) => void,
   applyAiPreset?: (id: string, signal: AbortSignal) => Promise<void>,
+  applyAiDefinition?: (definition: AiDefinition, signal: AbortSignal) => Promise<void>,
+  clearAiDefinition?: (kind: "filter" | "color", signal: AbortSignal) => Promise<void>,
 ) {
   const markers = useMapObjectStore(),
-    shapes = useShapeStore();
+    shapes = useShapeStore(),
+    auth = useAuthStore();
   let modal: ReturnType<typeof createAdvancedMapSearchModal> | undefined;
+  let accountInvalid = false;
   let disposed = false,
     refreshAll = false,
     applyingFromModal = false;
@@ -30,7 +37,14 @@ export function useAdvancedMapSearch(
   >();
   const seen = new Map<string, number>();
   const context = () =>
-    `${markers.recordCache.generation}:${layer.value}:${markers.attributeRevision}:${markers.mutationRevision}:${shapes.mutationRevision}`;
+    JSON.stringify([
+      auth.accountId,
+      markers.recordCache.generation,
+      layer.value,
+      markers.attributeRevision,
+      markers.mutationRevision,
+      shapes.mutationRevision,
+    ]);
   // レイヤ切り替えが失敗した場合は、ツールバーの選択より先に表示範囲を復元する。
   // 再確認は、その表示範囲を対象に行う。
   const scope = () => `${markers.activeLayerId}:${markers.activeIsMaster}`;
@@ -39,20 +53,52 @@ export function useAdvancedMapSearch(
     activeRequest = undefined;
     previous?.controller.abort();
   };
-  const transport: AttributeTransport = async (path, body, signal) => {
+  const accountMessage = "ログイン中のアカウントが変わりました。画面を再読み込みしてください。";
+  const invalidateAccount = () => {
+    if (accountInvalid) return;
+    accountInvalid = true;
+    pending.clear();
+    seen.clear();
+    refreshAll = false;
+    cancelRecheck();
+    modal?.close();
+    message(accountMessage);
+  };
+  const transport: AttributeTransport = async (path, body, signal, method) => {
+    if (accountInvalid) throw Error(accountMessage);
+    const actor = auth.accountId;
+    const config = {
+      signal,
+      ...(path.startsWith("/form-answers/map-presets")
+        ? { headers: { "X-AI-Account-ID": actor } }
+        : {}),
+    };
     try {
-      return body === undefined
-        ? (await apiClient.get(path, { signal })).data
-        : (await apiClient.post(path, body, { signal, timeout: 60000 })).data;
+      const response =
+        method === "DELETE"
+          ? await apiClient.delete(path, config)
+          : body === undefined
+            ? await apiClient.get(path, config)
+            : await apiClient.post(path, body, { ...config, timeout: 60000 });
+      if (accountInvalid) throw Error(accountMessage);
+      if (actor !== auth.accountId || signal.aborted)
+        throw new DOMException("Aborted", "AbortError");
+      return response.data;
     } catch (e) {
       if (apiClient.isAxiosError(e)) {
+        const data = e.response?.data as { code?: unknown; error?: unknown } | undefined;
+        if (data?.code === "ai_account_changed" || data?.error === "ai_account_changed") {
+          invalidateAccount();
+          throw Error("ai_account_changed");
+        }
         if (e.response?.status === 409)
           throw Error("共通フォームが変更されました。開き直して条件を確認してください。");
         if (e.response?.status === 404)
           throw Error("共通フォームまたはレイヤーが見つかりません。開き直してください。");
-        const data = e.response?.data as { error?: string } | undefined;
         throw Error(
-          data?.error?.replace(/^validation error:\s*/, "") || "検索結果を取得できませんでした。",
+          typeof data?.error === "string"
+            ? data.error.replace(/^validation error:\s*/, "")
+            : "検索結果を取得できませんでした。",
         );
       }
       throw e;
@@ -64,7 +110,16 @@ export function useAdvancedMapSearch(
       getApplied: () => markers.attributeSearch,
       getLayerIds: () => (layer.value === master.value ? null : [layer.value]),
       getContext: context,
+      getAiContextKey: () =>
+        JSON.stringify([
+          auth.accountId,
+          layer.value,
+          markers.recordCache.generation,
+          shapes.recordCache.generation,
+        ]),
       applyAiPreset,
+      applyAiDefinition,
+      clearAiDefinition,
       onApply: (request, result) => {
         applyingFromModal = true;
         try {
@@ -77,7 +132,13 @@ export function useAdvancedMapSearch(
     });
   });
   async function flush() {
-    if (disposed || activeRequest || (!refreshAll && !pending.size) || !markers.attributeSearch)
+    if (
+      accountInvalid ||
+      disposed ||
+      activeRequest ||
+      (!refreshAll && !pending.size) ||
+      !markers.attributeSearch
+    )
       return;
     const full = refreshAll;
     refreshAll = false;
@@ -159,7 +220,7 @@ export function useAdvancedMapSearch(
   const subscribe = (kind: "marker" | "shape") => {
     const store = kind === "marker" ? markers : shapes;
     return store.tableChanges.subscribe((change) => {
-      if (change.type !== "record" || change.kind !== kind) return;
+      if (accountInvalid || change.type !== "record" || change.kind !== kind) return;
       const key = `${kind}:${change.id}`,
         version = store.mutationVersions.get(change.id) || 0;
       if (version <= (seen.get(key) || 0)) return;
@@ -171,6 +232,19 @@ export function useAdvancedMapSearch(
     });
   };
   const stops = [subscribe("marker"), subscribe("shape")];
+  stops.push(
+    watch(
+      () => [auth.accountId, layer.value],
+      () => {
+        pending.clear();
+        seen.clear();
+        refreshAll = false;
+        cancelRecheck();
+        modal?.close();
+      },
+      { flush: "sync" },
+    ),
+  );
   const stop = watch(
     () => markers.attributeRevision,
     () => {
@@ -189,10 +263,18 @@ export function useAdvancedMapSearch(
     stop();
   });
   return {
-    openAdvancedSearch: () => void modal?.open(),
+    openAdvancedSearch: () => {
+      if (!accountInvalid) void modal?.open();
+    },
+    invalidateAccount,
+    recallSavedPreset: async (preset: AnySavedMapPreset) => {
+      if (!modal || disposed) throw Error("詳しい検索の準備ができていません。");
+      if (accountInvalid) throw Error(accountMessage);
+      await modal.recallPreset(preset);
+    },
     closeAdvancedSearch: () => modal?.close(),
     refreshAttributeSearch: () => {
-      if (disposed || !markers.attributeSearch) return;
+      if (accountInvalid || disposed || !markers.attributeSearch) return;
       cancelRecheck();
       refreshAll = true;
       void flush();

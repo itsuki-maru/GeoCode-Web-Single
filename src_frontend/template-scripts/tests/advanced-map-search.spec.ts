@@ -51,7 +51,7 @@ beforeEach(() => {
   });
 });
 
-describe("AI保存条件の適用", () => {
+describe("AI保存条件の呼び出しと明示実行", () => {
   const preset = {
     id: "saved-ai",
     kind: "filter",
@@ -75,10 +75,13 @@ describe("AI保存条件の適用", () => {
     { enabled: false, protocol_version: 2, succeeds: false, error: "AI機能を無効" },
     { enabled: true, protocol_version: 1, succeeds: false, error: "サーバーへ更新" },
   ])(
-    "既存の編集条件を維持し、対応状態でのみ適用する: $enabled/$protocol_version",
+    "手動の下書きを保持し、呼び出し後の実行ボタンから反映する: $enabled/$protocol_version",
     async (state) => {
       const apply = vi.fn(),
         applyAiPreset = vi.fn().mockResolvedValue(undefined);
+      const applyAiDefinition = vi.fn(async () => {
+        if (!state.succeeds) throw Error(state.error);
+      });
       const transport = vi.fn(async (path: string) => {
         if (path === "/common-forms") return forms;
         if (path === "/ai/capabilities")
@@ -102,38 +105,57 @@ describe("AI保存条件の適用", () => {
         getContext: () => "account",
         onApply: apply,
         applyAiPreset,
+        applyAiDefinition,
       });
       await modal.open();
       click("保存した検索条件");
       await vi.waitFor(() => expect(document.querySelector("tbody tr")).not.toBeNull());
-      click("適用");
+      click("呼び出し");
+      await vi.waitFor(() =>
+        expect(document.querySelector<HTMLDialogElement>('[aria-label="呼び出し完了"]')?.open).toBe(
+          true,
+        ),
+      );
+      expect(applyAiDefinition).not.toHaveBeenCalled();
+      expect(applyAiPreset).not.toHaveBeenCalled();
+      expect(transport.mock.calls.some(([path]) => path === "/ai/capabilities")).toBe(false);
+      document.querySelector<HTMLButtonElement>('[aria-label="呼び出し完了"] button')!.click();
+      [...document.querySelectorAll<HTMLButtonElement>(".map-preset-dialog.form-settings button")]
+        .find((button) => button.textContent === "閉じる")!
+        .click();
+      click("絞り込み実行");
       if (state.succeeds) {
         await vi.waitFor(() =>
-          expect(applyAiPreset).toHaveBeenCalledWith("saved-ai", expect.any(AbortSignal)),
+          expect(applyAiDefinition).toHaveBeenCalledWith(
+            preset.definition,
+            expect.any(AbortSignal),
+          ),
         );
         await vi.waitFor(() =>
-          expect(document.body.textContent).toContain("AI条件を地図へ適用しました。"),
+          expect(document.body.textContent).toContain("条件を地図へ反映しました。"),
         );
       } else {
         await vi.waitFor(() =>
           expect(document.querySelector('[role="alert"]')?.textContent).toContain(state.error),
         );
-        expect(applyAiPreset).not.toHaveBeenCalled();
       }
       expect(apply).not.toHaveBeenCalled();
+      expect(applyAiPreset).not.toHaveBeenCalled();
+      click("手動の絞り込み条件を編集");
       expect(document.querySelector<HTMLInputElement>(".advanced-map-search input")!.value).toBe(
         "7",
       );
     },
   );
 
-  it("AI設定の取得中に対象が変わった場合は保存条件を適用しない", async () => {
+  it("項目情報の取得中に対象が変わった場合は古い保存条件を表示・適用しない", async () => {
     let context = "old";
     let resolve!: (value: unknown) => void;
+    let reads = 0;
     const applyAiPreset = vi.fn();
     const transport = vi.fn(async (path: string) => {
-      if (path === "/common-forms") return forms;
-      if (path === "/ai/capabilities")
+      if (path === "/common-forms" && ++reads === 1) return forms;
+      if (path === "/common-forms")
         return new Promise((done) => {
           resolve = done;
         });
@@ -151,14 +173,14 @@ describe("AI保存条件の適用", () => {
     await modal.open();
     click("保存した検索条件");
     await vi.waitFor(() => expect(document.querySelector("tbody tr")).not.toBeNull());
-    click("適用");
+    click("呼び出し");
+    await vi.waitFor(() => expect(resolve).toBeTypeOf("function"));
     context = "new";
-    resolve({ enabled: true, voice_enabled: false, revision: "r", protocol_version: 2 });
+    resolve(forms);
     await vi.waitFor(() =>
-      expect(document.querySelector('[role="alert"]')?.textContent).toContain(
-        "地図の対象が変わりました",
-      ),
+      expect(document.querySelector<HTMLDialogElement>(".advanced-map-search")!.open).toBe(false),
     );
+    expect(document.querySelector(".ai-condition-editor")).toBeNull();
     expect(applyAiPreset).not.toHaveBeenCalled();
   });
 });

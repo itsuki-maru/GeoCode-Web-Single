@@ -2,11 +2,10 @@ import { action, node } from "./coloring-editor";
 import { createMapMessageDialog } from "./map-message-dialog";
 import { renderMapPresetsTable } from "./map-presets-table";
 import {
-  clonePresetDraft,
+  cloneAnyPresetDraft,
   cloneSavedMapPreset,
-  isSavedMapPreset,
   isAnySavedMapPreset,
-  type MapPresetDraft,
+  type AnyMapPresetDraft,
   type AnySavedMapPreset,
 } from "./answer-map-presets";
 import type { AttributeTransport } from "./advanced-map-search";
@@ -245,14 +244,12 @@ export function createMapPresetDialogs(
                 // スピナーを解除してから、一覧を残したまま完了メッセージを表示する。
                 progressDialog.clear();
                 noticeDialog.show(
-                  preset.schema_version === 2
-                    ? "AI条件を地図へ適用しました。"
-                    : "呼び出しが完了しました。",
+                  "呼び出しが完了しました。実行ボタンで地図に反映します。",
                   "呼び出し完了",
                 );
               }
             },
-            preset.schema_version === 2 ? "AI条件を適用しています…" : "検索条件を呼び出しています…",
+            "検索条件を呼び出しています…",
             true,
             true,
           ),
@@ -279,8 +276,9 @@ export function createMapPresetDialogs(
     syncBusy();
   }
   return {
-    save(value: MapPresetDraft) {
-      const draft = clonePresetDraft(value);
+    save(value: AnyMapPresetDraft) {
+      const draft = cloneAnyPresetDraft(value);
+      const version = "schema_version" in draft ? draft.schema_version : 1;
       open("検索条件を保存", "save");
       const label = node("label", "条件名"),
         input = node("input");
@@ -301,10 +299,15 @@ export function createMapPresetDialogs(
                   throw Error("条件名を1〜100文字で入力してください。");
                 const data = await transport(
                   endpoint,
-                  { ...draft, name, schema_version: 1 },
+                  { ...draft, name, schema_version: version },
                   signal,
                 );
-                if (!isSavedMapPreset(data)) throw Error("保存結果を確認できませんでした。");
+                if (
+                  !isAnySavedMapPreset(data) ||
+                  data.schema_version !== version ||
+                  data.kind !== draft.kind
+                )
+                  throw Error("保存結果を確認できませんでした。");
                 if (!signal.aborted) close();
               },
               "保存しています…",

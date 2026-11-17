@@ -1,0 +1,60 @@
+.ai-condition-editor {
+  min-width: 0;
+  max-width: 100%;
+  font: inherit;
+}
+.ai-condition-editor .ai-editor-controls {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+.ai-condition-editor .ai-editor-expression {
+  min-width: 0;
+  margin: 12px 0;
+  padding: 14px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+}
+.ai-condition-editor
+  .ai-editor-expression.is-root:is(
+    [data-operation="all"],
+    [data-operation="text"],
+    [data-operation="attribute"]
+  ) {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.ai-condition-editor .ai-editor-expression legend {
+  padding: 0 5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.ai-condition-editor button {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  font: inherit;
+}
+.ai-condition-editor p {
+  overflow-wrap: anywhere;
+}
+.ai-condition-editor .ai-editor-feedback:empty {
+  display: none;
+}
+.ai-condition-editor .ai-editor-feedback.is-error {
+  color: #b42318;
+}
+.ai-condition-editor [data-operation="not"] {
+  border-left: 4px solid #8b4c18;
+}
+@media (max-width: 650px) {
+  .ai-condition-editor .ai-editor-expression {
+    padding: 8px 5px;
+  }
+  .ai-condition-editor legend {
+    font-size: 14px;
+  }
+}

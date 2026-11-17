@@ -33,6 +33,17 @@ async fn request(
     path: &str,
     body: Value,
 ) -> (StatusCode, Value) {
+    request_with_expected_account(app, user, actor, method, path, body).await
+}
+
+async fn request_with_expected_account(
+    app: &Router,
+    user: Option<&str>,
+    actor: Option<&str>,
+    method: &str,
+    path: &str,
+    body: Value,
+) -> (StatusCode, Value) {
     let mut builder = Request::builder().method(method).uri(path);
     if let Some(user) = user {
         builder = builder.header(
@@ -60,7 +71,12 @@ async fn request(
     let status = response.status();
     assert_eq!(response.headers()["cache-control"], "no-store", "{path}");
     let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap())
+    let body = if status == StatusCode::NO_CONTENT && bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
+    (status, body)
 }
 
 async fn setup(pool: &SqlitePool, name: &str) -> (Router, String, Uuid) {
@@ -603,4 +619,452 @@ async fn deleted_forms_are_revalidated_at_confirmation_without_saving_a_stale_de
     .await
     .unwrap();
     assert_eq!(saved, 0);
+}
+
+// 別タブでCookieが切り替わっても、画面Aの下書きを利用者Bへ保存・一覧表示・削除しない。
+#[tokio::test]
+async fn manual_preset_crud_checks_optional_actor_before_accessing_cookie_account() {
+    let pool = common::test_pool().await;
+    let _serial = TEST_LOCK.lock().await;
+    let original_user = common::create_test_user(&pool, "preset-original-actor").await;
+    let cookie_user = common::create_test_user(&pool, "preset-cookie-actor").await;
+    let app = app(&pool);
+    let original_header = original_user.to_string();
+    let cookie_header = cookie_user.to_string();
+    let base = "/form-answers/map-presets";
+    let definition = json!({"type":"filter","expression":{
+        "op":"text","query1":"Cookie利用者だけの非公開条件","query2":""
+    }});
+    let version_one = json!({
+        "name":"Cookie利用者だけの非公開条件1","kind":"filter","schema_version":1,
+        "definition":{"common_form_id":null,"conditions":[]}
+    });
+    let version_two = json!({
+        "name":"Cookie利用者だけの非公開条件2","kind":"filter","schema_version":2,
+        "definition":definition
+    });
+    // AIが未設定でも、正しいヘッダーを付けた利用者の明示保存は従来どおり利用できる。
+    let mut saved_ids = vec![];
+    for body in [version_one.clone(), version_two.clone()] {
+        let (status, saved) = request_with_expected_account(
+            &app,
+            Some(&cookie_user),
+            Some(&cookie_header),
+            "POST",
+            base,
+            body,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{saved}");
+        saved_ids.push(saved["id"].as_str().unwrap().to_owned());
+    }
+    let original_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM answer_map_saved_condition_model WHERE user_id=$1",
+    )
+    .bind(&cookie_user)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(original_count, 2);
+    let delete_path = format!("{base}/{}", saved_ids[0]);
+
+    for expected_actor in [original_header.as_str(), "not-the-cookie-account", ""] {
+        for (method, path, body) in [
+            ("POST", base.to_string(), version_two.clone()),
+            ("GET", format!("{base}?versions=1,2"), Value::Null),
+            ("DELETE", delete_path.clone(), Value::Null),
+        ] {
+            let (status, error) = request_with_expected_account(
+                &app,
+                Some(&cookie_user),
+                Some(expected_actor),
+                method,
+                &path,
+                body,
+            )
+            .await;
+            assert_eq!(status, StatusCode::CONFLICT, "{method}: {error}");
+            assert_eq!(error, json!({"error":"ai_account_changed"}));
+            assert!(!error.to_string().contains("Cookie利用者だけの非公開条件"));
+            let count: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM answer_map_saved_condition_model WHERE user_id=$1",
+            )
+            .bind(&cookie_user)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(count, original_count, "拒否した要求ごとに行を変更しない");
+        }
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM answer_map_saved_condition_model WHERE user_id=$1",
+        )
+        .bind(&cookie_user)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            count, original_count,
+            "拒否した保存・削除では行を変更しない"
+        );
+    }
+    // ヘッダーが一致する場合と、省略する旧クライアントのv1/v2を両方維持する。
+    for expected_actor in [Some(cookie_header.as_str()), None] {
+        let (status, list) = request_with_expected_account(
+            &app,
+            Some(&cookie_user),
+            expected_actor,
+            "GET",
+            &format!("{base}?versions=1,2"),
+            Value::Null,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{list}");
+        assert_eq!(list["total"], original_count);
+        assert_eq!(
+            list["items"].as_array().unwrap().len(),
+            original_count as usize
+        );
+    }
+    for body in [version_one, version_two] {
+        let (status, saved) =
+            request_with_expected_account(&app, Some(&cookie_user), None, "POST", base, body).await;
+        assert_eq!(status, StatusCode::CREATED, "{saved}");
+        assert_eq!(
+            request_with_expected_account(
+                &app,
+                Some(&cookie_user),
+                None,
+                "DELETE",
+                &format!("{base}/{}", saved["id"].as_str().unwrap()),
+                Value::Null,
+            )
+            .await
+            .0,
+            StatusCode::NO_CONTENT
+        );
+    }
+    for id in saved_ids {
+        assert_eq!(
+            request_with_expected_account(
+                &app,
+                Some(&cookie_user),
+                Some(&cookie_header),
+                "DELETE",
+                &format!("{base}/{id}"),
+                Value::Null,
+            )
+            .await
+            .0,
+            StatusCode::NO_CONTENT
+        );
+    }
+    let final_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM answer_map_saved_condition_model WHERE user_id=$1",
+    )
+    .bind(&cookie_user)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(final_count, 0);
+}
+
+async fn edited_form(pool: &SqlitePool, owner: &str, title: &str) -> Uuid {
+    let form = Uuid::new_v4();
+    let schema = json!({"fields":[
+        {"id":"n","label":"精密数値","type":"number"},
+        {"id":"state","label":"材質","type":"select","choices":["現行材"]}
+    ]});
+    let historic = json!({"fields":[
+        {"id":"state","label":"旧材質","type":"select","choices":["旧材"]}
+    ]});
+    sqlx::query(
+        r#"
+        INSERT INTO common_form_model (
+            id,
+            user_id,
+            version,
+            form_title,
+            form_description,
+            form_schema,
+            create_at,
+            update_at
+        ) VALUES ($1, $2, 2, $3, '', $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        "#,
+    )
+    .bind(form.to_string())
+    .bind(owner)
+    .bind(title)
+    .bind(schema.clone())
+    .execute(pool)
+    .await
+    .unwrap();
+    for (version, schema) in [(1, historic), (2, schema)] {
+        sqlx::query(
+            r#"
+            INSERT INTO common_form_revision_model (
+                form_id,
+                version,
+                form_schema
+            ) VALUES ($1, $2, $3)
+            "#,
+        )
+        .bind(form.to_string())
+        .bind(version)
+        .bind(schema)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    form
+}
+
+fn edited_filter(form: Uuid, condition: Value) -> Value {
+    json!({"type":"filter","expression":{
+        "op":"attribute","common_form_id":form,"conditions":[condition]
+    }})
+}
+
+fn edited_coloring(form: Uuid, condition: Value) -> Value {
+    json!({"type":"color","common_form_id":form,"rules":[{
+        "id":"edited-rule","label":"分類","color":"#112233","conditions":[condition]
+    }]})
+}
+
+fn edited_execution(revision: Uuid, action: Value) -> Value {
+    json!({
+        "protocol_version":2,"revision":revision,
+        "context":{"layer_ids":null},"action":action
+    })
+}
+
+// 編集後の定義も、保存条件と同じ検証を通す。LLM接続・APIキー・永続操作は不要。
+#[tokio::test]
+async fn edited_definitions_validate_current_and_historic_fields_before_local_execution() {
+    let pool = common::test_pool().await;
+    let _serial = TEST_LOCK.lock().await;
+    let (app, user, revision) = setup(&pool, "edited-definition-owner").await;
+    let other = common::create_test_user(&pool, "edited-definition-other").await;
+    let first = edited_form(&pool, &user, "編集用フォーム").await;
+    let second = edited_form(&pool, &user, "別の編集用フォーム").await;
+    let foreign = edited_form(&pool, &other, "他者の非公開フォーム").await;
+    let mut config = AiConfig {
+        enabled: true,
+        write_enabled: false,
+        // providerへ接続する実装へ変わった場合は、外部通信前に失敗する接続先。
+        base_url: "local-execution-must-not-call-provider".into(),
+        model: "test-model".into(),
+        max_requests_per_minute: 60,
+        ..Default::default()
+    };
+    sqlx::query("UPDATE ai_settings SET config=$1 WHERE id=1")
+        .bind(sqlx::types::Json(config.clone()))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let historic = json!({
+        "field_id":"state","field_type":"select","op":"in","value":["旧材"],"upper":null
+    });
+    let numeric = json!({
+        "field_id":"n","field_type":"number","op":"gte",
+        "value":"9007199254740993.000000000001","upper":null
+    });
+    let compound = json!({"type":"filter","expression":{"op":"and","children":[
+        {"op":"or","children":[
+            {"op":"attribute","common_form_id":first,"conditions":[historic.clone()]},
+            {"op":"attribute","common_form_id":second,"conditions":[numeric]}
+        ]},
+        {"op":"not","child":{"op":"text","query1":"廃止","query2":""}}
+    ]}});
+    // OR・NOT・複数フォーム・過去の選択肢・精密数値を変換せず実行できる。
+    for action in [compound.clone(), edited_coloring(first, historic.clone())] {
+        let (status, result) = request(
+            &app,
+            Some(&user),
+            Some(&user),
+            "POST",
+            "/ai/assist/execute",
+            edited_execution(revision, action.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{result}");
+        assert_eq!(result["definition"], action);
+        assert_eq!(result["target_count"], 0);
+    }
+
+    let bad_conditions = [
+        json!({"field_id":"state","field_type":"select","op":"in","value":["存在しない材質"],"upper":null}),
+        json!({"field_id":"state","field_type":"text","op":"eq","value":"現行材","upper":null}),
+        json!({"field_id":"unknown","field_type":"number","op":"gte","value":"1","upper":null}),
+        // f64では同じ値になる逆転範囲も、DB版ごとの厳密な十進数比較で拒否する。
+        json!({"field_id":"n","field_type":"number","op":"between",
+            "value":"9007199254740993.000000000002","upper":"9007199254740993.000000000001"}),
+    ];
+    for condition in bad_conditions {
+        for action in [
+            edited_filter(first, condition.clone()),
+            edited_coloring(first, condition),
+        ] {
+            let (status, error) = request(
+                &app,
+                Some(&user),
+                Some(&user),
+                "POST",
+                "/ai/assist/execute",
+                edited_execution(revision, action),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+        }
+    }
+    // 部分的に実行可能でも、複合式中の不正な選択肢を無視して適用しない。
+    let mut invalid_compound = compound.clone();
+    invalid_compound["expression"]["children"][0]["children"][0]["conditions"][0]["value"] =
+        json!(["存在しない材質"]);
+    assert_eq!(
+        request(
+            &app,
+            Some(&user),
+            Some(&user),
+            "POST",
+            "/ai/assist/execute",
+            edited_execution(revision, invalid_compound)
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    for form in [foreign, Uuid::new_v4()] {
+        for action in [
+            edited_filter(form, historic.clone()),
+            edited_coloring(form, historic.clone()),
+        ] {
+            let (status, error) = request(
+                &app,
+                Some(&user),
+                Some(&user),
+                "POST",
+                "/ai/assist/execute",
+                edited_execution(revision, action),
+            )
+            .await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{error}");
+            assert!(!error.to_string().contains("他者の非公開フォーム"));
+        }
+    }
+
+    // 編集後の直接実行でも、既存の設定版・アカウント・レイヤー境界を維持する。
+    assert_eq!(
+        request(
+            &app,
+            Some(&user),
+            Some(&user),
+            "POST",
+            "/ai/assist/execute",
+            edited_execution(Uuid::new_v4(), compound.clone())
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        request(
+            &app,
+            Some(&user),
+            Some(&other),
+            "POST",
+            "/ai/assist/execute",
+            edited_execution(revision, compound.clone())
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+    let foreign_layer = common::master_layer_id(&pool, &other).await;
+    let mut foreign_scope = edited_execution(revision, compound.clone());
+    foreign_scope["context"]["layer_ids"] = json!([foreign_layer]);
+    assert_eq!(
+        request(
+            &app,
+            Some(&user),
+            Some(&user),
+            "POST",
+            "/ai/assist/execute",
+            foreign_scope
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+
+    // 名前を付けた手動保存は既存APIを使い、AIチャットの自動保存だけwriteEnabledで制限する。
+    let (status, saved) = request(
+        &app,
+        Some(&user),
+        Some(&user),
+        "POST",
+        "/form-answers/map-presets",
+        json!({"name":"編集して別名保存","kind":"filter","schema_version":2,"definition":compound}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    assert_eq!(saved["schema_version"], 2);
+    assert_eq!(saved["definition"], compound);
+    let automatic = json!({
+        "operation_id":Uuid::new_v4(),"protocol_version":2,"revision":revision,
+        "context":{"layer_ids":null},
+        "action":{"type":"save_preset","name":"自動では保存しない","kind":"filter"},
+        "state":{"filter":compound}
+    });
+    assert_eq!(
+        request(
+            &app,
+            Some(&user),
+            Some(&user),
+            "POST",
+            "/ai/operations/prepare",
+            automatic
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    let (status, reapplied) = request(
+        &app,
+        Some(&user),
+        Some(&user),
+        "POST",
+        "/ai/assist/execute",
+        edited_execution(
+            revision,
+            json!({"type":"apply_preset","preset_id":saved["id"]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reapplied}");
+    assert_eq!(reapplied["definition"], compound);
+    let operations: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_operation_model")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(operations, 0);
+
+    config.enabled = false;
+    sqlx::query("UPDATE ai_settings SET config=$1 WHERE id=1")
+        .bind(sqlx::types::Json(config))
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        request(
+            &app,
+            Some(&user),
+            Some(&user),
+            "POST",
+            "/ai/assist/execute",
+            edited_execution(revision, compound)
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
 }
