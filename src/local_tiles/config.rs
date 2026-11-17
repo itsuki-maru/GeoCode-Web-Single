@@ -29,7 +29,7 @@ impl LocalTileConfig {
             dataset_path: tiles.join("datasets"),
             cache_path: tiles.join("png"),
             work_path: tiles.join("work"),
-            workers: 2,
+            workers: 4,
             queue_capacity: 128,
             max_subscribers: 256,
             background_queue_capacity: 4,

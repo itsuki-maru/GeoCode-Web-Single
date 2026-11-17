@@ -1,5 +1,5 @@
 use geocode_web_single::{
-    init::read_env_json,
+    init::{read_env_json, read_env_json_readonly},
     local_tiles::{catalog::DatasetRecord, config::LocalTileConfig},
 };
 use serde_json::json;
@@ -50,6 +50,10 @@ fn old_json_gets_independent_tile_paths_and_does_not_rewrite_again() {
     original["tile_catalog_database_path"] = serde_json::Value::Null;
     dir.write(original);
     let before = std::fs::read(dir.settings()).unwrap();
+    let readonly = read_env_json_readonly(&dir.settings()).unwrap();
+    assert_eq!(LocalTileConfig::from_setup(&readonly).unwrap().workers, 4);
+    assert_eq!(std::fs::read(dir.settings()).unwrap(), before);
+    assert!(!dir.0.join("geocode-web-single.env.json.bak").exists());
     let setup = read_env_json(&dir.0).unwrap();
     let config = LocalTileConfig::from_setup(&setup).unwrap();
     assert_eq!(
@@ -59,7 +63,7 @@ fn old_json_gets_independent_tile_paths_and_does_not_rewrite_again() {
     assert_eq!(config.dataset_path, dir.0.join("tiles/datasets"));
     assert_eq!(config.cache_path, dir.0.join("tiles/png"));
     assert_eq!(config.work_path, dir.0.join("tiles/work"));
-    assert_eq!(config.workers, 2);
+    assert_eq!(config.workers, 4);
     assert_eq!(config.background_queue_capacity, 4);
     assert_eq!(setup.image_file_path, "custom-relative-image-path");
     assert_eq!(setup.upload_file_path, "custom-relative-upload-path");
@@ -91,7 +95,7 @@ fn explicit_paths_survive_and_invalid_settings_never_get_written_back() {
     value["tile_dataset_path"] = json!(data);
     value["tile_cache_path"] = json!(png);
     value["tile_work_path"] = json!(work);
-    value["local_tile_workers"] = json!("3");
+    value["local_tile_workers"] = json!("2");
     dir.write(value);
     let setup = read_env_json(&dir.0).unwrap();
     let config = LocalTileConfig::from_setup(&setup).unwrap();
@@ -99,7 +103,7 @@ fn explicit_paths_survive_and_invalid_settings_never_get_written_back() {
     assert_eq!(config.dataset_path, data);
     assert_eq!(config.cache_path, png);
     assert_eq!(config.work_path, work);
-    assert_eq!(config.workers, 3);
+    assert_eq!(config.workers, 2);
     for (field, invalid) in [
         ("tile_catalog_database_path", ""),
         ("tile_catalog_database_path", "relative/catalog.sqlite"),
