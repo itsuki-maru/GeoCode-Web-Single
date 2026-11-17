@@ -11,12 +11,14 @@ import { assetsUrl } from "@/settingMobile";
 import { mergeAiColoring } from "../../../template-scripts/src/ai/map-state";
 import { aiFailureMessage } from "../../../template-scripts/src/ai/types";
 import type {
+  AiDefinition,
   AiExecutionResult,
   AiMapView,
   AiTransport,
   AiUndo,
 } from "../../../template-scripts/src/ai/types";
 import type { AnswerColoring } from "../../../template-scripts/src/map/answer-coloring";
+import type { AnySavedMapPreset } from "../../../template-scripts/src/map/common/answer-map-presets";
 
 interface MapBridge {
   filter(): Promise<boolean>;
@@ -28,7 +30,13 @@ interface MapBridge {
 }
 
 /** AIの一時表示を手動の検索・色分けと分離する。保存レコードは変更しない。 */
-export function useAiAssistant(layer: Ref<string>, master: Ref<string>, bridge: MapBridge) {
+export function useAiAssistant(
+  layer: Ref<string>,
+  master: Ref<string>,
+  bridge: MapBridge,
+  onRecallPreset?: (preset: AnySavedMapPreset) => void | Promise<void>,
+  onAccountChanged?: () => void,
+) {
   const markers = useMapObjectStore(),
     shapes = useShapeStore(),
     auth = useAuthStore();
@@ -94,7 +102,7 @@ export function useAiAssistant(layer: Ref<string>, master: Ref<string>, bridge: 
       throw Error("地図への色分けの反映を確認できませんでした。");
   };
   const perform = async (
-    result: AiExecutionResult,
+    result: AiExecutionResult | { type: "clear"; kind: "filter" | "color" },
     signal: AbortSignal,
   ): Promise<AiUndo | void> => {
     const key = identity();
@@ -143,7 +151,10 @@ export function useAiAssistant(layer: Ref<string>, master: Ref<string>, bridge: 
     try {
       if (result.type === "filter") markers.setAiFilter(result.targets!);
       else if (result.type === "color") aiColoring = result.coloring!;
-      else {
+      else if (result.type === "clear") {
+        if (result.kind === "filter") markers.setAiFilter(null);
+        else aiColoring = null;
+      } else {
         markers.setAiFilter(null);
         aiColoring = null;
       }
@@ -193,11 +204,16 @@ export function useAiAssistant(layer: Ref<string>, master: Ref<string>, bridge: 
           suggestionRevision,
         ]),
       apply: (result, signal) => enqueue(() => perform(result, signal)),
+      clear: (kind, signal) => enqueue(() => perform({ type: "clear", kind }, signal)),
       onEnabledChange: (value) => {
         aiEnabled.value = value;
         launcher?.setEnabled(value);
       },
-      onAccountChanged: clearState,
+      onAccountChanged: () => {
+        clearState();
+        onAccountChanged?.();
+      },
+      onRecallPreset,
       onLayerCreated: async (_layer, signal) => {
         const key = identity();
         const accountId = auth.accountId;
@@ -251,6 +267,14 @@ export function useAiAssistant(layer: Ref<string>, master: Ref<string>, bridge: 
     applyPreset: async (id: string, signal?: AbortSignal) => {
       if (!chat) throw Error("AIアシスタントの準備ができていません。");
       await chat.applyPreset(id, signal);
+    },
+    applyDefinition: async (definition: AiDefinition, signal?: AbortSignal) => {
+      if (!chat) throw Error("AIアシスタントの準備ができていません。");
+      await chat.applyDefinition(definition, signal);
+    },
+    clearDefinition: async (kind: "filter" | "color", signal?: AbortSignal) => {
+      if (!chat) throw Error("AIアシスタントの準備ができていません。");
+      await chat.clearDefinition(kind, signal);
     },
     clearAi: clear,
     async applyManualColoring(value: AnswerColoring | null) {

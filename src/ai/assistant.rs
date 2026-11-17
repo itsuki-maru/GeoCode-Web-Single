@@ -373,6 +373,9 @@ async fn run(
     command: Command,
 ) -> Result<Value, AppError> {
     actions::validate_scope(pool, user, &context.layer_ids).await?;
+    // 保存IDの適用はvalidate_saved_presetで検証済み。直接編集した定義にも同じ検証を行う。
+    let validate_direct_definition =
+        matches!(&command, Command::Filter { .. } | Command::Color { .. });
     let mut display = match command {
         Command::ListPresets { kind, page, name } => {
             return list(pool, user, kind, name, page).await;
@@ -416,6 +419,9 @@ async fn run(
             .ok_or(AppError::AiOperationNotAllowed)?,
     };
     normalize_action(&mut display);
+    if validate_direct_definition {
+        presets::validate_action(pool, user, &display).await?;
+    }
     let mut result = actions::execute_action(pool, user, context.layer_ids, &display).await?;
     result["definition"] =
         serde_json::to_value(display).map_err(|_| AppError::InternalServerError)?;

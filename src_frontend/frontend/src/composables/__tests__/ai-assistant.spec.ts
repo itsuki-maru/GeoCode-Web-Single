@@ -44,7 +44,7 @@ const coloring = (name: string, id = "m1") => ({
   rules: [{ id: "r", label: name, color: "#ff0000" }],
   targets: { [`marker:${id}`]: "r" },
 });
-function setup() {
+function setup(onAccountChanged?: () => void) {
   const markers = useMapObjectStore(),
     shapes = useShapeStore();
   markers.activateScope("l1", false);
@@ -72,13 +72,30 @@ function setup() {
   wrapper = mount(
     defineComponent({
       setup() {
-        assistant = useAiAssistant(layer, ref("master"), bridge);
+        assistant = useAiAssistant(layer, ref("master"), bridge, undefined, onAccountChanged);
         return () => null;
       },
     }),
   );
   return { markers, layer, bridge, assistant };
 }
+it("サーバー検出のアカウント不一致はstoreのIDが同じでもAI状態と検索編集を失効させる", async () => {
+  const invalidateSearch = vi.fn(),
+    { markers, bridge } = setup(invalidateSearch);
+  const auth = useAuthStore();
+  auth.accountId = "account-a";
+  await captured.options.apply(
+    { type: "color", coloring: coloring("AI") },
+    new AbortController().signal,
+  );
+  markers.setAiFilter(["marker:m1"]);
+  captured.options.onAccountChanged();
+  expect(auth.accountId).toBe("account-a");
+  expect(markers.aiFilterTargets).toBeNull();
+  expect(bridge.resetColor).toHaveBeenCalled();
+  expect(invalidateSearch).toHaveBeenCalledOnce();
+});
+
 it("shows only the enabled floating icon, retains synchronous capabilities and cleans up on unmount", () => {
   captured.enabledImmediately = true;
   setup();
@@ -306,4 +323,58 @@ it("binds write-result GETs to the actor and maps the denied-operation code to i
   } finally {
     vi.mocked(apiClient.isAxiosError).mockReturnValue(false);
   }
+});
+
+it.each(["filter", "color"] as const)(
+  "AIの%sだけを解除し、手動条件ともう一方のAI条件を保持してUndoできる",
+  async (kind) => {
+    const { markers, bridge, assistant } = setup();
+    markers.setAttributeSearch(
+      { common_form_id: "f", definition_version: 1, layer_ids: ["l1"], conditions: [] },
+      {
+        common_form_id: "f",
+        definition_version: 1,
+        as_of: "now",
+        marker_ids: ["m1"],
+        shape_ids: [],
+        target_count: 1,
+      },
+    );
+    await assistant.applyManualColoring(coloring("手動"));
+    await captured.options.apply(
+      { type: "filter", targets: ["marker:m2"], target_count: 1 },
+      new AbortController().signal,
+    );
+    await captured.options.apply(
+      { type: "color", coloring: coloring("AI", "m2") },
+      new AbortController().signal,
+    );
+    const beforeColoring = structuredClone(bridge.color.mock.lastCall![0]);
+    const undo = await captured.options.clear(kind, new AbortController().signal);
+    expect(markers.attributeSearch?.common_form_id).toBe("f");
+    if (kind === "filter") {
+      expect(markers.aiFilterTargets).toBeNull();
+      expect([...markers.mapObjectList.keys()]).toEqual(["m1"]);
+      expect(bridge.color.mock.lastCall![0]).toEqual(beforeColoring);
+    } else {
+      expect([...markers.aiFilterTargets!]).toEqual(["marker:m2"]);
+      expect(bridge.color.mock.lastCall![0]).toEqual(coloring("手動"));
+    }
+    await undo();
+    expect([...markers.aiFilterTargets!]).toEqual(["marker:m2"]);
+    expect(bridge.color.mock.lastCall![0]).toEqual(beforeColoring);
+  },
+);
+
+it("AI条件の解除に失敗した場合は片側だけ消えた状態を残さない", async () => {
+  const { markers, bridge } = setup();
+  await captured.options.apply(
+    { type: "filter", targets: ["marker:m1"], target_count: 1 },
+    new AbortController().signal,
+  );
+  bridge.filter.mockResolvedValueOnce(false);
+  await expect(captured.options.clear("filter", new AbortController().signal)).rejects.toThrow(
+    "反映",
+  );
+  expect([...markers.aiFilterTargets!]).toEqual(["marker:m1"]);
 });

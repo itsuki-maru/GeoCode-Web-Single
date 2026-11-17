@@ -224,17 +224,20 @@ fn write_json<T: Serialize>(
             let replacement: Vec<u16> =
                 temporary.as_os_str().encode_wide().chain(Some(0)).collect();
             // ReplaceFileは置換先のACLを保持する。ACL統合エラーも無視しない。
-            unsafe {
-                ReplaceFileW(
-                    PCWSTR(destination.as_ptr()),
-                    PCWSTR(replacement.as_ptr()),
-                    PCWSTR::null(),
-                    REPLACE_FILE_FLAGS(0),
-                    None,
-                    None,
-                )
-                .map_err(io::Error::other)?;
-            }
+            retry_replace_file(
+                || unsafe {
+                    ReplaceFileW(
+                        PCWSTR(destination.as_ptr()),
+                        PCWSTR(replacement.as_ptr()),
+                        PCWSTR::null(),
+                        REPLACE_FILE_FLAGS(0),
+                        None,
+                        None,
+                    )
+                    .map_err(windows_io_error)
+                },
+                std::thread::sleep,
+            )?;
         }
         #[cfg(not(windows))]
         temporary.persist(&file_path).map_err(|error| error.error)?;
@@ -244,6 +247,39 @@ fn write_json<T: Serialize>(
             .map_err(|error| error.error)?;
     }
     sync_parent(&file_path)
+}
+
+#[cfg(windows)]
+fn windows_io_error(error: windows::core::Error) -> io::Error {
+    let code = error.code().0 as u32;
+    if code & 0xffff_0000 == 0x8007_0000 {
+        // HRESULT_FROM_WIN32の元コードを残し、共有違反等だけを判定する。
+        io::Error::from_raw_os_error((code & 0xffff) as i32)
+    } else {
+        io::Error::other(error)
+    }
+}
+
+#[cfg(any(windows, test))]
+fn retry_replace_file(
+    mut replace: impl FnMut() -> io::Result<()>,
+    mut wait: impl FnMut(Duration),
+) -> io::Result<()> {
+    let mut retries_left = 5;
+    loop {
+        match replace() {
+            // ReplaceFileWは32/33/1175時に両ファイルの元の名前を維持する。
+            // 1176/1177は名前が変わり得るので再試行せず、ACLエラー等も拒否する。
+            // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew
+            Err(error)
+                if retries_left > 0 && matches!(error.raw_os_error(), Some(32 | 33 | 1175)) =>
+            {
+                retries_left -= 1;
+                wait(Duration::from_millis(50));
+            },
+            result => return result,
+        }
+    }
 }
 
 fn sync_parent(path: &Path) -> io::Result<()> {
@@ -287,6 +323,111 @@ mod tests {
         fs::write(&config, b"original-config").unwrap();
         assert!(create_json_file(config.clone(), &serde_json::json!({"new":true})).is_err());
         assert_eq!(fs::read(config).unwrap(), b"original-config");
+    }
+
+    #[test]
+    fn replacement_retries_only_transient_failures_and_can_then_succeed() {
+        for code in [32, 33, 1175] {
+            let mut calls = 0;
+            let mut waits = Vec::new();
+            retry_replace_file(
+                || {
+                    calls += 1;
+                    if calls < 3 {
+                        Err(io::Error::from_raw_os_error(code))
+                    } else {
+                        Ok(())
+                    }
+                },
+                |duration| waits.push(duration),
+            )
+            .unwrap();
+            assert_eq!(calls, 3);
+            assert_eq!(waits, vec![Duration::from_millis(50); 2]);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn replacement_preserves_win32_error_codes_from_hresult() {
+        for code in [5, 32, 33, 1175, 1176, 1177] {
+            let hresult = windows::core::HRESULT((0x8007_0000 | code as u32) as i32);
+            let error = windows_io_error(windows::core::Error::from_hresult(hresult));
+            assert_eq!(error.raw_os_error(), Some(code));
+        }
+    }
+
+    #[test]
+    fn replacement_retry_has_a_short_limit_and_returns_the_last_os_error() {
+        let mut calls = 0;
+        let mut waits = Vec::new();
+        let error = retry_replace_file(
+            || {
+                calls += 1;
+                Err(io::Error::from_raw_os_error(1175))
+            },
+            |duration| waits.push(duration),
+        )
+        .unwrap_err();
+        assert_eq!(calls, 6);
+        assert_eq!(waits, vec![Duration::from_millis(50); 5]);
+        assert_eq!(
+            waits.into_iter().sum::<Duration>(),
+            Duration::from_millis(250)
+        );
+        assert_eq!(error.raw_os_error(), Some(1175));
+    }
+
+    #[test]
+    fn replacement_never_retries_acl_errors_or_partially_renamed_files() {
+        for code in [5, 87, 1176, 1177] {
+            let mut calls = 0;
+            let error = retry_replace_file(
+                || {
+                    calls += 1;
+                    Err(io::Error::from_raw_os_error(code))
+                },
+                |_| panic!("再試行できないエラーで待機しない"),
+            )
+            .unwrap_err();
+            assert_eq!(calls, 1);
+            assert_eq!(error.raw_os_error(), Some(code));
+        }
+        let mut calls = 0;
+        let error = retry_replace_file(
+            || {
+                calls += 1;
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "permission denied",
+                ))
+            },
+            |_| panic!("OSコードのないエラーで待機しない"),
+        )
+        .unwrap_err();
+        assert_eq!(calls, 1);
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn replacement_stops_if_retry_changes_to_a_non_transient_error() {
+        let mut calls = 0;
+        let mut waits = 0;
+        let error = retry_replace_file(
+            || {
+                calls += 1;
+                Err(io::Error::from_raw_os_error(if calls == 1 {
+                    1175
+                } else {
+                    1177
+                }))
+            },
+            |_| waits += 1,
+        )
+        .unwrap_err();
+        assert_eq!(calls, 2);
+        assert_eq!(waits, 1);
+        assert_eq!(error.raw_os_error(), Some(1177));
     }
 
     #[test]

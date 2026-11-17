@@ -14,7 +14,7 @@ use crate::{
 use axum::{
     Json,
     extract::{Extension, Path, Query},
-    http::{StatusCode, header},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use chrono::{NaiveDateTime, Utc};
@@ -723,11 +723,23 @@ pub async fn validate_saved_preset(
     // 呼出元から他者の値を渡されても所有者付きで取り直す。
     let preset = get_preset(pool, user, &preset.id).await?;
     let action = preset_action(&preset)?;
-    let mut tx = super::answer_sqlite::begin_read(pool).await?;
-    validate_action_tx(&mut tx, user, &action).await?;
-    tx.commit().await?;
+    validate_action(pool, user, &action).await?;
     Ok(action)
 }
+
+/// 編集済みの定義も、保存条件と同じ所有権・項目・選択肢の検証を通してから実行する。
+/// 地図の検索やLLMへの通信は行わず、現在と過去のフォーム定義だけを確認する。
+pub(crate) async fn validate_action(
+    pool: &SqlitePool,
+    user: &str,
+    action: &AiAction,
+) -> Result<(), AppError> {
+    let mut tx = super::answer_sqlite::begin_read(pool).await?;
+    validate_action_tx(&mut tx, user, action).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 pub async fn list_presets(
     pool: &SqlitePool,
     user: &str,
@@ -837,11 +849,21 @@ pub async fn delete_preset(pool: &SqlitePool, user: &str, id: &str) -> Result<()
     }
     Ok(())
 }
+/// 新しい編集画面は表示時のアカウントを固定する。ヘッダーなしの従来手動画面は互換維持。
+fn validate_optional_account(user: &str, headers: &HeaderMap) -> Result<(), AppError> {
+    if headers.contains_key("x-ai-account-id") {
+        super::ai::validate_account(user, headers)?;
+    }
+    Ok(())
+}
+
 pub async fn create_handler(
     Extension(user): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
+    headers: HeaderMap,
     Json(request): Json<CreatePreset>,
 ) -> Result<Response, AppError> {
+    validate_optional_account(&user, &headers)?;
     Ok((
         StatusCode::CREATED,
         [(header::CACHE_CONTROL, "no-store")],
@@ -852,8 +874,10 @@ pub async fn create_handler(
 pub async fn list_handler(
     Extension(user): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
+    headers: HeaderMap,
     Query(query): Query<ListQuery>,
 ) -> Result<Response, AppError> {
+    validate_optional_account(&user, &headers)?;
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
         Json(list_presets(&pool, &user, query).await?),
@@ -863,8 +887,10 @@ pub async fn list_handler(
 pub async fn delete_handler(
     Extension(user): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
+    headers: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> Result<Response, AppError> {
+    validate_optional_account(&user, &headers)?;
     delete_preset(&pool, &user, &id.to_string()).await?;
     Ok((
         StatusCode::NO_CONTENT,

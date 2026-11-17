@@ -122,6 +122,32 @@ CI/releaseでは、出力先を`target/frontend-dist-<run_id>-<run_attempt>`と�
 
 通常のCI/releaseは、リポジトリに保存した`tests/fixtures/frontend-compat-baseline.json`との照合を必須とする。非公開の移植元リポジトリを取得せず、`FRONTEND_SOURCE_TOKEN`等の追加Secretも要求しない。これにより、移植元へのアクセス権がない環境やforkのPRでも同じ固定基準を検査できる。内容差・欠落・余剰は引き続き失敗とし、CIで基準を自動更新しない。Tauri自身の埋込先も`TAURI_CONFIG`または`--config`で隔離先へ指定する。
 
+フロントを移植して採用版を更新した際は、移植元の変更とSQLite側の内容をレビューした後、固定基準も同じコミットへ明示的に更新する。現在の採用版はPostgreSQL版v1.41.0の`fb7ebf0447a3207d8f9d720a3394c8b9a5de0194`で、共通フロント822ファイルを記録している。保存条件の呼び出し・編集と関連UIの追加を含む。製品バージョンと改行の正規化規則は変更しない。
+
+更新例は次のとおり。移植元の専用コピーは採用コミットのHEADと一致し、共通フロントに未コミット変更がない状態を用意する。`--write-baseline`は指定した移植元のファイルを記録するため、コミット番号だけを渡して内容の確認を省略しない。
+
+```powershell
+$sourceRoot = 'C:/src/GeoCode-Web-audit'
+$sourceRef = git -C $sourceRoot rev-parse HEAD
+if ($LASTEXITCODE -ne 0 -or $sourceRef -ne 'fb7ebf0447a3207d8f9d720a3394c8b9a5de0194') {
+    throw '移植元の専用コピーを採用コミットへ用意してください。'
+}
+$sourceChanges = git -C $sourceRoot status --porcelain -- src_frontend src/templates
+if ($LASTEXITCODE -ne 0 -or $sourceChanges) {
+    throw '移植元の共通フロントに未コミット変更があります。'
+}
+node scripts/check-frontend-compat.mjs --write-baseline --source-root $sourceRoot --source-ref $sourceRef
+if ($LASTEXITCODE -ne 0) { throw '採用基準の更新に失敗しました。' }
+node scripts/check-frontend-compat.mjs --source-root $sourceRoot
+if ($LASTEXITCODE -ne 0) { throw '移植元との直接照合に失敗しました。' }
+node scripts/check-frontend-compat.mjs
+if ($LASTEXITCODE -ne 0) { throw '固定基準との照合に失敗しました。' }
+node --test tests/frontend-compat.test.mjs tests/build-frontend-assets.test.mjs tests/frontend-vendor-assets.test.mjs
+if ($LASTEXITCODE -ne 0) { throw 'フロント検証スクリプトのテストに失敗しました。' }
+```
+
+基準を更新した際は`tests/frontend-compat.test.mjs`内の採用コミットの検証も同じ値へ更新し、基準JSON・テスト・更新理由を合わせてレビューする。差分ファイルを除外したり、CIで基準を自動生成したりして検査を通さない。
+
 移植元との直接照合は、移植・基準更新時、または基準の出自を再確認する際に明示的に行う。移植元を読める認証済み環境で、採用コミットの専用作業コピーを用意する。現在の保存基準を監査する例は次のとおり。既存の作業中コピーを強制的に切り替えない。
 
 ```powershell

@@ -3,7 +3,7 @@ import { evaluateMapAnalysis } from "./common/map-analysis";
 import { createAiChat } from "../ai/chat";
 import { createAiLauncher } from "../ai/launcher";
 import { observeAiSuggestionDataChanges } from "../ai/suggestion-events";
-import { aiFetchTransport } from "../ai/types";
+import { aiFetchTransport, type AiExecutionResult } from "../ai/types";
 import { intersectTargetMasks, mergeAiColoring } from "../ai/map-state";
 import { installAnswerColoring, type AnswerColoring } from "./answer-coloring";
 import { createAdvancedMapSearchModal, attributeTransport } from "./common/advanced-map-search";
@@ -377,6 +377,41 @@ export function initializeReadOnlyMapPage(
   let colorSpecification = null;
   let analysisRevision = 0;
   let advancedSearch;
+  let advancedSearchAccountInvalid = false;
+  let accountMessages: ReturnType<typeof createMapMessageDialog> | undefined;
+  const accountMessage = "ログイン中のアカウントが変わりました。画面を再読み込みしてください。";
+  const invalidateAdvancedSearchAccount = () => {
+    if (advancedSearchAccountInvalid) return;
+    advancedSearchAccountInvalid = true;
+    advancedSearch?.close();
+    if (!mapDisposed) {
+      if (!accountMessages) {
+        accountMessages = createMapMessageDialog();
+        map.once("unload", () => accountMessages?.dispose());
+      }
+      accountMessages.show(accountMessage, "アカウントの変更");
+    }
+  };
+  const accountBoundAttributeTransport = async (path, body, signal, method) => {
+    if (advancedSearchAccountInvalid) throw Error(accountMessage);
+    try {
+      const result = await attributeTransport(
+        path,
+        body,
+        signal,
+        method,
+        path.startsWith("/form-answers/map-presets")
+          ? (bootstrap.tileVisibilityAccountId ?? "")
+          : undefined,
+      );
+      if (advancedSearchAccountInvalid) throw Error(accountMessage);
+      return result;
+    } catch (error) {
+      if (error instanceof Error && error.message === "ai_account_changed")
+        invalidateAdvancedSearchAccount();
+      throw error;
+    }
+  };
   const shapeSearchMatches = new WeakMap<object, { query: string; result: boolean }>();
   const shapeCreatedListeners = new Set<(layer: any, record: any) => void>();
   const shapeEvictedListeners = new Set<(layer: any, record: any) => void>();
@@ -879,14 +914,27 @@ export function initializeReadOnlyMapPage(
     button.textContent = "詳しい検索と色分け";
     button.setAttribute("aria-pressed", "false");
     const modal = createAdvancedMapSearchModal({
-      transport: attributeTransport,
+      transport: accountBoundAttributeTransport,
       applyAiPreset: async (id, signal) => {
+        if (advancedSearchAccountInvalid) throw Error(accountMessage);
         if (!aiForPresets) throw Error("AIアシスタントの準備ができていません。");
         await aiForPresets.applyPreset(id, signal);
       },
+      applyAiDefinition: async (definition, signal) => {
+        if (advancedSearchAccountInvalid) throw Error(accountMessage);
+        if (!aiForPresets) throw Error("AIアシスタントの準備ができていません。");
+        await aiForPresets.applyDefinition(definition, signal);
+      },
+      clearAiDefinition: async (kind, signal) => {
+        if (advancedSearchAccountInvalid) throw Error(accountMessage);
+        if (!aiForPresets) throw Error("AIアシスタントの準備ができていません。");
+        await aiForPresets.clearDefinition(kind, signal);
+      },
       getApplied: () => appliedAttributeSearch,
       getLayerIds: () => null,
-      getContext: () => `${bootstrap.tileVisibilityAccountId || ""}:${analysisRevision}`,
+      getAiContextKey: () => bootstrap.tileVisibilityAccountId || "",
+      getContext: () =>
+        `${bootstrap.tileVisibilityAccountId || ""}:${analysisRevision}:${advancedSearchAccountInvalid}`,
       analysis: {
         getSpecification: () => colorSpecification,
         getColoring: () => manualMapColoring,
@@ -906,7 +954,7 @@ export function initializeReadOnlyMapPage(
         if (!result && colorSpecification) {
           const current = analysisRevision;
           const colors = await evaluateMapAnalysis(
-            attributeTransport,
+            accountBoundAttributeTransport,
             null,
             colorSpecification,
             null,
@@ -939,7 +987,9 @@ export function initializeReadOnlyMapPage(
       },
     });
     advancedSearch = modal;
-    button.addEventListener("click", () => void modal.open(button));
+    button.addEventListener("click", () => {
+      if (!advancedSearchAccountInvalid) void modal.open(button);
+    });
     control.onAdd = () => {
       const container = L.DomUtil.create("div", "leaflet-bar leaflet-control");
       container.append(button);
@@ -1253,10 +1303,53 @@ export function initializeReadOnlyMapPage(
       shapeMeasurementManager?.scheduleRefresh();
       refreshColorLegend?.();
     };
+    const applyAiDisplay = async (
+      result: AiExecutionResult | { type: "clear"; kind: "filter" | "color" },
+      signal: AbortSignal,
+    ) => {
+      if (signal.aborted || aiDisposed) throw Error("地図の操作を中止しました。");
+      if (result.type === "focus") {
+        const before = map.getCenter(),
+          zoom = map.getZoom();
+        map.setView([result.latitude, result.longitude], result.zoom ?? zoom, { animate: false });
+        return async () => {
+          if (aiDisposed) throw Error("地図が閉じられました。");
+          map.setView(before, zoom, { animate: false });
+        };
+      }
+      const before = { targets: aiTargetMask, coloring: aiMapColoring };
+      const restore = async () => {
+        if (aiDisposed) throw Error("地図が閉じられました。");
+        aiTargetMask = before.targets;
+        aiMapColoring = before.coloring;
+        refreshAiDisplay();
+      };
+      try {
+        if (result.type === "filter") aiTargetMask = new Set(result.targets);
+        else if (result.type === "color") aiMapColoring = result.coloring;
+        else if (result.type === "clear") {
+          if (result.kind === "filter") aiTargetMask = null;
+          else aiMapColoring = null;
+        } else {
+          aiTargetMask = null;
+          aiMapColoring = null;
+        }
+        refreshAiDisplay();
+        return restore;
+      } catch (error) {
+        await restore();
+        throw error;
+      }
+    };
     aiChat = createAiChat({
       mode: "standalone",
       transport: (path, body, signal) =>
         aiFetchTransport(path, body, signal, bootstrap.tileVisibilityAccountId),
+      onRecallPreset: async (preset) => {
+        if (advancedSearchAccountInvalid) throw Error(accountMessage);
+        if (aiDisposed || !advancedSearch) throw Error("詳しい検索の準備ができていません。");
+        await advancedSearch.recallPreset(preset);
+      },
       getContext: () => ({ layer_ids: null }),
       getContextKey: () => `${bootstrap.tileVisibilityAccountId || ""}:${aiDisposed}`,
       getSuggestionContextKey: () =>
@@ -1265,6 +1358,7 @@ export function initializeReadOnlyMapPage(
         aiLauncher.setEnabled(enabled);
       },
       onAccountChanged: () => {
+        invalidateAdvancedSearchAccount();
         aiTargetMask = null;
         aiMapColoring = null;
         refreshAiDisplay();
@@ -1283,38 +1377,8 @@ export function initializeReadOnlyMapPage(
           markerLayerControl.layerControlOverlayLayers.push(group);
         synchronizedAiLayers.add(layer.id);
       },
-      apply: async (result, signal) => {
-        if (signal.aborted || aiDisposed) throw Error("地図の操作を中止しました。");
-        if (result.type === "focus") {
-          const before = map.getCenter(),
-            zoom = map.getZoom();
-          map.setView([result.latitude, result.longitude], result.zoom ?? zoom, { animate: false });
-          return async () => {
-            if (aiDisposed) throw Error("地図が閉じられました。");
-            map.setView(before, zoom, { animate: false });
-          };
-        }
-        const before = { targets: aiTargetMask, coloring: aiMapColoring };
-        const restore = async () => {
-          if (aiDisposed) throw Error("地図が閉じられました。");
-          aiTargetMask = before.targets;
-          aiMapColoring = before.coloring;
-          refreshAiDisplay();
-        };
-        try {
-          if (result.type === "filter") aiTargetMask = new Set(result.targets);
-          else if (result.type === "color") aiMapColoring = result.coloring;
-          else {
-            aiTargetMask = null;
-            aiMapColoring = null;
-          }
-          refreshAiDisplay();
-          return restore;
-        } catch (error) {
-          await restore();
-          throw error;
-        }
-      },
+      apply: applyAiDisplay,
+      clear: (kind, signal) => applyAiDisplay({ type: "clear", kind }, signal),
     });
     const stopSuggestionUpdates = observeAiSuggestionDataChanges(
       () => bootstrap.tileVisibilityAccountId || "",
