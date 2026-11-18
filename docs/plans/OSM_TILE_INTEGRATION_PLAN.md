@@ -216,7 +216,7 @@ URLへデータセット・描画世代を含め、ブラウザの長期キャ�
 
 | JSON項目 | 暫定既定値 | 意味 |
 | --- | --- | --- |
-| `local_tile_workers` | `"2"` | オンデマンドと事前生成を合わせた実描画数 |
+| `local_tile_workers` | `"4"` | オンデマンドと事前生成を合わせた実描画数（2026-11-18に全国DBの比較結果から更新） |
 | `local_tile_queue_capacity` | `"128"` | 待機する固有タイルjob数 |
 | `local_tile_max_subscribers` | `"256"` | 完了未受取を含む待機要求の上限 |
 | `local_tile_background_queue_capacity` | `"4"` | 取り込み・事前生成を合わせた待機ジョブ数 |

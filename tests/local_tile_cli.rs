@@ -689,6 +689,9 @@ fn avoid_saving_configuration_defaults_for_binary_help_and_config_queries() {
     );
     assert!(!missing.parent().unwrap().exists());
     let path = settings(root.path(), &root.path().join("存在しない本体.sqlite"));
+    let mut stored: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    stored.as_object_mut().unwrap().remove("local_tile_workers");
+    std::fs::write(&path, serde_json::to_vec_pretty(&stored).unwrap()).unwrap();
     let before = std::fs::read(&path).unwrap();
     let output = Process::new(binary())
         .args(["local-tiles", "config", "show", "--json", "--config"])
@@ -708,6 +711,7 @@ fn avoid_saving_configuration_defaults_for_binary_help_and_config_queries() {
             .to_string_lossy()
             .as_ref()
     );
+    assert_eq!(value["local_tile_workers"], 4);
     assert!(!String::from_utf8_lossy(&output.stdout).contains("never-print"));
     assert_eq!(std::fs::read(&path).unwrap(), before);
     assert!(!root.path().join("geocode-web-single.env.json.bak").exists());

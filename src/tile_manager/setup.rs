@@ -247,6 +247,7 @@ mod tests {
         initialize(&path, form()).await.unwrap();
         let settings = crate::init::read_env_json_readonly(&path).unwrap();
         assert_eq!(settings.admin_username, "manager-admin");
+        assert_eq!(settings.local_tile_workers, "4");
         assert!(
             !path
                 .parent()
