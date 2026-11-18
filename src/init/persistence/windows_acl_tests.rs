@@ -62,7 +62,12 @@ fn restrict_fixture_dacl(path: &Path) {
 // 実装のパス用GetFileSecurityWとは別に、公開ファイルのハンドルから
 // OSが保持するDACLと継承保護bitを取得する。
 fn actual_dacl(path: &Path) -> (Vec<u8>, bool) {
-    let file = File::open(path).unwrap();
+    use std::os::windows::fs::OpenOptionsExt;
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(if path.is_dir() { 0x02000000 } else { 0 })
+        .open(path)
+        .unwrap();
     let mut dacl: *mut ACL = std::ptr::null_mut();
     let mut descriptor = PSECURITY_DESCRIPTOR(std::ptr::null_mut());
     unsafe {
@@ -90,6 +95,25 @@ fn actual_dacl(path: &Path) -> (Vec<u8>, bool) {
             std::slice::from_raw_parts(dacl.cast::<u8>(), (*dacl).AclSize as usize).to_vec();
         (bytes, control & SE_DACL_PROTECTED.0 != 0)
     }
+}
+
+#[test]
+fn maintenance_directory_is_private_at_creation_and_never_replaces_existing_paths() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("catalog.sqlite");
+    fs::write(&source, b"fixture").unwrap();
+    restrict_fixture_dacl(&source);
+    let expected = actual_dacl(&source);
+    let destination = directory.path().join("private-backup");
+    create_maintenance_directory(&source, &destination).unwrap();
+    assert_eq!(actual_dacl(&destination), expected);
+    let file = destination.join("catalog.before.sqlite");
+    fs::write(&file, b"").unwrap();
+    protect_maintenance_file(&source, &file).unwrap();
+    assert_eq!(actual_dacl(&file), expected);
+    fs::write(&file, b"protected data").unwrap();
+    assert!(create_maintenance_directory(&source, &destination).is_err());
+    assert_eq!(fs::read(file).unwrap(), b"protected data");
 }
 
 #[test]

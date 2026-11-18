@@ -10,6 +10,20 @@ use uuid::Uuid;
 
 mod ai_key;
 mod persistence;
+
+pub(crate) fn protect_maintenance_file(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> io::Result<()> {
+    persistence::protect_maintenance_file(source, destination)
+}
+
+pub(crate) fn create_maintenance_directory(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> io::Result<()> {
+    persistence::create_maintenance_directory(source, destination)
+}
 use persistence::{
     backup_configuration, create_json_file, lock_configuration, reject_non_regular_file,
     write_to_json_file,

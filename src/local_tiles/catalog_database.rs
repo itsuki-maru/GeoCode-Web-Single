@@ -19,6 +19,9 @@ use std::{
 };
 use tokio::sync::{Mutex, OnceCell};
 
+#[path = "catalog_database/rebind.rs"]
+pub mod rebind;
+
 const APPLICATION_ID: i32 = 0x47574354; // 管理DBの識別子「GWCT」。
 const VERSION: i32 = 1;
 const SCHEMA: &str = include_str!("migrations/0001_catalog.sql");
@@ -640,6 +643,24 @@ fn inspect(path: &Path, app_path: &str, app_id: &str) -> Result<Existing, String
     connection
         .busy_timeout(Duration::from_secs(5))
         .map_err(message)?;
+    if empty_database(&connection)? {
+        return Ok(Existing::Empty);
+    }
+    validate_catalog(&connection)?;
+    let binding: (String, String) = connection
+        .query_row(
+            "SELECT app_database_path, app_file_id FROM tile_catalog_binding WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(message)?;
+    if path_key(Path::new(&binding.0)) != path_key(Path::new(app_path)) || binding.1 != app_id {
+        return Err("このタイル管理DBは別の本体DBに対応しています。本体DBの移設・復元時は対応付けを確認してください。".into());
+    }
+    Ok(Existing::Catalog)
+}
+
+fn validate_catalog(connection: &Connection) -> Result<(), String> {
     let application_id: i32 = connection
         .pragma_query_value(None, "application_id", |row| row.get(0))
         .map_err(message)?;
@@ -648,7 +669,7 @@ fn inspect(path: &Path, app_path: &str, app_id: &str) -> Result<Existing, String
         .map_err(message)?;
     let actual_schema = schema(&connection)?;
     if application_id == 0 && version == 0 && actual_schema.is_empty() {
-        return Ok(Existing::Empty);
+        return Err("初期化済みのタイル管理DBがありません。".into());
     }
     if application_id != APPLICATION_ID {
         return Err("指定ファイルはタイル管理DBではありません。既存DBは変更しません。".into());
@@ -683,20 +704,6 @@ fn inspect(path: &Path, app_path: &str, app_id: &str) -> Result<Existing, String
     if stored_checksum != checksum() {
         return Err("タイル管理DBのschema履歴が一致しません。".into());
     }
-    let binding: (String, String) = connection
-        .query_row(
-            r#"
-            SELECT app_database_path, app_file_id
-            FROM tile_catalog_binding
-            WHERE id = 1
-            "#,
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(message)?;
-    if path_key(Path::new(&binding.0)) != path_key(Path::new(app_path)) || binding.1 != app_id {
-        return Err("このタイル管理DBは別の本体DBに対応しています。本体DBの移設・復元時は対応付けを確認してください。".into());
-    }
     let check: String = connection
         .query_row("PRAGMA quick_check", [], |row| row.get(0))
         .map_err(message)?;
@@ -715,7 +722,7 @@ fn inspect(path: &Path, app_path: &str, app_id: &str) -> Result<Existing, String
     {
         return Err("タイル管理DBの外部キーに不整合があります。".into());
     }
-    Ok(Existing::Catalog)
+    Ok(())
 }
 
 #[cfg(test)]

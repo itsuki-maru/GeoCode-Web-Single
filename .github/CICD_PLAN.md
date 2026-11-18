@@ -129,7 +129,7 @@ CI/releaseでは、出力先を`target/frontend-dist-<run_id>-<run_attempt>`と�
 ```powershell
 $sourceRoot = 'C:/src/GeoCode-Web-audit'
 $sourceRef = git -C $sourceRoot rev-parse HEAD
-if ($LASTEXITCODE -ne 0 -or $sourceRef -ne 'fb7ebf0447a3207d8f9d720a3394c8b9a5de0194') {
+if ($LASTEXITCODE -ne 0 -or $sourceRef -ne 'b224019edd233c3720bbe0dbd2eed7f266bd6db6') {
     throw '移植元の専用コピーを採用コミットへ用意してください。'
 }
 $sourceChanges = git -C $sourceRoot status --porcelain -- src_frontend src/templates

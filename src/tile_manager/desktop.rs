@@ -81,7 +81,7 @@ async fn tile_manager_pick_path(
     authorize(&window)?;
     if !matches!(
         kind.as_str(),
-        "pbf" | "landmask" | "elevation" | "database" | "folder"
+        "pbf" | "landmask" | "elevation" | "database" | "folder" | "proof"
     ) {
         return Err("選択する資料の種類が不正です。".into());
     }
@@ -144,6 +144,10 @@ fn pick_windows_path(kind: &str, owner: usize) -> Result<Option<String>, String>
         }
         dialog.SetOptions(options).map_err(|e| e.to_string())?;
         let filter = match kind {
+            "proof" => Some(COMDLG_FILTERSPEC {
+                pszName: w!("移設記録 JSON"),
+                pszSpec: w!("*.json"),
+            }),
             "pbf" => Some(COMDLG_FILTERSPEC {
                 pszName: w!("OSM PBF"),
                 pszSpec: w!("*.osm.pbf;*.pbf"),

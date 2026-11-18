@@ -732,6 +732,31 @@ pub async fn validate_existing_schema(pool: &SqlitePool) -> Result<(), Error> {
     Ok(())
 }
 
+/// 移設専用の読み取り接続でも、通常CLIと同じmigration契約を検査する。
+pub(crate) fn validate_existing_schema_sync(
+    connection: &rusqlite::Connection,
+) -> Result<(), String> {
+    let mut query = connection
+        .prepare("SELECT version, name FROM schema_migrations ORDER BY version")
+        .map_err(|error| error.to_string())?;
+    let rows = query
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    if rows.len() != MIGRATIONS.len()
+        || MIGRATIONS
+            .iter()
+            .zip(&rows)
+            .any(|(expected, actual)| expected.version != actual.0 || expected.name != actual.1)
+    {
+        return Err("本体DBのschemaがこのアプリの適用済み構成と一致しません。移設処理ではmigrationを実行しません。".into());
+    }
+    Ok(())
+}
+
 // データベースのマイグレーション
 pub async fn run_migrations(pool: &SqlitePool) -> Result<(), Error> {
     // 同時起動でも既適用版の読取前に書込権を確保し、ロック昇格時のBUSYを避ける。

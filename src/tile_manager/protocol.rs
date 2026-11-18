@@ -26,6 +26,7 @@ pub(super) enum Operation {
     Precompute(PrecomputeRequest),
     Resume(Job),
     Background(Background),
+    Rebind(crate::local_tiles::catalog::rebind::Request),
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -60,6 +61,15 @@ impl Operation {
         let mut value: Self =
             serde_json::from_value(serde_json::json!({"action":action,"payload":payload}))
                 .map_err(|error| format!("未対応の操作または入力条件が不正です: {error}"))?;
+        if matches!(
+            &value,
+            Self::Rebind(
+                crate::local_tiles::catalog::rebind::Request::Inspect
+                    | crate::local_tiles::catalog::rebind::Request::Plan { .. }
+            )
+        ) {
+            return Err("移設の事前確認は照会操作を使用してください。".into());
+        }
         if let Self::Import(request) = &mut value {
             if request
                 .request_id
@@ -96,6 +106,7 @@ impl Operation {
             Self::Precompute(_) => "precompute",
             Self::Resume(_) => "resume",
             Self::Background(_) => "background",
+            Self::Rebind(_) => "rebind",
         }
     }
 }

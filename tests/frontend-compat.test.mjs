@@ -121,7 +121,7 @@ test("このリポジトリは固定したPostgreSQL採用基準と一致する"
     { cwd: workspace, encoding: "utf8" },
   );
   assert.match(output, /フロント互換性: OK/);
-  assert.match(output, /fb7ebf0447a3207d8f9d720a3394c8b9a5de0194/);
+  assert.match(output, /b224019edd233c3720bbe0dbd2eed7f266bd6db6/);
 });
 
 test("実コマンドは独自ファイル・欠落・内容改変で非0を返す", async () => {

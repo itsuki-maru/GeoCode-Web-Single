@@ -7,6 +7,7 @@ use std::path::{Component, Path, PathBuf};
 #[path = "catalog_database.rs"]
 mod database;
 pub use database::TileCatalog;
+pub use database::rebind;
 
 /// 競合試験では実際の接続を保持し、製品用の制御フックを追加せず待機を作る。
 #[cfg(test)]
