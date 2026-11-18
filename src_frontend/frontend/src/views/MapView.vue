@@ -743,6 +743,7 @@ const uploadedUniqueFileName = ref("");
 const oneTimeUrl = ref("");
 const oneTimeUuid = ref("");
 const oneTimeExpiration = ref("");
+const oneTimeBackgroundReplaced = ref(false);
 
 // --- 地図オブジェクトの編集 ---
 const mapObjectEditRef = ref<InstanceType<typeof MapObjectEditModal> | null>(null);
@@ -926,10 +927,12 @@ const onOnetimeGenerated = (
   uuid: string,
   _updateUrl: boolean,
   expiration: string,
+  backgroundReplaced = false,
 ): void => {
   oneTimeUrl.value = generatedUrl;
   oneTimeUuid.value = uuid;
   oneTimeExpiration.value = expiration;
+  oneTimeBackgroundReplaced.value = backgroundReplaced;
   isOnetimeUrlModal.value = true;
 };
 
@@ -938,6 +941,7 @@ const handleOnetimeInvalidated = async (): Promise<void> => {
   oneTimeUrl.value = "";
   oneTimeUuid.value = "";
   oneTimeExpiration.value = "";
+  oneTimeBackgroundReplaced.value = false;
   await onetimeSettingRef.value?.fetchCurrentSharedUrl();
 };
 
@@ -1496,6 +1500,7 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
     :uuid="oneTimeUuid"
     :isHttps="isHttpsProtocol"
     :expiration="oneTimeExpiration"
+    :background-replaced="oneTimeBackgroundReplaced"
     :zIndex="shareSnapshot ? 21 : 3"
     @close="isOnetimeUrlModal = false"
     @invalidated="handleOnetimeInvalidated"

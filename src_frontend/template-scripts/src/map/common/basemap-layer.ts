@@ -2,6 +2,7 @@ import { normalizeBasemapDefinition, type TileServerRecord } from "./basemap-def
 import { formatTileAttribution } from "./tile-attribution";
 import { BASEMAP_TIMEOUT_MS } from "./map-timeouts";
 import { tileProxyRenderUrl } from "./tile-proxy-url";
+import { createGoogleBasemap } from "./google-basemap";
 
 export interface BasemapHandle {
   layer: any;
@@ -19,6 +20,7 @@ export function createBasemapLayer(
   const definition = normalizeBasemapDefinition(record);
   if (!definition) throw new Error("背景地図の設定が不正です。");
   if (signal?.aborted) throw new DOMException("背景の切替を中止しました。", "AbortError");
+  if (record.provider === "google") return createGoogleBasemap(leaflet, map, record, signal);
   if (definition.kind === "raster") {
     const layer = leaflet.tileLayer(tileProxyRenderUrl(record.url), {
       attribution: record.attribution,

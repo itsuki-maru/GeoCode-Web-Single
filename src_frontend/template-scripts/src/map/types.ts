@@ -45,6 +45,7 @@ interface MapBootstrapBase {
   layers: Record<string, LayerRecord>;
   markers: Record<string, MarkerRecord>;
   tileServers: Record<string, TileServerRecord>;
+  fallbackTileServerId?: string;
 }
 
 export interface EditableMapBootstrap extends MapBootstrapBase {

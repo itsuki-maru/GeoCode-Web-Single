@@ -2,7 +2,7 @@ import type { MapBootstrap } from "./types";
 import { restoreNormalBodyReferences } from "./normal-body-references";
 import { isStoredShareMapSnapshot } from "./common/share-snapshot";
 import { isClusteringMinZoom } from "./common/marker-clustering";
-import { normalizeBasemapDefinition } from "./common/basemap-definition";
+import { getFallbackTileServerId, normalizeBasemapDefinition } from "./common/basemap-definition";
 
 const MAP_PAGES = new Set<MapBootstrap["page"]>([
   "map",
@@ -46,9 +46,17 @@ export function readMapBootstrap(): MapBootstrap {
     !MAP_PAGES.has(value.page as MapBootstrap["page"]) ||
     (value.clusteringMinZoom !== undefined && !isClusteringMinZoom(value.clusteringMinZoom)) ||
     !isRecord(value.tileServers) ||
+    (value.fallbackTileServerId !== undefined &&
+      (typeof value.fallbackTileServerId !== "string" ||
+        getFallbackTileServerId(value.tileServers, value.fallbackTileServerId) !==
+          value.fallbackTileServerId)) ||
     !Object.entries(value.tileServers).every(([id, tile]) => {
       const definition = normalizeBasemapDefinition(tile);
-      return definition !== null && (id !== "1" || definition.kind === "raster");
+      return (
+        definition !== null &&
+        (id !== "1" ||
+          (definition.kind === "raster" && (tile as Record<string, unknown>).provider !== "google"))
+      );
     }) ||
     !isRecord(value.layers) ||
     !isRecord(value.markers)

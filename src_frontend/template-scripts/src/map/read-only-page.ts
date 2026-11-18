@@ -212,18 +212,18 @@ export function initializeReadOnlyMapPage(
   const hasCapturedView = Boolean(sharedSnapshot || isSnapshotPrint);
   const initialState = printState ?? sharedSnapshot?.state;
   const tileServers = sharedSnapshot?.tileServers ?? bootstrap.tileServers;
+  const { fallbackTileServerId } = bootstrap;
   const layers = bootstrap.layers;
   const markerRecords = bootstrap.markers;
   const shapeRecords = bootstrap.shapes;
 
-  const storage = createMapStorage(
-    tileServers,
-    isAnswerPreview || hasCapturedView
-      ? {
-          getStorage: () => ({ getItem: () => null, setItem: () => {} }) as Storage,
-        }
-      : undefined,
-  );
+  const storage = createMapStorage(tileServers, {
+    fallbackTileServerId,
+    getStorage:
+      isAnswerPreview || hasCapturedView
+        ? () => ({ getItem: () => null, setItem: () => {} }) as Storage
+        : undefined,
+  });
   const shapeStyle = createShapeStyleCore(() => SHAPE_STYLE);
   const shapeArrow = createShapeArrowRuntime({
     getDefaultStyle: () => SHAPE_STYLE,
@@ -283,14 +283,13 @@ export function initializeReadOnlyMapPage(
     initialState?.view ??
     answerMapView ??
     (isAnother ? (lastMapView ?? bootstrap.initialView) : temporaryBootstrap!.initialView);
-  const initialTileServerId = initialState
-    ? initialState.tileServerId
-    : isAnother
-      ? loadSelectedTileServerId(tileServers)
-      : "1";
+  const initialTileServerId =
+    initialState?.tileServerId ??
+    (isAnother ? loadSelectedTileServerId(tileServers, { fallbackTileServerId }) : undefined);
   let basemapMessages: ReturnType<typeof createMapMessageDialog> | undefined;
   const mapRuntime = createReadOnlyMapRuntime({
     initialTileServerId,
+    fallbackTileServerId,
     center: [initialView.latitude, initialView.longitude],
     escapeHtml,
     leaflet: L,
@@ -1455,6 +1454,7 @@ export function initializeReadOnlyMapPage(
             version: sharedSnapshot?.version,
             sourcePage: expectedPage,
             snapshotShare: Boolean(sharedSnapshot),
+            fallbackTileServerId,
             layers,
             markers: markerRecords,
             shapes: getShapeRecords(shapeRecords),

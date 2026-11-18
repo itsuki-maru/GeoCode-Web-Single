@@ -172,6 +172,47 @@ function configuredSnapshot() {
     jobs: [], requests: [] };
 }
 
+test('対応不一致でも移設の確認画面を使え、確認した計画だけを適用する', { skip: !JSDOM }, async () => {
+  const snapshot = { ...configuredSnapshot(), error: '別の本体DBに対応しています', owner_available: false, rebind: { binding_matches: false } };
+  const plan = { payload: { previous: { path: 'C:/old.sqlite' }, target: { path: 'D:/new.sqlite' }, evidence: 'original_database', catalog_contents: { rows: { local_tile_datasets: 3, local_tile_jobs: 17 } } }, signature: 'signed' };
+  let submitted;
+  const { dom, $ } = browserFixture(snapshot, async (command, args) => {
+    if (command === 'tile_manager_query' && args.action === 'rebind_plan') return plan;
+    if (command === 'tile_manager_submit') { submitted = args; return { id: args.requestId, state: 'starting' }; }
+    return {};
+  });
+  try {
+    await waitFor(() => !$('rebind-panel').hidden, 'repair panel unavailable');
+    assert.equal($('rebind-apply').disabled, true);
+    $('rebind-source').value = 'C:/old.sqlite';
+    $('rebind-plan').click(); await waitFor(() => !$('rebind-apply').disabled, 'verified plan not shown');
+    assert.match($('rebind-diagnosis').textContent, /17件/);
+    $('rebind-source').value = 'C:/changed.sqlite'; $('rebind-source').dispatchEvent(new dom.window.Event('input'));
+    assert.equal($('rebind-apply').disabled, true);
+    $('rebind-plan').click(); await waitFor(() => !$('rebind-apply').disabled, 'new plan unavailable');
+    $('rebind-apply').click(); await waitFor(() => submitted, 'repair not submitted');
+    assert.equal(submitted.action, 'rebind'); assert.equal(submitted.payload.kind, 'apply');
+    assert.deepEqual(plain(submitted.payload.plan), plan);
+    assert.equal($('rebind-apply').disabled, true);
+  } finally { await new Promise(resolve => setTimeout(resolve, 10)); dom.window.close(); }
+});
+
+test('照合中に条件が変わった移設計画は適用できない', { skip: !JSDOM }, async () => {
+  let release;
+  const { dom, $ } = browserFixture(configuredSnapshot(), async (command, args) => {
+    if (command === 'tile_manager_query' && args.action === 'rebind_plan') return new Promise(resolve => { release = resolve; });
+    return {};
+  });
+  try {
+    await waitFor(() => !$('workspace').hidden, 'workspace unavailable');
+    $('show-rebind').click(); $('rebind-plan').click(); await waitFor(() => release, 'plan not requested');
+    $('rebind-proof').value = 'D:/different.json'; $('rebind-proof').dispatchEvent(new dom.window.Event('input'));
+    release({ payload: { previous: {}, target: {}, catalog_contents: { rows: {} } } });
+    await waitFor(() => !$('rebind-plan').disabled, 'plan not finished');
+    assert.equal($('rebind-apply').disabled, true);
+  } finally { dom.window.close(); }
+});
+
 test('初期フォームから除外設定を送信し、停止の明示選択と道路形式も尊重する', { skip: !JSDOM }, async () => {
   for (const values of [
     { features: 'standard-v2', policy: null, expected: 'skip-feature' },

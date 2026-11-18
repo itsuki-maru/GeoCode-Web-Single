@@ -905,16 +905,10 @@ impl LocalTiles {
         {
             return Ok(json!({"id":existing}));
         }
-        let maximum: i64 = sqlx::query_scalar(
-            r#"
-            SELECT COALESCE(MAX(id), 0)
-            FROM tileserver_model
-            "#,
-        )
-        .fetch_one(&mut *transaction)
-        .await
-        .map_err(Failure::internal)?;
-        let background_id = maximum.checked_add(1).ok_or_else(Failure::unavailable)?;
+        let background_id = crate::db::tiles::next_background_id(&mut transaction)
+            .await
+            .map_err(Failure::internal)?
+            .ok_or_else(Failure::unavailable)?;
         let attribution = attribution_html(&dataset_info(&dataset.dataset)["attribution"])?;
         sqlx::query(
             r#"

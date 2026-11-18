@@ -1,9 +1,13 @@
 //! 全画面地図が保持している対象と表示設定を、追加検索せず共有用に固定する。
 use crate::{
+    db::{
+        BasemapScope,
+        tiles::{AvailableTileServers, load_basemap_catalog},
+    },
     error::AppError,
     model::{
-        LayerObjectFromRow, MarkerObjectFromRow, ShapeObject, TileServers,
-        is_valid_basemap_definition,
+        LayerObjectFromRow, MarkerObjectFromRow, ShapeObject, is_valid_basemap_definition,
+        is_valid_basemap_provider,
     },
     shape_validation::validate_shape_geojson,
 };
@@ -145,7 +149,7 @@ pub(super) fn parse(value: Value, user: &str) -> Result<Snapshot, AppError> {
             "共有対象はマーカーと図形を合わせて10,000件以内にしてください。".into(),
         ));
     }
-    if !matches!(input.version, 1 | 2)
+    if !matches!(input.version, 1 | 2 | 3)
         || input.layers.len() > MAX_LAYERS
         || input.tile_servers.len() > 1000
         || input.tile_overlays.len() > 1000
@@ -322,9 +326,7 @@ pub(super) fn parse(value: Value, user: &str) -> Result<Snapshot, AppError> {
             }
         }
     }
-    if !input.tile_servers.contains_key("1")
-        || !input.tile_servers.contains_key(&state.tile_server_id)
-    {
+    if !input.tile_servers.contains_key(&state.tile_server_id) {
         return Err(invalid());
     }
     let mut tile_servers = HashMap::new();
@@ -344,6 +346,11 @@ pub(super) fn parse(value: Value, user: &str) -> Result<Snapshot, AppError> {
                 "updated_at",
                 "kind",
                 "style_url",
+                "provider",
+                "google_map_type",
+                "enabled",
+                "allow_temporary_share",
+                "allow_live_map",
             ],
         )?;
         let id = value["id"].as_i64().ok_or_else(invalid)?;
@@ -351,7 +358,10 @@ pub(super) fn parse(value: Value, user: &str) -> Result<Snapshot, AppError> {
             return Err(invalid());
         }
         let tile = public_tile_server(&value, input.version)?;
-        if id == 1 && tile["kind"].as_str().is_some_and(|kind| kind != "raster") {
+        if id == 1
+            && (tile["kind"].as_str().is_some_and(|kind| kind != "raster")
+                || tile["provider"] == "google")
+        {
             return Err(invalid());
         }
         tile_servers.insert(key, tile);
@@ -399,6 +409,20 @@ fn public_tile_server(value: &Value, version: u8) -> Result<Value, AppError> {
         Some(Value::String(kind)) => kind.as_str(),
         _ => return Err(invalid()),
     };
+    let provider = match value.get("provider") {
+        None => "generic",
+        Some(Value::String(p)) => p.as_str(),
+        _ => return Err(invalid()),
+    };
+    let map_type = value
+        .get("google_map_type")
+        .filter(|value| !value.is_null());
+    if map_type.is_some_and(|value| !value.is_string())
+        || !is_valid_basemap_provider(kind, provider, map_type.and_then(Value::as_str))
+        || (provider == "google" && version < 3)
+    {
+        return Err(invalid());
+    }
     let style_url = value.get("style_url").filter(|value| !value.is_null());
     if style_url.is_some_and(|value| !value.is_string())
         || !is_valid_basemap_definition(kind, style_url.and_then(Value::as_str))
@@ -412,9 +436,13 @@ fn public_tile_server(value: &Value, version: u8) -> Result<Value, AppError> {
         "include_foreign_tiles":value["include_foreign_tiles"],
         "min_zoom":value["min_zoom"], "max_zoom":value["max_zoom"],
     });
-    if version == 2 {
+    if version >= 2 {
         tile["kind"] = json!(kind);
         tile["style_url"] = style_url.cloned().unwrap_or(Value::Null);
+    }
+    if version == 3 {
+        tile["provider"] = json!(provider);
+        tile["google_map_type"] = map_type.cloned().unwrap_or(Value::Null);
     }
     Ok(tile)
 }
@@ -424,6 +452,58 @@ fn tile_server_matches(captured: &Value, current: &Value, version: u8) -> bool {
         (public_tile_server(captured, version), public_tile_server(current, version)),
         (Ok(captured), Ok(current)) if super::super::answer_sqlite::json_equal(&captured, &current)
     )
+}
+
+/// 利用可否だけを現在の設定で見直し、許可済みの定義と地図の内容は保存時のまま使う。
+pub(super) fn apply_availability(
+    metadata: &mut Value,
+    basemaps: &AvailableTileServers,
+) -> Result<bool, AppError> {
+    let version = snapshot_version(metadata)?;
+    let selected = metadata["state"]["tileServerId"]
+        .as_str()
+        .ok_or_else(invalid)?
+        .to_owned();
+    let tiles = metadata["tileServers"]
+        .as_object_mut()
+        .ok_or_else(invalid)?;
+    let available: HashMap<_, _> = basemaps.tiles.iter().map(|tile| (tile.id, tile)).collect();
+    let fallback = basemaps
+        .fallback_id
+        .and_then(|id| available.get(&id))
+        .ok_or(AppError::InternalServerError)?;
+    let fallback_id = fallback.id.to_string();
+
+    tiles.retain(|id, captured| {
+        id.parse::<i64>()
+            .ok()
+            .and_then(|id| available.get(&id))
+            .is_some_and(|current| {
+                captured["provider"].as_str().unwrap_or("generic") == current.provider
+                    && captured["google_map_type"].as_str() == current.google_map_type.as_deref()
+            })
+    });
+    // フォールバックが共有時の一覧になくても、現在使える定義を一つ補う。
+    let has_fallback = tiles.get(&fallback_id).is_some_and(|tile| {
+        tile["kind"].as_str().unwrap_or("raster") == "raster"
+            && tile["provider"].as_str().unwrap_or("generic") == "generic"
+    });
+    if !has_fallback {
+        let current = serde_json::to_value(fallback).map_err(|_| AppError::InternalServerError)?;
+        tiles.insert(fallback_id.clone(), public_tile_server(&current, version)?);
+    }
+    let replaced = !tiles.contains_key(&selected);
+    if replaced {
+        metadata["state"]["tileServerId"] = json!(fallback_id);
+    }
+    Ok(replaced)
+}
+
+fn snapshot_version(metadata: &Value) -> Result<u8, AppError> {
+    match metadata["version"].as_u64() {
+        Some(version @ (1 | 2 | 3)) => Ok(version as u8),
+        _ => Err(invalid()),
+    }
 }
 
 fn public_tile_overlay(value: &Value) -> Value {
@@ -438,8 +518,8 @@ fn public_tile_overlay(value: &Value) -> Value {
 pub(super) async fn authorize(
     tx: &mut Transaction<'_, Sqlite>,
     user: &str,
-    snapshot: &Snapshot,
-) -> Result<(), AppError> {
+    snapshot: &mut Snapshot,
+) -> Result<bool, AppError> {
     let layer_ids: Vec<_> = snapshot.layers.keys().collect();
     let layers: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
         r#"
@@ -510,32 +590,11 @@ pub(super) async fn authorize(
     {
         return Err(invalid());
     }
-    let server_rows: Vec<TileServers> = sqlx::query_as(
-        r#"
-        SELECT
-            id,
-            layer_name,
-            label,
-            url,
-            kind,
-            style_url,
-            attribution,
-            include_foreign_tiles,
-            min_zoom,
-            max_zoom,
-            create_at,
-            updated_at
-        FROM tileserver_model
-        "#,
-    )
-    .fetch_all(&mut **tx)
-    .await?;
-    let version = snapshot.metadata["version"].as_u64().ok_or_else(invalid)?;
-    if !matches!(version, 1 | 2) {
-        return Err(invalid());
-    }
-    let servers: HashMap<_, _> = server_rows
-        .into_iter()
+    let catalog = load_basemap_catalog(&mut **tx).await?;
+    let version = snapshot_version(&snapshot.metadata)?;
+    let servers: HashMap<_, _> = catalog
+        .tiles
+        .iter()
         .map(|server| {
             let id = server.id.to_string();
             let value = serde_json::to_value(server).map_err(|_| AppError::InternalServerError)?;
@@ -548,7 +607,7 @@ pub(super) async fn authorize(
     {
         if !servers
             .get(id)
-            .is_some_and(|current| tile_server_matches(tile, current, version as u8))
+            .is_some_and(|current| tile_server_matches(tile, current, version))
         {
             return Err(AppError::Validation(
                 "背景地図の設定が変更されています。地図を開き直してください。".into(),
@@ -599,7 +658,10 @@ pub(super) async fn authorize(
             ));
         }
     }
-    Ok(())
+    apply_availability(
+        &mut snapshot.metadata,
+        &catalog.into_available(BasemapScope::Temporary),
+    )
 }
 
 fn json_ids(ids: &[&String]) -> Result<String, AppError> {
@@ -675,7 +737,7 @@ mod tests {
     #[test]
     // 未知の形式・種別と、既定背景のベクタ化を拒否する。
     fn snapshots_reject_unknown_versions_kinds_and_vector_default_background() {
-        for version in [0, 3, 255] {
+        for version in [0, 4, 255] {
             let mut bad = empty();
             bad["version"] = json!(version);
             assert!(parse(bad, &Uuid::nil().to_string()).is_err());

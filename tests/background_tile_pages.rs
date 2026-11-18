@@ -13,6 +13,7 @@ use geocode_web_single::{
     handler::{
         answer_map::{AnswerMapRequest, answer_map_handler},
         live_map::live_map_page_handler,
+        map::{map_another_get_handler, map_get_handler},
         onetime_url::{generate_url_handler, temporary_map_get_handler},
     },
     model::GenarateUrlPayload,
@@ -185,4 +186,154 @@ async fn nonsnapshot_share_pages_receive_current_background_metadata_on_desktop_
         .into_response();
         assert_background_metadata(response).await;
     }
+}
+
+async fn read_backgrounds(response: Response) -> Value {
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), 1_000_000).await.unwrap();
+    serde_json::from_slice(&body).unwrap()
+}
+
+fn assert_policy(page: &Value, fallback: &str, ids: &[&str]) {
+    assert_eq!(page["fallback"], fallback);
+    let mut actual: Vec<_> = page["tiles"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    actual.sort_unstable();
+    assert_eq!(actual, ids);
+}
+
+#[tokio::test]
+async fn authenticated_and_existing_public_maps_use_their_own_background_policies() {
+    let pool = common::test_pool().await;
+    let (user, tera) = fixture(&pool).await;
+    for name in [
+        "map.html",
+        "map-mobile.html",
+        "map-anather.html",
+        "live-map.html",
+        "temporary-map.html",
+        "temporary-map-mobile.html",
+    ] {
+        tera.lock().await.add_raw_template(
+            name,
+            r#"{"fallback": {{ fallbackTileServerId | json_encode() | safe }}, "tiles": {{ tileServers | json_encode() | safe }}}"#,
+        ).unwrap();
+    }
+    let layer = common::master_layer_id(&pool, &user).await;
+    let Json(temporary) = generate_url_handler(
+        Extension(user.clone()),
+        Extension(pool.clone()),
+        None,
+        Json(GenarateUrlPayload {
+            minutes: 60,
+            layers: vec![layer],
+            update_url: false,
+            share_password: None,
+            include_shapes: true,
+            include_tile_overlays: false,
+            snapshot: None,
+        }),
+    )
+    .await
+    .unwrap();
+    let public_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO live_map (id, public_id, name, created_by, expires_at)
+        VALUES ($1, $2, 'existing live map', $3, datetime('now', '+1 hour'))
+        "#,
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(public_id.to_string())
+    .bind(&user)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO tileserver_model (
+            id, layer_name, label, url, attribution,
+            include_foreign_tiles, create_at, updated_at, enabled, allow_temporary_share
+        ) VALUES
+            (3, 'live fallback', 'ライブの代替背景', '/live/{z}/{x}/{y}', '', false,
+                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, true, false),
+            (4, 'disabled', '無効背景', '/disabled/{z}/{x}/{y}', '', false,
+                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, false, true)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    for statement in [
+        r#"
+        INSERT INTO background_map_fallbacks (id, live_id)
+        VALUES (1, 3)
+        "#,
+        r#"
+        UPDATE tileserver_model
+        SET allow_live_map = false
+        WHERE id = 1
+        "#,
+        r#"
+        UPDATE tileserver_model
+        SET allow_temporary_share = false
+        WHERE id = 2
+        "#,
+    ] {
+        sqlx::query(statement).execute(&pool).await.unwrap();
+    }
+
+    for agent in ["Desktop", "Mobile"] {
+        let mut headers = HeaderMap::new();
+        headers.insert("user-agent", agent.parse().unwrap());
+        let editing = map_get_handler(
+            Extension(user.clone()),
+            Extension(pool.clone()),
+            Extension(tera.clone()),
+            Query(serde_json::from_value(json!({})).unwrap()),
+            headers.clone(),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        assert_policy(&read_backgrounds(editing).await, "1", &["1", "2", "3"]);
+
+        let shared = temporary_map_get_handler(
+            headers,
+            Extension(pool.clone()),
+            Extension(tera.clone()),
+            Query(serde_json::from_value(json!({})).unwrap()),
+            Ok(Path(temporary.id.clone())),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        assert_policy(&read_backgrounds(shared).await, "1", &["1"]);
+    }
+
+    let another = map_another_get_handler(
+        Extension(user.clone()),
+        Extension(pool.clone()),
+        Extension(tera.clone()),
+        Query(serde_json::from_value(json!({})).unwrap()),
+    )
+    .await
+    .unwrap()
+    .into_response();
+    assert_policy(&read_backgrounds(another).await, "1", &["1", "2", "3"]);
+
+    let live = live_map_page_handler(
+        HeaderMap::new(),
+        Extension(tera),
+        Extension(pool),
+        Path(public_id.to_string()),
+        Query(Default::default()),
+    )
+    .await
+    .unwrap();
+    assert_policy(&read_backgrounds(live).await, "3", &["2", "3"]);
 }

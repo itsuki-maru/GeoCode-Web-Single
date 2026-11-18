@@ -1,7 +1,22 @@
 import { createBasemapLayer } from "./basemap-layer";
-import type { TileServerRecord } from "./basemap-definition";
+import {
+  getFallbackTileServerId,
+  requiresBasemapReady,
+  type TileServerRecord,
+  type BasemapProvider,
+} from "./basemap-definition";
+
+export interface BasemapState {
+  id: string;
+  provider: BasemapProvider;
+  ready: boolean;
+  pending: boolean;
+  /** 背景側の表示条件。将来のRoutes APIの権限・有効化は別に確認する。 */
+  googleRoutesAvailable: boolean;
+}
 
 export interface BasemapController {
+  getState(): BasemapState;
   select(id: string): Promise<boolean>;
   getSelectedId(): string;
   getLayer(): any;
@@ -16,6 +31,7 @@ export interface BasemapControllerOptions {
   tileServers: Record<string, TileServerRecord>;
   bounds: any;
   initialId?: string;
+  fallbackTileServerId?: string;
   saveSelectedTileServerId?(id: string): void;
   onCommit?(id: string, layer: any): void;
   onError?(error: unknown, id: string): void;
@@ -48,16 +64,15 @@ export function createBasemapController({
   map,
   tileServers,
   bounds,
-  initialId = "1",
+  initialId,
+  fallbackTileServerId,
   saveSelectedTileServerId,
   onCommit,
   onError,
 }: BasemapControllerOptions): BasemapController {
-  const fallbackId =
-    (tileServers["1"]?.kind !== "vector" && tileServers["1"]
-      ? "1"
-      : Object.keys(tileServers).find((id) => tileServers[id].kind !== "vector")) ?? "";
+  const fallbackId = getFallbackTileServerId(tileServers, fallbackTileServerId) ?? "";
   if (!fallbackId) throw new Error("ラスタの背景地図が必要です。");
+  const requestedId = initialId && Object.hasOwn(tileServers, initialId) ? initialId : fallbackId;
 
   let current: ManagedLayer;
   let candidate: Candidate | undefined;
@@ -66,17 +81,33 @@ export function createBasemapController({
   let disposed = false;
   let lastSelection: Promise<boolean> = Promise.resolve(true);
 
+  const state = (): BasemapState => {
+    const record = current && tileServers[current.id];
+    const ready = Boolean(
+      current && !current.failed && !current.provisional && !pending && !disposed,
+    );
+    const provider = record?.provider ?? "generic";
+    return {
+      id: current?.id ?? "",
+      provider,
+      ready,
+      pending,
+      googleRoutesAvailable: ready && provider === "google",
+    };
+  };
+  const notifyState = () => map.fire?.("basemapstatechange", state());
   const setPending = (value: boolean) => {
     if (pending === value) return;
     pending = value;
     map.fire?.("basemaploadingchange", { pending });
+    notifyState();
   };
   const notifyCommit = () => onCommit?.(current.id, current.handle.layer);
   const withinZoomRange = (id: string) => {
     const record = tileServers[id];
     const zoom = map.getZoom?.();
     return (
-      record.kind !== "vector" ||
+      !requiresBasemapReady(record) ||
       typeof zoom !== "number" ||
       (zoom >= (record.min_zoom ?? 5) && zoom <= (record.max_zoom ?? 18))
     );
@@ -99,8 +130,9 @@ export function createBasemapController({
     entry.onError = (event: any) => {
       if (disposed || current !== entry) return;
       entry.failed = true;
+      notifyState();
       onError?.(event?.error ?? event, entry.id);
-      if (tileServers[entry.id].kind === "vector" && !pending) {
+      if (requiresBasemapReady(tileServers[entry.id]) && !pending) {
         // 一時的な障害による代替表示では、利用者が保存した背景の好みを変更しない。
         void requestSelection(fallbackId, false);
       }
@@ -114,6 +146,10 @@ export function createBasemapController({
   };
   const commit = (entry: ManagedLayer, persist: boolean, boundsRecord = tileServers[entry.id]) => {
     const previous = current;
+    map.fire?.("basemapwillchange", {
+      id: entry.id,
+      provider: tileServers[entry.id].provider ?? "generic",
+    });
     current = entry;
     current.handle.setVisible(true);
     map.setMaxBounds?.(boundsRecord.include_foreign_tiles ? null : bounds);
@@ -123,6 +159,7 @@ export function createBasemapController({
     if (persist) saveSelectedTileServerId?.(entry.id);
     notifyCommit();
     map.fire?.("basemapchange", { id: entry.id, layer: entry.handle.layer });
+    notifyState();
   };
 
   const restoreProvisionalFallback = (): boolean => {
@@ -136,7 +173,7 @@ export function createBasemapController({
   };
 
   async function runSelection(id: string, persist: boolean): Promise<boolean> {
-    if (disposed || !tileServers[id]) return false;
+    if (disposed || !Object.hasOwn(tileServers, id)) return false;
     const selectedGeneration = ++generation;
     cancelCandidate();
     if (id === current.id && !current.failed && withinZoomRange(id)) {
@@ -187,7 +224,7 @@ export function createBasemapController({
       if (!restoreProvisionalFallback()) {
         if (
           id !== fallbackId &&
-          tileServers[current.id].kind === "vector" &&
+          requiresBasemapReady(tileServers[current.id]) &&
           (current.failed || !withinZoomRange(current.id))
         ) {
           // 最新候補も失敗した場合だけ、利用できなくなった旧背景をラスタへ戻す。
@@ -213,6 +250,7 @@ export function createBasemapController({
   }
 
   const controller: BasemapController = {
+    getState: state,
     select: (id) => requestSelection(id, true),
     getSelectedId: () => current.id,
     getLayer: () => current.handle.layer,
@@ -237,9 +275,9 @@ export function createBasemapController({
     },
   };
 
-  const requested = tileServers[initialId];
-  const initialVector = requested?.kind === "vector";
-  const initialRasterId = requested && requested.kind !== "vector" ? initialId : fallbackId;
+  const requested = tileServers[requestedId];
+  const initialVector = requiresBasemapReady(requested);
+  const initialRasterId = initialVector ? fallbackId : requestedId;
   // 暫定ラスタの制約で、復元したベクタの低ズームや海外位置を変更しない。
   const initialRaster = initialVector
     ? { ...tileServers[initialRasterId], min_zoom: 0, max_zoom: 30 }
@@ -256,6 +294,6 @@ export function createBasemapController({
   void handle.ready?.catch((error) => {
     if (!disposed && current.handle === handle) onError?.(error, initialRasterId);
   });
-  if (requested?.kind === "vector") void requestSelection(initialId, false);
+  if (initialVector) void requestSelection(requestedId, false);
   return controller;
 }

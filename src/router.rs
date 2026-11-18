@@ -155,6 +155,14 @@ pub fn build_router_with_local_tiles(
 
     let tile_settings_routes = Router::new()
         .route(
+            "/admin/google-maps-settings",
+            get(crate::google_maps::admin_get).put(crate::google_maps::admin_update),
+        )
+        .route(
+            "/admin/google-maps-settings/check",
+            post(crate::google_maps::admin_check),
+        )
+        .route(
             "/admin/tile-server-settings",
             get(tile_server_settings::get_settings),
         )
@@ -231,8 +239,12 @@ pub fn build_router_with_local_tiles(
             get(background_maps::admin_list).post(background_maps::admin_create),
         )
         .route(
+            "/admin/background-maps/fallbacks",
+            put(background_maps::admin_update_fallbacks),
+        )
+        .route(
             "/admin/background-maps/{id}",
-            put(background_maps::admin_update),
+            put(background_maps::admin_update).delete(background_maps::admin_delete),
         )
         .route("/tile-overlays", get(tile_overlays::user_list))
         .route("/tile-overlays/{id}", put(tile_overlays::user_select))
@@ -376,6 +388,7 @@ pub fn build_router_with_local_tiles(
         .route("/file/export/{layer_id}", get(export_json_handler))
         .route("/admin", get(admin_index_get_handler))
         .route("/tile-server-settings", get(admin_index_get_handler))
+        .route("/google-maps-settings", get(admin_index_get_handler))
         .route("/admin/users", get(get_users_handler))
         .route(
             "/admin/user/password-reset/{update_user_id}",
@@ -508,6 +521,13 @@ pub fn build_router_with_local_tiles(
         .route("/", get(crate::root_handler))
         .route("/index", get(crate::index_handler))
         .route("/health-check", get(crate::health_check_handler))
+        // 共有ページのトークンまたはアカウントをハンドラーで確認する。
+        .route("/google-maps/context", post(crate::google_maps::context))
+        .route(
+            "/google-maps/tiles/{z}/{x}/{y}",
+            get(crate::google_maps::tile),
+        )
+        .route("/google-maps/viewport", get(crate::google_maps::viewport))
         .route("/geocode", post(crate::handler::geocoding::search_handler))
         .route("/app-init", get(crate::get_app_init_handler))
         .route("/favicon.ico", get(crate::serve_favicon))
@@ -608,6 +628,9 @@ pub fn build_router_with_local_tiles(
         .layer(middleware::from_fn(print_request_response))
         .layer(middleware::from_fn(security_headers_and_origin))
         .layer(Extension(tile_settings))
+        .layer(Extension(Arc::new(
+            crate::google_maps::GoogleMaps::default(),
+        )))
         .layer(Extension(local_tiles))
         .layer(DefaultBodyLimit::max(105 * 1024 * 1024))
         .fallback(crate::custom_not_found_handler)

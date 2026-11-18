@@ -34,7 +34,6 @@ const bootstrap = window.__GEOCODE_LIVE_MAP_BOOTSTRAP__;
 const map = L.map("map").setView([39.2, 138.5], 6);
 const tileServers = bootstrap.tileServers as Record<string, any>;
 const tileServerEntries = Object.entries(tileServers);
-const defaultTileServerId = tileServers["1"] ? "1" : tileServerEntries[0]?.[0];
 const japanBounds = L.latLngBounds(L.latLng(20.25, 122.56), L.latLng(45.55, 153.59));
 let basemapController: ReturnType<typeof createBasemapController> | null = null;
 let basemapErrorDialog: ReturnType<typeof createMapMessageDialog> | null = null;
@@ -51,13 +50,13 @@ function selectTileServer(tileServerId: string): void {
   syncBasemapSelection(basemapController.getSelectedId());
 }
 
-if (defaultTileServerId) {
+if (tileServerEntries.length) {
   basemapController = createBasemapController({
     leaflet: L,
     map,
     tileServers,
     bounds: japanBounds,
-    initialId: defaultTileServerId,
+    fallbackTileServerId: bootstrap.fallbackTileServerId,
     onCommit: syncBasemapSelection,
     onError: () => {
       basemapErrorDialog ??= createMapMessageDialog();

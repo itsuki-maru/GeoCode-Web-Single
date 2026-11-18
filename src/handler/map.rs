@@ -113,10 +113,9 @@ pub async fn map_get_handler(
     // User-Agentに"Mobile"が含まれているか確認
     let is_mobile = user_agent.map_or(false, |ua| ua.contains("Mobile"));
 
-    let tile_servers = crate::db::load_tile_servers(&pool).await.map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
+    let basemaps =
+        crate::db::load_available_tile_servers(&pool, crate::db::BasemapScope::Normal).await?;
+    let tile_servers = basemaps.tiles;
 
     let tile_servers_hash_map = vec_to_hashmap(tile_servers, |t| t.id);
 
@@ -275,6 +274,9 @@ pub async fn map_get_handler(
     context.insert("zoom", &zoom);
     context.insert("clusteringMinZoom", &load_clustering_min_zoom(&pool).await?);
     context.insert("tileServers", &tile_servers_hash_map);
+    if let Some(id) = basemaps.fallback_id {
+        context.insert("fallbackTileServerId", &id.to_string());
+    }
     context.insert("geocoderCsis", &crate::config::CONFIG.geocoder.uses_csis());
     context.insert("tileVisibilityAccountId", &user_id);
     context.insert(
@@ -307,10 +309,9 @@ pub async fn map_another_get_handler(
     Query(params): Query<MapAnotherWindowQueryParams>,
 ) -> Result<impl IntoResponse, AppError> {
     // タイルサーバの一覧を取得
-    let tile_servers = crate::db::load_tile_servers(&pool).await.map_err(|e| {
-        tracing::error!(error = %e, "database error.");
-        AppError::Sqlx(e)
-    })?;
+    let basemaps =
+        crate::db::load_available_tile_servers(&pool, crate::db::BasemapScope::Normal).await?;
+    let tile_servers = basemaps.tiles;
 
     // タイルサーバをハッシュマップに変換
     let tile_servers_hash_map = vec_to_hashmap(tile_servers, |t| t.id);
@@ -351,6 +352,9 @@ pub async fn map_another_get_handler(
     context.insert("longitude", &DEFAULT_ANOTHER_MAP_LONGITUDE);
     context.insert("zoom", &DEFAULT_ANOTHER_MAP_ZOOM);
     context.insert("tileServers", &tile_servers_hash_map);
+    if let Some(id) = basemaps.fallback_id {
+        context.insert("fallbackTileServerId", &id.to_string());
+    }
     context.insert("geocoderCsis", &crate::config::CONFIG.geocoder.uses_csis());
     context.insert("tileVisibilityAccountId", &user_id);
     context.insert(

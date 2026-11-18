@@ -129,6 +129,20 @@ function selectVector() {
 }
 
 describe("read-only basemap transitions", () => {
+  it("以前選んだ背景がなくなった場合は、管理者が指定した背景を使う", () => {
+    const base = fixture();
+    base.fallbackTileServerId = "3";
+    base.tileServers["3"] = { ...base.tileServers["1"], id: 3, layer_name: "fallback" };
+    window.__GEOCODE_MAP_BOOTSTRAP__ = base;
+    localStorage.setItem("geocode-web:selected-tile-server-id", "4");
+
+    runtime = initializeReadOnlyMapPage("map-anather");
+
+    expect(runtime.getPrintState().tileServerId).toBe("3");
+    expect(document.querySelector<HTMLInputElement>(".tile-radio:checked")?.value).toBe("3");
+    expect(document.querySelector('.tile-radio[value="4"]')).toBeNull();
+  });
+
   it("ベクタ読み込み中に確定済みラスタをクリックすると切替を中止し、遅い完了を無視する", async () => {
     runtime = initializeReadOnlyMapPage("map-anather");
     const select = vi.spyOn(runtime.basemapController, "select");
@@ -187,6 +201,9 @@ describe("read-only basemap transitions", () => {
 
   it("v2共有はラスタを先に表示し、保存されたベクタの切替後に印刷を開始する", async () => {
     const base = fixture();
+    base.fallbackTileServerId = "3";
+    base.tileServers["3"] = { ...base.tileServers["1"], id: 3, layer_name: "fallback" };
+    delete base.tileServers["1"];
     const state = {
       view: base.initialView,
       tileServerId: "2",
@@ -215,7 +232,8 @@ describe("read-only basemap transitions", () => {
     } satisfies TemporaryMapBootstrap;
     runtime = initializeReadOnlyMapPage("temporary-map");
     expect(layers.vectors[0]!.styleUrl).toBe("/assets/styles/vector.json");
-    expect(runtime.getPrintState().tileServerId).toBe("1");
+    expect(runtime.getPrintState().tileServerId).toBe("3");
+    expect(document.querySelector('.tile-radio[value="1"]')).toBeNull();
     const print = [...document.querySelectorAll("button")].find(
       (button) => button.textContent === "地図を印刷",
     )!;

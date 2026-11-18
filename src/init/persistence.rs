@@ -93,6 +93,98 @@ fn temporary_file(destination: &Path, permission_source: &Path) -> io::Result<Na
     Ok(temporary)
 }
 
+pub(super) fn protect_maintenance_file(source: &Path, destination: &Path) -> io::Result<()> {
+    reject_non_regular_file(source)?;
+    #[cfg(windows)]
+    copy_existing_dacl(source, destination)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(
+            destination,
+            fs::Permissions::from_mode(if destination.is_dir() { 0o700 } else { 0o600 }),
+        )?;
+    }
+    Ok(())
+}
+
+/// バックアップを置く前から保護されたディレクトリを、新規作成だけで公開する。
+pub(super) fn create_maintenance_directory(source: &Path, destination: &Path) -> io::Result<()> {
+    reject_non_regular_file(source)?;
+    #[cfg(windows)]
+    {
+        use std::{mem::size_of, os::windows::ffi::OsStrExt};
+        use windows::{
+            Win32::{
+                Security::{
+                    DACL_SECURITY_INFORMATION, GetFileSecurityW, PSECURITY_DESCRIPTOR,
+                    SE_DACL_PROTECTED, SECURITY_ATTRIBUTES, SetSecurityDescriptorControl,
+                },
+                Storage::FileSystem::CreateDirectoryW,
+            },
+            core::PCWSTR,
+        };
+        let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+        let destination: Vec<u16> = destination
+            .as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        let mut size = 0u32;
+        unsafe {
+            let _ = GetFileSecurityW(
+                PCWSTR(source.as_ptr()),
+                DACL_SECURITY_INFORMATION.0,
+                None,
+                0,
+                &mut size,
+            );
+        }
+        if size == 0 || size > 1024 * 1024 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "元のアクセス権を確認できません。",
+            ));
+        }
+        let mut buffer = vec![0usize; (size as usize).div_ceil(size_of::<usize>())];
+        let descriptor = PSECURITY_DESCRIPTOR(buffer.as_mut_ptr().cast());
+        unsafe {
+            GetFileSecurityW(
+                PCWSTR(source.as_ptr()),
+                DACL_SECURITY_INFORMATION.0,
+                Some(descriptor),
+                size,
+                &mut size,
+            )
+            .ok()
+            .map_err(io::Error::other)?;
+            SetSecurityDescriptorControl(descriptor, SE_DACL_PROTECTED, SE_DACL_PROTECTED)
+                .map_err(io::Error::other)?;
+            let attributes = SECURITY_ATTRIBUTES {
+                nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+                lpSecurityDescriptor: descriptor.0,
+                bInheritHandle: false.into(),
+            };
+            CreateDirectoryW(PCWSTR(destination.as_ptr()), Some(&attributes))
+                .map_err(io::Error::other)?;
+        }
+        Ok(())
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        fs::DirBuilder::new().mode(0o700).create(destination)
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        let _ = destination;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "安全なアクセス権設定に対応していません。",
+        ))
+    }
+}
+
 #[cfg(windows)]
 fn copy_existing_dacl(source: &Path, destination: &Path) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;

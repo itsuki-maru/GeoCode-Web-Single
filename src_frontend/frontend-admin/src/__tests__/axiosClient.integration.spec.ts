@@ -337,8 +337,15 @@ const background = {
   style_url: "/styles/v1.json",
   attribution: "出典",
   include_foreign_tiles: false,
+  enabled: true,
+  allow_temporary_share: true,
+  allow_live_map: true,
   min_zoom: null,
   max_zoom: null,
+};
+const backgroundSettings = {
+  backgrounds: [background],
+  fallbacks: { normal: "1", temporary: "1", live: "1" },
 };
 async function openBackground() {
   wrapper = mount(BackgroundMaps, { attachTo: document.body });
@@ -351,7 +358,7 @@ describe("実Axiosを使う背景地図設定", () => {
   it("保存中のトークン更新後も同じ入力を再送し、一度だけ成功を反映する", async () => {
     const writes: unknown[] = [];
     adapter.mockImplementation(async (config) => {
-      if (config.method === "get") return response(config, [background]);
+      if (config.method === "get") return response(config, backgroundSettings);
       if (path(config) === "/account/refresh") return response(config);
       writes.push(JSON.parse(config.data));
       if (writes.length === 1) throw httpError(config, 401, { error: "token_expired" });
@@ -372,7 +379,9 @@ describe("実Axiosを使う背景地図設定", () => {
       adapter.mock.calls.filter(([config]) => path(config) === "/account/refresh"),
     ).toHaveLength(1);
     expect(w.get("li").text()).toContain("/styles/v2.json");
-    expect(w.get('[role="status"]').text()).toContain("背景地図を保存しました");
+    const dialog = w.get('[role="dialog"][aria-labelledby="message-modal-title"]');
+    expect(dialog.isVisible()).toBe(true);
+    expect(dialog.text()).toContain("背景地図を保存しました");
     expect(auth.logout).not.toHaveBeenCalled();
     expect(auth.push).not.toHaveBeenCalled();
   });
@@ -380,7 +389,7 @@ describe("実Axiosを使う背景地図設定", () => {
   it("サーバーの入力エラーでは元の一覧と編集中の入力を維持し、再保存で回復する", async () => {
     let attempts = 0;
     adapter.mockImplementation(async (config) => {
-      if (config.method === "get") return response(config, [background]);
+      if (config.method === "get") return response(config, backgroundSettings);
       if (++attempts === 1) throw httpError(config, 400, { error: "private provider details" });
       return response(config, { ...background, ...JSON.parse(config.data) });
     });
@@ -390,6 +399,8 @@ describe("実Axiosを使う背景地図設定", () => {
     await flushPromises();
     expect(attempts).toBe(1);
     expect(w.get('[role="alert"]').text()).toContain("保存できませんでした");
+    const dialog = w.get('[role="dialog"][aria-labelledby="message-modal-title"]');
+    expect(dialog.isVisible()).toBe(false);
     expect(w.text()).not.toContain("private provider details");
     expect(w.get<HTMLInputElement>("#background-style-url").element.value).toBe(
       "/styles/retry.json",
@@ -400,6 +411,7 @@ describe("実Axiosを使う背景地図設定", () => {
     await flushPromises();
     expect(attempts).toBe(2);
     expect(w.get("li").text()).toContain("/styles/retry.json");
-    expect(w.get('[role="status"]').text()).toContain("保存しました");
+    expect(dialog.isVisible()).toBe(true);
+    expect(dialog.text()).toContain("背景地図を保存しました");
   });
 });

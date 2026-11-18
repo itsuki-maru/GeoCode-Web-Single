@@ -4,6 +4,8 @@ import {
 } from "../../../template-scripts/src/map/common/basemap-definition";
 
 export type BackgroundMapInput = {
+  provider?: "generic" | "google";
+  google_map_type?: "roadmap" | "satellite" | "terrain" | null;
   layer_name: string;
   label: string;
   url: string;
@@ -11,6 +13,9 @@ export type BackgroundMapInput = {
   style_url: string | null;
   attribution: string;
   include_foreign_tiles: boolean;
+  enabled: boolean;
+  allow_temporary_share: boolean;
+  allow_live_map: boolean;
   min_zoom: number | null;
   max_zoom: number | null;
 };
@@ -21,6 +26,17 @@ export type BackgroundMapRecord = Omit<BackgroundMapInput, "kind" | "style_url">
   style_url?: string | null;
 };
 
+export type BackgroundMapFallbacks = {
+  normal: string | null;
+  temporary: string | null;
+  live: string | null;
+};
+
+export type BackgroundMapSettings = {
+  backgrounds: BackgroundMapRecord[];
+  fallbacks: BackgroundMapFallbacks;
+};
+
 export type BackgroundMapForm = Omit<BackgroundMapInput, "style_url" | "min_zoom" | "max_zoom"> & {
   style_url: string;
   min_zoom: number | string;
@@ -28,6 +44,8 @@ export type BackgroundMapForm = Omit<BackgroundMapInput, "style_url" | "min_zoom
 };
 
 export const newBackgroundMapForm = (): BackgroundMapForm => ({
+  provider: "generic",
+  google_map_type: "roadmap",
   layer_name: "",
   label: "",
   url: "",
@@ -35,12 +53,17 @@ export const newBackgroundMapForm = (): BackgroundMapForm => ({
   style_url: "",
   attribution: "",
   include_foreign_tiles: false,
+  enabled: true,
+  allow_temporary_share: true,
+  allow_live_map: true,
   min_zoom: "",
   max_zoom: "",
 });
 
 export function editBackgroundMapForm(record: BackgroundMapRecord): BackgroundMapForm {
   return {
+    provider: record.provider ?? "generic",
+    google_map_type: record.google_map_type ?? "roadmap",
     layer_name: record.layer_name,
     label: record.label,
     url: record.url,
@@ -48,6 +71,9 @@ export function editBackgroundMapForm(record: BackgroundMapRecord): BackgroundMa
     style_url: record.style_url ?? "",
     attribution: record.attribution,
     include_foreign_tiles: record.include_foreign_tiles,
+    enabled: record.enabled,
+    allow_temporary_share: record.allow_temporary_share,
+    allow_live_map: record.allow_live_map,
     min_zoom: record.min_zoom ?? "",
     max_zoom: record.max_zoom ?? "",
   };
@@ -86,7 +112,16 @@ export function validateBackgroundMapForm(
   if (form.attribution.includes("\0")) return { error: "出典に使用できない文字が含まれています。" };
   const layer_name = form.layer_name.trim();
   const label = form.label.trim();
-  const url = form.url.trim();
+  const google = form.provider === "google";
+  const url = google ? "/google-maps/tiles/{z}/{x}/{y}" : form.url.trim();
+  if (form.provider !== undefined && form.provider !== "generic" && !google)
+    return { error: "配信元を選択してください。" };
+  if (
+    google &&
+    (form.kind !== "raster" ||
+      !["roadmap", "satellite", "terrain"].includes(form.google_map_type ?? ""))
+  )
+    return { error: "Google地図の種類を選択してください。" };
   if (!label || [...label].length > 255) return { error: "表示名は1〜255文字で入力してください。" };
   if (!layer_name || [...layer_name].length > 255)
     return { error: "識別名は1〜255文字で入力してください。" };
@@ -104,7 +139,7 @@ export function validateBackgroundMapForm(
   if ([...form.attribution].length > 255) return { error: "出典は255文字以内で入力してください。" };
   if (form.kind !== "raster" && form.kind !== "vector")
     return { error: "背景の種別を選択してください。" };
-  if (editingId === 1 && form.kind !== "raster")
+  if (editingId === 1 && (form.kind !== "raster" || google))
     return { error: "背景ID 1はラスタのまま使用してください。" };
   if (
     form.kind === "vector" &&
@@ -123,13 +158,17 @@ export function validateBackgroundMapForm(
     };
   return {
     input: {
+      ...(google ? { provider: "google" as const, google_map_type: form.google_map_type } : {}),
       layer_name,
       label,
       url,
       kind: form.kind,
       style_url: form.kind === "vector" ? form.style_url : null,
-      attribution: form.attribution,
+      attribution: google ? "" : form.attribution,
       include_foreign_tiles: form.include_foreign_tiles,
+      enabled: form.enabled,
+      allow_temporary_share: form.allow_temporary_share,
+      allow_live_map: form.allow_live_map,
       min_zoom,
       max_zoom,
     },

@@ -180,6 +180,24 @@ describe("read-only print snapshot", () => {
     ).toBe(true);
   });
 
+  it("ID 1 が許可されていない共有地図の印刷に、公開先のフォールバックを引き継ぐ", () => {
+    const { source, state } = fixture();
+    const snapshot = createReadOnlyPrintSnapshot(
+      {
+        ...source,
+        snapshotShare: true,
+        fallbackTileServerId: "3",
+        tileServers: { "3": { ...source.tileServers["1"], id: 3 } },
+      },
+      { ...state, layerIds: [], tileServerId: "3" },
+      new Set(),
+    );
+    expect(snapshot.fallbackTileServerId).toBe("3");
+    expect(Object.keys(snapshot.tileServers)).toEqual(["3"]);
+    expect(isReadOnlyPrintSnapshot(snapshot)).toBe(true);
+    expect(isReadOnlyPrintSnapshot({ ...snapshot, fallbackTileServerId: "1" })).toBe(false);
+  });
+
   it("転送データで対象ID・所属・色割当と描画定義の不整合を拒否する", () => {
     const { source, state, keys } = fixture();
     const snapshot = createReadOnlyPrintSnapshot(source, state, keys);

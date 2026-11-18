@@ -69,6 +69,17 @@ pub enum Command {
         policy: ElevationDatumPolicy,
     },
     ConfigShow,
+    RebindInspect,
+    RebindPrepare {
+        output: PathBuf,
+    },
+    RebindPlan {
+        source_database: Option<PathBuf>,
+        proof: Option<PathBuf>,
+    },
+    RebindApply {
+        plan: PathBuf,
+    },
     Status,
     DatasetsList,
     DatasetShow {
@@ -136,6 +147,10 @@ impl Invocation {
                 | Command::BuildInfo
                 | Command::ElevationInspect { .. }
                 | Command::ConfigShow
+                | Command::RebindInspect
+                | Command::RebindPrepare { .. }
+                | Command::RebindPlan { .. }
+                | Command::RebindApply { .. }
         )
     }
     pub fn is_writer(&self) -> bool {
@@ -149,6 +164,8 @@ impl Invocation {
                 | Command::Resume { .. }
                 | Command::BackgroundAdd { .. }
                 | Command::Cleanup { .. }
+                | Command::RebindPrepare { .. }
+                | Command::RebindApply { .. }
         )
     }
 }
@@ -158,6 +175,10 @@ pub fn help_text() -> &'static str {
 使用方法: geocode_web_single.exe local-tiles <コマンド> [オプション]\n\n\
 管理画面: local-tiles gui [--config ABSOLUTE_JSON_PATH]（サーバー非起動）\n\n\
   build-info / config show / status\n\
+  catalog rebind inspect\n\
+  catalog rebind prepare --output ABSOLUTE_PROOF_JSON\n\
+  catalog rebind plan [--source-database ORIGINAL_DB | --proof PROOF_JSON]\n\
+  catalog rebind apply --plan PLAN_JSON\n\
   elevation inspect --input ABSOLUTE_PATH [--elevation-datum-policy strict|allow-jgd2000-2011]\n\
   datasets list / show --dataset ID\n\
   datasets register --database PATH --name NAME\n\
@@ -254,6 +275,17 @@ pub fn parse(args: &[String]) -> Result<Invocation, CliError> {
                 .map_err(|error| CliError::usage(error.to_string()))?,
         },
         ["config", "show"] => Command::ConfigShow,
+        ["catalog", "rebind", "inspect"] => Command::RebindInspect,
+        ["catalog", "rebind", "prepare"] => Command::RebindPrepare {
+            output: PathBuf::from(required(&mut options, "--output")?),
+        },
+        ["catalog", "rebind", "plan"] => Command::RebindPlan {
+            source_database: options.remove("--source-database").map(PathBuf::from),
+            proof: options.remove("--proof").map(PathBuf::from),
+        },
+        ["catalog", "rebind", "apply"] => Command::RebindApply {
+            plan: PathBuf::from(required(&mut options, "--plan")?),
+        },
         ["status"] => Command::Status,
         ["datasets", "list"] => Command::DatasetsList,
         ["datasets", "show"] => Command::DatasetShow {
@@ -689,6 +721,43 @@ pub async fn execute_with_cancellation(
     pool: Option<SqlitePool>,
     cancellation: CancellationToken,
 ) -> Result<CommandOutput, CliError> {
+    use super::catalog::rebind;
+    let relocation = match &invocation.command {
+        Command::RebindInspect => Some(rebind::Request::Inspect),
+        Command::RebindPrepare { output } => Some(rebind::Request::Prepare {
+            output: output.clone(),
+        }),
+        Command::RebindPlan {
+            source_database,
+            proof,
+        } => Some(rebind::Request::Plan {
+            source_database: source_database.clone(),
+            proof: proof.clone(),
+        }),
+        Command::RebindApply { plan } => Some(rebind::Request::Apply {
+            plan: rebind::read_document(plan).map_err(catalog_error)?,
+        }),
+        _ => None,
+    };
+    if let Some(request) = relocation {
+        let path = invocation
+            .config_path
+            .clone()
+            .or_else(|| {
+                dirs::home_dir().map(|p| p.join(".geocode-web-single/geocode-web-single.env.json"))
+            })
+            .ok_or_else(|| CliError::usage("設定JSONの絶対パスが必要です。"))?;
+        let value = rebind::run(path, request, cancellation.clone())
+            .await
+            .map_err(|error| {
+                if cancellation.is_cancelled() {
+                    CliError::new(130, error)
+                } else {
+                    catalog_error(error)
+                }
+            })?;
+        return Ok(CommandOutput::success(value));
+    }
     if matches!(invocation.command, Command::Help) {
         return Ok(CommandOutput::success(json!({"help":help_text()})));
     }

@@ -56,6 +56,7 @@ interface LeafletNamespace {
 
 interface ReadOnlyMapRuntimeOptions {
   initialTileServerId?: string;
+  fallbackTileServerId?: string;
   center: [number, number];
   escapeHtml(value: unknown): string;
   handleTileChange?: EventListener;
@@ -71,7 +72,8 @@ const LEAFLET_ATTRIBUTION =
   '&copy; <a href="https://leafletjs.com" target="_blank" rel="noopener noreferrer">Leaflet</a>';
 
 export function createReadOnlyMapRuntime({
-  initialTileServerId = "1",
+  initialTileServerId,
+  fallbackTileServerId,
   center,
   escapeHtml,
   handleTileChange,
@@ -82,11 +84,6 @@ export function createReadOnlyMapRuntime({
   tileServers,
   zoom,
 }: ReadOnlyMapRuntimeOptions) {
-  const defaultTileServer = tileServers[initialTileServerId];
-  if (!defaultTileServer) {
-    throw new Error("Default tile server 1 is required");
-  }
-
   const map = leaflet.map("map", {
     center,
     crs: leaflet.CRS.EPSG3857,
@@ -122,10 +119,9 @@ export function createReadOnlyMapRuntime({
       let radioHtml = '<div class="radio-zone"><form>';
 
       for (const [tileServerId, tileServer] of Object.entries(tileServers)) {
-        const checkedAttribute = tileServerId === initialTileServerId ? "checked" : "";
         const layerName = escapeHtml(tileServer.layer_name);
         radioHtml += `
-                <input class="tile-radio" type="radio" id="${layerName}" name="tile" value="${tileServerId}" ${checkedAttribute}>
+                <input class="tile-radio" type="radio" id="${layerName}" name="tile" value="${tileServerId}">
                 <label for="${layerName}" class="tile-radio-label">${escapeHtml(tileServer.label)}</label><br>
                 `;
       }
@@ -166,6 +162,7 @@ export function createReadOnlyMapRuntime({
     tileServers,
     bounds,
     initialId: initialTileServerId,
+    fallbackTileServerId,
     saveSelectedTileServerId,
     onCommit: (id) => syncTileSelection(id),
     onError: onBasemapError,

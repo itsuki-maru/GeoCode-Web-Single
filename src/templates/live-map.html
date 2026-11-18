@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="ja">
     <head>
+        <meta name="google-maps-access" content="{{ googleMapsAccess | default(value="") }}" />
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <meta name="referrer" content="no-referrer" />
@@ -469,6 +470,9 @@
                 publicId: "{{ publicId }}",
                 cameraEnabled: {{ cameraEnabled | default(value=false) }},
                 tileServers: {{ tileServers | json_encode_for_html | safe }},
+                {% if fallbackTileServerId is defined %}
+                fallbackTileServerId: {{ fallbackTileServerId | json_encode_for_html | safe }},
+                {% endif %}
             isCheckOverlay: {{ isCheckOverlay }},
             tileOverlays: {{ tileOverlays | json_encode_for_html | safe }},
             publishedLayers: {{ publishedLayers | json_encode_for_html | safe }},

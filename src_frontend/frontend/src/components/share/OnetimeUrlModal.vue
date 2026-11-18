@@ -10,6 +10,7 @@ const props = defineProps<{
   uuid: string;
   isHttps: boolean;
   expiration?: string;
+  backgroundReplaced?: boolean;
   zIndex?: number;
 }>();
 
@@ -93,20 +94,19 @@ const invalidateOneTimeMap = async (): Promise<void> => {
   >
     <div class="onetime-url-content">
       <h2 class="modal-h2">メッセージ</h2>
-      <div class="input-text-zone" v-if="isHttps">
+      <div class="input-text-zone">
         <p><strong>共有マップを作成しました。</strong></p>
+        <p v-if="backgroundReplaced">
+          選択中の背景地図は共有できないため、共有用の既定の背景地図に切り替えました。
+        </p>
         <p v-if="expiration" class="expiration-text">
           有効期限: {{ formatExpiration(expiration) }}
         </p>
-        <pre :id="uuid" class="hidden-code-text"><code :id="uuid">{{ url }}</code></pre>
-        <button id="link-copy-btn" @click="selectTextOrClipboardCopy(uuid)">リンクを取得</button>
-      </div>
-      <div class="input-text-zone" v-else>
-        <p><strong>共有マップを作成しました。</strong></p>
-        <p v-if="expiration" class="expiration-text">
-          有効期限: {{ formatExpiration(expiration) }}
-        </p>
-        <pre><code :id="uuid" @click="selectTextOrClipboardCopy(uuid)">{{ url }}</code></pre>
+        <template v-if="isHttps">
+          <pre :id="uuid" class="hidden-code-text"><code :id="uuid">{{ url }}</code></pre>
+          <button id="link-copy-btn" @click="selectTextOrClipboardCopy(uuid)">リンクを取得</button>
+        </template>
+        <pre v-else><code :id="uuid" @click="selectTextOrClipboardCopy(uuid)">{{ url }}</code></pre>
       </div>
       <div class="btn-zone">
         <button :disabled="invalidating" @click="emit('close')">閉じる</button>

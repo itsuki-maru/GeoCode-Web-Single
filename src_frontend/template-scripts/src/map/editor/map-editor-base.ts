@@ -307,6 +307,7 @@ const basemapController = createBasemapController({
   tileServers,
   bounds,
   initialId: initialTileServerId,
+  fallbackTileServerId: getDefaultTileServerId(),
   saveSelectedTileServerId,
   onCommit: syncEditorBasemapSelection,
   onError: showEditorBasemapError,

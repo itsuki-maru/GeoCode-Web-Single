@@ -64,7 +64,7 @@ impl Manager {
                 "requests":process::list_receipts(&config, &self.config_path)?,"owner_available":false}));
             },
         };
-        let result = async {
+        let result: Result<Value,String> = async {
             let status = execute_reader(Command::Status, &config, &pool).await?;
             let datasets = execute_reader(Command::DatasetsList, &config, &pool).await?;
             let mut jobs = execute_reader(Command::JobsList { limit:100, offset:0 }, &config, &pool).await?;
@@ -75,10 +75,39 @@ impl Manager {
                 "datasets":datasets,"jobs":jobs,"requests":requests}))
         }.await;
         close_pool(&pool).await;
-        result
+        match result {
+            Ok(value) => Ok(value),
+            Err(error) => {
+                let diagnosis = crate::local_tiles::catalog::rebind::run(
+                    self.config_path.clone(),
+                    crate::local_tiles::catalog::rebind::Request::Inspect,
+                    CancellationToken::new(),
+                )
+                .await
+                .ok();
+                Ok(
+                    json!({"configured":true,"config_path":self.config_path,"config":config_value(&config),"error":error,
+                    "datasets":[],"jobs":[],"requests":process::list_receipts(&config,&self.config_path)?,"owner_available":false,"rebind":diagnosis}),
+                )
+            },
+        }
     }
 
     pub async fn query(&self, action: &str, payload: Value) -> Result<Value, String> {
+        if action == "rebind_inspect" || action == "rebind_plan" {
+            use crate::local_tiles::catalog::rebind;
+            let request = if action == "rebind_inspect" {
+                let _: EmptyQuery = decode(payload)?;
+                rebind::Request::Inspect
+            } else {
+                let options: RebindPlanQuery = decode(payload)?;
+                rebind::Request::Plan {
+                    source_database: options.source_database,
+                    proof: options.proof,
+                }
+            };
+            return rebind::run(self.config_path.clone(), request, CancellationToken::new()).await;
+        }
         if action == "log" {
             let request: LogQuery = decode(payload)?;
             let (_, config) = load_configuration(&self.config_path)?;
@@ -123,6 +152,27 @@ impl Manager {
             .to_string();
         let operation = Operation::parse(action, payload, &id)?;
         let (settings, config) = load_configuration(&self.config_path)?;
+        if matches!(&operation, Operation::Rebind(_)) {
+            if let Some(receipt) =
+                process::existing_request(&config, &self.config_path, &id, &operation)?
+            {
+                return serde_json::to_value(receipt).map_err(message);
+            }
+            crate::local_tiles::catalog::rebind::run(
+                self.config_path.clone(),
+                crate::local_tiles::catalog::rebind::Request::Inspect,
+                CancellationToken::new(),
+            )
+            .await?;
+            return serde_json::to_value(process::submit(
+                &config,
+                &self.config_path,
+                &self.executable,
+                id,
+                operation,
+            )?)
+            .map_err(message);
+        }
         let pool = open_existing_pool(&settings.database_url, false).await?;
         let status = execute_reader(Command::Status, &config, &pool).await;
         close_pool(&pool).await;
@@ -142,6 +192,15 @@ impl Manager {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EmptyQuery {}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RebindPlanQuery {
+    source_database: Option<PathBuf>,
+    proof: Option<PathBuf>,
+}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DatasetQuery {

@@ -468,7 +468,68 @@ PNG容量は`local-tiles cache scan`で明示的に調べる。状態照会や�
 
 catalogだけを移す場合は、同じ本体DBを使い、`tile_catalog_database_path`をコピー先へ変更する。空のcatalogへ切り替えると以前の登録・履歴は引き継がれない。移設のために管理テーブルや識別値を直接編集しない。
 
-本体DBとの対応には正規化したパスと実ファイルの識別を使う。本体DBの移動・置換・復元で対応が変わった場合は、自動で付け替えず利用を拒否する。この手順は本体DBを変更しないcatalog等の移設を対象とし、本体DBの移設・復元ではcatalogとの対応も別途確認する。対応変更用CLIは提供していない。
+本体DBとの対応には正規化したパスと実ファイルの識別を使う。本体DBの移動・置換・復元で対応が変わった場合は、自動で付け替えず利用を拒否する。本体DBも移設した場合は、次の専用操作で同一性を確認して対応付けを更新する。
+
+### 本体DB移設後のcatalog対応付けを更新する
+
+通常アプリ・`-s`サーバー・生成CLIを正常終了してから実行する。管理GUIの「本体DBの移設・対応付け」またはCLIを使う。いずれもHTTPサーバーを起動しない。設定JSONの`database_url`と`sqlite_database_path`は同じ移設先の本体DBを指すようにし、タイル用4項目も実際の保存先へ合わせる。設定JSON自体の置き場所は維持する。元の設定に保存された`tile_settings_encryption_key`も引き継ぎ、変更しない。
+
+更新は次のいずれかで同一性を確認できる場合だけ許可する。
+
+- 同じ実ファイルを同一ボリューム内で移動し、ファイル識別子が維持されている場合。
+- catalogに記録された識別子と一致する移動前の本体DBが残っており、移設先の全テーブル・全行と照合できる場合。
+- 移設前の正しい対応付けで作成した、改ざん検証付きの移設記録があり、その記録と移設先の内容が一致する場合。
+
+元ファイルを使う場合は、計画作成から適用完了まで元ファイルも保全する。元ファイルが残っている場合は、適用時に元・先の両方を保護して再照合し、旧設定で起動したアプリが元DBを書き込んでいる場合も拒否する。
+
+ファイル識別子の異なる通常のバックアップコピーだけでは、catalogとの対応を証明できない。元ファイルも事前記録もない場合は自動更新できない。移設記録を使うコピーでは、記録後に本体DB・catalogの内容を変更しない。通常起動によるmigrationやログイン後の更新等で内容が変わった場合も照合は失敗し、既存データを変更せず停止する。検査を省略する強制オプションはない。
+
+PowerShell補助スクリプトの例（各パスは実環境へ置き換える。移設先は、この作業を実行するPC上のローカルディスクを使う）：
+
+```powershell
+$exe = 'C:/GeoCode/geocode_web_single.exe'
+$config = 'C:/Users/yourname/.geocode-web-single/geocode-web-single.env.json'
+$helper = './scripts/rebind-local-tile-catalog.ps1'
+
+# 1. 現在の対応を読み取り専用で診断
+& $helper -Executable $exe -ConfigFile $config -Mode Inspect
+
+# 2. 元の実ファイルが残っている場合：全内容を照合して計画を保存
+& $helper -Executable $exe -ConfigFile $config -Mode Plan `
+  -OriginalDatabase 'C:/original/geocode-web.sqlite' `
+  -PlanFile 'C:/backup/catalog-rebind-plan.json'
+
+# 3. 表示された旧・新の本体DBを確認して適用（計画は15分間有効）
+& $helper -Executable $exe -ConfigFile $config -Mode Apply `
+  -PlanFile 'C:/backup/catalog-rebind-plan.json'
+```
+
+同じ実ファイルの移動で識別子が維持されていれば、`Plan`の`-OriginalDatabase`と`-ProofFile`は省略できる。
+
+これから本体DBをコピーする場合は、移設前の正しい設定で次を実行する。保存先の親フォルダーは先に用意する。既存ファイルは上書きしない。記録は7日間有効で、秘密鍵自体を含めない。
+
+```powershell
+# 移設前：アプリ等を終了し、正しく対応している本体DBとcatalogから記録を作る
+& $helper -Executable $exe -ConfigFile $config -Mode Prepare `
+  -ProofFile 'C:/backup/catalog-relocation-proof.json'
+
+# 本体DB・catalog等を整合した一式として移し、同じ設定JSONの保存先を修正した後
+& $helper -Executable $exe -ConfigFile $config -Mode Plan `
+  -ProofFile 'C:/backup/catalog-relocation-proof.json' `
+  -PlanFile 'C:/backup/catalog-rebind-plan-new.json'
+& $helper -Executable $exe -ConfigFile $config -Mode Apply `
+  -PlanFile 'C:/backup/catalog-rebind-plan-new.json'
+```
+
+直接CLIを使う場合のコマンドは`local-tiles catalog rebind inspect`、`prepare --output ABSOLUTE_JSON`、`plan [--source-database ORIGINAL_DB | --proof PROOF_JSON]`、`apply --plan PLAN_JSON`。共通で`--config ABSOLUTE_JSON --json`を指定できる。`plan`のJSONはUTF-8で保存する。補助スクリプトはWindows PowerShellでもUTF-8で保存し、既存の計画ファイルを上書きしない。
+
+補助スクリプトが組織等の実行ポリシーで禁止されている場合は、ポリシーを変更せず直接CLIを使用する。
+
+適用直前に設定・DBの識別子・全内容・稼働状況を再検査し、catalogの所有者ロックとSQLiteトランザクションを使う。catalogの隣の`catalog-relocation-UUID`へ、整合した`catalog.before.sqlite`と署名付き`receipt.json`を保存・照合してから、`tile_catalog_binding`の対応先2項目だけを更新する。本体DB・完成DB・PNG・描画世代・ジョブ履歴は更新しない。処理の進捗はGUIの「処理状況・履歴」またはCLIの標準エラーで確認する。
+
+適用前の中断では対応付けを確定せず、検証済みの中断記録が揃っていれば同じ計画で再試行できる。バックアップ作成途中等で記録が不完全な場合は、残ったファイルを保全して新しい計画を作る。適用済みの計画を再実行しても二重更新せず、記録と実際の対応先を確認して適用済みと返す。既存のバックアップを上書きしたり、古いバックアップを自動で現在のcatalogへ戻したりしない。
+
+外部登録した完成DBの絶対パスは、この操作では書き換えない。必要な場合は対応付けの更新後に`datasets register`で参照先を更新する。完了後は`datasets list`・`jobs list`・既存URL・PNG利用・事前生成の再開を確認して通常運用へ戻る。
 
 PNGだけを空の新しい保存先へ切り替えた場合、現在の描画版のタイルは必要に応じて再生成される。旧PNGは元の場所に残る。旧描画版の保存PNGを使い続けたい場合は、その世代のディレクトリも移す。
 
@@ -592,7 +653,7 @@ $job | ConvertTo-Json -Depth 20 | Set-Content -Path './local-tiles-render.result
 
 catalog等の更新可能なSQLiteでは、稼働中のDBファイルだけをコピーしない。SQLiteのbackup APIに対応したツールで一貫したsnapshotを作るか、全プロセスの正常終了とsidecarの状態を確認してコピーする。`-wal`・`-shm`・journalが残っている場合は、未反映の更新や復旧に必要な情報を含む可能性があるため、手動で削除してDBだけをコピーしない。停止した一式を保全し、SQLiteが整合性を保って読み出せる方法でバックアップする。catalogの移設後に古いWALや別のDBのsidecarを新しいDBへ混ぜない。
 
-DBの復元は全プロセスを止め、本体DB・catalog・設定が対応する組合せで行う。本体DBの実ファイル識別が変わる復元はcatalogの対応検査で拒否される場合があり、自動的な再対応付けは行わない。
+DBの復元は全プロセスを止め、本体DB・catalog・設定が対応する組合せで行う。本体DBの実ファイル識別が変わる復元はcatalogの対応検査で拒否される場合がある。同一性を証明できる場合は「本体DB移設後のcatalog対応付けを更新する」の専用操作を使い、自動的な再対応付けは行わない。
 
 起動時は所有lockで実行元がなくなったジョブを確認し、中断として記録する。取り込みの残骸や元PBFを一括自動削除しない。調査後に手動で整理する場合も、使用中の完成DB・ジョブ領域と区別する。
 

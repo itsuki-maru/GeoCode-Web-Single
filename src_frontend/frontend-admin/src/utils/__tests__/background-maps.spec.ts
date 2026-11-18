@@ -14,6 +14,9 @@ const legacy: BackgroundMapRecord = {
   url: "/tile/{z}/{x}/{y}.png",
   attribution: '<span>既存出典</span>\n<a href="https://example.test">出典</a>',
   include_foreign_tiles: false,
+  enabled: true,
+  allow_temporary_share: true,
+  allow_live_map: true,
   min_zoom: null,
   max_zoom: null,
 };

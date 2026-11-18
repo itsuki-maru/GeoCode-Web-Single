@@ -144,9 +144,11 @@ async fn saved_share(pool: &SqlitePool, owner: &str) -> Value {
 
 async fn current_background(pool: &SqlitePool, id: i64) -> Value {
     let row = sqlx::query_as::<_, TileServers>(
-        "SELECT id, layer_name, label, url, kind, style_url, attribution,
-            include_foreign_tiles, min_zoom, max_zoom, create_at, updated_at
-         FROM tileserver_model WHERE id=$1",
+        r#"
+        SELECT *
+        FROM tileserver_model
+        WHERE id = $1
+        "#,
     )
     .bind(id)
     .fetch_one(pool)

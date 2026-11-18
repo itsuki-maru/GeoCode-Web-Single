@@ -14,6 +14,7 @@
   const ACTION_LABELS = {
     import: 'PBFの取り込み', precompute: 'タイルの事前生成', resume: '事前生成の再開',
     register: 'データセットの登録', prepare: '描画条件の準備', background: '背景地図への登録',
+    rebind: '本体DBの対応付け更新',
   };
   const STAGE_LABELS = {
     NotStarted: '開始を待っています', Validating: '入力を検査しています', Searching: '地物を検索しています',
@@ -23,6 +24,8 @@
     ImportLandmask: '陸域ポリゴンを取り込んでいます', ImportElevation: '標高資料を取り込んでいます',
     BuildingContours: '等高線を作成しています', FinalValidation: '完成データを検査しています',
     Publishing: 'データセットを登録しています', Exporting: 'タイルを事前生成しています', Completed: '処理が完了しました',
+    checking: 'DBの整合性と内容を照合しています', backup: 'catalogのバックアップを作成しています',
+    before_backup: '更新前の保存先を確認しています', before_commit: '対応付けを更新しています', committing: '対応付けを確定しています', completed: '移設処理が完了しました', saving_proof: '移設記録を保存しています',
   };
   const VIEW_LABELS = {
     import: ['地図を取り込む', '取得済みのPBFから、この端末で使える地図を作成します。'],
@@ -153,7 +156,7 @@
     const state = { snapshot: null, view: 'import', selectedDataset: '', profiles: new Map(),
       polling: false, initialized: false, seenRequests: new Map(), plan: null, planSignature: '',
       datasetSignature: '', activitySignature: '', planning: false, initializing: false, settingsOpen: false,
-      pendingCancels: new Set(), logRequestId: '' };
+      pendingCancels: new Set(), logRequestId: '', rebindPlan: null, rebinding: false, rebindRevision: 0 };
     const nativeInvoke = async (command, args) => {
       const invoke = globalThis.__TAURI__?.core?.invoke;
       if (!invoke) throw new Error('専用ウィンドウを開けませんでした。local-tiles gui で起動してください。');
@@ -412,6 +415,8 @@
 
     function applySnapshot(snapshot) {
       state.snapshot = snapshot;
+      if (snapshot.rebind && snapshot.rebind.binding_matches === false) $('rebind-panel').hidden = false;
+      $('show-rebind').disabled = !snapshot.configured;
       const configured = snapshot.configured === true;
       $('setup-panel').hidden = configured;
       $('workspace').hidden = !configured;
@@ -472,7 +477,7 @@
     }
 
     async function submit(action, payload) {
-      if (!canWrite()) { notify('ほかの処理が終了してから開始してください。状態の確認と取消は利用できます。', true); return; }
+      if (action !== 'rebind' && !canWrite()) { notify('ほかの処理が終了してから開始してください。状態の確認と取消は利用できます。', true); return; }
       const task = submission.submit(action, payload);
       updateWriterButtons();
       try {
@@ -531,6 +536,45 @@
     $('dismiss-notice').addEventListener('click', () => { $('notice').hidden = true; });
     $('refresh-button').addEventListener('click', refresh);
     $('show-settings').addEventListener('click', () => { renderSettings(); $('settings-dialog').showModal(); });
+    const invalidateRebind = () => { state.rebindRevision++; state.rebindPlan = null; $('rebind-apply').disabled = true; };
+    for (const id of ['rebind-source', 'rebind-proof']) $(id).addEventListener('input', invalidateRebind);
+    $('show-rebind').addEventListener('click', () => { $('rebind-panel').hidden = !$('rebind-panel').hidden; });
+    const rebindQuery = async (action, payload) => {
+      if (state.rebinding || submission.pending) return null;
+      state.rebinding = true; $('rebind-plan').disabled = true; $('rebind-inspect').disabled = true;
+      try { return await nativeInvoke('tile_manager_query', { action, payload }); }
+      finally { state.rebinding = false; $('rebind-plan').disabled = false; $('rebind-inspect').disabled = false; }
+    };
+    $('rebind-inspect').addEventListener('click', async () => {
+      invalidateRebind();
+      try {
+        const result = await rebindQuery('rebind_inspect', {});
+        if (result) $('rebind-diagnosis').textContent = `${result.message}\n記録された本体DB: ${result.previous.path}\n現在の本体DB: ${result.target.path}\ncatalog: ${result.catalog.path}`;
+      } catch (error) { notify(errorMessage(error), true); }
+    });
+    $('rebind-plan').addEventListener('click', async () => {
+      invalidateRebind();
+      const revision = state.rebindRevision;
+      try {
+        const result = await rebindQuery('rebind_plan', { source_database: $('rebind-source').value.trim() || null, proof: $('rebind-proof').value.trim() || null });
+        if (!result || revision !== state.rebindRevision) return;
+        state.rebindPlan = result;
+        const plan = result.payload;
+        $('rebind-diagnosis').textContent = `同一性を確認しました。\n変更前: ${plan.previous.path}\n変更後: ${plan.target.path}\n確認方法: ${plan.evidence}\nデータセット: ${plan.catalog_contents.rows.local_tile_datasets || 0}件\nジョブ履歴: ${plan.catalog_contents.rows.local_tile_jobs || 0}件\n適用前にcatalogのバックアップを作成します。`;
+        $('rebind-apply').disabled = false;
+      } catch (error) { notify(errorMessage(error), true); }
+    });
+    $('rebind-apply').addEventListener('click', async () => {
+      const plan = state.rebindPlan;
+      if (!plan || state.rebinding || submission.pending) return;
+      invalidateRebind();
+      await submit('rebind', { kind: 'apply', plan });
+    });
+    $('rebind-prepare').addEventListener('click', async () => {
+      const output = $('rebind-output').value.trim();
+      if (!output || state.rebinding || submission.pending) { if (!output) notify('移設記録の保存先を入力してください。', true); return; }
+      await submit('rebind', { kind: 'prepare', output });
+    });
     $('close-settings').addEventListener('click', () => $('settings-dialog').close());
     $('close-log').addEventListener('click', () => $('log-dialog').close());
     $('refresh-log').addEventListener('click', () => { if (state.logRequestId) openLog(state.logRequestId); });

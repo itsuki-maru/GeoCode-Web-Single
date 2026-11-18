@@ -92,24 +92,51 @@ async fn execute_request(path: &Path) -> Result<i32, String> {
     receipt.worker_pid = Some(std::process::id());
     receipt.update("running");
     protocol::atomic_json(&paths.receipt, &receipt)?;
-    let result = async {
-        let pool = open_existing_pool(
-            &settings.database_url,
-            matches!(operation, Operation::Background(_)),
-        )
-        .await?;
-        let service = LocalTiles::new(config, pool.clone());
-        let result = async {
-            service.ensure_writer().await.map_err(failure)?;
-            execute_operation(&service, &operation, &request.id, &paths, &mut receipt).await
+    let result = if let Operation::Rebind(rebinding) = &operation {
+        let config_path = request.config_path.clone();
+        let rebinding = rebinding.clone();
+        let receipt_path = paths.receipt.clone();
+        let mut progress_receipt = receipt.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut last = std::time::Instant::now() - Duration::from_secs(1);
+            crate::local_tiles::catalog::rebind::execute(
+                &config_path,
+                rebinding,
+                &crate::tilegen::cancel::CancellationToken::new(),
+                &mut |stage, completed| {
+                    if last.elapsed() >= Duration::from_millis(250) {
+                        progress_receipt.result = Some(
+                            serde_json::json!({"progress":{"stage":stage,"completed":completed}}),
+                        );
+                        protocol::atomic_json(&receipt_path, &progress_receipt)?;
+                        last = std::time::Instant::now();
+                    }
+                    Ok(())
+                },
+            )
+        })
+        .await
+        .map_err(message)?
+    } else {
+        async {
+            let pool = open_existing_pool(
+                &settings.database_url,
+                matches!(operation, Operation::Background(_)),
+            )
+            .await?;
+            let service = LocalTiles::new(config, pool.clone());
+            let result = async {
+                service.ensure_writer().await.map_err(failure)?;
+                execute_operation(&service, &operation, &request.id, &paths, &mut receipt).await
+            }
+            .await;
+            // 子process自身だけが処理回収と排他解放を所有する。画面の閉鎖とは独立。
+            service.shutdown().await;
+            close_pool(&pool).await;
+            result
         }
-        .await;
-        // 子process自身だけが処理回収と排他解放を所有する。画面の閉鎖とは独立。
-        service.shutdown().await;
-        close_pool(&pool).await;
-        result
-    }
-    .await;
+        .await
+    };
     let code = match result {
         Ok(value) => {
             let state = value
@@ -203,6 +230,7 @@ async fn execute_operation(
                 .await
                 .map_err(failure);
         },
+        Operation::Rebind(_) => return Err("移設処理は専用の実行経路が必要です。".into()),
     };
     let accepted = accepted.ok_or("処理受付を確認できません。")?;
     let job = accepted["id"]

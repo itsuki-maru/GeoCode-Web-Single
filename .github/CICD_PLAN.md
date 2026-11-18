@@ -122,14 +122,14 @@ CI/releaseでは、出力先を`target/frontend-dist-<run_id>-<run_attempt>`と�
 
 通常のCI/releaseは、リポジトリに保存した`tests/fixtures/frontend-compat-baseline.json`との照合を必須とする。非公開の移植元リポジトリを取得せず、`FRONTEND_SOURCE_TOKEN`等の追加Secretも要求しない。これにより、移植元へのアクセス権がない環境やforkのPRでも同じ固定基準を検査できる。内容差・欠落・余剰は引き続き失敗とし、CIで基準を自動更新しない。Tauri自身の埋込先も`TAURI_CONFIG`または`--config`で隔離先へ指定する。
 
-フロントを移植して採用版を更新した際は、移植元の変更とSQLite側の内容をレビューした後、固定基準も同じコミットへ明示的に更新する。現在の採用版はPostgreSQL版v1.41.0の`fb7ebf0447a3207d8f9d720a3394c8b9a5de0194`で、共通フロント822ファイルを記録している。保存条件の呼び出し・編集と関連UIの追加を含む。製品バージョンと改行の正規化規則は変更しない。
+フロントを移植して採用版を更新した際は、移植元の変更とSQLite側の内容をレビューした後、固定基準も同じコミットへ明示的に更新する。現在の採用版はPostgreSQL版の`b224019edd233c3720bbe0dbd2eed7f266bd6db6`で、Google背景地図と背景地図管理を含む共通フロント828ファイルを記録している。製品バージョンと改行の正規化規則は変更しない。
 
 更新例は次のとおり。移植元の専用コピーは採用コミットのHEADと一致し、共通フロントに未コミット変更がない状態を用意する。`--write-baseline`は指定した移植元のファイルを記録するため、コミット番号だけを渡して内容の確認を省略しない。
 
 ```powershell
 $sourceRoot = 'C:/src/GeoCode-Web-audit'
 $sourceRef = git -C $sourceRoot rev-parse HEAD
-if ($LASTEXITCODE -ne 0 -or $sourceRef -ne 'fb7ebf0447a3207d8f9d720a3394c8b9a5de0194') {
+if ($LASTEXITCODE -ne 0 -or $sourceRef -ne 'b224019edd233c3720bbe0dbd2eed7f266bd6db6') {
     throw '移植元の専用コピーを採用コミットへ用意してください。'
 }
 $sourceChanges = git -C $sourceRoot status --porcelain -- src_frontend src/templates

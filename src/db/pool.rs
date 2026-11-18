@@ -571,6 +571,20 @@ const MIGRATIONS: &[Migration] = &[
             "../../migrations/20261117120000_ai_operations.sql"
         )],
     },
+    Migration {
+        version: 28,
+        name: "add_google_maps",
+        statements: &[include_str!(
+            "../../migrations/20261118090000_add_google_maps.sql"
+        )],
+    },
+    Migration {
+        version: 29,
+        name: "add_background_map_availability",
+        statements: &[include_str!(
+            "../../migrations/20261118100000_add_background_map_availability.sql"
+        )],
+    },
 ];
 
 // データベース接続の確立
@@ -718,6 +732,31 @@ pub async fn validate_existing_schema(pool: &SqlitePool) -> Result<(), Error> {
     Ok(())
 }
 
+/// 移設専用の読み取り接続でも、通常CLIと同じmigration契約を検査する。
+pub(crate) fn validate_existing_schema_sync(
+    connection: &rusqlite::Connection,
+) -> Result<(), String> {
+    let mut query = connection
+        .prepare("SELECT version, name FROM schema_migrations ORDER BY version")
+        .map_err(|error| error.to_string())?;
+    let rows = query
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    if rows.len() != MIGRATIONS.len()
+        || MIGRATIONS
+            .iter()
+            .zip(&rows)
+            .any(|(expected, actual)| expected.version != actual.0 || expected.name != actual.1)
+    {
+        return Err("本体DBのschemaがこのアプリの適用済み構成と一致しません。移設処理ではmigrationを実行しません。".into());
+    }
+    Ok(())
+}
+
 // データベースのマイグレーション
 pub async fn run_migrations(pool: &SqlitePool) -> Result<(), Error> {
     // 同時起動でも既適用版の読取前に書込権を確保し、ロック昇格時のBUSYを避ける。
@@ -755,6 +794,24 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), Error> {
 
         for statement in migration.statements {
             // SQLx用マイグレーションを先に適用したDBと、既存DBの再実行を両立する。
+            let completion_marker = match migration.version {
+                28 => Some("google_maps_settings"),
+                29 => Some("remember_background_map_id"),
+                _ => None,
+            };
+            if let Some(name) = completion_marker {
+                let exists: bool = sqlx::query_scalar(
+                    r#"
+                    SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE name = $1)
+                    "#,
+                )
+                .bind(name)
+                .fetch_one(&mut *tx)
+                .await?;
+                if exists {
+                    continue;
+                }
+            }
             if migration.version == 23 {
                 let exists: i64 = sqlx::query_scalar(
                     r#"

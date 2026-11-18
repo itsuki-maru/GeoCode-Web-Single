@@ -1,4 +1,5 @@
 import type { TileServerRecord } from "../types";
+import { getFallbackTileServerId } from "./basemap-definition";
 
 const STORAGE_KEYS = {
   mapMobileUiHidden: "geocode-web:map-mobile-ui-hidden",
@@ -12,33 +13,34 @@ const STORAGE_KEYS = {
 type TileServers = Record<string, TileServerRecord>;
 
 interface StorageDependencies {
+  fallbackTileServerId?: string;
   getStorage?: () => Storage;
   warn?: (message: string, error: unknown) => void;
 }
-
-const defaultTileServerId = (tileServers: TileServers): string | undefined =>
-  tileServers["1"] ? "1" : Object.keys(tileServers)[0];
 
 // 初期表示だけ引き継ぐ画面でも、保存を有効にせず選択を読み込めるようにする。
 export function loadSelectedTileServerId(
   tileServers: TileServers,
   {
+    fallbackTileServerId,
     getStorage = () => window.localStorage,
     warn = (message, error) => console.warn(message, error),
   }: StorageDependencies = {},
 ): string | undefined {
   try {
     const savedTileServerId = getStorage().getItem(STORAGE_KEYS.selectedTileServer);
-    if (savedTileServerId && tileServers[savedTileServerId]) return savedTileServerId;
+    if (savedTileServerId && Object.hasOwn(tileServers, savedTileServerId))
+      return savedTileServerId;
   } catch (error) {
     warn("Failed to restore selected tile server:", error);
   }
-  return defaultTileServerId(tileServers);
+  return getFallbackTileServerId(tileServers, fallbackTileServerId);
 }
 
 export function createMapStorage(
   tileServers: TileServers,
   {
+    fallbackTileServerId,
     getStorage = () => window.localStorage,
     warn = (message, error) => console.warn(message, error),
   }: StorageDependencies = {},
@@ -68,15 +70,15 @@ export function createMapStorage(
     isTileServerSelectionPersistenceEnabled = true;
   };
 
-  const getDefaultTileServerId = (): string | undefined => defaultTileServerId(tileServers);
+  const getDefaultTileServerId = () => getFallbackTileServerId(tileServers, fallbackTileServerId);
 
   const getInitialTileServerId = (): string | undefined => {
     if (!isTileServerSelectionPersistenceEnabled) return getDefaultTileServerId();
-    return loadSelectedTileServerId(tileServers, { getStorage, warn });
+    return loadSelectedTileServerId(tileServers, { fallbackTileServerId, getStorage, warn });
   };
 
   const saveSelectedTileServerId = (tileServerId: string): void => {
-    if (!isTileServerSelectionPersistenceEnabled || !tileServers[tileServerId]) {
+    if (!isTileServerSelectionPersistenceEnabled || !Object.hasOwn(tileServers, tileServerId)) {
       return;
     }
     try {

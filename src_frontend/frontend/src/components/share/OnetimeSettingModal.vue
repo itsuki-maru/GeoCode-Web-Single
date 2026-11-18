@@ -19,7 +19,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: [];
-  generated: [url: string, uuid: string, updateUrl: boolean, expiration: string];
+  generated: [
+    url: string,
+    uuid: string,
+    updateUrl: boolean,
+    expiration: string,
+    backgroundReplaced: boolean,
+  ];
   message: [text: string];
 }>();
 
@@ -209,6 +215,7 @@ const genOnetimeMapUrl = async (updateUrl: boolean = true): Promise<void> => {
       response.data["id"],
       updateUrl,
       response.data["expiration"],
+      response.data["background_replaced"] === true,
     );
     await fetchCurrentSharedUrl();
   } catch (error) {
@@ -240,6 +247,7 @@ const openExistingSharedUrl = (): void => {
     existingSharedUuid.value,
     true,
     existingSharedExpiration.value,
+    false,
   );
 };
 
