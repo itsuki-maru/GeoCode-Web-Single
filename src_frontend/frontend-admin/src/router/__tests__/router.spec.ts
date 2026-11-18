@@ -12,6 +12,7 @@ vi.mock("@/views/live/AdminLiveMaps.vue", () => ({ default: { render: () => null
 vi.mock("@/views/TileOverlays.vue", () => ({ default: { render: () => null } }));
 vi.mock("@/views/MapDisplaySettings.vue", () => ({ default: { render: () => null } }));
 vi.mock("@/views/BackgroundMaps.vue", () => ({ default: { render: () => null } }));
+vi.mock("@/views/GoogleMapsSettings.vue", () => ({ default: { render: () => null } }));
 vi.mock("@/views/TileServerSettings.vue", () => ({ default: { render: () => null } }));
 vi.mock("@/views/AiSettings.vue", () => ({ default: { render: () => null } }));
 
@@ -27,6 +28,7 @@ describe("管理者ルートの認証ガード", () => {
     "/tile-overlays",
     "/map-display-settings",
     "/background-maps",
+    "/google-maps-settings",
     "/tile-server-settings",
     "/ai-settings",
   ])("%sでも認証を確認して、失敗時はログインへ戻す", async (path) => {

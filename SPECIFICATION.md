@@ -523,9 +523,12 @@ JSON として不正な場合、または必須項目が欠落している場合
 
 - 起動時マイグレーション24で`tileserver_model`へ`kind`（既定`raster`）と`style_url`を追加する。既存のID・画像URL・日時・保存済み共有JSONを保持し、ID `1`を代替表示用のラスタとして確保する。
 - 通常・モバイル・別画面・共有・回答・ライブ地図は共通の背景定義取得と描画処理を使用する。ラスタは`url`の画像タイル、ベクタは`style_url`のスタイルに従ってMapLibreで描画する。ベクタ行も互換用の`url`を保持する。
-- `GET/POST /admin/background-maps`と`PUT /admin/background-maps/{id}`は管理者専用。表示名・識別名・画像URL・出典は255文字以内、スタイルURLはHTTPSまたは同一サイト絶対パスかつUTF-8で4096バイト以内。ズームは0〜22の整数で、未設定時は最小5・最大18として表示する。IDは編集で変更しない。
-- ベクタへの切替は準備完了後に確定し、失敗時は利用可能な現在の背景を維持する。連続切替は最後の選択を反映する。初期表示や表示中ベクタの利用不能時はID `1`のラスタへ代替する。共有・印刷には確定済みの背景IDを渡す。
-- 保存済み共有v1／v2は保存時の背景定義を復元する。表示状態を保存しない従来共有は現在のDB設定を読む。共有v2は種別・スタイルURLも保存する。外部スタイルやタイルの実体は閲覧時に取得する。
+- `GET/POST /admin/background-maps`、`PUT/DELETE /admin/background-maps/{id}`、`PUT /admin/background-maps/fallbacks`は管理者専用。表示名・識別名・画像URL・出典は255文字以内、スタイルURLはHTTPSまたは同一サイト絶対パスかつUTF-8で4096バイト以内。ズームは0〜22の整数で、未設定時は最小5・最大18として表示する。
+- 背景ごとに有効状態と共有URL・ライブマップでの利用可否を設定する。通常地図の代替背景は有効な汎用ラスタのID `1`を優先し、共有URL・ライブマップはそれぞれ利用可能な汎用ラスタを指定できる。管理操作は各用途の代替背景を保持し、使用中の代替背景の無効化・削除を拒否する。保存・削除の結果は共通メッセージモーダルに表示する。
+- Google・ベクタ背景への切替は描画準備が完了してから確定する。初期選択や表示中の背景が利用できなくなった場合は、その用途の代替背景に切り替える。印刷は表示元と同じ候補を使う。
+- 閲覧時は発行済みのスナップショットからも、無効・削除済み・共有不可の背景を除外する。保存時の選択が利用できない場合は共有用の代替背景を指定する。閲覧時の調整は共有の保存内容に書き戻さない。
+- 起動時マイグレーション28でGoogleの背景種別と接続設定を追加し、29で背景の利用可否と公開先別の代替設定を追加する。既存の背景を有効・共有可・ライブ利用可として移行する。管理画面とローカル地図登録は`BEGIN IMMEDIATE`で確保した同じ書き込み接続上で採番し、削除済みの背景IDを再利用しない。
+- 「Google Maps設定」でMap Tiles APIのキーと言語・地域・利用上限を保存できる。キーはSQLiteに暗号化して保存する。暗号鍵は通常、設定JSONの`tile_settings_encryption_key`を使用し、起動時に`GOOGLE_MAPS_ENCRYPTION_KEY`を明示した場合はそちらを優先する。中継は閲覧先と登録背景IDを確認し、タイル・出典取得のたびに利用可否を再検証する。
 - 起動時マイグレーション25で`tile_server_settings`を追加し、ラスタ中継先・暗号化したAPIキー・ベクタ配信元の許可を管理する。中継先の接続確認・保存、設定版による更新競合検出、設定版ごとのタイルキャッシュを使用する。
 - 初期設定は実行時設定JSONの`tile_server_base_url`・`tile_server_api_key`・`vector_tile_allowed_origins`から取得する。管理画面から適用した設定はDBへ保存し、「環境変数へ戻す」で実行時設定JSON由来の設定へ戻す。
 - 実行時設定JSONへ`tile_proxy_allowed_origins`と`tile_settings_encryption_key`も追加する。暗号鍵は初回セットアップ時に生成し、既存JSONで項目省略・`null`の場合も生成・保存する。空文字列を含む不正な鍵は起動時に拒否する。管理設定を復元するため、SQLite DBと設定JSONを合わせて保管する。Tauri・サーバー単体の全起動経路でDBの管理設定を読み込み、運転中も5秒間隔で再取得する。詳細は[タイル配信プロキシ](docs/TILE_PROXY.md#管理画面からの設定)を参照する。
@@ -931,9 +934,9 @@ AI条件の解除は既存の表示実行APIのresetでアカウント・設定�
 
 ### 11.7 一時共有URL API
 
-`POST /onetimeurl/generate`は`minutes`、`layers`、`update_url`、任意の`share_password`・`include_shapes`・`include_tile_overlays`・`snapshot`を受け取る。`snapshot`未指定または`null`は従来の通常共有で、空の`layers`は拒否する。スナップショットは`{version,state,layers,markers,shapes,tileServers,tileOverlays}`とし、`version`は保存する背景一覧がすべてラスタなら`1`、ベクタを含む場合は`2`とする。レイヤ・マーカーはIDをキーとするオブジェクト、図形は配列とする。外側の`layers`も同じグループID集合にする。
+`POST /onetimeurl/generate`は`minutes`、`layers`、`update_url`、任意の`share_password`・`include_shapes`・`include_tile_overlays`・`snapshot`を受け取る。`snapshot`未指定または`null`は従来の通常共有で、空の`layers`は拒否する。スナップショットは`{version,state,layers,markers,shapes,tileServers,tileOverlays}`とし、背景候補が汎用ラスタのみなら`1`、ベクタを含む場合は`2`、Googleを含む場合は`3`とする。レイヤ・マーカーはIDをキーとするオブジェクト、図形は配列とする。外側の`layers`も同じグループID集合にする。
 
-成功応答は`{id,url,expiration}`、`GET /onetimeurl/current`の応答はこれらと`is_password_protected`。現在URLの取得では対象データや表示設定全体を返さない。`DELETE /onetimeurl/delete/{id_url}`は認証ユーザーの共有枠を停止し、パスのIDで他ユーザーの共有を操作しない。公開閲覧とパスワード認証は`GET/POST /onetime/{url_id}`を使用する。
+成功応答は`{id,url,expiration,background_replaced}`。スナップショット作成時に選択背景を共有用の代替背景に切り替えた場合は`background_replaced`を`true`にする。`GET /onetimeurl/current`の応答は`{id,url,expiration,is_password_protected}`。現在URLの取得では対象データや表示設定全体を返さない。`DELETE /onetimeurl/delete/{id_url}`は認証ユーザーの共有枠を停止し、パスのIDで他ユーザーの共有を操作しない。公開閲覧とパスワード認証は`GET/POST /onetime/{url_id}`を使用する。
 
 保存型・表示状態のキー・認可・SQLiteの移行手順は[一時共有URL](docs/TEMPORARY_SHARING.md)を参照する。
 

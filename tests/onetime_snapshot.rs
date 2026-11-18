@@ -162,19 +162,7 @@ async fn fixture(pool: &SqlitePool) -> (String, String, String, String, Value) {
     .unwrap();
     let tile = sqlx::query_as::<_, TileServers>(
         r#"
-        SELECT
-            id,
-            layer_name,
-            label,
-            url,
-            kind,
-            style_url,
-            attribution,
-            include_foreign_tiles,
-            min_zoom,
-            max_zoom,
-            create_at,
-            updated_at
+        SELECT *
         FROM tileserver_model
         ORDER BY id
         LIMIT 1
@@ -226,9 +214,11 @@ async fn vector_tile(pool: &SqlitePool, style_url: &str) -> Value {
     .await
     .unwrap();
     let tile = sqlx::query_as::<_, TileServers>(
-        "SELECT id, layer_name, label, url, kind, style_url, attribution,
-            include_foreign_tiles, min_zoom, max_zoom, create_at, updated_at
-         FROM tileserver_model WHERE id=2",
+        r#"
+        SELECT *
+        FROM tileserver_model
+        WHERE id = 2
+        "#,
     )
     .fetch_one(pool)
     .await
@@ -288,7 +278,7 @@ async fn vector_snapshot_preserves_style_and_rejects_definition_changes_without_
     let mut unknown_kind = snapshot.clone();
     unknown_kind["tileServers"]["2"]["kind"] = json!("unknown");
     let mut unknown_version = snapshot.clone();
-    unknown_version["version"] = json!(3);
+    unknown_version["version"] = json!(4);
     for bad in [changed_style, changed_kind, unknown_kind, unknown_version] {
         assert!(
             generate_url_handler(
@@ -317,16 +307,161 @@ async fn vector_snapshot_preserves_style_and_rejects_definition_changes_without_
         .is_err()
     );
     assert_eq!(saved(&pool, &user).await, before);
-    // 保存済み共有は、後から変更・削除された配信設定を再認可せず表示する。
+    // 利用可能なうちは保存時のスタイルを維持し、削除後は代替背景へ切り替える。
+    assert_eq!(
+        rendered(&pool, &original.id, false).await["tiles"]["2"]["style_url"],
+        "/styles/captured.json"
+    );
     sqlx::query("DELETE FROM tileserver_model WHERE id = 2")
         .execute(&pool)
         .await
         .unwrap();
     for mobile in [false, true] {
         let output = rendered(&pool, &original.id, mobile).await;
-        assert_eq!(output["snapshot"], *metadata);
-        assert_eq!(output["tiles"]["2"]["style_url"], "/styles/captured.json");
+        assert_eq!(output["snapshot"]["state"]["tileServerId"], "1");
+        assert_eq!(
+            output["snapshot"]["state"]["view"],
+            metadata["state"]["view"]
+        );
+        assert!(output["tiles"].get("2").is_none());
+        assert_eq!(output["tiles"], output["snapshot"]["tileServers"]);
     }
+    assert_eq!(saved(&pool, &user).await, before);
+}
+
+#[tokio::test]
+async fn temporary_background_policy_replaces_archived_and_new_snapshot_selection() {
+    let pool = common::test_pool().await;
+    let (user, layer, _, _, mut snapshot) = fixture(&pool).await;
+    let selected = vector_tile(&pool, "/styles/captured.json").await;
+    snapshot["version"] = json!(2);
+    snapshot["state"]["tileServerId"] = json!("2");
+    snapshot["tileServers"]["2"] = selected;
+    let original = create(&pool, &user, payload(&layer, Some(snapshot.clone()), false)).await;
+    assert!(!original.background_replaced);
+    let before = saved(&pool, &user).await;
+
+    sqlx::query(
+        r#"
+        INSERT INTO tileserver_model (
+            id, layer_name, label, url, attribution, include_foreign_tiles, create_at, updated_at
+        ) VALUES (
+            5, 'temporary-fallback', '共有の代替背景', '/temporary/{z}/{x}/{y}', '', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO background_map_fallbacks (id, temporary_id)
+        VALUES (1, 5)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE tileserver_model
+        SET allow_temporary_share = false
+        WHERE id IN (1, 2)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for mobile in [false, true] {
+        let page = rendered(&pool, &original.id, mobile).await;
+        assert_eq!(page["fallback"], "5");
+        assert_eq!(page["tiles"].as_object().unwrap().len(), 1);
+        assert_eq!(page["tiles"]["5"]["url"], "/temporary/{z}/{x}/{y}");
+        assert_eq!(page["snapshot"]["tileServers"], page["tiles"]);
+        assert_eq!(page["snapshot"]["state"]["tileServerId"], "5");
+        assert_eq!(
+            page["snapshot"]["state"]["view"],
+            before["map_snapshot"]["state"]["view"]
+        );
+        assert_eq!(page["markers"], before["markers"]);
+    }
+    assert_eq!(saved(&pool, &user).await, before);
+
+    sqlx::query(
+        r#"
+        UPDATE tileserver_model
+        SET allow_temporary_share = true
+        WHERE id = 2
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let restored = rendered(&pool, &original.id, false).await;
+    assert_eq!(restored["snapshot"]["state"]["tileServerId"], "2");
+    assert_eq!(restored["tiles"]["2"]["style_url"], "/styles/captured.json");
+
+    sqlx::query(
+        r#"
+        UPDATE tileserver_model
+        SET enabled = false
+        WHERE id = 2
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let updated = create(&pool, &user, payload(&layer, Some(snapshot), true)).await;
+    assert_eq!(updated.id, original.id);
+    assert!(updated.background_replaced);
+    let after = saved(&pool, &user).await;
+    assert_eq!(after["map_snapshot"]["state"]["tileServerId"], "5");
+    assert_eq!(
+        after["map_snapshot"]["tileServers"]
+            .as_object()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn google_v3_snapshot_checks_the_registered_provider_and_map_type() {
+    let pool = common::test_pool().await;
+    let (user, layer, _, _, mut snapshot) = fixture(&pool).await;
+    let tile = sqlx::query_as::<_, TileServers>(
+        r#"
+        INSERT INTO tileserver_model (
+            id, layer_name, label, url, attribution, create_at, updated_at, provider, google_map_type
+        ) VALUES (
+            2, 'google', 'Google道路地図', '/google-maps/tiles/{z}/{x}/{y}', '',
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'google', 'roadmap'
+        )
+        RETURNING *
+        "#,
+    ).fetch_one(&pool).await.unwrap();
+    snapshot["version"] = json!(3);
+    snapshot["state"]["tileServerId"] = json!("2");
+    snapshot["tileServers"]["2"] = serde_json::to_value(tile).unwrap();
+    let original = create(&pool, &user, payload(&layer, Some(snapshot.clone()), false)).await;
+    let page = rendered(&pool, &original.id, false).await;
+    assert_eq!(page["snapshot"]["version"], 3);
+    assert_eq!(page["tiles"]["2"]["provider"], "google");
+    assert_eq!(page["tiles"]["2"]["google_map_type"], "roadmap");
+    let saved_before = saved(&pool, &user).await;
+
+    // 共有要求からGoogleの地図種別を差し替えても、中継対象を変更できない。
+    snapshot["tileServers"]["2"]["google_map_type"] = json!("terrain");
+    let result = generate_url_handler(
+        Extension(user.clone()),
+        Extension(pool.clone()),
+        None,
+        Json(payload(&layer, Some(snapshot), true)),
+    )
+    .await;
+    assert!(result.is_err());
+    assert_eq!(saved(&pool, &user).await, saved_before);
 }
 
 #[tokio::test]
@@ -361,6 +496,7 @@ async fn rendered(pool: &SqlitePool, id: &str, mobile: bool) -> Value {
             name,
             r#"{
                 "snapshot": {{ shareSnapshot | json_encode() | safe }},
+                "fallback": {{ fallbackTileServerId | json_encode() | safe }},
                 "markers": {{ markersObj | json_encode() | safe }},
                 "shapes": {{ shapesObj | json_encode() | safe }},
                 "tiles": {{ tileServers | json_encode() | safe }},

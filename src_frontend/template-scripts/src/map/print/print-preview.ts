@@ -505,8 +505,16 @@ export function createReadOnlySnapshotPrintPreview(
   close: () => void,
   session: { parentOrigin: string; requestId: string },
 ) {
-  const { state, layers, markers, shapes, tileServers, tileOverlays } = snapshot;
-  const base = { initialView: state.view, layers, markers, tileServers, tileOverlays };
+  const { state, layers, markers, shapes, tileServers, tileOverlays, fallbackTileServerId } =
+    snapshot;
+  const base = {
+    initialView: state.view,
+    layers,
+    markers,
+    tileServers,
+    tileOverlays,
+    fallbackTileServerId,
+  };
   const bootstrap: AnotherMapBootstrap | TemporaryMapBootstrap =
     snapshot.sourcePage === "map-anather"
       ? { ...base, page: "map-anather", shapes, isCluster: state.clusteringAllowed !== false }

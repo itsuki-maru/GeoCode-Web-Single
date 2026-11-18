@@ -738,12 +738,21 @@ async fn render_password_page(
 async fn render_live_map(
     tera: &Arc<Mutex<Tera>>,
     pool: &SqlitePool,
-    public_id: &str,
+    map: &LiveMapAccessRow,
     is_check_overlay: bool,
 ) -> Result<Response, AppError> {
-    let tile_servers = crate::db::load_tile_servers(pool).await?;
-    let tile_servers = vec_to_hashmap(tile_servers, |tile_server| tile_server.id);
+    let public_id = &map.public_id;
+    let basemaps =
+        crate::db::load_available_tile_servers(pool, crate::db::BasemapScope::Live).await?;
+    let tile_servers = vec_to_hashmap(basemaps.tiles, |tile_server| tile_server.id);
     let mut context = Context::new();
+    if let Some(id) = basemaps.fallback_id {
+        context.insert("fallbackTileServerId", &id.to_string());
+    }
+    context.insert(
+        "googleMapsAccess",
+        &crate::google_maps::live_access(&map.id, map.access_version, map.expires_at)?,
+    );
     context.insert("publicId", &public_id);
     context.insert("isCheckOverlay", &is_check_overlay);
     context.insert(
@@ -830,7 +839,7 @@ pub async fn live_map_page_handler(
     if map.password_hash.is_some() && !viewer_cookie_is_valid(&headers, &map) {
         return render_password_page(&tera, &public_id, None, params.overlays_checked()).await;
     }
-    render_live_map(&tera, &pool, &public_id, params.overlays_checked()).await
+    render_live_map(&tera, &pool, &map, params.overlays_checked()).await
 }
 
 fn client_rate_limit_key(headers: &HeaderMap) -> String {

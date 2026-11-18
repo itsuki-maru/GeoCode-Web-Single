@@ -132,6 +132,7 @@ describe("共有リンクの入力検証と既存リンク", () => {
         "share",
         true,
         expect.any(String),
+        false,
       ]);
       await w
         .findAll("button")
@@ -173,6 +174,27 @@ describe("現在の地図のスナップショット共有", () => {
     };
     vi.mocked(apiClient.post).mockResolvedValue(response);
     vi.mocked(apiClient.get).mockResolvedValue(response);
+  });
+  it("共有先の既定背景への切り替えを発行結果に引き継ぐ", async () => {
+    const w = open();
+    vi.mocked(apiClient.post).mockResolvedValueOnce({
+      data: {
+        id: "share",
+        url: "/onetime/share",
+        expiration: "2026-12-01T00:00:00",
+        background_replaced: true,
+      },
+    });
+    await w.get(".dropdown-btn > button").trigger("click");
+    await flushPromises();
+    expect(w.emitted("generated")?.[0]).toEqual([
+      window.location.origin + "/onetime/share",
+      "share",
+      false,
+      "2026-12-01T00:00:00",
+      true,
+    ]);
+    w.unmount();
   });
   it("地図の対象と表示設定を確認し、通常共有の対象選択を出さずに保存する", async () => {
     const snapshot = shareSnapshotFixture();

@@ -1,11 +1,15 @@
 /** 省略された種別は従来のラスタ背景として扱う。 */
 export type BasemapKind = "raster" | "vector";
+export type BasemapProvider = "generic" | "google";
+export type GoogleMapType = "roadmap" | "satellite" | "terrain";
 
 export type BasemapMetadata =
   { kind?: "raster"; style_url?: null } | { kind: "vector"; style_url: string };
 
 /** Vueと地図iframeの両方から使うため、地図描画モジュールに依存させない。 */
 interface TileServerBaseRecord {
+  provider?: BasemapProvider;
+  google_map_type?: GoogleMapType | null;
   attribution: string;
   id: number;
   include_foreign_tiles: boolean;
@@ -19,7 +23,25 @@ interface TileServerBaseRecord {
 export type TileServerRecord = TileServerBaseRecord & BasemapMetadata;
 
 export type BasemapDefinition =
-  { kind: "raster"; style_url: null } | { kind: "vector"; style_url: string };
+  | { kind: "raster"; style_url: null; provider?: "google"; google_map_type?: GoogleMapType }
+  | { kind: "vector"; style_url: string };
+
+export const isGoogleBasemap = (record: Pick<TileServerRecord, "provider">): boolean =>
+  record.provider === "google";
+export const requiresBasemapReady = (record: TileServerRecord): boolean =>
+  record.kind === "vector" || isGoogleBasemap(record);
+
+export function getFallbackTileServerId(
+  tileServers: Record<string, unknown>,
+  preferredId = "1",
+): string | undefined {
+  const isFallback = (id: string) => {
+    if (!Object.prototype.hasOwnProperty.call(tileServers, id)) return false;
+    const definition = normalizeBasemapDefinition(tileServers[id]);
+    return definition?.kind === "raster" && definition.provider !== "google";
+  };
+  return isFallback(preferredId) ? preferredId : Object.keys(tileServers).find(isFallback);
+}
 
 export function isBasemapStyleUrl(value: unknown): value is string {
   if (
@@ -41,7 +63,24 @@ export function isBasemapStyleUrl(value: unknown): value is string {
 /** 描画方法を変更せず、旧設定と新設定を共通のメタデータへ正規化する。 */
 export function normalizeBasemapDefinition(value: unknown): BasemapDefinition | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const { kind, style_url } = value as Record<string, unknown>;
+  const { kind, style_url, provider, google_map_type } = value as Record<string, unknown>;
+  if (provider === "google") {
+    return (kind === undefined || kind === "raster") &&
+      (style_url === undefined || style_url === null) &&
+      ["roadmap", "satellite", "terrain"].includes(google_map_type as string)
+      ? {
+          kind: "raster",
+          style_url: null,
+          provider: "google",
+          google_map_type: google_map_type as GoogleMapType,
+        }
+      : null;
+  }
+  if (
+    (provider !== undefined && provider !== "generic") ||
+    (google_map_type !== undefined && google_map_type !== null)
+  )
+    return null;
   if (kind === undefined || kind === "raster") {
     return style_url === undefined || style_url === null
       ? { kind: "raster", style_url: null }

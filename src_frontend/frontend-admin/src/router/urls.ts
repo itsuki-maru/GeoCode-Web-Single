@@ -17,3 +17,5 @@ export const adminMapDisplaySettingsUrl = baseUrl + "/admin/map-display-settings
 export const adminBackgroundMapsUrl = baseUrl + "/admin/background-maps";
 export const adminTileServerSettingsUrl = baseUrl + "/admin/tile-server-settings";
 export const adminAiSettingsUrl = baseUrl + "/admin/ai-settings";
+
+export const adminGoogleMapsSettingsUrl = baseUrl + "/admin/google-maps-settings";

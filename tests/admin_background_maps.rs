@@ -10,8 +10,12 @@ use axum::{
 };
 use geocode_web_single::{
     auth::create_token,
+    db::{BasemapScope, load_available_tile_servers},
     error::AppError,
-    handler::background_maps::{BackgroundMapInput, admin_create, admin_list, admin_update},
+    handler::background_maps::{
+        BackgroundMapInput, admin_create, admin_delete, admin_list, admin_update,
+        admin_update_fallbacks,
+    },
     model::TileServers,
 };
 use serde_json::{Value, json};
@@ -101,7 +105,8 @@ async fn preserve_legacy_raster_defaults_and_unset_zoom_on_create_and_update() {
     let listed = admin_list(Extension(admin.clone()), Extension(pool.clone()))
         .await
         .unwrap()
-        .0;
+        .0
+        .backgrounds;
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].label, "変更後の表示名");
     assert_eq!(listed[0].url, tile.url);
@@ -164,7 +169,8 @@ async fn preserve_background_ids_and_creation_times_when_editing_raster_and_vect
     let listed = admin_list(Extension(admin.clone()), Extension(pool.clone()))
         .await
         .unwrap()
-        .0;
+        .0
+        .backgrounds;
     assert_eq!(listed.iter().map(|row| row.id).collect::<Vec<_>>(), [1, 2]);
     assert_eq!(listed[0].kind, "raster");
 }
@@ -537,6 +543,183 @@ async fn sanitize_new_attribution_and_preserve_unchanged_legacy_html() {
 }
 
 #[tokio::test]
+async fn availability_and_fallbacks_are_protected_for_each_map_use() {
+    let pool = common::test_pool().await;
+    let admin = common::create_test_admin(&pool, "background-availability-admin").await;
+    let normal = create(&pool, &admin, definition("通常フォールバック")).await;
+    let shared = create(&pool, &admin, definition("共有フォールバック")).await;
+    let live = create(&pool, &admin, definition("ライブフォールバック")).await;
+
+    let switch = |temporary: i64, live: i64| {
+        admin_update_fallbacks(
+            Extension(admin.clone()),
+            Extension(pool.clone()),
+            Json(
+                serde_json::from_value(
+                    json!({"temporary":temporary.to_string(),"live":live.to_string()}),
+                )
+                .unwrap(),
+            ),
+        )
+    };
+    let update = |id, data| {
+        admin_update(
+            Extension(admin.clone()),
+            Extension(pool.clone()),
+            Path(id),
+            None,
+            input(data),
+        )
+    };
+    let delete = |id| admin_delete(Extension(admin.clone()), Extension(pool.clone()), Path(id));
+    let mut update_normal = definition("通常フォールバック");
+    update_normal["allow_temporary_share"] = json!(false);
+    update_normal["allow_live_map"] = json!(false);
+    assert!(matches!(
+        update(normal.id, update_normal.clone()).await,
+        Err(AppError::Validation(_))
+    ));
+    let Json(fallbacks) = switch(shared.id, live.id).await.unwrap();
+    assert_eq!(fallbacks.temporary.as_deref(), Some("2"));
+    let Json(normal) = update(normal.id, update_normal).await.unwrap();
+    assert_eq!(
+        (normal.allow_temporary_share, normal.allow_live_map),
+        (false, false)
+    );
+    assert!(matches!(
+        switch(normal.id, live.id).await,
+        Err(AppError::Validation(_))
+    ));
+    assert!(matches!(
+        delete(normal.id).await,
+        Err(AppError::Validation(_))
+    ));
+    assert!(matches!(
+        delete(shared.id).await,
+        Err(AppError::Validation(_))
+    ));
+    assert!(matches!(
+        delete(live.id).await,
+        Err(AppError::Validation(_))
+    ));
+    assert!(matches!(
+        update(shared.id, vector("共有フォールバック")).await,
+        Err(AppError::Validation(_))
+    ));
+    let mut disable = definition("ライブフォールバック");
+    disable["enabled"] = json!(false);
+    assert!(matches!(
+        update(live.id, disable).await,
+        Err(AppError::Validation(_))
+    ));
+
+    let mut disabled = definition("無効な背景");
+    disabled["enabled"] = json!(false);
+    disabled["allow_live_map"] = json!(false);
+    let disabled = create(&pool, &admin, disabled).await;
+    let changed = update(disabled.id, definition("名前だけ変更"))
+        .await
+        .unwrap()
+        .0;
+    assert!(!changed.enabled && !changed.allow_live_map);
+    let listed = admin_list(Extension(admin.clone()), Extension(pool.clone()))
+        .await
+        .unwrap()
+        .0;
+    assert_eq!(listed.fallbacks.normal.as_deref(), Some("1"));
+    assert_eq!(listed.fallbacks.temporary.as_deref(), Some("2"));
+    assert_eq!(listed.fallbacks.live.as_deref(), Some("3"));
+    assert_eq!(listed.backgrounds.len(), 4);
+    for (scope, fallback, expected) in [
+        (BasemapScope::Normal, normal.id, vec![1, 2, 3]),
+        (BasemapScope::Temporary, shared.id, vec![2, 3]),
+        (BasemapScope::Live, live.id, vec![2, 3]),
+    ] {
+        let available = load_available_tile_servers(&pool, scope).await.unwrap();
+        assert_eq!(available.fallback_id, Some(fallback));
+        assert_eq!(
+            available
+                .tiles
+                .into_iter()
+                .map(|tile| tile.id)
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+    assert_eq!(delete(disabled.id).await.unwrap(), StatusCode::NO_CONTENT);
+    assert!(matches!(delete(disabled.id).await, Err(AppError::NotFound)));
+
+    // 外部から無効化された古い参照があっても、実際のフォールバックがあれば整理できる。
+    let extra = create(&pool, &admin, definition("退役する共有背景")).await;
+    let Json(_) = switch(extra.id, live.id).await.unwrap();
+    sqlx::query(
+        r#"
+        UPDATE tileserver_model
+        SET enabled = false
+        WHERE id = $1
+        "#,
+    )
+    .bind(extra.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(delete(extra.id).await.unwrap(), StatusCode::NO_CONTENT);
+    let available = load_available_tile_servers(&pool, BasemapScope::Temporary)
+        .await
+        .unwrap();
+    assert_eq!(available.fallback_id, Some(shared.id));
+}
+
+#[tokio::test]
+async fn concurrent_deletion_cannot_remove_the_active_fallback_or_reuse_manually_assigned_ids() {
+    let (pool, path) = common::file_test_pool().await;
+    let admin = common::create_test_admin(&pool, "background-delete-admin").await;
+    let default = create(&pool, &admin, definition("既定背景")).await;
+    sqlx::query(
+        r#"
+        INSERT INTO tileserver_model (id, layer_name, label, url, attribution, create_at, updated_at)
+        VALUES (100, '手動背景', '手動背景', '/legacy.png', '旧出典', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (deleted, selected) = tokio::join!(
+        admin_delete(Extension(admin.clone()), Extension(pool.clone()), Path(100)),
+        admin_update_fallbacks(
+            Extension(admin.clone()),
+            Extension(pool.clone()),
+            Json(serde_json::from_value(json!({"temporary":"100","live":"1"})).unwrap()),
+        ),
+    );
+    assert_ne!(deleted.is_ok(), selected.is_ok());
+    if selected.is_ok() {
+        let Json(_) = admin_update_fallbacks(
+            Extension(admin.clone()),
+            Extension(pool.clone()),
+            Json(serde_json::from_value(json!({"temporary":"1","live":"1"})).unwrap()),
+        )
+        .await
+        .unwrap();
+        admin_delete(Extension(admin.clone()), Extension(pool.clone()), Path(100))
+            .await
+            .unwrap();
+    }
+    assert!(matches!(
+        admin_delete(
+            Extension(admin.clone()),
+            Extension(pool.clone()),
+            Path(default.id)
+        )
+        .await,
+        Err(AppError::Validation(_))
+    ));
+    let next = create(&pool, &admin, definition("削除後の背景")).await;
+    assert_eq!(next.id, 101);
+    common::close_file_test_pool(pool, path).await;
+}
+
+#[tokio::test]
 async fn require_authentication_and_valid_json_types_for_admin_routes() {
     let pool = common::test_pool().await;
     let admin = common::create_test_admin(&pool, "background-router-admin").await;
@@ -550,6 +733,8 @@ async fn require_authentication_and_valid_json_types_for_admin_routes() {
         ("GET", "/admin/background-maps"),
         ("POST", "/admin/background-maps"),
         ("PUT", "/admin/background-maps/1"),
+        ("PUT", "/admin/background-maps/fallbacks"),
+        ("DELETE", "/admin/background-maps/1"),
     ] {
         let response = app
             .clone()

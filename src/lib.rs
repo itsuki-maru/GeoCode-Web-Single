@@ -16,6 +16,7 @@ pub mod db;
 pub mod error;
 mod frontend_html;
 pub mod geocoding;
+pub mod google_maps;
 pub mod handler;
 pub mod image;
 pub mod init;

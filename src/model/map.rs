@@ -14,6 +14,16 @@ pub struct TileServers {
     pub kind: String,
     #[serde(default)]
     pub style_url: Option<String>,
+    #[serde(default = "default_tile_provider")]
+    pub provider: String,
+    #[serde(default)]
+    pub google_map_type: Option<String>,
+    #[serde(default = "default_tile_available")]
+    pub enabled: bool,
+    #[serde(default = "default_tile_available")]
+    pub allow_temporary_share: bool,
+    #[serde(default = "default_tile_available")]
+    pub allow_live_map: bool,
     pub attribution: String,
     pub include_foreign_tiles: bool,
     pub min_zoom: Option<i64>,
@@ -24,6 +34,24 @@ pub struct TileServers {
 
 fn default_tile_kind() -> String {
     "raster".into()
+}
+
+fn default_tile_provider() -> String {
+    "generic".into()
+}
+
+fn default_tile_available() -> bool {
+    true
+}
+
+pub fn is_valid_basemap_provider(kind: &str, provider: &str, map_type: Option<&str>) -> bool {
+    match provider {
+        "generic" => map_type.is_none(),
+        "google" => {
+            kind == "raster" && matches!(map_type, Some("roadmap" | "satellite" | "terrain"))
+        },
+        _ => false,
+    }
 }
 
 /// スタイルは公開可能な HTTPS URL または同一オリジンの絶対パスに限定する。

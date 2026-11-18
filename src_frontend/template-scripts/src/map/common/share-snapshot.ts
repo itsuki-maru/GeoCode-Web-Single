@@ -1,6 +1,10 @@
 import { isAnswerColoring } from "../answer-coloring";
 import { isPrintMapState, type PrintMapState } from "./print-state";
-import { normalizeBasemapDefinition, type TileServerRecord } from "./basemap-definition";
+import {
+  getFallbackTileServerId,
+  normalizeBasemapDefinition,
+  type TileServerRecord,
+} from "./basemap-definition";
 
 // Vue と地図iframeの境界で使う型は、地図の描画モジュールへ依存させない。
 interface LayerRecord {
@@ -38,7 +42,7 @@ interface TileOverlayRecord {
 }
 
 export interface StoredShareMapSnapshot {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   state: PrintMapState;
   tileServers: Record<string, TileServerRecord>;
   tileOverlays: TileOverlayRecord[];
@@ -90,18 +94,20 @@ export const legacyBasemapFields = [
 /** v1には新メタデータを混ぜず、ベクタ背景を含む場合だけv2へ進める。 */
 export function projectSnapshotBasemaps(
   tileServers: Record<string, TileServerRecord>,
-  minimumVersion: 1 | 2 = 1,
+  minimumVersion: 1 | 2 | 3 = 1,
 ): Pick<StoredShareMapSnapshot, "version" | "tileServers"> {
   const definitions = Object.entries(tileServers).map(([id, tile]) => {
     const definition = normalizeBasemapDefinition(tile);
-    if (!definition || (id === "1" && definition.kind !== "raster"))
+    if (!definition || (id === "1" && (definition.kind !== "raster" || tile.provider === "google")))
       throw new Error("Background-map definition is invalid");
     return { id, tile, definition };
   });
   const version =
-    minimumVersion === 2 || definitions.some(({ definition }) => definition.kind === "vector")
-      ? 2
-      : 1;
+    minimumVersion === 3 || definitions.some(({ tile }) => tile.provider === "google")
+      ? 3
+      : minimumVersion === 2 || definitions.some(({ definition }) => definition.kind === "vector")
+        ? 2
+        : 1;
   return {
     version,
     tileServers: Object.fromEntries(
@@ -109,7 +115,13 @@ export function projectSnapshotBasemaps(
         id,
         {
           ...Object.fromEntries(legacyBasemapFields.map((field) => [field, tile[field]])),
-          ...(version === 2 ? definition : {}),
+          ...(version >= 2 ? definition : {}),
+          ...(version === 3
+            ? {
+                provider: tile.provider ?? "generic",
+                google_map_type: tile.google_map_type ?? null,
+              }
+            : {}),
         } as TileServerRecord,
       ]),
     ),
@@ -119,13 +131,14 @@ export function projectSnapshotBasemaps(
 export function isStoredShareMapSnapshot(v: unknown): v is StoredShareMapSnapshot {
   if (
     !record(v) ||
-    (v.version !== 1 && v.version !== 2) ||
+    (v.version !== 1 && v.version !== 2 && v.version !== 3) ||
     !isPrintMapState(v.state) ||
     !record(v.tileServers) ||
     !Array.isArray(v.tileOverlays)
   )
     return false;
-  if (!owns(v.tileServers, "1") || !owns(v.tileServers, v.state.tileServerId)) return false;
+  if (!getFallbackTileServerId(v.tileServers) || !owns(v.tileServers, v.state.tileServerId))
+    return false;
   if (
     !Object.entries(v.tileServers).every(
       ([id, t]) =>
@@ -139,7 +152,9 @@ export function isStoredShareMapSnapshot(v: unknown): v is StoredShareMapSnapsho
         (() => {
           const definition = normalizeBasemapDefinition(t);
           return (
-            definition !== null && (definition.kind === "raster" || (v.version === 2 && id !== "1"))
+            definition !== null &&
+            (definition.kind === "raster" || (v.version >= 2 && id !== "1")) &&
+            (t.provider !== "google" || (v.version === 3 && id !== "1"))
           );
         })(),
     )

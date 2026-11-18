@@ -76,7 +76,7 @@ async fn assert_application_schema(pool: &SqlitePool) {
             .fetch_all(pool)
             .await
             .unwrap();
-    assert_eq!(versions, (1..=27).collect::<Vec<_>>());
+    assert_eq!(versions, (1..=29).collect::<Vec<_>>());
 }
 
 #[tokio::test]

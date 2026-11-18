@@ -62,6 +62,34 @@ function fixture(): ShareMapSnapshot {
 }
 
 describe("share snapshot data boundary", () => {
+  it("Google背景を含む場合だけv3へ進み、資格情報を引き継がない", () => {
+    const source = fixture();
+    source.tileServers["2"] = {
+      ...source.tileServers["1"],
+      id: 2,
+      provider: "google",
+      kind: "raster",
+      style_url: null,
+      google_map_type: "satellite",
+    };
+    Object.assign(source.tileServers["2"], { apiKey: "private-key", session: "private-session" });
+    const captured = createShareMapSnapshot(
+      source,
+      source.state,
+      new Set(["marker:keep", "marker:excluded"]),
+    );
+    expect(captured.version).toBe(3);
+    expect(captured.tileServers["2"].provider).toBe("google");
+    expect(JSON.stringify(captured)).not.toContain("private-");
+    expect(isShareMapSnapshot(captured)).toBe(true);
+    expect(isShareMapSnapshot({ ...captured, version: 2 })).toBe(false);
+    expect(
+      isShareMapSnapshot({
+        ...captured,
+        tileServers: { ...captured.tileServers, "1": { ...captured.tileServers["2"], id: 1 } },
+      }),
+    ).toBe(false);
+  });
   it("共有内容の送信先は同一originかサーバーが許可した開発originに限定する", () => {
     const own = "https://map.example.test";
     const dev = "http://localhost:5173";
@@ -123,7 +151,7 @@ describe("share snapshot data boundary", () => {
         state: { ...captured.state, overlays: { unknown: true } },
       }),
     ).toBe(false);
-    expect(isShareMapSnapshot({ ...captured, version: 3 })).toBe(false);
+    expect(isShareMapSnapshot({ ...captured, version: 4 })).toBe(false);
   });
 
   it("ラスタのみは新メタデータを除いて従来のv1を生成する", () => {
@@ -176,9 +204,9 @@ describe("share snapshot data boundary", () => {
     expect(isShareMapSnapshot(withTile(2, {}))).toBe(true);
     expect(isShareMapSnapshot(withTile(2, { kind: "unknown" }))).toBe(false);
     expect(isShareMapSnapshot(withTile(1, { style_url: "/style.json" }))).toBe(false);
-    expect(
-      isShareMapSnapshot(withTile(2, { kind: "vector", style_url: "/style.json" })),
-    ).toBe(false);
+    expect(isShareMapSnapshot(withTile(2, { kind: "vector", style_url: "/style.json" }))).toBe(
+      false,
+    );
     const vector = {
       ...captured,
       version: 2,

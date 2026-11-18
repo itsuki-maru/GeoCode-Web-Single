@@ -1,4 +1,5 @@
 use super::admin::load_clustering_min_zoom;
+use crate::db::{BasemapScope, load_available_tile_servers};
 use crate::error::AppError;
 use crate::model::{
     CreateUpdatedTemporaryUrlResponse, CurrentTemporaryUrlResponse, GenarateUrlPayload,
@@ -85,38 +86,40 @@ pub async fn generate_url_handler(
     if !owner_exists {
         return Err(AppError::NotFound);
     }
-    let (layers, markers, shapes, map_snapshot) = if let Some(captured) = captured {
-        snapshot::authorize(&mut tx, &user_id, &captured).await?;
-        // スナップショットの保存まで本体DBの書き込みの排他を保持する。利用停止処理も
-        // 同じ排他を使い、背景と共有からの参照を確認する。
-        validate_snapshot_local_tiles(
-            local_tiles.as_ref().map(|extension| &extension.0),
-            &captured.metadata,
-        )
-        .await?;
-        let requested: std::collections::HashSet<_> = payload.layers.iter().cloned().collect();
-        if requested != captured.layers.keys().cloned().collect() {
-            return Err(AppError::Validation(
-                "共有するレイヤグループが一致しません。地図を開き直してください。".into(),
-            ));
-        }
-        (
-            captured.layers,
-            captured.markers,
-            captured.shapes,
-            Some(captured.metadata),
-        )
-    } else {
-        let layer_ids = payload.layers;
-        let markers = get_markers_hash_map(&mut tx, &user_id, &layer_ids).await?;
-        let layers = get_layer_hash_map(&mut tx, &user_id, &layer_ids).await?;
-        let shapes = if payload.include_shapes {
-            get_shapes_hash_map(&mut tx, &user_id, &layer_ids).await?
+    let (layers, markers, shapes, map_snapshot, background_replaced) =
+        if let Some(mut captured) = captured {
+            let background_replaced = snapshot::authorize(&mut tx, &user_id, &mut captured).await?;
+            // スナップショットの保存まで本体DBの書き込みの排他を保持する。利用停止処理も
+            // 同じ排他を使い、背景と共有からの参照を確認する。
+            validate_snapshot_local_tiles(
+                local_tiles.as_ref().map(|extension| &extension.0),
+                &captured.metadata,
+            )
+            .await?;
+            let requested: std::collections::HashSet<_> = payload.layers.iter().cloned().collect();
+            if requested != captured.layers.keys().cloned().collect() {
+                return Err(AppError::Validation(
+                    "共有するレイヤグループが一致しません。地図を開き直してください。".into(),
+                ));
+            }
+            (
+                captured.layers,
+                captured.markers,
+                captured.shapes,
+                Some(captured.metadata),
+                background_replaced,
+            )
         } else {
-            HashMap::new()
+            let layer_ids = payload.layers;
+            let markers = get_markers_hash_map(&mut tx, &user_id, &layer_ids).await?;
+            let layers = get_layer_hash_map(&mut tx, &user_id, &layer_ids).await?;
+            let shapes = if payload.include_shapes {
+                get_shapes_hash_map(&mut tx, &user_id, &layer_ids).await?
+            } else {
+                HashMap::new()
+            };
+            (layers, markers, shapes, None, false)
         };
-        (layers, markers, shapes, None)
-    };
     let id = Uuid::now_v7().to_string();
     let url = format!("/onetime/{id}");
     let mut temporary_url = TemporaryUrl::new(
@@ -132,7 +135,8 @@ pub async fn generate_url_handler(
     )
     .map_err(|_| AppError::BadRequest)?;
     temporary_url.map_snapshot = map_snapshot;
-    let response = save_temporary_url(&mut tx, temporary_url, payload.update_url).await?;
+    let mut response = save_temporary_url(&mut tx, temporary_url, payload.update_url).await?;
+    response.background_replaced = background_replaced;
     tx.commit().await?;
     Ok(Json(response))
 }
@@ -734,20 +738,23 @@ async fn render_temporary_map_page(
     is_map_ui_hidden: bool,
     is_overlay_tile: bool,
 ) -> Result<axum::response::Response, AppError> {
-    let shared_snapshot = temp_url
+    let mut shared_snapshot = temp_url
         .map_snapshot
         .as_deref()
         .map(parse_json)
         .transpose()?;
     let mut context = Context::new();
-    if let Some(snapshot) = &shared_snapshot {
+    let basemaps = load_available_tile_servers(pool, BasemapScope::Temporary).await?;
+    if let Some(id) = basemaps.fallback_id {
+        context.insert("fallbackTileServerId", &id.to_string());
+    }
+    if let Some(snapshot) = &mut shared_snapshot {
+        snapshot::apply_availability(snapshot, &basemaps)?;
         context.insert("clusteringMinZoom", &load_clustering_min_zoom(pool).await?);
-        // スナップショット共有では、保存後のタイル設定を追加取得しない。
         context.insert("tileServers", &snapshot["tileServers"]);
         context.insert("tileOverlays", &snapshot["tileOverlays"]);
     } else {
-        let tile_servers = crate::db::load_tile_servers(pool).await?;
-        let tile_servers = vec_to_hashmap(tile_servers, |server| server.id);
+        let tile_servers = vec_to_hashmap(basemaps.tiles, |server| server.id);
         context.insert("tileServers", &tile_servers);
         let tile_overlays = if temp_url.include_tile_overlays {
             crate::handler::tile_overlays::selected_tiles(pool, &temp_url.user_id).await?
@@ -763,6 +770,10 @@ async fn render_temporary_map_page(
     context.insert("markersObj", &markers);
     context.insert("shapesObj", &shapes);
     context.insert("shareSnapshot", &shared_snapshot);
+    context.insert(
+        "googleMapsAccess",
+        &crate::google_maps::temporary_access(&temp_url)?,
+    );
     context.insert("geocoderCsis", &crate::config::CONFIG.geocoder.uses_csis());
     context.insert(
         "geocoderShareToken",

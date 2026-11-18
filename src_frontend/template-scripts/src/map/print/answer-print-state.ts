@@ -128,6 +128,7 @@ export function createAnswerPrintSnapshot(
         Object.entries(bootstrap.layers).filter(([id]) => layerIds.has(id)),
       ),
       tileServers: bootstrap.tileServers,
+      fallbackTileServerId: bootstrap.fallbackTileServerId,
       tileOverlays: bootstrap.tileOverlays || [],
       answerPreview: {
         ...bootstrap.answerPreview,

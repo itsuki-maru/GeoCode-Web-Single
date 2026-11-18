@@ -67,6 +67,19 @@ const routeSettings: RouteRecordRaw[] = [
     },
   },
   {
+    path: "/google-maps-settings",
+    name: "GoogleMapsSettings",
+    component: () => import("@/views/GoogleMapsSettings.vue"),
+    beforeEnter: async (_to, _from, next) => {
+      try {
+        await apiClient.get(getUserUrl);
+        next();
+      } catch {
+        next({ name: "login" });
+      }
+    },
+  },
+  {
     path: "/tile-server-settings",
     name: "TileServerSettings",
     component: () => import("@/views/TileServerSettings.vue"),

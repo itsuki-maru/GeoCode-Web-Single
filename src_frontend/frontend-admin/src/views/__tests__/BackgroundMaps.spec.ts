@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import BackgroundMaps from "../BackgroundMaps.vue";
+import ConfirmModal from "@/components/common/ConfirmModal.vue";
 import { adminBackgroundMapsUrl } from "@/router/urls";
 
-const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn() }));
+const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }));
 vi.mock("@/axiosClient", () => ({ default: api }));
 const legacy = {
   id: 1,
@@ -12,6 +13,9 @@ const legacy = {
   url: "/tile/{z}/{x}/{y}.png",
   attribution: '<img src="x" onerror="alert(1)">出典',
   include_foreign_tiles: false,
+  enabled: true,
+  allow_temporary_share: true,
+  allow_live_map: true,
   min_zoom: null,
   max_zoom: null,
 };
@@ -23,6 +27,9 @@ const vector = {
   kind: "vector",
   style_url: "/style.json",
 };
+const fallbacks = { normal: "1", temporary: "1", live: "1" };
+const savedMessage = "背景地図を保存しました。地図の再読み込み時に反映されます。";
+const deletedMessage = "背景地図を削除しました。地図の再読み込み時に反映されます。";
 let wrapper: VueWrapper;
 const submit = async () => {
   await wrapper.get("form").trigger("submit");
@@ -31,9 +38,17 @@ const submit = async () => {
 const edit = async (id: number) => {
   await wrapper.findAll("li")[id - 1]!.get("button").trigger("click");
 };
+const acknowledgeMessage = async (text: string) => {
+  const dialog = wrapper.get('[role="dialog"][aria-labelledby="message-modal-title"]');
+  expect(dialog.isVisible()).toBe(true);
+  expect(dialog.get("p").text()).toBe(text);
+  expect(wrapper.find('[role="status"]').exists()).toBe(false);
+  await dialog.get("button").trigger("click");
+  expect(dialog.isVisible()).toBe(false);
+};
 
 beforeEach(() => {
-  api.get.mockResolvedValue({ data: [legacy, vector] });
+  api.get.mockResolvedValue({ data: { backgrounds: [legacy, vector], fallbacks } });
   wrapper = mount(BackgroundMaps, { attachTo: document.body });
 });
 afterEach(() => {
@@ -42,6 +57,41 @@ afterEach(() => {
 });
 
 describe("背景地図設定", () => {
+  it("Google背景をURL入力なしで登録でき、既定背景の配信元は変更できない", async () => {
+    await flushPromises();
+    await edit(1);
+    expect(wrapper.get<HTMLSelectElement>("#background-provider").element.disabled).toBe(true);
+    // 新規登録へ戻してGoogle地図を選ぶ。
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("編集をやめる"))!
+      .trigger("click");
+    await wrapper.get("#background-provider").setValue("google");
+    await wrapper.get("#background-google-type").setValue("terrain");
+    await wrapper.get("#background-label").setValue("Google地形");
+    await wrapper.get("#background-layer-name").setValue("google-terrain");
+    expect(wrapper.find("#background-url").exists()).toBe(false);
+    api.post.mockResolvedValue({
+      data: {
+        ...legacy,
+        id: 3,
+        provider: "google",
+        google_map_type: "terrain",
+        label: "Google地形",
+      },
+    });
+    await submit();
+    expect(api.post).toHaveBeenCalledWith(
+      adminBackgroundMapsUrl,
+      expect.objectContaining({
+        provider: "google",
+        google_map_type: "terrain",
+        kind: "raster",
+        url: "/google-maps/tiles/{z}/{x}/{y}",
+        attribution: "",
+      }),
+    );
+  });
   it("文字数はUnicode文字数で検証し、絵文字をUTF-16のmaxlengthで切り詰めない", async () => {
     await flushPromises();
     await edit(2);
@@ -84,7 +134,7 @@ describe("背景地図設定", () => {
       kind: "raster",
       style_url: null,
     });
-    expect(wrapper.get('[role="status"]').text()).toContain("保存しました");
+    await acknowledgeMessage(savedMessage);
     expect(wrapper.get("li").text()).toContain("更新した航空写真");
     expect(wrapper.get("legend").text()).toBe("背景地図を登録");
   });
@@ -122,6 +172,7 @@ describe("背景地図設定", () => {
         max_zoom: 22,
       }),
     );
+    await acknowledgeMessage(savedMessage);
     await edit(3);
     expect(wrapper.get<HTMLInputElement>("#background-style-url").element.value).toBe(
       created.style_url,
@@ -146,6 +197,7 @@ describe("背景地図設定", () => {
       `${adminBackgroundMapsUrl}/2`,
       expect.objectContaining({ kind: "raster", style_url: null }),
     );
+    await acknowledgeMessage(savedMessage);
     await edit(2);
     await wrapper.get("#background-label").setValue("取り消す入力");
     await wrapper
@@ -222,5 +274,87 @@ describe("背景地図設定", () => {
     complete({ data: vector });
     await flushPromises();
     expect(wrapper.get<HTMLFieldSetElement>("fieldset").element.disabled).toBe(false);
+  });
+
+  it("公開先ごとにフォールバックを変更し、移動した公開先の利用可否だけを編集できる", async () => {
+    const otherRaster = {
+      ...legacy,
+      id: 3,
+      label: "代替ラスタ",
+      layer_name: "other-raster",
+      allow_live_map: false,
+    };
+    api.get.mockResolvedValueOnce({
+      data: { backgrounds: [legacy, vector, otherRaster], fallbacks },
+    });
+    await flushPromises();
+    await wrapper.get(".list-heading button").trigger("click");
+    await flushPromises();
+    const shared = wrapper.get<HTMLSelectElement>("#background-fallback-temporary");
+    const live = wrapper.get<HTMLSelectElement>("#background-fallback-live");
+    expect(
+      [...shared.element.options]
+        .filter((option) => !option.disabled)
+        .map((option) => option.value),
+    ).toEqual(["1", "3"]);
+    expect(
+      [...live.element.options].filter((option) => !option.disabled).map((option) => option.value),
+    ).toEqual(["1"]);
+    await shared.setValue("3");
+    api.put.mockResolvedValueOnce({ data: { ...fallbacks, temporary: "3" } });
+    await wrapper.findAll("form")[1]!.trigger("submit");
+    await flushPromises();
+    expect(api.put).toHaveBeenCalledWith(`${adminBackgroundMapsUrl}/fallbacks`, {
+      temporary: "3",
+      live: "1",
+    });
+    expect(wrapper.get('[role="status"]').text()).toBe("フォールバックを保存しました。");
+    await edit(1);
+    expect(wrapper.get("#background-enabled").attributes()).toHaveProperty("disabled");
+    expect(wrapper.get("#background-allow-live").attributes()).toHaveProperty("disabled");
+    await wrapper.get("#background-allow-temporary").setValue(false);
+    api.put.mockResolvedValueOnce({ data: { ...legacy, allow_temporary_share: false } });
+    await submit();
+    expect(api.put).toHaveBeenCalledWith(
+      `${adminBackgroundMapsUrl}/1`,
+      expect.objectContaining({
+        enabled: true,
+        allow_temporary_share: false,
+        allow_live_map: true,
+      }),
+    );
+    expect(wrapper.get("li").text()).toContain("共有URLで使用不可");
+  });
+
+  it("無効化した背景も管理一覧で再編集でき、削除は確認後だけに実行できる", async () => {
+    await flushPromises();
+    expect(wrapper.get('button[aria-label="航空写真を削除"]').attributes()).toHaveProperty(
+      "disabled",
+    );
+    await edit(2);
+    await wrapper.get("#background-enabled").setValue(false);
+    api.put.mockResolvedValueOnce({ data: { ...vector, enabled: false } });
+    await submit();
+    expect(api.put).toHaveBeenCalledWith(
+      `${adminBackgroundMapsUrl}/2`,
+      expect.objectContaining({ enabled: false }),
+    );
+    expect(wrapper.findAll("li")[1]!.text()).toContain("無効");
+    await acknowledgeMessage(savedMessage);
+    await edit(2);
+    expect(wrapper.get<HTMLInputElement>("#background-enabled").element.checked).toBe(false);
+    await wrapper.get('button[aria-label="ベクタ地図を削除"]').trigger("click");
+    expect(api.delete).not.toHaveBeenCalled();
+    wrapper.getComponent(ConfirmModal).vm.$emit("cancel");
+    await flushPromises();
+    expect(wrapper.findAll("li")).toHaveLength(2);
+    await wrapper.get('button[aria-label="ベクタ地図を削除"]').trigger("click");
+    api.delete.mockResolvedValueOnce({});
+    wrapper.getComponent(ConfirmModal).vm.$emit("confirm");
+    await flushPromises();
+    expect(api.delete).toHaveBeenCalledWith(`${adminBackgroundMapsUrl}/2`);
+    expect(wrapper.findAll("li")).toHaveLength(1);
+    expect(wrapper.get("legend").text()).toBe("背景地図を登録");
+    await acknowledgeMessage(deletedMessage);
   });
 });

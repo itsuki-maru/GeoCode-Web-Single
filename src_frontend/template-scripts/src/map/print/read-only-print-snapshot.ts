@@ -1,4 +1,5 @@
 import { isAnswerColoring } from "../answer-coloring";
+import { getFallbackTileServerId } from "../common/basemap-definition";
 import type { PrintMapState } from "../common/print-state";
 import {
   isStoredShareMapSnapshot,
@@ -16,6 +17,7 @@ export type ReadOnlyPrintSourcePage = "map-anather" | "temporary-map";
 export interface ReadOnlyPrintSnapshot extends ShareMapSnapshot {
   sourcePage: ReadOnlyPrintSourcePage;
   snapshotShare?: boolean;
+  fallbackTileServerId?: string;
   shapes: ShapeRecord[];
 }
 
@@ -24,9 +26,15 @@ type LegacyLayerRecord = Omit<LayerRecord, "marker_icon_id" | "marker_icon_filen
 
 export interface ReadOnlyPrintSource extends Pick<
   ReadOnlyPrintSnapshot,
-  "sourcePage" | "snapshotShare" | "markers" | "shapes" | "tileServers" | "tileOverlays"
+  | "sourcePage"
+  | "snapshotShare"
+  | "fallbackTileServerId"
+  | "markers"
+  | "shapes"
+  | "tileServers"
+  | "tileOverlays"
 > {
-  version?: 1 | 2;
+  version?: 1 | 2 | 3;
   layers: Record<string, LegacyLayerRecord>;
 }
 
@@ -34,6 +42,7 @@ const snapshotFields = [
   "version",
   "sourcePage",
   "snapshotShare",
+  "fallbackTileServerId",
   "state",
   "layers",
   "markers",
@@ -68,7 +77,13 @@ const layerFields = [
 ] as const;
 const markerFields = ["id", "layer_id", "marker_name", "detail", "latitude", "longitude"] as const;
 const shapeFields = ["id", "layer_id", "shape_type", "name", "user_id", "geojson"] as const;
-const tileFields = [...legacyBasemapFields, "kind", "style_url"] as const;
+const tileFields = [
+  ...legacyBasemapFields,
+  "kind",
+  "style_url",
+  "provider",
+  "google_map_type",
+] as const;
 const overlayFields = [
   "id",
   "name",
@@ -172,6 +187,10 @@ function hasValidFields(value: unknown): value is ReadOnlyPrintSnapshot {
     (value.snapshotShare !== undefined && typeof value.snapshotShare !== "boolean") ||
     (value.snapshotShare === true && value.sourcePage !== "temporary-map") ||
     !isStoredShareMapSnapshot(value) ||
+    (value.fallbackTileServerId !== undefined &&
+      (typeof value.fallbackTileServerId !== "string" ||
+        getFallbackTileServerId(value.tileServers, value.fallbackTileServerId) !==
+          value.fallbackTileServerId)) ||
     !allowedFields(value.state, stateFields) ||
     !allowedFields(value.state.view, viewFields) ||
     !record(value.layers) ||
@@ -331,6 +350,7 @@ export function createReadOnlyPrintSnapshot(
     ...projectSnapshotBasemaps(source.tileServers, source.version),
     sourcePage: source.sourcePage,
     snapshotShare: source.snapshotShare,
+    fallbackTileServerId: source.fallbackTileServerId,
     layers,
     markers,
     shapes,

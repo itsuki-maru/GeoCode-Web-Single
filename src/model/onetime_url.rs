@@ -112,6 +112,9 @@ pub struct CreateUpdatedTemporaryUrlResponse {
     pub id: String,
     pub url: String,
     pub expiration: String,
+    #[sqlx(default)]
+    #[serde(default)]
+    pub background_replaced: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]

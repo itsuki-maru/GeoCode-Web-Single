@@ -1,15 +1,19 @@
 use crate::{
-    db::load_tile_servers,
+    db::{
+        BasemapScope,
+        tiles::{BasemapCatalog, load_basemap_catalog, next_background_id},
+    },
     error::AppError,
     handler::live_map::require_superuser,
     local_tiles::LocalTiles,
-    model::{TileServers, is_valid_basemap_definition},
+    model::{TileServers, is_valid_basemap_definition, is_valid_basemap_provider},
 };
 use axum::{
     Json,
     extract::{Extension, Path},
+    http::StatusCode,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::{
     collections::{HashMap, HashSet},
@@ -29,10 +33,20 @@ pub struct BackgroundMapInput {
     kind: String,
     #[serde(default)]
     style_url: Option<String>,
+    #[serde(default = "default_provider")]
+    provider: String,
+    google_map_type: Option<String>,
+    enabled: Option<bool>,
+    allow_temporary_share: Option<bool>,
+    allow_live_map: Option<bool>,
 }
 
 fn default_kind() -> String {
     "raster".into()
+}
+
+fn default_provider() -> String {
+    "generic".into()
 }
 
 /// 本体DBの書き込みトランザクション中に呼び出し、catalogの検査から本体DBへの
@@ -145,6 +159,15 @@ impl BackgroundMapInput {
                     .into(),
             ));
         }
+        if !is_valid_basemap_provider(&self.kind, &self.provider, self.google_map_type.as_deref()) {
+            return Err(AppError::Validation(
+                "背景の配信元とGoogle地図の種類を確認してください。".into(),
+            ));
+        }
+        if self.provider == "google" {
+            self.url = "/google-maps/tiles/{z}/{x}/{y}".into();
+            self.attribution.clear();
+        }
         if !valid_image_url(&self.url) {
             return Err(AppError::Validation(
                 "画像タイルURLは255文字以内のHTTP・HTTPS URLまたは同一サイトの絶対パスを指定してください。認証情報・フラグメント・未対応の置換文字は使用できません。"
@@ -165,7 +188,7 @@ impl BackgroundMapInput {
                     .into(),
             ));
         }
-        if id == Some(1) && self.kind != "raster" {
+        if id == Some(1) && (self.kind != "raster" || self.provider != "generic") {
             return Err(AppError::Validation(
                 "既定の背景地図（ID 1）はラスタのまま使用してください。".into(),
             ));
@@ -182,12 +205,113 @@ impl BackgroundMapInput {
     }
 }
 
+#[derive(Serialize)]
+pub struct BackgroundMapList {
+    pub backgrounds: Vec<TileServers>,
+    pub fallbacks: BackgroundMapFallbacks,
+}
+
+#[derive(Serialize)]
+pub struct BackgroundMapFallbacks {
+    pub normal: Option<String>,
+    pub temporary: Option<String>,
+    pub live: Option<String>,
+}
+
+impl BackgroundMapFallbacks {
+    fn from_catalog(catalog: &BasemapCatalog) -> Self {
+        let fallback_id = |scope| catalog.fallback(scope).map(|id| id.to_string());
+        Self {
+            normal: fallback_id(BasemapScope::Normal),
+            temporary: fallback_id(BasemapScope::Temporary),
+            live: fallback_id(BasemapScope::Live),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct UpdateFallbacks {
+    temporary: String,
+    live: String,
+}
+
+fn scope_label(scope: BasemapScope) -> &'static str {
+    match scope {
+        BasemapScope::Normal => "通常地図",
+        BasemapScope::Temporary => "共有URL",
+        BasemapScope::Live => "ライブマップ",
+    }
+}
+
+fn fallback_required(scope: BasemapScope) -> AppError {
+    AppError::Validation(format!(
+        "{}のフォールバックには、その地図で使用可能な有効なラスタ背景が必要です。",
+        scope_label(scope)
+    ))
+}
+
+fn validate_fallbacks(catalog: &BasemapCatalog) -> Result<(), AppError> {
+    for scope in BasemapScope::ALL {
+        if catalog.fallback(scope).is_none() {
+            return Err(fallback_required(scope));
+        }
+    }
+    Ok(())
+}
+
 pub async fn admin_list(
     Extension(user): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
-) -> Result<Json<Vec<TileServers>>, AppError> {
+) -> Result<Json<BackgroundMapList>, AppError> {
     require_superuser(&user, &pool).await?;
-    Ok(Json(load_tile_servers(&pool).await?))
+    let catalog = load_basemap_catalog(&pool).await?;
+    Ok(Json(BackgroundMapList {
+        fallbacks: BackgroundMapFallbacks::from_catalog(&catalog),
+        backgrounds: catalog.tiles,
+    }))
+}
+
+pub async fn admin_update_fallbacks(
+    Extension(user): Extension<String>,
+    Extension(pool): Extension<SqlitePool>,
+    Json(input): Json<UpdateFallbacks>,
+) -> Result<Json<BackgroundMapFallbacks>, AppError> {
+    require_superuser(&user, &pool).await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let catalog = load_basemap_catalog(&mut *tx).await?;
+    let resolve = |value: &str, scope: BasemapScope| -> Result<i64, AppError> {
+        let id: i64 = value.parse().map_err(|_| fallback_required(scope))?;
+        catalog
+            .tiles
+            .iter()
+            .any(|tile| tile.id == id && scope.allows_fallback(tile))
+            .then_some(id)
+            .ok_or_else(|| fallback_required(scope))
+    };
+    let temporary = resolve(&input.temporary, BasemapScope::Temporary)?;
+    let live = resolve(&input.live, BasemapScope::Live)?;
+    sqlx::query(
+        r#"
+        INSERT INTO background_map_fallbacks (id, temporary_id, live_id)
+        VALUES (1, $1, $2)
+        ON CONFLICT (id) DO UPDATE
+        SET
+            temporary_id = excluded.temporary_id,
+            live_id = excluded.live_id
+        "#,
+    )
+    .bind(temporary)
+    .bind(live)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(Json(BackgroundMapFallbacks {
+        normal: catalog
+            .fallback(BasemapScope::Normal)
+            .map(|id| id.to_string()),
+        temporary: Some(temporary.to_string()),
+        live: Some(live.to_string()),
+    }))
 }
 
 pub async fn admin_create(
@@ -213,23 +337,13 @@ pub async fn admin_create(
     )
     .await?;
     // 読み取り前に書き込み権を確保し、ID・識別名の割り当てと更新を直列化する。
-    if input.kind == "vector"
-        && !sqlx::query_scalar::<_, bool>(
-            r#"
-            SELECT EXISTS (
-                SELECT 1
-                FROM tileserver_model
-                WHERE id = 1
-                    AND kind = 'raster'
-            )
-            "#,
-        )
-        .fetch_one(&mut *tx)
-        .await?
+    if (input.kind == "vector" || input.provider == "google")
+        && load_basemap_catalog(&mut *tx)
+            .await?
+            .fallback(BasemapScope::Normal)
+            .is_none()
     {
-        return Err(AppError::Validation(
-            "ベクタ背景を登録する前に、既定のラスタ背景（ID 1）が必要です。".into(),
-        ));
+        return Err(fallback_required(BasemapScope::Normal));
     }
     if sqlx::query_scalar::<_, bool>(
         r#"
@@ -246,18 +360,8 @@ pub async fn admin_create(
     {
         return Err(AppError::Conflict);
     }
-    let maximum: i64 = sqlx::query_scalar(
-        r#"
-        SELECT
-            COALESCE(MAX(id), 0)
-        FROM tileserver_model
-        "#,
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-    let id = maximum
-        .max(0)
-        .checked_add(1)
+    let id = next_background_id(&mut tx)
+        .await?
         .ok_or_else(|| AppError::Validation("登録できる背景地図のID上限に達しました。".into()))?;
     let tile = sqlx::query_as::<_, TileServers>(
         r#"
@@ -272,10 +376,18 @@ pub async fn admin_create(
             max_zoom,
             kind,
             style_url,
+            provider,
+            google_map_type,
+            enabled,
+            allow_temporary_share,
+            allow_live_map,
             create_at,
             updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        )
         RETURNING *
         "#,
     )
@@ -289,8 +401,14 @@ pub async fn admin_create(
     .bind(input.max_zoom)
     .bind(input.kind)
     .bind(input.style_url)
+    .bind(input.provider)
+    .bind(input.google_map_type)
+    .bind(input.enabled.unwrap_or(true))
+    .bind(input.allow_temporary_share.unwrap_or(true))
+    .bind(input.allow_live_map.unwrap_or(true))
     .fetch_one(&mut *tx)
     .await?;
+    validate_fallbacks(&load_basemap_catalog(&mut *tx).await?)?;
     tx.commit().await?;
     Ok(Json(tile))
 }
@@ -315,58 +433,23 @@ pub async fn admin_update(
         &input.url,
     )
     .await?;
-    let (previous_name, previous_attribution): (String, String) = sqlx::query_as(
-        r#"
-            SELECT
-                layer_name,
-                attribution
-            FROM tileserver_model
-            WHERE id = $1
-            "#,
-    )
-    .bind(id)
-    .fetch_optional(&mut *tx)
-    .await?
-    .ok_or(AppError::NotFound)?;
+    let catalog = load_basemap_catalog(&mut *tx).await?;
+    let previous = catalog
+        .tiles
+        .iter()
+        .find(|tile| tile.id == id)
+        .ok_or(AppError::NotFound)?;
     // 他の項目を編集した場合は、既存ラスタの出典HTMLを原文のまま保持する。
     // 新規・変更したHTMLは、Leafletの出典表示へ渡す前に安全化する。
-    if previous_attribution != input.attribution {
+    if previous.attribution != input.attribution {
         input.attribution = clean_attribution(&input.attribution)?;
     }
-    if input.kind == "vector"
-        && !sqlx::query_scalar::<_, bool>(
-            r#"
-            SELECT EXISTS (
-                SELECT 1
-                FROM tileserver_model
-                WHERE id = 1
-                    AND kind = 'raster'
-            )
-            "#,
-        )
-        .fetch_one(&mut *tx)
-        .await?
-    {
-        return Err(AppError::Validation(
-            "ベクタ背景を登録する前に、既定のラスタ背景（ID 1）が必要です。".into(),
-        ));
-    }
     // 旧データの重複識別名は編集可能とし、新しいDOM IDの重複を防ぐ。
-    if previous_name != input.layer_name
-        && sqlx::query_scalar::<_, bool>(
-            r#"
-            SELECT EXISTS (
-                SELECT 1
-                FROM tileserver_model
-                WHERE id <> $1
-                    AND layer_name = $2
-            )
-            "#,
-        )
-        .bind(id)
-        .bind(&input.layer_name)
-        .fetch_one(&mut *tx)
-        .await?
+    if previous.layer_name != input.layer_name
+        && catalog
+            .tiles
+            .iter()
+            .any(|tile| tile.layer_name == input.layer_name)
     {
         return Err(AppError::Conflict);
     }
@@ -383,6 +466,11 @@ pub async fn admin_update(
             max_zoom = $8,
             kind = $9,
             style_url = $10,
+            provider = $11,
+            google_map_type = $12,
+            enabled = $13,
+            allow_temporary_share = $14,
+            allow_live_map = $15,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = $1
         RETURNING *
@@ -398,10 +486,61 @@ pub async fn admin_update(
     .bind(input.max_zoom)
     .bind(input.kind)
     .bind(input.style_url)
+    .bind(input.provider)
+    .bind(input.google_map_type)
+    .bind(input.enabled.unwrap_or(previous.enabled))
+    .bind(
+        input
+            .allow_temporary_share
+            .unwrap_or(previous.allow_temporary_share),
+    )
+    .bind(input.allow_live_map.unwrap_or(previous.allow_live_map))
     .fetch_one(&mut *tx)
     .await?;
+    for scope in BasemapScope::ALL {
+        if catalog.fallback(scope) == Some(id) && !scope.allows_fallback(&tile) {
+            return Err(AppError::Validation(format!(
+                "{}のフォールバックに使用中の背景地図は無効化・利用停止・種別変更できません。",
+                scope_label(scope)
+            )));
+        }
+    }
+    validate_fallbacks(&load_basemap_catalog(&mut *tx).await?)?;
     tx.commit().await?;
     Ok(Json(tile))
+}
+
+pub async fn admin_delete(
+    Extension(user): Extension<String>,
+    Extension(pool): Extension<SqlitePool>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, AppError> {
+    require_superuser(&user, &pool).await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let catalog = load_basemap_catalog(&mut *tx).await?;
+    if !catalog.tiles.iter().any(|tile| tile.id == id) {
+        return Err(AppError::NotFound);
+    }
+    for scope in BasemapScope::ALL {
+        if catalog.fallback(scope) == Some(id) {
+            return Err(AppError::Validation(format!(
+                "{}のフォールバックに使用中の背景地図は削除できません。",
+                scope_label(scope)
+            )));
+        }
+    }
+    validate_fallbacks(&catalog)?;
+    sqlx::query(
+        r#"
+        DELETE FROM tileserver_model
+        WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[cfg(test)]

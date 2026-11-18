@@ -571,6 +571,20 @@ const MIGRATIONS: &[Migration] = &[
             "../../migrations/20261117120000_ai_operations.sql"
         )],
     },
+    Migration {
+        version: 28,
+        name: "add_google_maps",
+        statements: &[include_str!(
+            "../../migrations/20261118090000_add_google_maps.sql"
+        )],
+    },
+    Migration {
+        version: 29,
+        name: "add_background_map_availability",
+        statements: &[include_str!(
+            "../../migrations/20261118100000_add_background_map_availability.sql"
+        )],
+    },
 ];
 
 // データベース接続の確立
@@ -755,6 +769,24 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), Error> {
 
         for statement in migration.statements {
             // SQLx用マイグレーションを先に適用したDBと、既存DBの再実行を両立する。
+            let completion_marker = match migration.version {
+                28 => Some("google_maps_settings"),
+                29 => Some("remember_background_map_id"),
+                _ => None,
+            };
+            if let Some(name) = completion_marker {
+                let exists: bool = sqlx::query_scalar(
+                    r#"
+                    SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE name = $1)
+                    "#,
+                )
+                .bind(name)
+                .fetch_one(&mut *tx)
+                .await?;
+                if exists {
+                    continue;
+                }
+            }
             if migration.version == 23 {
                 let exists: i64 = sqlx::query_scalar(
                     r#"

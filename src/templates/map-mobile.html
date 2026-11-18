@@ -681,6 +681,9 @@
             clusteringMinZoom: {{ clusteringMinZoom }},
             {% endif %}
             tileServers: {{ tileServers | json_encode_for_html | safe }},
+            {% if fallbackTileServerId is defined %}
+            fallbackTileServerId: {{ fallbackTileServerId | json_encode_for_html | safe }},
+            {% endif %}
             tileOverlays: {{ tileOverlays | json_encode_for_html | safe }},
             tileVisibilityAccountId: {{ tileVisibilityAccountId | json_encode_for_html | safe }},
             layers: {{ layersFromAxum | json_encode_for_html | safe }},

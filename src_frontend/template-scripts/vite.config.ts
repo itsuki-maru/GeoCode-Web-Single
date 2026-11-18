@@ -63,7 +63,9 @@ const {
   saveShapeLayerVisibility,
   saveShapeNameVisibility,
   saveUserLocationVisibility,
-} = createMapStorage(tileServers);
+} = createMapStorage(tileServers, {
+  fallbackTileServerId: window.__GEOCODE_MAP_BOOTSTRAP__?.fallbackTileServerId,
+});
 
 function syncEditorBasemapSelection(id) {
   document.querySelectorAll(".tile-radio").forEach((radio) => {
