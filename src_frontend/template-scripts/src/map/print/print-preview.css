@@ -101,7 +101,8 @@ body {
   gap: 8px;
   margin-top: 16px;
 }
-.print-actions button {
+.print-actions button,
+#print-memo-add {
   padding: 9px 16px;
   border-radius: 6px;
   border: 1px solid #9aa9ba;
@@ -182,6 +183,162 @@ body {
   max-width: 260px;
   box-sizing: border-box;
 }
+.print-memo {
+  --print-memo-toolbar-height: 34px;
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 400px;
+  max-width: 100%;
+  max-height: 100%;
+  /* 出力時も入力欄と同じ位置を保つ。 */
+  padding-top: var(--print-memo-toolbar-height);
+  font-family: sans-serif;
+}
+.print-memo-toolbar {
+  position: absolute;
+  inset: 0 0 auto;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--print-memo-toolbar-height);
+  padding: 2px 4px;
+  background: #f0f0f0;
+  border: 1px solid #bbb;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  user-select: none;
+}
+.print-memo-toolbar button {
+  display: grid;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: #333;
+  cursor: pointer;
+}
+.print-memo-toolbar button:hover,
+.print-memo-toolbar button[aria-pressed="true"] {
+  border-color: #a5b4d8;
+  background: #dce4f9;
+}
+.print-memo-toolbar button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.print-memo-toolbar svg {
+  width: 16px;
+  height: 16px;
+}
+.print-memo-toolbar button[data-bold] {
+  font-size: 16px;
+  font-weight: 700;
+}
+.print-memo-font-size {
+  min-width: 32px;
+  color: #555;
+  font-size: 11px;
+  text-align: center;
+}
+.print-memo-separator {
+  flex: 0 0 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: #ccc;
+}
+.print-memo-color {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.print-memo-color input {
+  box-sizing: border-box;
+  width: 28px;
+  height: 24px;
+  padding: 1px;
+  border: 1px solid #999;
+  border-radius: 3px;
+  background: white;
+  cursor: pointer;
+}
+.print-memo-toolbar button[data-white-background] {
+  width: auto;
+  padding: 0 6px;
+  font-size: 12px;
+}
+.print-memo-toolbar :is(button, input):focus-visible {
+  outline: 2px solid #2165bb;
+  outline-offset: 1px;
+}
+.print-memo-body {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  color: black;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.print-memo-body[data-bold] {
+  font-weight: 700;
+}
+.print-memo-body :is(.print-memo-text, .print-memo-editor) {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  border: 1px solid transparent;
+  padding: 10px;
+  background-color: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-underline-offset: 5px;
+}
+.print-memo-body[data-white-background] :is(.print-memo-text, .print-memo-editor) {
+  background-color: white;
+}
+.print-memo-body[data-underline] :is(.print-memo-text, .print-memo-editor) {
+  text-decoration-line: underline;
+}
+.print-memo-text {
+  visibility: hidden;
+}
+.print-memo-text:not([data-empty]) {
+  visibility: var(--print-memo-text-visibility, hidden);
+}
+.print-memo-text[data-border] {
+  border-color: black;
+}
+.print-memo-text::after {
+  /* 入力欄と同じく、末尾で改行した際にも最後の行の高さを確保する。 */
+  content: "\200b";
+}
+.print-memo-body .print-memo-editor {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  resize: none;
+  border-color: black;
+  border-radius: 0;
+}
+.print-memo-editor:focus-visible {
+  outline: 2px solid #2165bb;
+  outline-offset: -3px;
+}
+.print-pdf-capture {
+  --print-memo-text-visibility: visible;
+}
 body.print-preparing #print-viewport,
 body.print-preparing #print-settings {
   pointer-events: none;
@@ -229,6 +386,13 @@ body.pdf-preparing .pdf-output {
   overflow-wrap: anywhere;
 }
 @media print {
+  #print-paper {
+    --print-memo-text-visibility: visible;
+  }
+  .print-memo-toolbar,
+  .print-memo-body .print-memo-editor {
+    display: none;
+  }
   .answer-print-legend .map-color-legend-resize {
     display: none;
   }

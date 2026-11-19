@@ -264,6 +264,127 @@ async function mockVectorBackgrounds(decode = vi.fn().mockResolvedValue(undefine
 }
 
 describe("印刷プレビューと実際のLeaflet", () => {
+  it("前回のメモを追加時に復元し、確定した本文を保存する", () => {
+    const storageKey = "geocode-web:print-memo";
+    const saved = "集合場所\n北側の入口";
+    const close = vi.fn();
+    localStorage.setItem(storageKey, saved);
+    preview = createPrintPreview(state, close);
+    const add = document.querySelector<HTMLButtonElement>("#print-memo-add")!;
+
+    expect(document.getElementById("print-memo")).toBeNull();
+    add.click();
+    const editor = document.querySelector<HTMLTextAreaElement>(".print-memo-editor")!;
+    const text = document.querySelector<HTMLElement>(".print-memo-text")!;
+    expect(document.activeElement).toBe(editor);
+    expect(editor.value).toBe(saved);
+    expect(text.textContent).toBe(saved);
+    const toolbar = document.querySelector<HTMLElement>(".print-memo-toolbar")!;
+    expect(toolbar.querySelector<HTMLInputElement>('input[type="color"]')!.value).toBe("#000000");
+    expect(toolbar.querySelector("[data-white-background]")!.getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(toolbar.querySelector("[data-bold]")!.getAttribute("aria-pressed")).toBe("false");
+    expect(toolbar.querySelector("[data-border]")!.getAttribute("aria-pressed")).toBe("true");
+    add.focus();
+    add.click();
+    expect(document.querySelectorAll(".print-memo")).toHaveLength(1);
+    expect(document.activeElement).toBe(editor);
+
+    editor.value = "新しい集合場所\n<北側入口>";
+    editor.dispatchEvent(new InputEvent("input", { bubbles: true, isComposing: true }));
+    editor.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, isComposing: true }),
+    );
+    expect(close).not.toHaveBeenCalled();
+    expect(localStorage.getItem(storageKey)).toBe(saved);
+    editor.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+    expect(localStorage.getItem(storageKey)).toBe(editor.value);
+    expect(text.textContent).toBe(editor.value);
+    expect(text.children).toHaveLength(0);
+
+    document.querySelector<HTMLButtonElement>("#print-memo [data-remove]")!.click();
+    expect(document.getElementById("print-memo")).toBeNull();
+    expect(document.activeElement).toBe(add);
+    expect(localStorage.getItem(storageKey)).toBeNull();
+    add.click();
+    expect(document.querySelector<HTMLTextAreaElement>(".print-memo-editor")!.value).toBe("");
+  });
+
+  it("メモの書式変更を出力に反映し、本文が地図枠に収まるまで出力を止める", async () => {
+    preview = createPrintPreview(state, vi.fn());
+    await finishObjectLoads();
+    finishImages();
+    document.getElementById("print-memo-add")!.click();
+    const editor = document.querySelector<HTMLTextAreaElement>(".print-memo-editor")!;
+    const body = document.querySelector<HTMLElement>(".print-memo-body")!;
+    const text = document.querySelector<HTMLElement>(".print-memo-text")!;
+    const submit = document.querySelector<HTMLButtonElement>("#print-submit")!;
+    const pdf = document.querySelector<HTMLButtonElement>("#pdf-export")!;
+    editor.value = "注記";
+    editor.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(submit.disabled).toBe(false);
+    expect(pdf.disabled).toBe(false);
+
+    const toolbar = document.querySelector<HTMLElement>(".print-memo-toolbar")!;
+    const picker = toolbar.querySelector<HTMLInputElement>('input[type="color"]')!;
+    const background = toolbar.querySelector<HTMLButtonElement>("[data-white-background]")!;
+    const bold = toolbar.querySelector<HTMLButtonElement>("[data-bold]")!;
+    const border = toolbar.querySelector<HTMLButtonElement>("[data-border]")!;
+    for (const element of [editor, text]) {
+      expect(getComputedStyle(element).backgroundColor).toBe("rgb(255, 255, 255)");
+    }
+    const pointerDown = new PointerEvent("pointerdown", { bubbles: true, cancelable: true });
+    expect(picker.dispatchEvent(pointerDown)).toBe(true);
+    picker.value = "#3264ab";
+    picker.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(pdf.disabled).toBe(true);
+    background.click();
+    bold.click();
+    toolbar.querySelector<HTMLButtonElement>("[data-size-up]")!.click();
+    toolbar.querySelector<HTMLButtonElement>("[data-underline]")!.click();
+    for (const element of [editor, text]) {
+      const style = getComputedStyle(element);
+      expect(style.backgroundColor).toBe("rgba(0, 0, 0, 0)");
+      expect(style.borderTopColor).toBe("rgb(0, 0, 0)");
+      expect(style.color).toBe("rgb(50, 100, 171)");
+    }
+    expect(getComputedStyle(body).fontWeight).toBe("700");
+    expect(bold.getAttribute("aria-pressed")).toBe("true");
+    expect(background.getAttribute("aria-pressed")).toBe("false");
+    expect(body.style.fontSize).toBe("15px");
+    expect(text.hasAttribute("data-border")).toBe(true);
+    expect(body.hasAttribute("data-underline")).toBe(false);
+    expect(submit.disabled).toBe(true);
+    expect(pdf.disabled).toBe(true);
+
+    border.click();
+    expect(border.getAttribute("aria-pressed")).toBe("false");
+    expect(getComputedStyle(text).borderTopColor).toBe("rgba(0, 0, 0, 0)");
+    border.click();
+    expect(border.getAttribute("aria-pressed")).toBe("true");
+    expect(getComputedStyle(text).borderTopColor).toBe("rgb(0, 0, 0)");
+    background.click();
+    bold.click();
+    expect(getComputedStyle(body).fontWeight).toBe("400");
+    expect(getComputedStyle(text).backgroundColor).toBe("rgb(255, 255, 255)");
+
+    Object.defineProperty(body, "clientHeight", { value: 90 });
+    Object.defineProperty(text, "offsetHeight", { value: 180 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(document.getElementById("print-status")!.textContent).toContain(
+      "メモが地図枠に収まりません",
+    );
+    expect(submit.disabled).toBe(true);
+    expect(pdf.disabled).toBe(true);
+
+    document.querySelector<HTMLButtonElement>("#print-memo [data-remove]")!.click();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(submit.disabled).toBe(false);
+    expect(pdf.disabled).toBe(false);
+  });
+
   it.each(["印刷終了", "背景のload通知"])("%sの直後にPDFを無効にし、安定後に再び有効にする", async (change) => {
     preview = createPrintPreview(state, vi.fn());
     await finishObjectLoads();

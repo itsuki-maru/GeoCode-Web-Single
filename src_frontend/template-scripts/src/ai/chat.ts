@@ -1,5 +1,5 @@
 import css from "./chat.css?inline";
-import { awaitWithAbort, createProgressSpinner } from "../map/common/progress-spinner";
+import { awaitWithAbort } from "../map/common/progress-spinner";
 import { cloneSavedMapPreset, type AnySavedMapPreset } from "../map/common/answer-map-presets";
 import {
   validateCapabilities,
@@ -34,7 +34,24 @@ interface ChatOptions {
   onLayerCreated?(layer: { id: string; name: string }, signal: AbortSignal): Promise<void>;
   onRecallPreset?(preset: AnySavedMapPreset): void | Promise<void>;
 }
+
+interface ChatEntry {
+  role: "user" | "assistant";
+  content: string;
+}
+
+interface ChatReply {
+  prompt: string;
+  body: HTMLElement;
+  status: HTMLElement;
+  statusText: HTMLElement;
+  entry?: ChatEntry;
+}
+
 const GENERAL_EXAMPLE = "地図上のデータを絞り込む方法を教えて";
+const CHECKING_SETTINGS = "AIの利用設定を確認しています…";
+const PANEL_WORKING = "処理中です…";
+const REPLY_TIMEOUT = "処理に時間がかかりすぎました。指示を送り直してください。";
 const SUGGESTION_TTL_MS = 60_000;
 const SUGGESTION_REFRESH_DELAY_MS = 150;
 let chatInstance = 0;
@@ -134,12 +151,8 @@ export function createAiChat(options: ChatOptions) {
   );
   const log = node("div", "ai-log");
   log.setAttribute("role", "log");
+  log.setAttribute("aria-label", "会話履歴");
   log.setAttribute("aria-live", "polite");
-  const progress = node("div", "ai-progress");
-  progress.hidden = true;
-  progress.setAttribute("role", "progressbar");
-  progress.setAttribute("aria-label", "AIの処理中");
-  progress.append(createProgressSpinner());
   const status = node("p", "ai-status");
   const panel = node("section", "ai-panel");
   status.setAttribute("role", "status");
@@ -157,14 +170,14 @@ export function createAiChat(options: ChatOptions) {
   const actions = node("div", "ai-actions");
   const undoButton = node("button", "", "元に戻す");
   const recordButton = node("button", "ai-record", "音声入力");
-  const cancelButton = node("button", "", "中止");
+  const cancelButton = node("button", "ai-cancel", "中止");
   const sendButton = node("button", "ai-send", "送信");
   for (const button of [undoButton, recordButton, cancelButton]) button.type = "button";
   recordButton.setAttribute("aria-pressed", "false");
   sendButton.type = "submit";
   actions.append(undoButton, recordButton, cancelButton, sendButton);
   form.append(suggestionTools, draft, actions);
-  dialog.append(header, note, progress, log, panel, status, form);
+  dialog.append(header, note, log, panel, status, form);
   document.body.append(dialog);
 
   let capabilities: AiCapabilities | null = null;
@@ -187,7 +200,8 @@ export function createAiChat(options: ChatOptions) {
   let voiceSequence = 0;
   let voiceTimer: ReturnType<typeof setTimeout> | undefined;
   let opener: HTMLElement | undefined;
-  const history: { role: "user" | "assistant"; content: string }[] = [];
+  const history: ChatEntry[] = [];
+  let activeReply: ChatReply | undefined;
   const undos: { key: string; undo: AiUndo; entry?: { content: string } }[] = [];
   let appliedState: AiAppliedState = { filter: null, color: null };
   let scopeGeneration = 0;
@@ -275,18 +289,11 @@ export function createAiChat(options: ChatOptions) {
   const setStatus = (text: string, error = false) => {
     status.textContent = text;
     status.dataset.error = String(error);
-    if (!error && text) {
-      progress.setAttribute("aria-valuetext", text);
-    }
   };
   const update = () => {
     const voiceBusy = recording || requestingMicrophone;
     const processing = isBusy();
-    const waiting =
-      dialog.open && (processing || requestingMicrophone || (!!capabilityRequest && !capabilities));
-    progress.hidden = !waiting;
-    status.hidden = waiting;
-    dialog.setAttribute("aria-busy", String(waiting));
+    sendButton.hidden = processing;
     sendButton.disabled =
       processing ||
       voiceBusy ||
@@ -305,20 +312,46 @@ export function createAiChat(options: ChatOptions) {
           ? "録音を終了"
           : "音声入力";
     cancelButton.hidden = !processing;
+    cancelButton.disabled = !busy;
     draft.disabled = voiceBusy || processing;
     for (const button of panel.querySelectorAll<HTMLButtonElement>("button"))
       button.disabled = processing || voiceBusy || button.dataset.disabled === "true";
     renderSuggestions();
   };
-  const append = (role: "user" | "assistant", content: string) => {
+  const followConversation = (change: () => void, forceScroll = false) => {
+    const viewport = dialog.hasAttribute("data-compact") ? dialog : log;
+    const atEnd = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 32;
+    change();
+    if (forceScroll || atEnd) viewport.scrollTop = viewport.scrollHeight;
+  };
+  const appendMessage = (role: ChatEntry["role"], ...content: (Node | string)[]) => {
     const message = node("div", "ai-message");
     message.dataset.role = role;
-    message.append(node("span", "ai-message-label", role === "user" ? "あなた" : "AI"));
-    message.append(document.createTextNode(content));
+    message.append(node("span", "ai-message-label", role === "user" ? "あなた" : "AI"), ...content);
     log.append(message);
-    log.scrollTop = log.scrollHeight;
-    history.push({ role, content: content.slice(0, 4000) });
+  };
+  const rememberMessage = (role: ChatEntry["role"], content: string) => {
+    const entry = { role, content: content.slice(0, 4000) };
+    history.push(entry);
     if (history.length > 12) history.splice(0, history.length - 12);
+    return entry;
+  };
+  const setReplyStatus = (
+    reply: ChatReply,
+    text: string,
+    state: "waiting" | "done" | "error" = "done",
+  ) => {
+    followConversation(() => {
+      reply.status.dataset.state = state;
+      reply.status.hidden = !text;
+      reply.statusText.textContent = text;
+    });
+  };
+  const finishReply = (message: string, error = false) => {
+    if (!activeReply) return;
+    setReplyStatus(activeReply, message, error ? "error" : "done");
+    if (!activeReply.entry && !draft.value) draft.value = activeReply.prompt;
+    activeReply = undefined;
   };
   const releaseMicrophone = () => {
     clearTimeout(voiceTimer);
@@ -337,7 +370,7 @@ export function createAiChat(options: ChatOptions) {
     releaseMicrophone();
     update();
   };
-  const cancel = () => {
+  const cancel = (message?: string, error = false) => {
     ++sequence;
     request?.abort();
     request = undefined;
@@ -345,8 +378,9 @@ export function createAiChat(options: ChatOptions) {
     busy = false;
     outsidePointer = undefined;
     outsideClickReady = false;
+    if (activeReply) finishReply(message ?? "処理を中止しました。", error);
+    else if (message) setStatus(message, error);
     cancelRecording();
-    update();
   };
   const handleAccountError = (error: unknown) => {
     if (disposed || !(error instanceof Error) || error.message !== "ai_account_changed")
@@ -355,6 +389,7 @@ export function createAiChat(options: ChatOptions) {
     clearSuggestions();
     ++scopeGeneration;
     appliedState = { filter: null, color: null };
+    activeReply = undefined;
     pendingWrite = undefined;
     panel.replaceChildren();
     history.length = 0;
@@ -372,21 +407,21 @@ export function createAiChat(options: ChatOptions) {
     update();
     return true;
   };
-  const applyCapabilities = (next: AiCapabilities) => {
+  const applyCapabilities = (next: AiCapabilities, failure?: string) => {
     if (accountInvalid) return;
     const changed = !!capabilities && capabilities.revision !== next.revision;
     capabilities = next;
     if (!next.enabled || changed) clearSuggestions();
     options.onEnabledChange?.(next.enabled);
     if (!next.enabled || (changed && isBusy())) {
-      cancel();
-      if (dialog.open)
-        setStatus(
-          next.enabled
-            ? "AI設定が変更されました。指示を送り直してください。"
-            : "管理者がAI機能を無効にしています。",
-          true,
-        );
+      const message =
+        failure ??
+        (next.enabled
+          ? "AI設定が変更されました。指示を送り直してください。"
+          : "管理者がAI機能を無効にしています。");
+      cancel(dialog.open ? message : undefined, true);
+    } else if (status.textContent === CHECKING_SETTINGS) {
+      setStatus("");
     }
     if (!next.voice_enabled) cancelRecording();
     update();
@@ -409,9 +444,10 @@ export function createAiChat(options: ChatOptions) {
       await loadCapabilities(controller.signal);
     } catch {
       if (!disposed && !controller.signal.aborted) {
-        applyCapabilities({ enabled: false, voice_enabled: false, revision: "" });
-        if (dialog.open)
-          setStatus("AIの利用設定を取得できません。時間をおいて開き直してください。", true);
+        applyCapabilities(
+          { enabled: false, voice_enabled: false, revision: "" },
+          "AIの利用設定を取得できません。時間をおいて開き直してください。",
+        );
       }
     } finally {
       if (capabilityRequest === controller) {
@@ -563,7 +599,7 @@ export function createAiChat(options: ChatOptions) {
     request = controller;
     const id = ++sequence;
     busy = true;
-    setStatus("処理中です…");
+    setStatus(PANEL_WORKING);
     update();
     const timer = setTimeout(() => controller.abort(), 180000);
     try {
@@ -571,7 +607,10 @@ export function createAiChat(options: ChatOptions) {
     } catch (error) {
       if (!handleAccountError(error) && !disposed && id === sequence) {
         const message = error instanceof Error ? error.message : "AIの処理に失敗しました。";
-        if (message === AI_OPERATION_NOT_ALLOWED) append("assistant", AI_OPERATION_NOT_ALLOWED);
+        if (message === AI_OPERATION_NOT_ALLOWED) {
+          followConversation(() => appendMessage("assistant", AI_OPERATION_NOT_ALLOWED));
+          rememberMessage("assistant", AI_OPERATION_NOT_ALLOWED);
+        }
         setStatus(controller.signal.aborted ? "処理を中止しました。" : message, true);
       }
       if (propagate) throw error;
@@ -580,6 +619,7 @@ export function createAiChat(options: ChatOptions) {
       if (id === sequence) {
         request = undefined;
         busy = false;
+        if (status.textContent === PANEL_WORKING) setStatus("");
         update();
       }
     }
@@ -621,7 +661,8 @@ export function createAiChat(options: ChatOptions) {
         });
         if (undos.length > 10) undos.shift();
       }
-      setStatus(success);
+      if (activeReply) setReplyStatus(activeReply, success);
+      else setStatus(success);
     } finally {
       displaySettling = false;
       update();
@@ -982,7 +1023,7 @@ export function createAiChat(options: ChatOptions) {
   };
   const send = async (event?: Event) => {
     event?.preventDefault();
-    if (accountInvalid) return;
+    if (disposed || accountInvalid || !dialog.open) return;
     const message = draft.value.trim();
     if (isBusy() || recording || requestingMicrophone || pendingWrite?.attempted || !message)
       return;
@@ -994,13 +1035,45 @@ export function createAiChat(options: ChatOptions) {
     const key = options.getContextKey();
     const context = structuredClone(options.getContext());
     busy = true;
+    const focusChanged = document.activeElement === draft || document.activeElement === sendButton;
+    const reply: ChatReply = {
+      prompt: message,
+      body: node("div", "ai-reply-body"),
+      status: node("div", "ai-reply-status"),
+      statusText: node("span"),
+    };
+    const dots = node("span", "ai-reply-dots");
+    dots.setAttribute("aria-hidden", "true");
+    dots.append(node("span"), node("span"), node("span"));
+    reply.status.append(dots, reply.statusText);
+    activeReply = reply;
+    setStatus("");
+    setReplyStatus(reply, "回答を準備中…", "waiting");
+    followConversation(() => {
+      appendMessage("user", message);
+      appendMessage("assistant", reply.body, reply.status);
+    }, true);
+    draft.value = "";
     update();
-    setStatus("AIに問い合わせています…");
-    const timeout = setTimeout(() => controller.abort(), 240000);
-    let assistantEntry: { role: "user" | "assistant"; content: string } | undefined;
+    if (focusChanged) cancelButton.focus({ preventScroll: true });
+    const timeout = setTimeout(() => {
+      if (id === sequence) {
+        cancel(REPLY_TIMEOUT, true);
+        if (dialog.open) draft.focus({ preventScroll: true });
+      }
+    }, 240000);
+    controller.signal.addEventListener("abort", () => clearTimeout(timeout), { once: true });
+    const showAnswer = (answer: string) => {
+      // 有効な応答が届いたやり取りを、次のAIリクエストへ渡す履歴に加える。
+      rememberMessage("user", message);
+      reply.entry = rememberMessage("assistant", answer);
+      followConversation(() => {
+        reply.body.textContent = answer;
+      });
+    };
     let plannedAction: unknown;
     const rememberAction = (state: string) => {
-      recordAction(assistantEntry, plannedAction, state);
+      recordAction(reply.entry, plannedAction, state);
     };
     try {
       const available = await loadCapabilities(controller.signal);
@@ -1025,20 +1098,18 @@ export function createAiChat(options: ChatOptions) {
         typeof response.revision !== "string"
       )
         throw Error("AIの応答を確認できませんでした。");
-      append("user", message);
-      draft.value = "";
-      append(
-        "assistant",
-        response.outcome === "denied" ? AI_OPERATION_NOT_ALLOWED : response.message,
-      );
-      if (response.outcome === "denied") {
-        setStatus("");
-        return;
-      }
-      assistantEntry = history.at(-1);
-      plannedAction = response.action;
-      if (response.action !== undefined && response.action !== null) {
-        setStatus("地図へ反映しています…");
+      showAnswer(response.outcome === "denied" ? AI_OPERATION_NOT_ALLOWED : response.message);
+      if (response.outcome !== "denied" && response.action != null) {
+        plannedAction = response.action;
+        rememberAction("適用待ち・未実行");
+        const type = (response.action as { type?: unknown }).type;
+        const progress =
+          type === "create_layer" || type === "save_preset"
+            ? "確認内容を準備中…"
+            : type === "list_presets"
+              ? "保存条件を取得中…"
+              : "地図に反映中…";
+        setReplyStatus(reply, progress, "waiting");
         await execute(
           response.action,
           response.revision,
@@ -1046,37 +1117,34 @@ export function createAiChat(options: ChatOptions) {
           id,
           key,
           controller.signal,
-          assistantEntry,
+          reply.entry,
         );
         if (!pendingWrite) rememberAction("適用成功");
-      } else setStatus("");
+      }
+      if (reply.status.dataset.state === "waiting") setReplyStatus(reply, "");
     } catch (error) {
       rememberAction("適用失敗・未確定。成功した条件として扱わないこと");
+      if (disposed || id !== sequence) return;
       if (handleAccountError(error)) return;
-      if (error instanceof Error && error.message === AI_OPERATION_NOT_ALLOWED) {
-        if (!assistantEntry) {
-          append("user", message);
-          draft.value = "";
-        }
-        append("assistant", AI_OPERATION_NOT_ALLOWED);
-      }
-      if (!disposed && id === sequence) {
-        setStatus(
-          controller.signal.aborted
-            ? "処理を中止しました。必要に応じて指示を送り直してください。"
-            : error instanceof Error
-              ? error.message
-              : "AIの処理に失敗しました。",
+      const errorMessage = (error instanceof Error && error.message) || "AIの処理に失敗しました。";
+      if (errorMessage === AI_OPERATION_NOT_ALLOWED && !reply.entry) {
+        showAnswer(errorMessage);
+        finishReply("");
+      } else {
+        if (errorMessage === AI_OPERATION_NOT_ALLOWED) rememberMessage("assistant", errorMessage);
+        finishReply(
+          error instanceof Error && error.name === "AbortError" ? REPLY_TIMEOUT : errorMessage,
           true,
         );
       }
     } finally {
       clearTimeout(timeout);
       if (id === sequence) {
+        activeReply = undefined;
         request = undefined;
         busy = false;
         update();
-        if (dialog.open) draft.focus();
+        if (dialog.open) draft.focus({ preventScroll: true });
       }
     }
   };
@@ -1243,9 +1311,8 @@ export function createAiChat(options: ChatOptions) {
   const hidden = () => {
     if (document.visibilityState === "hidden") {
       stopSuggestionRequest();
-      cancel();
+      cancel(dialog.open ? "画面が非表示になったため、録音・通信を中止しました。" : undefined);
       capabilityRequest?.abort();
-      if (dialog.open) setStatus("画面が非表示になったため、録音・通信を中止しました。");
     }
   };
   const onFocus = () => void refreshCapabilities();
@@ -1328,8 +1395,8 @@ export function createAiChat(options: ChatOptions) {
     }
   });
   cancelButton.addEventListener("click", () => {
-    cancel();
-    setStatus("処理を中止しました。");
+    cancel("処理を中止しました。");
+    draft.focus({ preventScroll: true });
   });
   recordButton.addEventListener("click", () => void startRecording());
   undoButton.addEventListener("click", async () => {
@@ -1552,10 +1619,8 @@ export function createAiChat(options: ChatOptions) {
         trigger ||
         (document.activeElement instanceof HTMLElement ? document.activeElement : undefined);
       if (!dialog.open) dialog.showModal();
-      setStatus(capabilities?.enabled ? "" : "AIの利用設定を確認しています…");
+      if (!accountInvalid) setStatus(capabilities?.enabled ? "" : CHECKING_SETTINGS);
       void refreshCapabilities().then(() => {
-        if (dialog.open && capabilities && !capabilities.enabled)
-          setStatus("管理者がAI機能を無効にしています。");
         if (dialog.open) void refreshSuggestions();
       });
       draft.focus();

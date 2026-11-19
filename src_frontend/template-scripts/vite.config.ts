@@ -287,10 +287,14 @@ export default defineConfig({
   plugins: [editorEntryPlugin(), {
     name: "bundled-third-party-licenses",
     generateBundle() {
+      const marginTextWriterNotice = readFileSync(
+        resolve(templateScriptsDirectory, "licenses/MarginTextWriter.txt"),
+        "utf8",
+      );
       this.emitFile({
         type: "asset",
         fileName: "template-third-party-licenses.txt",
-        source: createBundledNotices(this.getModuleIds()),
+        source: `${createBundledNotices(this.getModuleIds())}\n\n--------------------\n\n${marginTextWriterNotice}`,
       });
     },
   }],

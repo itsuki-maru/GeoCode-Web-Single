@@ -167,8 +167,7 @@ it("never blocks typing or chat while candidate loading is pending and never ove
   });
   mount(transport);
   await flush();
-  expect(document.querySelector<HTMLElement>(".ai-progress")!.hidden).toBe(true);
-  expect(dialog().getAttribute("aria-busy")).toBe("false");
+  expect(dialog().querySelector('.ai-reply-status[data-state="waiting"]')).toBeNull();
   expect(draft().disabled).toBe(false);
   input("手入力を保持する");
   expect(document.querySelector<HTMLButtonElement>(".ai-send")!.disabled).toBe(false);
@@ -370,7 +369,7 @@ it("ends a stalled candidate request on timeout without displaying a global spin
   expect(document.querySelector(".ai-suggestion-hint")!.textContent).not.toContain(
     "確認しています",
   );
-  expect(document.querySelector<HTMLElement>(".ai-progress")!.hidden).toBe(true);
+  expect(dialog().querySelector('.ai-reply-status[data-state="waiting"]')).toBeNull();
   expect(draft().disabled).toBe(false);
 });
 
