@@ -77,10 +77,19 @@ pub async fn file_test_pool() -> (SqlitePool, PathBuf) {
     (pool, path)
 }
 
+pub async fn shutdown_file_test_pool(pool: SqlitePool) {
+    // SQLx 0.8.6 では終了処理中に返却された接続がプールに残ることがある。
+    loop {
+        pool.close().await;
+        if pool.size() == 0 {
+            break;
+        }
+    }
+}
+
 pub async fn close_file_test_pool(pool: SqlitePool, path: PathBuf) {
-    pool.close().await;
-    drop(pool);
-    // SQLiteワーカースレッドによる物理接続の解放を待つ（Windows）。
+    shutdown_file_test_pool(pool).await;
+    // Windows でファイルが一時的に使用中の場合は削除を再試行する。
     for _ in 0..100 {
         match std::fs::remove_file(&path) {
             Ok(()) => return,
@@ -90,10 +99,13 @@ pub async fn close_file_test_pool(pool: SqlitePool, path: PathBuf) {
             {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             },
-            Err(error) => panic!("temporary database cleanup failed: {error}"),
+            Err(error) => panic!(
+                "temporary database cleanup failed for {}: {error}",
+                path.display()
+            ),
         }
     }
-    panic!("temporary database remained locked");
+    panic!("temporary database remained locked: {}", path.display());
 }
 
 pub async fn create_test_user(pool: &SqlitePool, username: &str) -> String {
