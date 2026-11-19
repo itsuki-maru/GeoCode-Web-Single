@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 import css from "./print-preview.css?inline";
 import { createPdfControls } from "./pdf-controls";
+import { createPrintMemo } from "./print-memo";
 import { MAPLIBRE_CANVAS_SELECTOR, prepareMaplibreCanvasPrint } from "./canvas-snapshot";
 import { initializeReadOnlyMapPage } from "../read-only-page";
 import { createLayerBulkToggleControl } from "../common/base";
@@ -55,6 +56,7 @@ export function createPrintPreview(
         )
         .join("")}</select></label>
       <label class="print-field">タイトル（任意・40文字まで）<input id="print-title-input" type="text" maxlength="40" placeholder="例：避難場所の案内図"></label>
+      <button id="print-memo-add" type="button" aria-expanded="false">メモを追加</button>
       <div class="print-actions"><button id="print-submit" type="button" disabled>印刷</button><button id="print-retry" type="button" hidden>再読み込み</button></div>
       <div id="print-status" role="status" aria-live="polite">地図を読み込んでいます…</div>
       <h2>背景地図</h2><div id="print-base"></div>
@@ -121,6 +123,11 @@ export function createPrintPreview(
     lastPending = Date.now();
     markPrintChanged();
   };
+  const printMemo = createPrintMemo(
+    element<HTMLButtonElement>("print-memo-add"),
+    mapElement,
+    markPrintChanged,
+  );
   const colorController =
     coloring || state.coloring ? installAnswerColoring(runtime, (window as any).L) : undefined;
   const printColoring = coloring || state.coloring;
@@ -288,14 +295,18 @@ export function createPrintPreview(
   const refreshStatus = () => {
     if (disposed || printing) return;
     const { loading, failed, objects, basemapPending } = readiness();
-    const legendOverflow = legend?.hasOverflow() ?? false;
+    const overflowMessage = legend?.hasOverflow()
+      ? "凡例が枠に収まりません。枠を広げるか、文字を小さくするか、分類を減らしてください。"
+      : printMemo.hasOverflow()
+        ? "メモが地図枠に収まりません。文字を小さくするか、文章を短くしてください。"
+        : "";
     const settling = Date.now() - lastChange < 700;
     const timedOut = loading && Date.now() - lastPending > 30000;
     if (!loading) lastPending = Date.now();
     // この処理では、提供範囲外のタイルと画像取得・通信の失敗を区別できない。
     // 無期限に待機せず、現在表示できている地図を印刷できるようにする。
     submit.disabled =
-      legendOverflow ||
+      Boolean(overflowMessage) ||
       objects.loading ||
       objects.failed ||
       basemapPending ||
@@ -304,9 +315,9 @@ export function createPrintPreview(
     submit.textContent =
       !objects.loading && !objects.failed && (failed || timedOut) ? "現在の表示で印刷" : "印刷";
     retry.hidden = !failed && !timedOut;
-    status.textContent = legendOverflow
-      ? "凡例が枠に収まりません。枠を広げるか、文字を小さくするか、分類を減らしてください。"
-      : objects.failed
+    status.textContent =
+      overflowMessage ||
+      (objects.failed
         ? "選択したグループのデータを取得できませんでした。再読み込みで再試行するか、該当グループのチェックを外してください。"
         : objects.loading
           ? "選択したグループのデータを読み込んでいます…"
@@ -318,7 +329,7 @@ export function createPrintPreview(
                 ? "地図を読み込んでいます…"
                 : failed
                   ? "地図画像の一部を表示できません。表示されている内容で印刷できます。必要に応じて再読み込みしてください。"
-                  : "印刷準備完了";
+                  : "印刷準備完了");
     pdfControls?.refresh();
   };
   const timer = window.setInterval(refreshStatus, 200);
@@ -396,6 +407,7 @@ export function createPrintPreview(
         !loading &&
         !failed &&
         !legend?.hasOverflow() &&
+        !printMemo.hasOverflow() &&
         Date.now() - lastChange >= 700
       );
     },
@@ -432,15 +444,16 @@ export function createPrintPreview(
     refreshStatus();
   });
   const keydown = (event: KeyboardEvent) => {
+    if (event.isComposing) return;
     if (event.key === "Escape") {
       event.preventDefault();
       close();
+      return;
     }
     if (
       (event.ctrlKey || event.metaKey) &&
       !event.altKey &&
       !event.shiftKey &&
-      !event.isComposing &&
       event.key.toLowerCase() === "p"
     ) {
       event.preventDefault();
@@ -471,6 +484,7 @@ export function createPrintPreview(
     restoreCanvasPrint?.();
     for (const { element, inert } of canvasPrintInteraction) element.inert = inert;
     canvasPrintInteraction = [];
+    printMemo.dispose();
     legend?.dispose();
     colorController?.dispose();
     pdfControls?.dispose();

@@ -1078,7 +1078,7 @@ it("shows escaped answers, executes a sent instruction, and supports undo after 
   expect(apply).toHaveBeenCalledOnce();
   expect(document.querySelector(".ai-log img")).toBeNull();
   expect(document.querySelector(".ai-log")!.textContent).toContain("<img");
-  expect(document.querySelector(".ai-status")!.textContent).toContain("1件");
+  expect(document.querySelector(".ai-reply-status")!.textContent).toContain("1件");
   const undoButton = [...document.querySelectorAll("button")].find(
     (button) => button.textContent === "元に戻す",
   )!;
@@ -1108,7 +1108,7 @@ it("does not execute an action after administrator settings change", async () =>
   submit();
   await flush();
   expect(transport.mock.calls.some(([path]) => path === "/ai/execute")).toBe(false);
-  expect(document.querySelector(".ai-status")!.textContent).toContain("設定が変更");
+  expect(document.querySelector(".ai-reply-status")!.textContent).toContain("設定が変更");
 });
 
 it("discards a reply when the selected layer changes or the chat closes", async () => {
@@ -1137,7 +1137,7 @@ it("discards a reply when the selected layer changes or the chat closes", async 
   await flush();
   expect(apply).not.toHaveBeenCalled();
   expect(document.querySelector(".ai-log")!.textContent).not.toContain("古い応答");
-  expect(document.querySelector(".ai-status")!.textContent).toContain("対象が変わりました");
+  expect(document.querySelector(".ai-reply-status")!.textContent).toContain("対象が変わりました");
 });
 
 it("releases a microphone acquired after the chat was closed", async () => {
@@ -1289,7 +1289,7 @@ it("aborts an in-flight request when the administrator disables AI", async () =>
   resolve({ message: "古い指示", action: {}, revision: "r1" });
   await flush();
   expect(apply).not.toHaveBeenCalled();
-  expect(document.querySelector(".ai-status")!.textContent).toContain("無効");
+  expect(document.querySelector(".ai-reply-status")!.textContent).toContain("無効");
 });
 
 it("does not stop an inactive recorder again while waiting for its stop event", async () => {

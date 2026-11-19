@@ -4,7 +4,7 @@ import { PRINT_PAPERS, type PrintPaper } from "../common/print-state";
 import { captureMaplibreCanvases, replaceMaplibreCanvasClones } from "./canvas-snapshot";
 
 const EXCLUDED =
-  ".leaflet-control-zoom, .leaflet-popup-close-button, .measurement-selection-help, .measurement-selection-summary:not(.has-selection), .geocode-content-load-more, .geocode-content-load-all";
+  ".leaflet-control-zoom, .leaflet-popup-close-button, .measurement-selection-help, .measurement-selection-summary:not(.has-selection), .geocode-content-load-more, .geocode-content-load-all, .print-memo-toolbar, .print-memo-editor";
 export function pdfScale(width: number, height: number): number {
   return Math.min(150 / 96, Math.sqrt(4_000_000 / (width * height)));
 }
@@ -14,6 +14,34 @@ export function pdfFilename(title: string): string {
 
 function checkAbort(signal: AbortSignal) {
   if (signal.aborted) throw new DOMException("中止しました", "AbortError");
+}
+
+function renderMemoUnderline(paper: HTMLElement) {
+  const text = paper.querySelector<HTMLElement>(
+    ".print-memo-body[data-underline] .print-memo-text:not([data-empty])",
+  );
+  if (!text?.firstChild) return;
+
+  // html2canvas は下線を文字のベースラインに描くため、折り返し後の各行の下に配置する。
+  const range = text.ownerDocument.createRange();
+  range.selectNodeContents(text.firstChild);
+  const lines = [...range.getClientRects()];
+  const bounds = text.getBoundingClientRect();
+  text.style.textDecorationLine = "none";
+  text.style.position = "relative";
+  for (const rect of lines) {
+    if (!rect.width) continue;
+    const line = text.ownerDocument.createElement("span");
+    Object.assign(line.style, {
+      position: "absolute",
+      left: `${rect.left - bounds.left - text.clientLeft}px`,
+      top: `${rect.bottom - bounds.top - text.clientTop + 1}px`,
+      width: `${rect.width}px`,
+      height: "1.5px",
+      backgroundColor: "currentColor",
+    });
+    text.append(line);
+  }
 }
 
 // 既存の CSP で許可されている HTTPS 画像を、fetch ではなく img 要素で読み込む。
@@ -185,6 +213,7 @@ export async function generateMapPdf(
         temporary.frame = _doc.defaultView?.frameElement ?? null;
         clone.style.transform = "none";
         clone.style.boxShadow = "none";
+        clone.classList.add("print-pdf-capture");
         const nodes = [clone, ...clone.querySelectorAll<HTMLElement>("*")];
         for (const [index, background] of backgrounds)
           nodes[index]!.style.backgroundImage = background;
@@ -232,6 +261,7 @@ export async function generateMapPdf(
           });
         await Promise.all([...clone.querySelectorAll("img")].map((img) => img.decode()));
         checkAbort(signal);
+        renderMemoUnderline(clone);
       },
     });
     checkAbort(signal);
