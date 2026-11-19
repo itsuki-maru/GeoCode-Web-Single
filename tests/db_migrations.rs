@@ -13,6 +13,50 @@ async fn memory_pool() -> SqlitePool {
 }
 
 #[tokio::test]
+async fn file_pool_shutdown_waits_for_connection_returned_during_close() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("migration.sqlite");
+    let (returning, return_started) = tokio::sync::oneshot::channel();
+    let (resume_return, wait_to_resume) = tokio::sync::oneshot::channel();
+    let release_signals = std::sync::Mutex::new(Some((returning, wait_to_resume)));
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .after_release(move |_, _| {
+            let signals = release_signals.lock().unwrap().take();
+            Box::pin(async move {
+                if let Some((returning, wait_to_resume)) = signals {
+                    returning.send(()).unwrap();
+                    wait_to_resume.await.unwrap();
+                }
+                Ok(true)
+            })
+        })
+        .connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&path)
+                .create_if_missing(true)
+                .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+        )
+        .await
+        .unwrap();
+
+    // close() が始まるまで、返却中の接続を idle キューに戻さない。
+    drop(pool.acquire().await.unwrap());
+    let close_during_return = async {
+        return_started.await.unwrap();
+        tokio::join!(common::shutdown_file_test_pool(pool.clone()), async {
+            pool.close_event().await;
+            resume_return.send(()).unwrap();
+        });
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(5), close_during_return)
+        .await
+        .expect("pool should shut down while a connection is being returned");
+    assert_eq!(pool.size(), 0);
+    common::close_file_test_pool(pool, path).await;
+}
+
+#[tokio::test]
 async fn migrations_create_schema_and_record_versions() {
     let pool = memory_pool().await;
 
@@ -1924,7 +1968,7 @@ async fn saved_condition_upgrade_from_twenty_one_preserves_all_existing_data_and
     let preset_before: Vec<(String, String, String, String, i64, String, String, String)> =
         sqlx::query_as(preset_query).fetch_all(&pool).await.unwrap();
     // 次回のアプリ起動を想定してファイルを開き直し、保存済みの条件が維持されることを確認する。
-    pool.close().await;
+    common::shutdown_file_test_pool(pool).await;
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect_with(
@@ -2662,7 +2706,7 @@ async fn ai_upgrade_from_twenty_five_preserves_existing_data_and_survives_reconn
         run_migrations(&pool).await.unwrap();
         assert_eq!(ai_migration_snapshot(&pool).await, ai_before);
 
-        pool.close().await;
+        common::shutdown_file_test_pool(pool).await;
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect_with(
@@ -2712,8 +2756,7 @@ async fn concurrent_ai_upgrade_waits_before_reading_versions_and_preserves_exist
             .execute(&seed).await.unwrap();
         seed_pre_preset_data(&seed).await;
         let before = existing_data_snapshot(&seed).await;
-        seed.close().await;
-        drop(seed);
+        common::shutdown_file_test_pool(seed).await;
         let options = SqliteConnectOptions::new()
             .filename(&path)
             .journal_mode(journal_mode)
@@ -2810,8 +2853,8 @@ async fn concurrent_ai_upgrade_waits_before_reading_versions_and_preserves_exist
         .unwrap();
         assert_eq!(empty, (0, 0));
         run_migrations(&pool).await.unwrap();
-        first.close().await;
-        second.close().await;
+        common::shutdown_file_test_pool(first).await;
+        common::shutdown_file_test_pool(second).await;
         common::close_file_test_pool(pool, path).await;
     }
 }
