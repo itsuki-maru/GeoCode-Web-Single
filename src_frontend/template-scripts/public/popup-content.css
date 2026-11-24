@@ -9,7 +9,26 @@
   flex-wrap: wrap;
   gap: 6px;
 }
-.geocode-content-popup .popup-content-toolbar select {
+.geocode-content-popup .popup-content-toolbar-route {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.geocode-content-popup .popup-content-toolbar-route label {
+  min-width: 0;
+  margin: 0;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+.geocode-content-popup .popup-content-toolbar-route select {
+  min-width: 0;
+}
+.geocode-content-popup .popup-content-route-button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.geocode-content-popup .popup-content-toolbar select,
+.geocode-content-popup .popup-content-route-button {
   box-sizing: border-box;
   width: auto;
   max-width: 100%;
@@ -24,16 +43,31 @@
   cursor: pointer;
   touch-action: manipulation;
 }
-.geocode-content-popup .popup-content-toolbar select:focus-visible {
+.geocode-content-popup .popup-content-toolbar select:focus-visible,
+.geocode-content-popup .popup-content-route-button:focus-visible {
   outline: 2px solid #597ba7;
   outline-offset: 2px;
 }
-.leaflet-popup-content .geocode-content-popup .popup-content-note {
+.geocode-content-popup .popup-content-google-link {
+  display: block;
+  width: fit-content;
+  margin-bottom: 6px;
+  color: #1958b0;
+  font-size: 12px;
+  text-decoration: underline;
+  touch-action: manipulation;
+}
+.leaflet-popup-content .geocode-content-popup .popup-content-note,
+.leaflet-popup-content .geocode-content-popup .popup-content-route-note {
   margin: 6px 0;
   font-size: 12px;
   line-height: 1.5;
   color: #64748b;
 }
+.leaflet-popup-content .geocode-content-popup .popup-content-route-note:empty {
+  margin: 0;
+}
+.geocode-content-popup .popup-content-toolbar:empty,
 .geocode-content-popup .popup-content-note:empty,
 .geocode-content-popup .popup-content-analysis:empty,
 .geocode-content-popup .popup-content-print-label {
@@ -49,8 +83,49 @@
 .leaflet-popup-content .geocode-content-popup .popup-content-body > :first-child {
   margin-top: 0;
 }
+
+.map-mobile-controls:not(.answer-preview) .leaflet-popup:has(.geocode-content-popup) {
+  width: min(400px, calc(100vw - 20px));
+}
+.map-mobile-controls:not(.answer-preview)
+  .leaflet-popup:has(.geocode-content-popup)
+  > .leaflet-popup-content-wrapper
+  > .leaflet-popup-content {
+  /* Leaflet のインライン幅を上書きし、左右の余白を保ったまま枠内に収める。 */
+  width: auto !important;
+}
+.map-mobile-controls:not(.answer-preview) .geocode-content-popup {
+  display: flex;
+  flex-direction: column;
+  /* Leaflet の枠とアンカー、自動移動の上下余白を確保する。 */
+  max-height: max(0px, calc(100vh - 110px));
+  overflow-y: auto;
+}
+.map-mobile-controls:not(.answer-preview) .geocode-content-popup > * {
+  flex-shrink: 0;
+}
+.map-mobile-controls:not(.answer-preview) .geocode-content-popup > .popup-content-body {
+  flex-shrink: 1;
+  width: 100%;
+  max-width: 100%;
+  min-height: 1.3em;
+  max-height: 400px;
+}
+.map-mobile-controls:not(.answer-preview) .geocode-content-popup :is(h1, h2, h3, h4, h5, h6) {
+  width: auto;
+  overflow-wrap: anywhere;
+}
+
 @media screen {
-  .pc-map-popup-height .geocode-content-popup[data-content-key^="marker:"] {
+  .map-mobile-controls .geocode-content-popup .popup-content-toolbar-route {
+    margin-right: 6px;
+  }
+  .map-mobile-controls #map:has(.popup-content-overlaps-controls) .leaflet-top {
+    visibility: hidden;
+  }
+}
+@media screen {
+  .pc-map-popup-height .popup-content-height-limited {
     display: flex;
     flex-direction: column;
     /* Leaflet の外枠 28px、アンカー・下余白など約 52〜58px に安全余白を加える。 */
@@ -58,16 +133,17 @@
     max-height: var(--geocode-popup-content-height);
     /* 本文と見出しの幅を揃え、長い見出しだけで高さを使う場合も全体をスクロールできる。 */
     width: 476px;
+    max-width: 100%;
     overflow-x: hidden;
     overflow-y: auto;
   }
-  .pc-map-popup-height .geocode-content-popup[data-content-key^="marker:"] > * {
+  .pc-map-popup-height .popup-content-height-limited > * {
     flex-shrink: 0;
   }
-  .pc-map-popup-height .geocode-content-popup[data-content-key^="marker:"] > .popup-content-title {
+  .pc-map-popup-height .popup-content-height-limited > .popup-content-title {
     overflow-wrap: anywhere;
   }
-  .pc-map-popup-height .geocode-content-popup[data-content-key^="marker:"] > .popup-content-body {
+  .pc-map-popup-height .popup-content-height-limited > .popup-content-body {
     flex-shrink: 1;
     width: 100%;
     min-width: 0;
@@ -78,7 +154,9 @@
   }
 }
 @media print {
-  .geocode-content-popup .popup-content-toolbar {
+  .geocode-content-popup .popup-content-toolbar,
+  .geocode-content-popup .popup-content-google-link,
+  .leaflet-popup-content .geocode-content-popup .popup-content-route-note {
     display: none;
   }
   .geocode-content-popup .popup-content-print-label {

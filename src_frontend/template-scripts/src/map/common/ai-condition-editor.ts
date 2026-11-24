@@ -1,108 +1,94 @@
 import css from "./ai-condition-editor.css?inline";
 import { action, node } from "./coloring-editor";
 import { answerConditionOperations, type AnswerField } from "./answer-coloring";
-import { validateAiPresetDefinition, type SavedAiMapPreset } from "./answer-map-presets";
+import type { SavedMapPreset } from "./answer-map-presets";
 import type { AiDefinition } from "../../ai/types";
 import type { AttributeTransport } from "./advanced-map-search";
 
-interface Condition {
-  field_id: string;
-  field_type: string;
-  op: string;
-  value?: unknown;
-  upper?: unknown;
-}
-type Expression =
-  | { op: "all" }
-  | { op: "text"; query1: string; query2?: string }
-  | { op: "attribute"; common_form_id: string; conditions: Condition[] }
-  | { op: "and" | "or"; children: Expression[] }
-  | { op: "not"; child: Expression };
-interface ColorRule {
-  id: string;
-  label: string;
-  color: string;
-  conditions: Condition[];
-}
-type Definition =
-  | { type: "filter"; expression: Expression }
-  | { type: "color"; common_form_id: string; rules: ColorRule[] };
+import {
+  noValue,
+  validateAiEditorDefinition,
+  type Condition,
+  type Definition,
+  type Expression,
+} from "./preset-definition";
+
 interface FormMetadata {
   fields: AnswerField[];
   error?: string;
 }
-interface EditorOptions {
+type EditorOptions = {
   definition: AiDefinition;
-  display?: SavedAiMapPreset["display"];
-  transport: AttributeTransport;
-  getLayerIds(): string[] | null;
-  onChange?(): void;
+  display?: SavedMapPreset["display"];
+  onChange?(draft: AiDefinition): void;
   onClear?(): void;
-}
-const noValue = new Set(["empty", "filled", "missing"]);
+} & (
+  | { transport: AttributeTransport; getLayerIds(): string[] | null }
+  | {
+      getForms(signal: AbortSignal): Promise<{ id: string; form_title: string }[]>;
+      getFields(id: string, signal: AbortSignal): Promise<{ fields: AnswerField[] }>;
+    }
+);
+export { validateAiEditorDefinition } from "./preset-definition";
 const clone = <T>(value: T): T => structuredClone(value);
 const record = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value);
 const message = (error: unknown) =>
   error instanceof Error ? error.message : "項目情報を読み込めませんでした。";
 
-/** 保存済み定義の構造を維持し、値は実行時のサーバー検証へも渡す。 */
-export function validateAiEditorDefinition(value: unknown): AiDefinition {
-  let encoded: string;
-  try {
-    encoded = JSON.stringify(value);
-  } catch {
-    throw Error("保存条件の形式を確認できませんでした。");
-  }
-  if (typeof encoded !== "string" || new TextEncoder().encode(encoded).length > 131072)
-    throw Error("保存条件は128KiB以内にしてください。");
-  const validated = validateAiPresetDefinition(value);
-  const conditionValues = (conditions: Condition[]) => {
+const savedFieldLabel = (
+  display: SavedMapPreset["display"] | undefined,
+  form: string,
+  condition: Condition,
+) =>
+  display?.fields.find(
+    (field) =>
+      field.id === condition.field_id &&
+      field.field_type === condition.field_type &&
+      (!field.form_id || field.form_id === form),
+  )?.label || condition.field_id;
+
+function checkDefinitionFields(
+  definition: Definition,
+  fields: (formId: string) => readonly AnswerField[],
+  display?: SavedMapPreset["display"],
+) {
+  const check = (form: string, conditions: Condition[]) => {
+    const candidates = fields(form);
     for (const condition of conditions) {
-      if (noValue.has(condition.op)) continue;
-      const values = [condition.value, ...(condition.op === "between" ? [condition.upper] : [])];
-      for (const item of values) {
-        if (typeof item === "string" && new TextEncoder().encode(item).length > 5000)
-          throw Error("検索値は5000バイト以内にしてください。");
-        if (
-          Array.isArray(item) &&
-          item.some((v) => typeof v !== "string" || new TextEncoder().encode(v).length > 5000)
-        )
-          throw Error("選択値を確認してください。");
-        if (condition.field_type === "number") {
-          const raw = String(item);
-          // Numberは有限性だけに使い、保持値・送信値へ変換しない。
-          if (
-            raw.length > 200 ||
-            !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(raw) ||
-            !Number.isFinite(Number(raw))
-          )
-            throw Error("数値の条件を確認してください。");
-        }
-        if (condition.field_type === "date") {
-          if (typeof item !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(item))
-            throw Error("日付はYYYY-MM-DD形式で入力してください。");
-          const date = new Date(`${item}T00:00:00Z`);
-          if (!Number.isFinite(date.valueOf()) || date.toISOString().slice(0, 10) !== item)
-            throw Error("日付を確認してください。");
-        }
-      }
+      const field = candidates.find(
+        (field) => field.id === condition.field_id && field.field_type === condition.field_type,
+      );
+      if (!field)
+        throw Error(
+          `「${savedFieldLabel(display, form, condition)}」の項目または型が見つかりません。条件を修正してください。`,
+        );
+      if (
+        !noValue.has(condition.op) &&
+        (condition.field_type === "select" || condition.field_type === "radio") &&
+        Array.isArray(condition.value) &&
+        condition.value.some((value) => !field.choices.includes(String(value)))
+      )
+        throw Error(`「${field.label}」に現在使えない選択値があります。条件を修正してください。`);
     }
   };
-  const inspect = (expression: Expression): void => {
-    if (expression.op === "attribute") conditionValues(expression.conditions);
-    else if (expression.op === "and" || expression.op === "or")
-      expression.children.forEach(inspect);
-    else if (expression.op === "not") inspect(expression.child);
+  const visit = (expression: Expression): void => {
+    if (expression.op === "attribute") check(expression.common_form_id, expression.conditions);
+    else if (expression.op === "not") visit(expression.child);
+    else if (expression.op === "and" || expression.op === "or") expression.children.forEach(visit);
   };
-  const definition = validated as unknown as Definition;
-  if (definition.type === "filter") inspect(definition.expression);
-  else
-    definition.rules.forEach((rule) => {
-      if (new TextEncoder().encode(rule.id).length > 40) throw Error("分類IDを確認してください。");
-      conditionValues(rule.conditions);
-    });
-  return validated;
+  if (definition.type === "filter") visit(definition.expression);
+  else definition.rules.forEach((rule) => check(definition.common_form_id, rule.conditions));
+}
+
+export function validateAiDefinitionFields(
+  value: AiDefinition,
+  fields: (formId: string) => readonly AnswerField[],
+  display?: SavedMapPreset["display"],
+): AiDefinition {
+  const definition = validateAiEditorDefinition(value);
+  checkDefinitionFields(definition, fields, display);
+  return definition;
 }
 
 /** 下書きだけを編集する。実行・保存・ブラウザーへの永続化は呼出側の責務。 */
@@ -114,7 +100,7 @@ export function createAiConditionEditor(host: HTMLElement, options: EditorOption
     document.head.append(style);
   }
   // 不明な式を一部だけ読み込んで、意味が変わった下書きを作らない。
-  const draft = validateAiEditorDefinition(options.definition) as unknown as Definition;
+  const draft = validateAiEditorDefinition(options.definition);
   const panel = node("section");
   panel.className =
     draft.type === "color" ? "ai-condition-editor map-coloring-editor" : "ai-condition-editor";
@@ -128,6 +114,7 @@ export function createAiConditionEditor(host: HTMLElement, options: EditorOption
   let disposed = false;
   let sequence = 0;
   let controller: AbortController | undefined;
+  let pendingMetadata: Promise<void> = Promise.resolve();
   let metadataError = "";
   let metadataFailed = false;
   let feedback: HTMLParagraphElement;
@@ -155,14 +142,9 @@ export function createAiConditionEditor(host: HTMLElement, options: EditorOption
     return [...ids].filter(Boolean);
   };
   const fields = (form: string) => metadata.get(form)?.fields ?? [];
-  const savedFieldLabel = (form: string, condition: Condition) =>
-    options.display?.fields.find(
-      (field) =>
-        field.id === condition.field_id &&
-        field.field_type === condition.field_type &&
-        (!field.form_id || field.form_id === form),
-    )?.label || condition.field_id;
-  function validateMetadata() {
+  const getDefinition = (): AiDefinition => {
+    if (disposed) throw Error("条件編集画面は閉じられています。");
+    const definition = validateAiEditorDefinition(draft);
     if (metadataError) throw Error(metadataError);
     if (!ready || loading) throw Error("項目情報の読み込み完了後に実行してください。");
     for (const id of formIds()) {
@@ -170,38 +152,8 @@ export function createAiConditionEditor(host: HTMLElement, options: EditorOption
       if (!data || data.error)
         throw Error(data?.error || "共通フォームの項目情報を読み直してください。");
     }
-    const check = (form: string, conditions: Condition[]) => {
-      for (const condition of conditions) {
-        const field = fields(form).find(
-          (field) => field.id === condition.field_id && field.field_type === condition.field_type,
-        );
-        if (!field)
-          throw Error(
-            `「${savedFieldLabel(form, condition)}」の項目または型が見つかりません。条件を修正してください。`,
-          );
-        if (
-          !noValue.has(condition.op) &&
-          (condition.field_type === "select" || condition.field_type === "radio") &&
-          Array.isArray(condition.value) &&
-          condition.value.some((value) => !field.choices.includes(String(value)))
-        )
-          throw Error(`「${field.label}」に現在使えない選択値があります。条件を修正してください。`);
-      }
-    };
-    const visit = (expression: Expression): void => {
-      if (expression.op === "attribute") check(expression.common_form_id, expression.conditions);
-      else if (expression.op === "not") visit(expression.child);
-      else if (expression.op === "and" || expression.op === "or")
-        expression.children.forEach(visit);
-    };
-    if (draft.type === "filter") visit(draft.expression);
-    else draft.rules.forEach((rule) => check(draft.common_form_id, rule.conditions));
-  }
-  const getDefinition = (): AiDefinition => {
-    if (disposed) throw Error("条件編集画面は閉じられています。");
-    const result = validateAiEditorDefinition(draft);
-    validateMetadata();
-    return result;
+    checkDefinitionFields(definition, fields, options.display);
+    return definition;
   };
   function updateFeedback() {
     if (!feedback) return;
@@ -216,7 +168,7 @@ export function createAiConditionEditor(host: HTMLElement, options: EditorOption
     panel.setAttribute("aria-busy", String(loading));
   }
   const changed = (redraw = false) => {
-    options.onChange?.();
+    options.onChange?.(clone(draft) as unknown as AiDefinition);
     if (redraw) render();
     else updateFeedback();
   };
@@ -334,7 +286,7 @@ export function createAiConditionEditor(host: HTMLElement, options: EditorOption
       if (!current)
         choices.unshift([
           fieldKey({ id: condition.field_id, field_type: condition.field_type }),
-          `${savedFieldLabel(form, condition)}（項目・型を確認）`,
+          `${savedFieldLabel(options.display, form, condition)}（項目・型を確認）`,
         ]);
       row.append(
         namedControl(
@@ -719,7 +671,11 @@ export function createAiConditionEditor(host: HTMLElement, options: EditorOption
         .find((element) => element.dataset.aiConditionFocus === active)
         ?.focus();
   }
-  async function refreshMetadata(signal?: AbortSignal): Promise<void> {
+  function refreshMetadata(signal?: AbortSignal): Promise<void> {
+    pendingMetadata = loadMetadata(signal);
+    return pendingMetadata;
+  }
+  async function loadMetadata(signal?: AbortSignal): Promise<void> {
     if (disposed) return;
     controller?.abort();
     const current = ++sequence;
@@ -729,19 +685,20 @@ export function createAiConditionEditor(host: HTMLElement, options: EditorOption
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) request.abort();
     const timer = setTimeout(() => request.abort(), 60000);
-    const scope = JSON.stringify(options.getLayerIds());
+    const scopeKey = () => ("getLayerIds" in options ? JSON.stringify(options.getLayerIds()) : "");
+    const scope = scopeKey();
     const active = () =>
-      !disposed &&
-      current === sequence &&
-      !request.signal.aborted &&
-      scope === JSON.stringify(options.getLayerIds());
+      !disposed && current === sequence && !request.signal.aborted && scope === scopeKey();
     loading = true;
     ready = false;
     metadataError = "";
     metadataFailed = false;
     render();
     try {
-      const response = await options.transport("/common-forms", undefined, request.signal);
+      const response =
+        "getForms" in options
+          ? await options.getForms(request.signal)
+          : await options.transport("/common-forms", undefined, request.signal);
       if (!active()) return;
       if (
         !Array.isArray(response) ||
@@ -755,17 +712,20 @@ export function createAiConditionEditor(host: HTMLElement, options: EditorOption
       const next = new Map<string, FormMetadata>();
       for (const id of formIds()) {
         try {
-          const data = await options.transport(
-            "/form-answers/map-filter",
-            {
-              query: { mode: "latest" },
-              scope: { kind: "layers", layer_ids: options.getLayerIds() },
-              common_form_id: id,
-              conditions: [],
-              options_only: true,
-            },
-            request.signal,
-          );
+          const data =
+            "getFields" in options
+              ? await options.getFields(id, request.signal)
+              : await options.transport(
+                  "/form-answers/map-filter",
+                  {
+                    query: { mode: "latest" },
+                    scope: { kind: "layers", layer_ids: options.getLayerIds() },
+                    common_form_id: id,
+                    conditions: [],
+                    options_only: true,
+                  },
+                  request.signal,
+                );
           if (!active()) return;
           if (
             !record(data) ||
@@ -805,7 +765,7 @@ export function createAiConditionEditor(host: HTMLElement, options: EditorOption
       signal?.removeEventListener("abort", abort);
       if (current === sequence && !disposed) {
         loading = false;
-        if (request.signal.aborted || scope !== JSON.stringify(options.getLayerIds())) {
+        if (request.signal.aborted || scope !== scopeKey()) {
           ready = false;
           metadataFailed = true;
           metadataError = "項目情報の取得を中止しました。現在の対象で読み直してください。";
@@ -817,6 +777,7 @@ export function createAiConditionEditor(host: HTMLElement, options: EditorOption
   render();
   return {
     getDefinition,
+    getDraftDefinition: () => clone(draft) as unknown as AiDefinition,
     setDisabled(value: boolean) {
       disabled = value;
       const controls = panel.querySelector<HTMLFieldSetElement>(".ai-editor-controls");
@@ -825,6 +786,7 @@ export function createAiConditionEditor(host: HTMLElement, options: EditorOption
       if (retry) retry.disabled = disabled || loading;
     },
     refreshMetadata,
+    whenMetadataReady: () => pendingMetadata,
     dispose() {
       disposed = true;
       ++sequence;

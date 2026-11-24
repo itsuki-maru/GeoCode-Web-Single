@@ -138,12 +138,17 @@ async fn fixture(pool: &SqlitePool) -> Fixture {
 }
 
 fn filter(form: Option<Uuid>, conditions: Value) -> Value {
-    json!({"name":"  保存条件  ","kind":"filter","schema_version":1,
-        "definition":{"common_form_id":form,"conditions":conditions}})
+    let expression = if form.is_none() && conditions == json!([]) {
+        json!({"op":"all"})
+    } else {
+        json!({"op":"attribute","common_form_id":form,"conditions":conditions})
+    };
+    json!({"name":"  保存条件  ","kind":"filter","schema_version":2,
+        "definition":{"type":"filter","expression":expression}})
 }
 
 fn coloring(form: Uuid) -> Value {
-    json!({"name":"色分け","kind":"coloring","schema_version":1,"definition":{
+    json!({"name":"色分け","kind":"coloring","schema_version":2,"definition":{"type":"color",
         "common_form_id":form,"rules":[{"id":"rule-1","label":"50年以上","color":"#f43F5e",
         "conditions":[{"field_id":"n","field_type":"number","op":"gte","value":"50"}]}]}})
 }
@@ -313,15 +318,26 @@ async fn definitions_round_trip_precisely_without_runtime_or_unrecognized_data()
     let value = "9007199254740993.00000000000000000001";
     let mut input = filter(
         Some(f.form),
-        json!([{"field_id":"n","field_type":"number","op":"between","value":value,"upper":"9007199254740993.00000000000000000002","ignored":"discard"}]),
+        json!([{"field_id":"n","field_type":"number","op":"between","value":value,"upper":"9007199254740993.00000000000000000002","ignored":"reject"}]),
     );
+    assert!(matches!(
+        save(&pool, f.owner, input.clone()).await,
+        Err(AppError::Validation(_))
+    ));
+    input["definition"]["expression"]["conditions"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("ignored");
     let first = save(&pool, f.owner, input.clone()).await.unwrap();
     let second = save(&pool, f.owner, input.clone()).await.unwrap();
     assert_ne!(first["id"], second["id"]);
     assert_eq!(first["name"], "保存条件");
-    assert_eq!(first["definition"]["conditions"][0]["value"], value);
+    assert_eq!(
+        first["definition"]["expression"]["conditions"][0]["value"],
+        value
+    );
     assert!(
-        first["definition"]["conditions"][0]
+        first["definition"]["expression"]["conditions"][0]
             .get("ignored")
             .is_none()
     );
@@ -356,6 +372,7 @@ async fn rejects_invalid_names_versions_types_operators_values_and_limits() {
     for (key, value) in [
         ("name", json!(" \n ")),
         ("name", json!("あ".repeat(101))),
+        ("schema_version", json!(1)),
         ("schema_version", json!(3)),
     ] {
         let mut input = base.clone();
@@ -366,8 +383,6 @@ async fn rejects_invalid_names_versions_types_operators_values_and_limits() {
         ));
     }
     let invalid_conditions = vec![
-        json!({"field_id":"text","field_type":"text","op":"eq","value":""}),
-        json!({"field_id":"text","field_type":"text","op":"contains","value":" \n\t "}),
         json!({"field_id":"missing","field_type":"text","op":"eq","value":"x"}),
         json!({"field_id":"n","field_type":"text","op":"eq","value":"x"}),
         json!({"field_id":"photo","field_type":"image","op":"contains","value":"x"}),
@@ -409,7 +424,7 @@ async fn rejects_invalid_names_versions_types_operators_values_and_limits() {
         save(&pool, f.owner, filter(None, json!([condition]))).await,
         Err(AppError::Validation(_))
     ));
-    for path in ["empty", "many", "duplicate", "color", "label", "conditions"] {
+    for path in ["empty", "many", "duplicate", "color", "label"] {
         let mut input = coloring(f.form);
         let rule = input["definition"]["rules"][0].clone();
         match path {
@@ -417,8 +432,7 @@ async fn rejects_invalid_names_versions_types_operators_values_and_limits() {
             "many" => input["definition"]["rules"] = json!(vec![rule.clone(); 11]),
             "duplicate" => input["definition"]["rules"] = json!([rule.clone(), rule]),
             "color" => input["definition"]["rules"][0]["color"] = json!("red"),
-            "label" => input["definition"]["rules"][0]["label"] = json!("  "),
-            "conditions" => input["definition"]["rules"][0]["conditions"] = json!([]),
+            "label" => input["definition"]["rules"][0]["label"] = json!(""),
             _ => unreachable!(),
         }
         assert!(
@@ -438,7 +452,7 @@ async fn rejects_invalid_names_versions_types_operators_values_and_limits() {
     );
 }
 
-/// 画像の3条件を検索・色分けの既存形式で保存し、そのまま通常地図で再実行できる。
+/// 画像の3条件をversion 2で保存し、通常地図で再実行できる。
 #[tokio::test]
 async fn image_presence_presets_keep_the_portable_format_and_execute() {
     use geocode_web_single::handler::answer_map_filter::{MapFilterRequest, filter_targets};
@@ -473,19 +487,23 @@ async fn image_presence_presets_keep_the_portable_format_and_execute() {
                 input["definition"]["rules"][0]["conditions"] = json!([condition.clone()]);
             }
             let saved = save(&pool, f.owner, input).await.unwrap();
-            assert_eq!(saved["schema_version"], 1);
+            assert_eq!(saved["schema_version"], 2);
             assert_eq!(saved["kind"], kind);
             assert_eq!(saved["display"]["fields"][0]["label"], "画像");
-            let conditions = if kind == "filter" {
-                &saved["definition"]["conditions"]
+            let (conditions, form) = if kind == "filter" {
+                let expression = &saved["definition"]["expression"];
+                (&expression["conditions"], &expression["common_form_id"])
             } else {
-                &saved["definition"]["rules"][0]["conditions"]
+                (
+                    &saved["definition"]["rules"][0]["conditions"],
+                    &saved["definition"]["common_form_id"],
+                )
             };
             assert_eq!(conditions[0]["op"], op);
             assert!(conditions[0]["value"].is_null() && conditions[0]["upper"].is_null());
             let r: MapFilterRequest = serde_json::from_value(json!({
                 "query":{"mode":"latest"},"scope":{"kind":"layers","layer_ids":null},
-                "common_form_id":saved["definition"]["common_form_id"],"conditions":conditions
+                "common_form_id":form,"conditions":conditions
             }))
             .unwrap();
             let result = filter_targets(&pool, &f.owner.to_string(), &r)
@@ -506,17 +524,18 @@ async fn api_definitions_are_canonical_and_match_editor_and_coloring_limits() {
             Some(f.form),
             json!([
                 {"field_id":"n","field_type":"number","op":"between","value":number,"upper":number},
-                {"field_id":"text","field_type":"text","op":"contains","value":"  点検  ","upper":"ignored"},
-                {"field_id":"n","field_type":"number","op":"missing","value":"ignored","upper":"ignored"}
+                {"field_id":"text","field_type":"text","op":"contains","value":"  点検  "},
+                {"field_id":"n","field_type":"number","op":"missing"}
             ]),
         );
         let saved = save(&pool, f.owner, input).await.unwrap();
-        assert_eq!(saved["definition"]["conditions"][0]["value"], raw);
-        assert_eq!(saved["definition"]["conditions"][0]["upper"], raw);
-        assert_eq!(saved["definition"]["conditions"][1]["value"], "点検");
-        assert!(saved["definition"]["conditions"][1]["upper"].is_null());
-        assert!(saved["definition"]["conditions"][2]["value"].is_null());
-        assert!(saved["definition"]["conditions"][2]["upper"].is_null());
+        let conditions = &saved["definition"]["expression"]["conditions"];
+        assert_eq!(conditions[0]["value"], raw);
+        assert_eq!(conditions[0]["upper"], raw);
+        assert_eq!(conditions[1]["value"], "  点検  ");
+        assert!(conditions[1]["upper"].is_null());
+        assert!(conditions[2]["value"].is_null());
+        assert!(conditions[2]["upper"].is_null());
     }
     let mut named = filter(None, json!([]));
     named["name"] = json!("🚧".repeat(100));
@@ -530,20 +549,20 @@ async fn api_definitions_are_canonical_and_match_editor_and_coloring_limits() {
         Err(AppError::Validation(_))
     ));
     let mut colors = coloring(f.form);
-    colors["definition"]["rules"][0]["label"] = json!("🚧".repeat(50));
+    colors["definition"]["rules"][0]["label"] = json!("🚧".repeat(100));
     colors["definition"]["rules"][0]["conditions"][0]["value"] = json!(50);
     let saved = save(&pool, f.owner, colors.clone()).await.unwrap();
     assert_eq!(
         saved["definition"]["rules"][0]["conditions"][0]["value"],
         "50"
     );
-    colors["definition"]["rules"][0]["label"] = json!("🚧".repeat(51));
+    colors["definition"]["rules"][0]["label"] = json!("🚧".repeat(101));
     assert!(matches!(
         save(&pool, f.owner, colors.clone()).await,
         Err(AppError::Validation(_))
     ));
     colors["definition"]["rules"][0]["label"] = json!("分類");
-    colors["definition"]["rules"][0]["id"] = json!("🚧".repeat(51));
+    colors["definition"]["rules"][0]["id"] = json!("a".repeat(41));
     assert!(matches!(
         save(&pool, f.owner, colors).await,
         Err(AppError::Validation(_))
@@ -825,10 +844,14 @@ async fn saved_filter_and_coloring_definitions_execute_in_the_current_owned_map_
     assert_eq!(page["items"].as_array().unwrap().len(), 2);
     for saved in page["items"].as_array().unwrap() {
         let definition = &saved["definition"];
-        let conditions = if saved["kind"] == "coloring" {
-            definition["rules"][0]["conditions"].clone()
+        let (conditions, form) = if saved["kind"] == "coloring" {
+            (
+                &definition["rules"][0]["conditions"],
+                &definition["common_form_id"],
+            )
         } else {
-            definition["conditions"].clone()
+            let expression = &definition["expression"];
+            (&expression["conditions"], &expression["common_form_id"])
         };
         let (status, matched, _) = http(
             &app,
@@ -838,7 +861,7 @@ async fn saved_filter_and_coloring_definitions_execute_in_the_current_owned_map_
             Some(json!({
                 "query":{"mode":"history","as_of":chrono::Utc::now()},
                 "targets":[format!("marker:{}",f.marker),format!("marker:{second}")],
-                "common_form_id":definition["common_form_id"], "conditions":conditions
+                "common_form_id":form, "conditions":conditions
             })),
         )
         .await;
@@ -1067,7 +1090,7 @@ async fn ai_definitions_round_trip_without_losing_expression_semantics() {
         Err(AppError::NotFound)
     ));
 
-    // v2は条件なしの全件分類を許可し、v1の編集画面向け制約は維持する。
+    // 条件なしの全件分類も保存できる。
     let colors = json!({"name":"全件分類","kind":"coloring","schema_version":2,"definition":{
         "type":"color","common_form_id":f.form,"rules":[{"id":"all","label":"すべて","color":"#123456","conditions":[]}]
     }});
@@ -1075,21 +1098,10 @@ async fn ai_definitions_round_trip_without_losing_expression_semantics() {
         save(&pool, f.owner, colors).await.unwrap()["definition"]["rules"][0]["conditions"],
         json!([])
     );
-    let mut legacy = coloring(f.form);
-    legacy["definition"]["rules"][0]["id"] = json!("🚧".repeat(50));
-    let legacy = save(&pool, f.owner, legacy).await.unwrap();
-    let preset = get_preset(&pool, &f.owner.to_string(), legacy["id"].as_str().unwrap())
-        .await
-        .unwrap();
-    assert_eq!(
-        serde_json::to_value(preset_action(&preset).unwrap()).unwrap()["rules"][0]["id"],
-        "preset-0"
-    );
-    assert_eq!(preset.definition["rules"][0]["id"], "🚧".repeat(50));
 }
 
 #[tokio::test]
-async fn legacy_lists_remain_v1_only_and_all_filters_affect_totals_and_paging() {
+async fn all_list_and_id_paths_exclude_existing_v1_and_keep_filters_and_pagination() {
     let pool = common::test_pool().await;
     let f = fixture(&pool).await;
     save(&pool, f.owner, filter(None, json!([]))).await.unwrap();
@@ -1100,11 +1112,53 @@ async fn legacy_lists_remain_v1_only_and_all_filters_affect_totals_and_paging() 
     let mut other = ai_filter(f.form);
     other["definition"] = json!({"type":"filter","expression":{"op":"all"}});
     save(&pool, f.other, other).await.unwrap();
-    let legacy = list_presets(&pool, &f.owner.to_string(), ListQuery::default())
+    let retired = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO answer_map_saved_condition_model
+         (id,user_id,kind,name,schema_version,definition,display,create_at)
+         VALUES ($1,$2,'filter','retired',1,$3,$4,CURRENT_TIMESTAMP)",
+    )
+    .bind(&retired)
+    .bind(f.owner.to_string())
+    .bind(json!({"common_form_id":null,"conditions":[]}))
+    .bind(json!({"form_label":null,"fields":[]}))
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(matches!(
+        get_preset(&pool, &f.owner.to_string(), &retired).await,
+        Err(AppError::NotFound)
+    ));
+    assert!(matches!(
+        delete_preset(&pool, &f.owner.to_string(), &retired).await,
+        Err(AppError::NotFound)
+    ));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT schema_version FROM answer_map_saved_condition_model WHERE id = $1"
+        )
+        .bind(&retired)
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        1
+    );
+    let page = list_presets(&pool, &f.owner.to_string(), ListQuery::default())
         .await
         .unwrap();
-    assert_eq!(legacy.total, 2);
-    assert!(legacy.items.iter().all(|item| item.schema_version == 1));
+    assert_eq!(page.total, 4);
+    assert!(page.items.iter().all(|item| item.schema_version == 2));
+    let retired_page = list_presets(
+        &pool,
+        &f.owner.to_string(),
+        ListQuery {
+            versions: Some("1".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(retired_page.total, 0);
     let combined = list_presets(
         &pool,
         &f.owner.to_string(),
@@ -1144,7 +1198,7 @@ async fn legacy_lists_remain_v1_only_and_all_filters_affect_totals_and_paging() 
     )
     .await
     .unwrap();
-    assert_eq!(mismatched.total, 0);
+    assert_eq!(mismatched.total, 1);
     let absent = list_presets(
         &pool,
         &f.owner.to_string(),
@@ -1337,4 +1391,325 @@ async fn v2_numeric_json_literals_remain_exact_strings_through_http_storage_list
     assert_eq!(saved["definition"]["rules"][0]["id"], "older");
     assert_eq!(saved["definition"]["rules"][0]["label"], " 高年数 ");
     assert_eq!(saved["definition"]["rules"][1]["id"], "rest");
+}
+
+#[tokio::test]
+async fn preset_text_fragments_match_database_like() {
+    let pool = common::test_pool().await;
+    let f = fixture(&pool).await;
+    let app = geocode_web_single::router::build_router(
+        pool.clone(),
+        geocode_web_single::build_tera_extension().unwrap(),
+        None,
+    );
+    let path = "/form-answers/map-presets/text-fold";
+    let pairs = [
+        ("I", "i"),
+        ("Ａ", "ａ"),
+        ("ΟΣ", "ς"),
+        ("I\u{0307}", "i"),
+        ("K", "k"),
+    ];
+    let fragments: Vec<_> = pairs.iter().flat_map(|(a, b)| [*a, *b]).collect();
+    let payload = json!({ "fragments": fragments });
+    assert_eq!(
+        http(&app, "POST", path, None, Some(payload.clone()))
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+    let (status, data, cache) = http(&app, "POST", path, Some(f.owner), Some(payload)).await;
+    assert_eq!(status, StatusCode::OK, "{data}");
+    assert_eq!(cache.as_deref(), Some("no-store"));
+    for (i, (haystack, needle)) in pairs.iter().enumerate() {
+        let expected = sqlx::query_scalar::<_, bool>("SELECT $1 LIKE '%' || $2 || '%'")
+            .bind(haystack)
+            .bind(needle)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let folded = data[2 * i].as_str().unwrap();
+        assert_eq!(folded.contains(data[2 * i + 1].as_str().unwrap()), expected);
+    }
+    let oversized = json!({ "fragments": vec!["I"; 2049] });
+    assert_eq!(
+        http(&app, "POST", path, Some(f.owner), Some(oversized))
+            .await
+            .0,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn evaluates_display_conditions_without_ai_and_enforces_ownership() {
+    let pool = common::test_pool().await;
+    let f = fixture(&pool).await;
+    let app = geocode_web_single::router::build_router(
+        pool.clone(),
+        geocode_web_single::build_tera_extension().unwrap(),
+        None,
+    );
+    let path = "/form-answers/map-presets/evaluate";
+    let layer = common::master_layer_id(&pool, &f.owner.to_string()).await;
+    let request = json!({"context":{"layer_ids":[layer]},"definition":{"type":"filter","expression":{"op":"text","query1":"設備"}}});
+    let (status, evaluated, _) =
+        http(&app, "POST", path, Some(f.owner), Some(request.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{evaluated}");
+    assert_eq!(
+        evaluated["definition"],
+        json!({
+            "type": "filter", "expression": { "op": "text", "query1": "設備", "query2": "" }
+        })
+    );
+    assert_eq!(
+        evaluated["targets"],
+        json!([format!("marker:{}", f.marker)])
+    );
+    assert_eq!(
+        http(&app, "POST", path, None, Some(request.clone()))
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        http(&app, "POST", path, Some(f.other), Some(request.clone()))
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    let mut reset = request.clone();
+    reset["definition"] = json!({"type":"reset"});
+    assert_eq!(
+        http(&app, "POST", path, Some(f.owner), Some(reset)).await.1,
+        json!({"type":"reset"})
+    );
+    let mut focus = request;
+    focus["definition"] = json!({"type":"focus","latitude":1,"longitude":1});
+    assert_eq!(
+        http(&app, "POST", path, Some(f.owner), Some(focus)).await.0,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn prepared_map_data_projects_owned_loaded_rows_and_historical_fields() {
+    let pool = common::test_pool().await;
+    let f = fixture(&pool).await;
+    let app = geocode_web_single::router::build_router(
+        pool.clone(),
+        geocode_web_single::build_tera_extension().unwrap(),
+        None,
+    );
+    let path = "/form-answers/map-presets/data";
+    let target = format!("marker:{}", f.marker);
+    let request = json!({"targets":[target],"forms":{f.form.to_string():["n","flag","photo","text","legacy"]}});
+    let at = chrono::Utc::now() - chrono::Duration::minutes(1);
+    // フィクスチャの旧版登録を、大きな数値を持つ現行版より前にする。
+    sqlx::query("UPDATE marker_form_submission_model SET create_at = $1 WHERE marker_id = $2")
+        .bind((at - chrono::Duration::minutes(1)).naive_utc())
+        .bind(f.marker.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(r#"INSERT INTO marker_form_submission_model
+        (id,marker_id,submitted_values,rendered_markdown,create_at,source_form,form_snapshot)
+        SELECT $1,$2,$3,'',$4,$5,json_object('form_schema',json(form_schema))
+        FROM common_form_model WHERE id=$6"#)
+        .bind(Uuid::new_v4().to_string()).bind(f.marker.to_string())
+        .bind(r#"{"n":12345678901234567890.123450000,"flag":false,"photo":"private-photo-path","ignored":"not requested"}"#)
+        .bind(at.naive_utc()).bind(json!({"id":f.form})).bind(f.form.to_string())
+        .execute(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO marker_form_submission_model \
+        (id,marker_id,submitted_values,rendered_markdown,create_at) VALUES ($1,$2,'{}','',$3)",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(f.marker.to_string())
+    .bind(at.naive_utc())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, latest, cache) =
+        http(&app, "POST", path, Some(f.owner), Some(request.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{latest}");
+    assert_eq!(cache.as_deref(), Some("no-store"));
+    assert_eq!(latest["rows"].as_array().unwrap().len(), 1);
+    let row = &latest["rows"][0];
+    assert_eq!(row["target"], target);
+    assert_eq!(row["form_id"], f.form.to_string());
+    assert_eq!(
+        row["fields"],
+        json!({
+            "n":{"type":"number","value":"12345678901234567890.123450000"},
+            "flag":{"type":"checkbox","value":false},
+            "photo":{"type":"image","value":true},
+            "text":{"type":"text","value":null}
+        })
+    );
+    let mut history = request.clone();
+    history["query"] = json!({"mode":"history","as_of":latest["as_of"]});
+    let (status, data, _) = http(&app, "POST", path, Some(f.owner), Some(history.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{data}");
+    let rows = data["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    assert!(
+        rows.iter()
+            .any(|row| row["fields"]["legacy"] == json!({"type":"text","value":"過去"}))
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row["form_id"].is_null() && row["fields"] == json!({}))
+    );
+    history["query"]["mode"] = json!("latest");
+    assert_eq!(
+        http(&app, "POST", path, Some(f.owner), Some(history.clone()))
+            .await
+            .1["rows"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    history["query"]["as_of"] = json!(at - chrono::Duration::seconds(1));
+    assert_eq!(
+        http(&app, "POST", path, Some(f.owner), Some(history.clone()))
+            .await
+            .1["rows"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    history["forms"] = json!({});
+    assert_eq!(
+        http(&app, "POST", path, Some(f.other), Some(history))
+            .await
+            .1["rows"],
+        json!([])
+    );
+    let mut empty = request.clone();
+    empty["targets"] = json!([]);
+    assert_eq!(
+        http(&app, "POST", path, Some(f.owner), Some(empty)).await.1["rows"],
+        json!([])
+    );
+    let mut wrong_layer = request.clone();
+    wrong_layer["layer_ids"] = json!([common::master_layer_id(&pool, &f.other.to_string()).await]);
+    let account_changed = Request::post(path)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(
+            header::COOKIE,
+            format!(
+                "access_token={}",
+                geocode_web_single::auth::create_token(&f.owner.to_string(), 30, "access_token", 0)
+                    .unwrap()
+            ),
+        )
+        .header("x-ai-account-id", f.other.to_string())
+        .body(Body::from(request.to_string()))
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(account_changed).await.unwrap().status(),
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        http(&app, "POST", path, Some(f.owner), Some(wrong_layer))
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        http(&app, "POST", path, Some(f.other), Some(request.clone()))
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        http(&app, "POST", path, None, Some(request)).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
+async fn prepared_map_data_paginates_history_within_one_target() {
+    let pool = common::test_pool().await;
+    let f = fixture(&pool).await;
+    let app = geocode_web_single::router::build_router(
+        pool.clone(),
+        geocode_web_single::build_tera_extension().unwrap(),
+        None,
+    );
+    let path = "/form-answers/map-presets/data";
+    let at = chrono::Utc::now();
+    sqlx::query(
+        "INSERT INTO marker_form_submission_model \
+        (id,marker_id,submitted_values,rendered_markdown,create_at) \
+        SELECT printf('%08x-0000-4000-8000-%012x', n, n),$1,'{}','',$2 \
+         FROM (WITH RECURSIVE seq(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM seq WHERE n<2048) SELECT n FROM seq)",
+    )
+    .bind(f.marker.to_string())
+    .bind(at.naive_utc())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let mut request = json!({"targets":[format!("marker:{}", f.marker)], "forms":{}, "query":{"mode":"history","as_of":at}});
+    let (status, first, _) = http(&app, "POST", path, Some(f.owner), Some(request.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    let rows = first["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2048);
+    let last = rows.last().unwrap();
+    assert_eq!(
+        first["next_cursor"],
+        json!({"target":last["target"],"id":last["id"]})
+    );
+    request["cursor"] = first["next_cursor"].clone();
+    let (status, second, _) = http(&app, "POST", path, Some(f.owner), Some(request)).await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    assert_eq!(second["rows"].as_array().unwrap().len(), 1);
+    assert!(second["next_cursor"].is_null());
+    assert!(rows.iter().all(|r| r["id"] != second["rows"][0]["id"]));
+}
+
+#[tokio::test]
+async fn projected_text_size_limits_history_pages_without_losing_rows() {
+    let pool = common::test_pool().await;
+    let f = fixture(&pool).await;
+    let app = geocode_web_single::router::build_router(
+        pool.clone(),
+        geocode_web_single::build_tera_extension().unwrap(),
+        None,
+    );
+    let at = chrono::Utc::now();
+    sqlx::query(r#"
+        INSERT INTO marker_form_submission_model
+            (id, marker_id, submitted_values, rendered_markdown, create_at, source_form, form_snapshot)
+        SELECT printf('%08x-0000-4000-8000-%012x', n, n), $1, $4,
+            '', $2, $3, '{"form_schema":{"fields":[{"id":"text","type":"text"}]}}'
+        FROM (WITH RECURSIVE seq(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM seq WHERE n<600) SELECT n FROM seq)"#)
+        .bind(f.marker.to_string()).bind(at.naive_utc()).bind(json!({"id":f.form})).bind(json!({"text":"a".repeat(4000)})).execute(&pool).await.unwrap();
+    let mut request = json!({"targets":[format!("marker:{}",f.marker)],"forms":{f.form.to_string():["text"]},
+        "query":{"mode":"history","as_of":at}});
+    let mut ids = std::collections::BTreeSet::new();
+    let mut pages = 0;
+    loop {
+        let (status, page, _) = http(
+            &app,
+            "POST",
+            "/form-answers/map-presets/data",
+            Some(f.owner),
+            Some(request.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        pages += 1;
+        for row in page["rows"].as_array().unwrap() {
+            assert!(ids.insert(row["id"].as_str().unwrap().to_owned()));
+        }
+        request["cursor"] = page["next_cursor"].clone();
+        if request["cursor"].is_null() {
+            break;
+        }
+    }
+    assert_eq!(ids.len(), 601);
+    assert_eq!(pages, 2);
 }

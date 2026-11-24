@@ -4,22 +4,29 @@ import apiClient from "@/axiosClient";
 import SaveMapPresetModal from "../SaveMapPresetModal.vue";
 import SavedMapPresetsModal from "../SavedMapPresetsModal.vue";
 import MessageModal from "@/components/common/MessageModal.vue";
-import type { MapPresetDraft, SavedMapPreset } from "@/utils/answer-map-presets";
+import type { V2MapPresetDraft } from "@/utils/answer-map-presets";
 
 vi.mock("@/axiosClient", () => ({ default: { get: vi.fn(), post: vi.fn(), delete: vi.fn() } }));
 const endpoint = "/form-answers/map-presets";
-const draft = (): MapPresetDraft => ({
-  kind: "filter",
-  definition: {
-    common_form_id: "form",
-    conditions: [{ field_id: "year", field_type: "number", op: "gte", value: "50", upper: null }],
-  },
-});
-const preset = (): SavedMapPreset => ({
+const draft = () =>
+  ({
+    kind: "filter",
+    schema_version: 2,
+    definition: {
+      type: "filter",
+      expression: {
+        op: "attribute",
+        common_form_id: "form",
+        conditions: [
+          { field_id: "year", field_type: "number", op: "gte", value: "50", upper: null },
+        ],
+      },
+    },
+  }) satisfies V2MapPresetDraft;
+const preset = () => ({
   ...draft(),
   id: "saved-one",
   name: "50年以上",
-  schema_version: 1,
   display: {
     form_label: "点検台帳",
     fields: [{ id: "year", field_type: "number", label: "耐用年数" }],
@@ -70,12 +77,12 @@ describe("検索条件の保存モーダル", () => {
     const value = draft(),
       wrapper = saveModal(value);
     await wrapper.get('[aria-label="条件名"]').setValue("  50年以上  ");
-    value.definition.conditions[0].value = "999";
+    value.definition.expression.conditions[0].value = "999";
     await wrapper.get("form").trigger("submit");
     await flushPromises();
     expect(apiClient.post).toHaveBeenCalledWith(
       endpoint,
-      { ...draft(), name: "50年以上", schema_version: 1 },
+      { ...draft(), name: "50年以上" },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(wrapper.emitted("saved")![0][0]).toEqual(preset());
@@ -129,12 +136,30 @@ describe("検索条件の保存モーダル", () => {
 });
 
 describe("保存した検索条件の一覧", () => {
+  it("ヘッダーの閉じる操作から取得失敗後に一覧を開き直せる", async () => {
+    vi.mocked(apiClient.get).mockRejectedValueOnce(Error("network"));
+    const wrapper = listModal();
+    await flushPromises();
+    const list = wrapper.get('[aria-labelledby="map-presets-title"]');
+    expect(list.get("header h2").text()).toBe("保存した検索条件");
+    expect(list.findAll("button").map((item) => item.text())).toEqual(["閉じる"]);
+    expect(list.get('[role="alert"]').text()).toContain("一覧を閉じて開き直してください。");
+    await list.get("header button").trigger("click");
+    expect(wrapper.emitted("close")).toHaveLength(1);
+    await wrapper.setProps({ isOpen: false });
+    await wrapper.setProps({ isOpen: true });
+    await flushPromises();
+    expect(apiClient.get).toHaveBeenCalledTimes(2);
+    expect(list.find('[role="alert"]').exists()).toBe(false);
+    expect(list.get("tbody tr").text()).toContain("50年以上");
+    expect(list.findAll("button").map((item) => item.text())).not.toContain("再読み込み");
+  });
   it("取得した名前・種別・項目名を表示し、呼び出しは複製を通知するだけ", async () => {
     const wrapper = listModal();
     await flushPromises();
     expect(apiClient.get).toHaveBeenCalledWith(
       endpoint,
-      expect.objectContaining({ params: { page: 1, page_size: 20 } }),
+      expect.objectContaining({ params: { page: 1, page_size: 20, versions: "2" } }),
     );
     const row = wrapper.get("tbody tr");
     expect(row.text()).toContain("地図上で絞り込み");
@@ -142,9 +167,9 @@ describe("保存した検索条件の一覧", () => {
     expect(row.text()).toContain("点検台帳");
     expect(row.text()).toContain("耐用年数 以上 50");
     await button(wrapper, "呼び出し").trigger("click");
-    const restored = wrapper.emitted("restore")![0][0] as SavedMapPreset;
+    const restored = wrapper.emitted("restore")![0][0] as ReturnType<typeof preset>;
     expect(restored).toEqual(preset());
-    restored.definition.conditions[0].value = "100";
+    restored.definition.expression.conditions[0].value = "100";
     expect(row.text()).toContain("耐用年数 以上 50");
     expect(wrapper.emitted("close")).toBeUndefined();
     expect(apiClient.post).not.toHaveBeenCalled();
@@ -227,18 +252,20 @@ describe("保存した検索条件の一覧", () => {
     vi.mocked(apiClient.get).mockResolvedValueOnce(page([{ ...preset(), id: "last" }], 21, 2));
     await button(wrapper, "次へ").trigger("click");
     await flushPromises();
+    expect(wrapper.emitted("pageItems")?.at(-1)).toEqual([[{ ...preset(), id: "last" }]]);
     expect(apiClient.get).toHaveBeenLastCalledWith(
       endpoint,
-      expect.objectContaining({ params: { page: 2, page_size: 20 } }),
+      expect.objectContaining({ params: { page: 2, page_size: 20, versions: "2" } }),
     );
     await button(wrapper, "削除").trigger("click");
     vi.mocked(apiClient.get).mockResolvedValueOnce(page([preset()], 20));
     await button(confirm(wrapper), "削除").trigger("click");
     await flushPromises();
     expect(apiClient.delete).toHaveBeenCalledWith(`${endpoint}/last`, expect.anything());
+    expect(wrapper.emitted("pageItems")?.at(-1)).toEqual([[preset()]]);
     expect(apiClient.get).toHaveBeenLastCalledWith(
       endpoint,
-      expect.objectContaining({ params: { page: 1, page_size: 20 } }),
+      expect.objectContaining({ params: { page: 1, page_size: 20, versions: "2" } }),
     );
   });
   it("読込中も閉じられ、再表示後に古い取得結果が上書きされない", async () => {

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createContext, runInContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
+import type { RoutePrintState } from "../src/map/common/route-result";
 
 const source = readFileSync("src/map/editor/map-editor-final.ts", "utf8");
 const printHandlers = source.slice(
@@ -26,6 +27,7 @@ function setup(pending = false) {
   };
   const handlers: Record<string, (event: any) => void> = {};
   const parent = { postMessage: vi.fn() };
+  const routeSearch = { getPrintRoute: vi.fn<() => RoutePrintState | undefined>() };
   const context = createContext({
     URL,
     window: {
@@ -42,6 +44,7 @@ function setup(pending = false) {
       },
     },
     getBasemapController: () => controller,
+    routeSearch,
     editorEntryProfile: { isMobile: false },
     editorParentOrigin: null,
     editorDataReady: true,
@@ -62,6 +65,7 @@ function setup(pending = false) {
     context,
     controller,
     parent,
+    routeSearch,
     handlers,
     ready,
     request() {
@@ -81,23 +85,33 @@ describe("editor basemap print state", () => {
     expect(s.parent.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "printStateResult",
-        state: expect.objectContaining({ tileServerId: "1" }),
+        state: expect.objectContaining({ tileServerId: "1", route: undefined }),
       }),
       "https://example.test",
     );
     expect(s.controller.whenReady).not.toHaveBeenCalled();
   });
 
-  it("waits for the latest committed background before replying", async () => {
+  it("waits for the latest committed background and includes its displayed route", async () => {
     const s = setup(true);
     s.request();
     expect(s.parent.postMessage).not.toHaveBeenCalled();
+    expect(s.routeSearch.getPrintRoute).not.toHaveBeenCalled();
+    const route: RoutePrintState = {
+      backgroundId: 2,
+      travelMode: "WALK",
+      durationSeconds: 720,
+      distanceMeters: 3_400,
+      encodedPolyline: "_p~iF~ps|U_ulLnnqC_mqNvxq`@",
+      warnings: ["徒歩経路の注意事項"],
+    };
     s.controller.selectedId = "2";
     s.controller.pending = false;
+    s.routeSearch.getPrintRoute.mockReturnValue(route);
     s.ready();
     await Promise.resolve();
     expect(s.parent.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ state: expect.objectContaining({ tileServerId: "2" }) }),
+      expect.objectContaining({ state: expect.objectContaining({ tileServerId: "2", route }) }),
       "https://example.test",
     );
   });

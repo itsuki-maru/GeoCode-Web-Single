@@ -40,6 +40,12 @@
 .map-presets-table th:nth-child(6) {
   width: 19%;
 }
+.map-presets-table .has-apply-action th:nth-child(4) {
+  width: 24%;
+}
+.map-presets-table .has-apply-action th:nth-child(6) {
+  width: 23%;
+}
 .map-presets-table tbody tr {
   background: white;
 }

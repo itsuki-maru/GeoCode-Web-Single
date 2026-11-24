@@ -3,7 +3,11 @@ import { ref, onMounted, watch } from "vue";
 import { renderMapPresetsTable } from "../../../../template-scripts/src/map/common/map-presets-table";
 import type { SavedMapPreset } from "@/utils/answer-map-presets";
 const props = defineProps<{ items: SavedMapPreset[]; disabled: boolean }>();
-const emit = defineEmits<{ restore: [value: SavedMapPreset]; remove: [value: SavedMapPreset] }>();
+const emit = defineEmits<{
+  restore: [value: SavedMapPreset];
+  apply: [value: SavedMapPreset];
+  remove: [value: SavedMapPreset];
+}>();
 const host = ref<HTMLElement | null>(null);
 const render = () => {
   if (host.value)
@@ -11,6 +15,7 @@ const render = () => {
       items: props.items,
       disabled: props.disabled,
       restore: (value) => emit("restore", value),
+      apply: (value) => emit("apply", value),
       remove: (value) => emit("remove", value),
     });
 };

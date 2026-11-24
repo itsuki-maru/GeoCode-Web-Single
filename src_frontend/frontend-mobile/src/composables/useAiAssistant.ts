@@ -1,4 +1,4 @@
-import { onMounted, onUnmounted, ref, watch, type Ref } from "vue";
+import { onMounted, onUnmounted, ref, shallowRef, watch, type Ref } from "vue";
 import apiClient from "@/axiosClient";
 import { useAuthStore } from "@/stores/auth";
 import { useLayersStore } from "@/stores/layers";
@@ -8,7 +8,7 @@ import { createAiChat } from "../../../template-scripts/src/ai/chat";
 import { createAiLauncher } from "../../../template-scripts/src/ai/launcher";
 import { observeAiSuggestionDataChanges } from "../../../template-scripts/src/ai/suggestion-events";
 import { assetsUrl } from "@/settingMobile";
-import { mergeAiColoring } from "../../../template-scripts/src/ai/map-state";
+import type { ManualConditionReplacement } from "../../../template-scripts/src/ai/map-state";
 import { aiFailureMessage } from "../../../template-scripts/src/ai/types";
 import type {
   AiDefinition,
@@ -18,7 +18,12 @@ import type {
   AiUndo,
 } from "../../../template-scripts/src/ai/types";
 import type { AnswerColoring } from "../../../template-scripts/src/map/answer-coloring";
-import type { AnySavedMapPreset } from "../../../template-scripts/src/map/common/answer-map-presets";
+import type { SavedMapPreset } from "../../../template-scripts/src/map/common/answer-map-presets";
+
+interface RecalledAnalysisState {
+  targets: string[] | null;
+  coloring: AnswerColoring | null;
+}
 
 interface MapBridge {
   filter(): Promise<boolean>;
@@ -27,14 +32,23 @@ interface MapBridge {
   focus(latitude: number, longitude: number, zoom?: number): Promise<boolean>;
   view(): Promise<AiMapView | null>;
   identity(): string;
+  managesReload?: boolean;
+  evaluatePreset?(definition: AiDefinition): AiExecutionResult;
+  presetContextKey?(): string;
+  preparePresetPage?(presets: SavedMapPreset[], signal: AbortSignal): Promise<void>;
+  prepareManualReplacement?(
+    kind: "filter" | "color" | "all",
+    signal: AbortSignal,
+    localPreset?: boolean,
+  ): Promise<ManualConditionReplacement | undefined>;
 }
 
-/** AIの一時表示を手動の検索・色分けと分離する。保存レコードは変更しない。 */
+/** 地図反映と取り消しを直列化し、各種別の適用済み条件を置換する。 */
 export function useAiAssistant(
   layer: Ref<string>,
   master: Ref<string>,
   bridge: MapBridge,
-  onRecallPreset?: (preset: AnySavedMapPreset) => void | Promise<void>,
+  onRecallPreset?: (preset: SavedMapPreset) => void | Promise<void>,
   onAccountChanged?: () => void,
 ) {
   const markers = useMapObjectStore(),
@@ -45,7 +59,14 @@ export function useAiAssistant(
   let chat: ReturnType<typeof createAiChat> | undefined;
   let launcher: ReturnType<typeof createAiLauncher> | undefined;
   let manualColoring: AnswerColoring | null = null;
-  let aiColoring: AnswerColoring | null = null;
+  const aiColoring = shallowRef<AnswerColoring | null>(null);
+  let committedAnalysis: RecalledAnalysisState = { targets: null, coloring: null };
+  const confirmAnalysis = () => {
+    committedAnalysis = {
+      targets: markers.aiFilterTargets ? [...markers.aiFilterTargets] : null,
+      coloring: aiColoring.value,
+    };
+  };
   let disposed = false;
   let clearRevision = 0;
   let suggestionRevision = 0;
@@ -98,17 +119,20 @@ export function useAiAssistant(
     }
   };
   const paint = async () => {
-    if (!(await bridge.color(mergeAiColoring(manualColoring, aiColoring))))
+    if (!(await bridge.color(aiColoring.value ?? manualColoring)))
       throw Error("地図への色分けの反映を確認できませんでした。");
   };
   const perform = async (
     result: AiExecutionResult | { type: "clear"; kind: "filter" | "color" },
     signal: AbortSignal,
+    preset?: { key?: string },
   ): Promise<AiUndo | void> => {
     const key = identity();
     const generation = clearRevision;
     const assert = (currentSignal?: AbortSignal) => {
       check(key, currentSignal);
+      if (currentSignal && preset && preset.key !== bridge.presetContextKey?.())
+        throw Error("地図のデータが変更されました。現在のデータで再実行してください。");
       if (generation !== clearRevision)
         throw Error("地図の状態が変わりました。再実行してください。");
     };
@@ -136,46 +160,67 @@ export function useAiAssistant(
           assert();
         });
     }
+    const kind =
+      result.type === "clear" ? result.kind : result.type === "reset" ? "all" : result.type;
+    const replacement = await bridge.prepareManualReplacement?.(kind, signal, !!preset);
     const previous = {
       targets: markers.aiFilterTargets ? [...markers.aiFilterTargets] : null,
-      coloring: aiColoring ? structuredClone(aiColoring) : null,
+      coloring: aiColoring.value ? structuredClone(aiColoring.value) : null,
+      manualColoring,
     };
     const restore = async () => {
       assert();
+      replacement?.restore();
+      if (kind !== "filter" || replacement) manualColoring = previous.manualColoring;
       markers.setAiFilter(previous.targets);
-      aiColoring = previous.coloring;
+      aiColoring.value = previous.coloring;
       await paint();
       if (!(await bridge.filter())) throw Error("地図への検索の反映を確認できませんでした。");
       assert();
+      confirmAnalysis();
     };
     try {
+      assert(signal);
+      replacement?.apply();
+      if (kind !== "filter" || replacement) manualColoring = replacement?.coloring ?? null;
       if (result.type === "filter") markers.setAiFilter(result.targets!);
-      else if (result.type === "color") aiColoring = result.coloring!;
+      else if (result.type === "color") aiColoring.value = result.coloring!;
       else if (result.type === "clear") {
         if (result.kind === "filter") markers.setAiFilter(null);
-        else aiColoring = null;
+        else aiColoring.value = null;
       } else {
         markers.setAiFilter(null);
-        aiColoring = null;
+        aiColoring.value = null;
       }
       await paint();
       assert(signal);
       if (!(await bridge.filter())) throw Error("地図への検索の反映を確認できませんでした。");
       assert(signal);
+      confirmAnalysis();
       return () => enqueue(restore);
     } catch (error) {
       if (!disposed && generation === clearRevision && key === identity())
         await restore().catch(() => undefined);
       throw error;
+    } finally {
+      replacement?.finish();
     }
   };
   const clearState = () => {
     ++clearRevision;
-    const hadAiColoring = !!aiColoring;
-    aiColoring = null;
+    const hadAiColoring = !!aiColoring.value;
+    aiColoring.value = null;
     manualColoring = null;
     markers.setAiFilter(null);
+    confirmAnalysis();
     if (hadAiColoring) void bridge.resetColor().catch(() => undefined);
+  };
+  const applyPreset = (
+    result: AiExecutionResult | { type: "clear"; kind: "filter" | "color" },
+    signal: AbortSignal,
+  ) => {
+    const scope = { key: bridge.presetContextKey?.() };
+    return enqueue(() => perform(result, signal, scope));
   };
   const clear = () => {
     clearState();
@@ -204,7 +249,9 @@ export function useAiAssistant(
           suggestionRevision,
         ]),
       apply: (result, signal) => enqueue(() => perform(result, signal)),
-      clear: (kind, signal) => enqueue(() => perform({ type: "clear", kind }, signal)),
+      evaluatePreset: bridge.evaluatePreset,
+      applyPreset,
+      clear: (kind, signal) => applyPreset({ type: "clear", kind }, signal),
       onEnabledChange: (value) => {
         aiEnabled.value = value;
         launcher?.setEnabled(value);
@@ -214,6 +261,7 @@ export function useAiAssistant(
         onAccountChanged?.();
       },
       onRecallPreset,
+      preparePresetPage: bridge.preparePresetPage,
       onLayerCreated: async (_layer, signal) => {
         const key = identity();
         const accountId = auth.accountId;
@@ -234,7 +282,7 @@ export function useAiAssistant(
       invalidateSuggestions,
     );
   });
-  watch(layer, clear, { flush: "sync" });
+  watch(layer, () => (bridge.managesReload ? chat?.close() : clear()), { flush: "sync" });
   watch(() => auth.accountId, clear, { flush: "sync" });
   let markerGeneration = markers.recordCache.generation;
   let shapeGeneration = shapes.recordCache.generation;
@@ -264,10 +312,6 @@ export function useAiAssistant(
   return {
     aiEnabled,
     openAiChat: () => chat?.open(),
-    applyPreset: async (id: string, signal?: AbortSignal) => {
-      if (!chat) throw Error("AIアシスタントの準備ができていません。");
-      await chat.applyPreset(id, signal);
-    },
     applyDefinition: async (definition: AiDefinition, signal?: AbortSignal) => {
       if (!chat) throw Error("AIアシスタントの準備ができていません。");
       await chat.applyDefinition(definition, signal);
@@ -277,6 +321,52 @@ export function useAiAssistant(
       await chat.clearDefinition(kind, signal);
     },
     clearAi: clear,
+    cancelAiRequest: () => chat?.close(),
+    getRecalledAnalysisState: () => committedAnalysis,
+    async restoreRecalledAnalysisState(state: RecalledAnalysisState, signal: AbortSignal) {
+      if (signal.aborted) return;
+      if (markers.aiFilterTargets || state.targets) markers.setAiFilter(state.targets);
+      const hadColoring = !!aiColoring.value;
+      aiColoring.value = state.coloring;
+      confirmAnalysis();
+      if (hadColoring || state.coloring) await paint().catch(() => undefined);
+    },
+    getRecalledColoring: () => aiColoring.value,
+    replaceAppliedCondition(
+      kind: "filter" | "color",
+      definition: AiDefinition | null,
+      apply: () => Promise<void>,
+      signal?: AbortSignal,
+    ) {
+      const key = identity(),
+        generation = clearRevision;
+      return enqueue(async () => {
+        const targets = markers.aiFilterTargets;
+        const coloring = aiColoring.value;
+        check(key, signal);
+        if (generation !== clearRevision)
+          throw Error("地図の状態が変わりました。再実行してください。");
+        if (kind === "filter" && targets) markers.setAiFilter(null);
+        if (kind === "color") aiColoring.value = null;
+        try {
+          await apply();
+          check(key);
+          chat?.setAppliedDefinition(kind, definition);
+          confirmAnalysis();
+        } catch (error) {
+          if (!disposed && generation === clearRevision && key === identity()) {
+            if (kind === "filter" && targets) {
+              markers.setAiFilter([...targets]);
+              await bridge.filter().catch(() => false);
+            } else if (kind === "color" && coloring) {
+              aiColoring.value = coloring;
+              await paint().catch(() => undefined);
+            }
+          }
+          throw error;
+        }
+      });
+    },
     async applyManualColoring(value: AnswerColoring | null) {
       const previous = manualColoring;
       manualColoring = value;

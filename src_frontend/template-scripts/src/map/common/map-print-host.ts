@@ -1,5 +1,4 @@
-import type { PrintMapState } from "./print-state";
-import { isPrintMapState } from "./print-state";
+import { isMapPrintPreviewState, type MapPrintPreviewState } from "./print-state";
 import { action, node } from "./coloring-editor";
 import type { ShareMapSnapshot } from "./share-snapshot";
 import { ANSWER_PRINT_PREVIEW_TIMEOUT_MS, PRINT_REQUEST_TIMEOUT_MS } from "./map-timeouts";
@@ -9,7 +8,7 @@ export const READ_ONLY_MAP_PRINT_PATH = "/assets/read-only-map-print.html";
 export function requestMapPrintState(
   source: HTMLIFrameElement,
   signal: AbortSignal,
-): Promise<PrintMapState> {
+): Promise<MapPrintPreviewState> {
   return new Promise((resolve, reject) => {
     const sourceWindow = source.contentWindow,
       origin = new URL(source.src, location.href).origin;
@@ -32,7 +31,7 @@ export function requestMapPrintState(
       )
         return;
       cleanup();
-      if (!isPrintMapState(event.data.state))
+      if (!isMapPrintPreviewState(event.data.state))
         reject(Error("現在の地図を取得できません。読み込み完了後に再試行してください。"));
       else resolve(event.data.state);
     };
@@ -62,7 +61,7 @@ type PrintPreviewOptions = {
     }
   | {
       snapshot?: false;
-      getState(signal: AbortSignal): Promise<PrintMapState | Record<string, unknown>>;
+      getState(signal: AbortSignal): Promise<MapPrintPreviewState | Record<string, unknown>>;
       answer?: {
         initialize(
           frame: HTMLIFrameElement,
@@ -171,7 +170,7 @@ export function openMapPrintPreview(options: PrintPreviewOptions) {
     initialized = false,
     ready = false,
     snapshotSent = false,
-    state: PrintMapState | ShareMapSnapshot | Record<string, unknown> | null = null,
+    state: MapPrintPreviewState | ShareMapSnapshot | Record<string, unknown> | null = null,
     session = "",
     failed = false;
   const fail = (message: string) => {

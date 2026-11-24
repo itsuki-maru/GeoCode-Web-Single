@@ -107,7 +107,7 @@ try {
     page.on("pageerror", (e) => errors.push(e.message));
     const presets = [];
     let missingField = false;
-    const calls = { save: 0, delete: 0, map: 0, filter: 0 };
+    const calls = { save: 0, delete: 0, map: 0, filter: 0, data: 0 };
     await page.route("**/form-answers/**", async (route) => {
       const request = route.request(),
         url = new URL(request.url());
@@ -121,7 +121,9 @@ try {
           contentType: "text/html",
           body: `<html lang="ja"><body style="background:#e5edf0;font-family:sans-serif">登録地図の通信fixture<script>
           const requestId=${JSON.stringify(requestId)};
-          window.addEventListener('message', e=>{const d=e.data;if(d?.type==='answer-map-filter'){
+          window.addEventListener('message', e=>{const d=e.data;if(d?.type==='answer-map-preset-scope-request'){
+            parent.postMessage({type:'answer-map-preset-scope',requestId,scopeId:d.scopeId,targets:[{key:${JSON.stringify(target)},name:'設備',detail:''}]},location.origin);
+          }else if(d?.type==='answer-map-filter'){
             parent.postMessage({type:'fixture-applied',updateId:d.updateId,coloring:d.coloring},location.origin);
             parent.postMessage({type:'answer-map-filter-applied',requestId,updateId:d.updateId,visible:d.targets.length,renderable:d.targets.length},location.origin);
           }});
@@ -134,11 +136,33 @@ try {
         calls.filter++;
         return json({ ...result, fields: missingField ? [] : fields });
       }
+      if (url.pathname === "/form-answers/map-presets/data") {
+        calls.data++;
+        const { forms, targets, query } = request.postDataJSON();
+        assert.deepEqual(targets, [target]);
+        assert.deepEqual(forms, { [formId]: [fieldId] });
+        return json({
+          rows: [
+            {
+              target,
+              id: "answer-1",
+              revision: 1,
+              form_id: formId,
+              fields: { [fieldId]: { type: "number", value: "60" } },
+            },
+          ],
+          as_of: query.as_of,
+          next_cursor: null,
+        });
+      }
       if (url.pathname === "/form-answers/map-presets") {
-        if (request.method() === "GET")
+        if (request.method() === "GET") {
+          assert.equal(url.searchParams.get("versions"), "2");
           return json({ items: presets, total: presets.length, page: 1, page_size: 20 });
+        }
         calls.save++;
         const body = request.postDataJSON();
+        assert.equal(body.schema_version, 2);
         const preset = {
           ...body,
           id: `00000000-0000-0000-0001-${String(calls.save).padStart(12, "0")}`,
@@ -151,7 +175,7 @@ try {
         presets.push(preset);
         return json(preset, 201);
       }
-      if (url.pathname.startsWith("/form-answers/map-presets/")) {
+      if (url.pathname.startsWith("/form-answers/map-presets/") && request.method() === "DELETE") {
         calls.delete++;
         const at = presets.findIndex((p) => p.id === url.pathname.split("/").pop());
         if (at === -1) return json({}, 404);
@@ -165,7 +189,7 @@ try {
     const color = page.locator(".color-panel");
     await filter.getByRole("combobox", { name: "共通フォーム", exact: true }).selectOption(formId);
     await filter.getByRole("button", { name: "条件を追加", exact: true }).click();
-    const number = filter.getByRole("textbox", { name: "条件の値", exact: true });
+    const number = filter.locator('input[aria-label="条件の値"]');
     await number.fill("50.000000000000000001");
     const saveButton = filter.getByRole("button", { name: "検索条件を保存", exact: true });
     await saveButton.click();
@@ -186,10 +210,15 @@ try {
         ),
     );
     assert.equal(calls.save, 1);
-    assert.equal(presets[0].definition.conditions[0].value, "50.000000000000000001");
+    assert.equal(presets[0].definition.expression.conditions[0].value, "50.000000000000000001");
     await number.fill("99");
     const initialMapLoads = calls.map;
+    const updateForm = () =>
+      page.evaluate((id) => {
+        window.dispatchEvent(new CustomEvent("geocode-answer-updated", { detail: { id } }));
+      }, target.slice("marker:".length));
     missingField = true;
+    await updateForm();
     await page.getByRole("button", { name: "保存した検索条件", exact: true }).click();
     top = page.locator(".base-modal-overlay:visible").last();
     await top
@@ -201,11 +230,32 @@ try {
     assert.equal(await number.inputValue(), "99", "項目が利用できない場合は元の入力を保持する");
     assert.equal(await page.evaluate(() => window.mapMessages.length), 0);
     missingField = false;
+    const prepared = page.waitForResponse(
+      (r) => new URL(r.url()).pathname === "/form-answers/map-presets/data",
+    );
+    await updateForm();
+    await prepared;
+    const afterPrefetch = { ...calls };
     await top
       .getByRole("row")
       .filter({ hasText: "50年以上" })
       .getByRole("button", { name: "呼び出し", exact: true })
       .click();
+    const closeNotice = (text) =>
+      page
+        .locator(".base-modal-overlay:visible")
+        .filter({ has: page.getByText(text, { exact: true }) })
+        .last()
+        .getByRole("button", { name: "閉じる", exact: true })
+        .click();
+    const leaveList = async () => {
+      await closeNotice("呼び出しが完了しました。");
+      await page
+        .getByRole("dialog", { name: "保存した検索条件" })
+        .getByRole("button", { name: "閉じる", exact: true })
+        .click();
+    };
+    await leaveList();
     await number.waitFor();
     await page.waitForFunction(
       () =>
@@ -219,7 +269,9 @@ try {
     );
     await filter.getByRole("button", { name: "絞り込み実行", exact: true }).click();
     await page.waitForFunction(() => window.mapMessages.length === 1);
-    await color.locator("summary").click();
+    await closeNotice("絞り込みが完了しました。");
+    assert.deepEqual(calls, afterPrefetch, "呼び出し・適用の追加通信は0件");
+    if (!(await color.evaluate((element) => element.open))) await color.locator("summary").click();
     await color
       .getByRole("combobox", { name: "色分けの共通フォーム", exact: true })
       .selectOption(formId);
@@ -244,6 +296,7 @@ try {
       .filter({ hasText: "点検の分類" })
       .getByRole("button", { name: "呼び出し", exact: true })
       .click();
+    await leaveList();
     await page.waitForFunction(
       () => document.querySelector('input[aria-label="分類名"]')?.value === "耐用年数50年以上",
     );
@@ -255,6 +308,7 @@ try {
     assert.equal(await page.evaluate(() => window.mapMessages.length), 1);
     await color.getByRole("button", { name: "色分け実行", exact: true }).click();
     await page.waitForFunction(() => window.mapMessages.length === 2);
+    await closeNotice("色分けが完了しました。");
     await page.getByRole("button", { name: "保存した検索条件", exact: true }).click();
     top = page.locator(".base-modal-overlay:visible").last();
     await top

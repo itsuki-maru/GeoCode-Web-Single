@@ -127,7 +127,7 @@ const clickIn = async (root: Element, text: string) => {
     .click();
   await flushPromises();
 };
-async function restoreSavedColoring() {
+async function openSavedMapPresets() {
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
     configurable: true,
     value() {
@@ -144,9 +144,10 @@ async function restoreSavedColoring() {
   const preset = {
     id: "saved-colors",
     kind: "coloring",
-    schema_version: 1,
+    schema_version: 2,
     name: "年数の分類",
     definition: {
+      type: "color",
       common_form_id: "form",
       rules: [
         {
@@ -159,6 +160,20 @@ async function restoreSavedColoring() {
     },
     display: { form_label: "設備", fields },
     create_at: "2026-11-05T00:00:00Z",
+  };
+  const filter = {
+    ...preset,
+    id: "saved-filter",
+    kind: "filter",
+    name: "50年以上",
+    definition: {
+      type: "filter",
+      expression: {
+        op: "attribute",
+        common_form_id: "form",
+        conditions: preset.definition.rules[0]!.conditions,
+      },
+    },
   };
   const get = api.get.getMockImplementation()!;
   api.get.mockImplementation((url: string) =>
@@ -174,19 +189,34 @@ async function restoreSavedColoring() {
           ],
         })
       : url.startsWith("/form-answers/map-presets")
-        ? Promise.resolve({ data: { items: [preset], total: 1 } })
+        ? Promise.resolve({ data: { items: [preset, filter], total: 2 } })
         : get(url),
   );
-  api.post.mockResolvedValue({
-    data: {
-      fields,
-      forms: [{ id: "form", label: "設備" }],
-      targets: ["shape:a"],
-      target_count: 1,
-      answer_count: 1,
-      as_of: "2026-11-05T00:00:00Z",
-    },
-  });
+  api.post.mockImplementation(async (url, body) => ({
+    data:
+      url === "/form-answers/map-presets/data"
+        ? {
+            as_of: "2026-11-05T00:00:00Z",
+            rows: [
+              {
+                target: "shape:a",
+                id: "answer",
+                revision: 1,
+                form_id: "form",
+                fields: { n: { type: "number", value: "55" } },
+              },
+            ],
+            next_cursor: null,
+          }
+        : {
+            fields,
+            forms: [{ id: "form", label: "設備" }],
+            targets: ["shape:a"],
+            target_count: 1,
+            answer_count: 1,
+            as_of: "2026-11-05T00:00:00Z",
+          },
+  }));
   localStorage.setItem(LAST_ACTIVE_LAYER_STORAGE_KEY, "a");
   mountView();
   await flushPromises();
@@ -194,8 +224,19 @@ async function restoreSavedColoring() {
   await flushPromises();
   const dialog = document.querySelector<HTMLDialogElement>(".advanced-map-search")!;
   await clickIn(dialog, "保存した検索条件");
-  const list = document.querySelector(".map-preset-dialog.form-settings")!;
+  const list = document.querySelector<HTMLDialogElement>(".map-preset-dialog.form-settings")!;
   expect(list.textContent).not.toContain("絞り込み条件のみ");
+  expect(api.post).toHaveBeenCalledWith(
+    "/form-answers/map-presets/data",
+    expect.objectContaining({ targets: ["marker:a", "shape:a"], forms: { form: ["n"] } }),
+    expect.anything(),
+  );
+  api.post.mockClear();
+  api.get.mockClear();
+  return { dialog, list, preset, filter };
+}
+async function restoreSavedColoring() {
+  const { dialog, list, preset } = await openSavedMapPresets();
   await clickIn(list, "呼び出し");
   await clickIn(document.querySelector('[aria-label="呼び出し完了"]')!, "閉じる");
   await clickIn(list, "閉じる");
@@ -243,6 +284,8 @@ it("保存した色分けを下書きに呼び出し、地図反映の成功後�
   expect(toolbar.props("attributeSearchActive")).toBe(false);
   colorFrame.mockResolvedValueOnce(false);
   await clickIn(dialog, "色分け実行");
+  expect(api.post).not.toHaveBeenCalled();
+  expect(api.get).not.toHaveBeenCalled();
   expect(dialog.querySelector(".color-error")?.textContent).toContain("反映を確認できません");
   expect(toolbar.props("attributeSearchActive")).toBe(false);
   await clickIn(dialog, "色分け実行");
@@ -261,6 +304,42 @@ it("保存した色分けを下書きに呼び出し、地図反映の成功後�
   expect(toolbar.props("attributeSearchActive")).toBe(false);
 });
 
+it("一覧から色分けと絞り込みを直接適用し、反映失敗後にも再試行できる", async () => {
+  const { dialog, list, preset, filter } = await openSavedMapPresets();
+  const colorButton = list.querySelector<HTMLButtonElement>(
+    `[data-preset-apply-id="${preset.id}"]`,
+  )!;
+  const filterButton = list.querySelector<HTMLButtonElement>(
+    `[data-preset-apply-id="${filter.id}"]`,
+  )!;
+  colorFrame.mockResolvedValueOnce(false);
+  colorButton.click();
+  await flushPromises();
+  expect(list.querySelector(".preset-error")?.textContent).toContain("反映を確認できません");
+  expect(document.querySelector('[aria-label="色分け完了"][open]')).toBeNull();
+  expect(document.activeElement).toBe(colorButton);
+
+  colorButton.click();
+  await flushPromises();
+  const coloring = expect.objectContaining({ targets: { "shape:a": "r" } });
+  expect(colorFrame).toHaveBeenLastCalledWith(coloring);
+  await clickIn(document.querySelector('[aria-label="色分け完了"][open]')!, "閉じる");
+  expect(list.open).toBe(true);
+  expect(document.activeElement).toBe(colorButton);
+
+  filterButton.click();
+  await flushPromises();
+  expect(colorFrame).toHaveBeenLastCalledWith(coloring);
+  expect(useMapObjectStore().aiFilterTargets).toEqual(new Set(["shape:a"]));
+  await clickIn(document.querySelector('[aria-label="絞り込み完了"][open]')!, "閉じる");
+  expect(list.open).toBe(true);
+  expect(document.activeElement).toBe(filterButton);
+  expect(dialog.querySelector(".attribute-status")?.textContent).toContain("適用中");
+  expect(dialog.querySelector(".ai-condition-editor")).toBeNull();
+  expect(api.post).not.toHaveBeenCalled();
+  expect(api.get).not.toHaveBeenCalled();
+});
+
 it.each([false, true])(
   "読み込み失敗で元のレイヤと色分けを復元する（レイヤ切替=%s）",
   async (switchLayer) => {
@@ -277,8 +356,10 @@ it.each([false, true])(
     expect(colorFrame).toHaveBeenLastCalledWith(previous);
     expect(wrapper!.getComponent({ name: "MapToolbar" }).props("attributeSearchActive")).toBe(true);
     expect(wrapper!.getComponent({ name: "MapToolbar" }).props("activeLayer")).toBe("a");
-    expect(api.post.mock.calls.length).toBeGreaterThan(0);
-    for (const [, request] of api.post.mock.calls) expect(request.scope.layer_ids).toEqual(["a"]);
+    // 復元には適用済みの分類結果を使う。切替先で保存条件を再実行しない。
+    expect(
+      api.post.mock.calls.some(([path]) => path === "/form-answers/map-presets/evaluate"),
+    ).toBe(false);
   },
 );
 

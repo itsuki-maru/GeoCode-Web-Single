@@ -563,6 +563,7 @@ window.addEventListener("message", function (event) {
             state: {
               view: { latitude: center.lat, longitude: center.lng, zoom: map.getZoom() },
               tileServerId: controller?.getSelectedId() || getDefaultTileServerId(),
+              route: routeSearch.getPrintRoute(),
               overlays: tileOverlayManager.getVisibility(),
               layerIds: is_master ? null : [layer],
               coloring: editorColoring.getState() || undefined,

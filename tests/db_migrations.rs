@@ -98,7 +98,7 @@ async fn migrations_create_schema_and_record_versions() {
     .fetch_one(&pool)
     .await
     .expect("migration count should be returned");
-    assert_eq!(migration_count, 29);
+    assert_eq!(migration_count, 30);
 
     let live_location_table_count: i64 = sqlx::query_scalar(
         r#"
@@ -229,7 +229,7 @@ async fn migrations_are_idempotent() {
     .fetch_one(&pool)
     .await
     .expect("migration count should be returned");
-    assert_eq!(migration_count, 29);
+    assert_eq!(migration_count, 30);
 }
 
 #[tokio::test]
@@ -311,7 +311,7 @@ async fn migrations_record_versions_for_existing_schema() {
     .await
     .expect("migration rows should be returned");
 
-    assert_eq!(rows.len(), 29);
+    assert_eq!(rows.len(), 30);
     assert_eq!(rows[0].get::<i64, _>("version"), 1);
     assert_eq!(rows[0].get::<String, _>("name"), "create_initial_schema");
     assert_eq!(rows[1].get::<i64, _>("version"), 2);
@@ -907,7 +907,7 @@ async fn common_form_upgrade_preserves_legacy_config_answers_and_markdown() {
         .fetch_one(&pool)
         .await
         .unwrap(),
-        29
+        30
     );
 }
 
@@ -1260,7 +1260,7 @@ async fn receipt_upgrade_from_version_twenty_preserves_data_and_is_repeatable() 
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(after.len(), 29);
+    assert_eq!(after.len(), 30);
     assert_eq!(&after[..20], before);
     let detail: String = sqlx::query_scalar(
         r#"
@@ -1403,7 +1403,7 @@ async fn receipt_upgrade_preserves_receipts_when_sql_was_applied_before_runtime_
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(total, 29);
+    assert_eq!(total, 30);
     let detail: String = sqlx::query_scalar(
         r#"
         SELECT
@@ -1993,7 +1993,7 @@ async fn saved_condition_upgrade_from_twenty_one_preserves_all_existing_data_and
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(migrations_after.len(), 29);
+    assert_eq!(migrations_after.len(), 30);
     assert_eq!(&migrations_after[..21], migrations_before);
     assert_eq!(migrations_after[21].0, 22);
     assert_eq!(existing_data_snapshot(&pool).await, before);
@@ -2069,7 +2069,7 @@ async fn saved_condition_upgrade_keeps_rows_when_sql_was_applied_before_runtime_
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(versions, (1..=29).collect::<Vec<_>>());
+    assert_eq!(versions, (1..=30).collect::<Vec<_>>());
 }
 
 #[tokio::test]
@@ -2353,12 +2353,72 @@ async fn preserve_legacy_background_and_tile_settings_across_sql_first_migration
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(versions, (1..=29).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=30).collect::<Vec<_>>());
         let settings_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tile_server_settings")
             .fetch_one(&pool)
             .await
             .unwrap();
         assert_eq!(settings_rows, 0);
+    }
+}
+
+// v29の既存キーを保持し、SQLx先行・アプリ先行のどちらでも同じ既定値を作る。
+#[tokio::test]
+async fn add_google_routes_settings_without_changing_existing_google_key() {
+    for sql_first in [false, true] {
+        let pool = common::test_pool().await;
+        let maps_revision = uuid::Uuid::new_v4().to_string();
+        let saved_key = vec![0_u8, 42, 255];
+        sqlx::raw_sql(
+            "DROP TABLE google_routes_settings; DELETE FROM schema_migrations WHERE version = 30;",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO google_maps_settings (id, revision, enabled, encrypted_tiles_key) VALUES (1, $1, true, $2)",
+        )
+        .bind(&maps_revision)
+        .bind(&saved_key)
+        .execute(&pool)
+        .await
+        .unwrap();
+        if sql_first {
+            sqlx::raw_sql(include_str!(
+                "../migrations/20261122120000_add_google_routes_settings.sql"
+            ))
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        run_migrations(&pool).await.unwrap();
+        let routes_sql =
+            "SELECT revision, enabled, requests_per_minute FROM google_routes_settings";
+        let routes: (String, bool, i32) =
+            sqlx::query_as(routes_sql).fetch_one(&pool).await.unwrap();
+        assert_eq!(routes, (uuid::Uuid::nil().to_string(), false, 60));
+
+        let revision = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "UPDATE google_routes_settings SET revision = $1, enabled = true, requests_per_minute = 75 WHERE id = 1",
+        )
+        .bind(&revision)
+        .execute(&pool)
+        .await
+        .unwrap();
+        run_migrations(&pool).await.unwrap();
+        let routes: (String, bool, i32) =
+            sqlx::query_as(routes_sql).fetch_one(&pool).await.unwrap();
+        assert_eq!(routes, (revision, true, 75));
+
+        let maps: (String, bool, Vec<u8>) = sqlx::query_as(
+            "SELECT revision, enabled, encrypted_tiles_key FROM google_maps_settings WHERE id = 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(maps, (maps_revision, true, saved_key));
     }
 }
 
@@ -2397,7 +2457,7 @@ async fn application_migrations_never_create_tile_catalog_tables() {
             .fetch_all(&pool)
             .await
             .unwrap();
-    assert_eq!(versions, (1..=29).collect::<Vec<_>>());
+    assert_eq!(versions, (1..=30).collect::<Vec<_>>());
     let existing: (String, String) =
         sqlx::query_as("SELECT url,attribution FROM tileserver_model WHERE id=42")
             .fetch_one(&pool)
@@ -2729,7 +2789,7 @@ async fn ai_upgrade_from_twenty_five_preserves_existing_data_and_survives_reconn
         .fetch_all(&pool)
         .await
         .unwrap();
-        assert_eq!(migrations_after.len(), 29);
+        assert_eq!(migrations_after.len(), 30);
         assert_eq!(&migrations_after[..25], migrations_before);
         assert_eq!(
             (migrations_after[25].0, migrations_after[25].1.as_str()),
@@ -2841,7 +2901,7 @@ async fn concurrent_ai_upgrade_waits_before_reading_versions_and_preserves_exist
                 .unwrap();
         assert_eq!(
             versions,
-            (1..=29).collect::<Vec<_>>(),
+            (1..=30).collect::<Vec<_>>(),
             "各移行を一度だけ適用する"
         );
         assert_eq!(existing_data_snapshot(&pool).await, before);

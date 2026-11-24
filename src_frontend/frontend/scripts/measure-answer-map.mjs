@@ -21,6 +21,7 @@ if (!output.startsWith(targetRoot)) throw Error("Benchmark output must stay unde
 const modes = (args.modes || "pc,mobile").split(",");
 if (modes.some((mode) => !["pc", "mobile"].includes(mode))) throw Error("Invalid benchmark modes");
 const initialOnly = args["initial-only"] === "true";
+const savedPresets = args["saved-presets"] === "true";
 const expectedCanonicalTextSha256 = args["canonical-text-sha256"] || null;
 if (expectedCanonicalTextSha256 && (!/^[a-f0-9]{64}$/.test(expectedCanonicalTextSha256) || initialOnly)) throw Error("Canonical text verification is a separate full functional run");
 const bootstrapFormat = args["bootstrap-format"] || "native";
@@ -69,8 +70,9 @@ function instrumentModal(source) {
   source = replaceOnce(source, "const submit = async () => {", "const submit = async () => {\n" + mark("parent.submit.start"), "submit");
   source = replaceOnce(source, "const view = await requestCurrentMapView(viewController.signal);", mark("parent.view.request") + "\nconst view = await requestCurrentMapView(viewController.signal);\n" + mark("parent.view.complete"), "map view");
   source = replaceOnce(source, "disposeNativeRequest = submitAuthenticatedForm(form.value, frame.value, (message) => {", mark("parent.nativeSubmit") + "\ndisposeNativeRequest = submitAuthenticatedForm(form.value, frame.value, (message) => {", "native submit");
-  source = replaceOnce(source, "if (!scopeReady.value || !props.isOpen || presetModalOpen.value) return;", "if (!scopeReady.value || !props.isOpen || presetModalOpen.value) return;\nif (optionsOnly) { " + mark("parent.options.start") + " }", "options start");
-  source = replaceOnce(source, "if (optionsOnly) {\n      busy.value = false;", "if (optionsOnly) {\n      " + mark("parent.options.complete") + "\n      busy.value = false;", "options complete");
+  source = replaceOnce(source, "if (!scopeReady.value || !props.isOpen || childModalOpen.value) return;", "if (!scopeReady.value || !props.isOpen || childModalOpen.value) return;\nif (optionsOnly) { " + mark("parent.options.start") + " }", "options start");
+  const optionsComplete = "if (!colorChange) meta(data);\n    if (optionsOnly) {";
+  source = replaceOnce(source, optionsComplete, optionsComplete + "\n      " + mark("parent.options.complete"), "options complete");
   source = replaceOnce(source, 'if (data.type === "answer-map-ready") {', 'if (data.type === "answer-map-ready") {\n' + mark("parent.mapReady.receive"), "ready receive");
   const readyStart = source.indexOf('if (data.type === "answer-map-ready") {');
   const readyEnd = source.indexOf('} else if (data.type === "answer-map-error")', readyStart);
@@ -84,6 +86,7 @@ defineExpose({
   benchmarkState: () => ({
     loading: loading.value, busy: busy.value, error: !!error.value,
     filterError: !!filterError.value, scopeReady: scopeReady.value,
+    preparingData: preparingData.value, preparationError: !!preparationError.value,
     initialCount: initialCount.value, matchedCount: matchedCount.value,
     visibleCount: visibleCount.value, renderableCount: renderableCount.value,
     answerCount: answerCount.value, coloringActive: coloringActive.value,
@@ -92,6 +95,7 @@ defineExpose({
     forms: forms.value.length, fields: fields.value.length,
   }),
   benchmarkFilter: async (operation: string) => {
+    await closeCompletion();
     if (operation === "clear") return fetchResult(false, true);
     selectedForm.value = (window as any).__ANSWER_MAP_BENCH_OPTIONS__.preferredFormId || forms.value[0]?.id || "";
     rows.value = [];
@@ -106,6 +110,7 @@ defineExpose({
     return fetchResult(false);
   },
   benchmarkColor: async (enabled: boolean) => {
+    await closeCompletion();
     if (!enabled) return fetchResult(false, false, { specification: null });
     selectedForm.value = (window as any).__ANSWER_MAP_BENCH_OPTIONS__.preferredFormId || forms.value[0]?.id || "";
     rows.value = [];
@@ -124,6 +129,34 @@ defineExpose({
     }});
   },
   benchmarkPrint: () => openPrint(),
+  benchmarkPrepareServer: async (definition: any) => {
+    await closeCompletion();
+    const form = definition.type === "filter" ? definition.expression.common_form_id : definition.common_form_id;
+    const data = await readPresetOptions(form, new AbortController().signal);
+    if (definition.type === "filter") {
+      selectedForm.value = form;
+      fields.value = data.fields;
+      rows.value = deserializePresetConditions(definition.expression.conditions, data.fields, () => ++nextId);
+    } else {
+      coloringPanel.value!.restoreDraft({ common_form_id: form, rules: definition.rules }, data.fields);
+    }
+    presetOptions.clear();
+    await nextTick();
+  },
+  benchmarkOpenPresets: async () => {
+    await closeCompletion();
+    openPresets();
+    await nextTick();
+  },
+  benchmarkWaitPresetPage: async () => {
+    if (!presetPage) throw Error("Benchmark preset page was not prepared");
+    await Promise.all([presetPage.data, ...presetPage.options.values()]);
+  },
+  benchmarkApplyPreset: async (kind: "filter" | "coloring" | "reset") => {
+    await closeCompletion();
+    if (kind === "coloring") return fetchResult(false, false, {specification: coloringPanel.value!.getDraft()!});
+    return fetchResult(false, kind === "reset");
+  },
   benchmarkClearPrint: () => { printSnapshot.value = null; filterError.value = ""; },
   benchmarkCsvCheck: async () => {
     const payload = { query: baseQuery.value, targets: initialTargets.value, common_form_id: null, conditions: [], options_only: false };
@@ -193,12 +226,12 @@ for (const mode of modes) {
             source = replaceOnce(source, "  shapeRenderer = createShapeRenderManager({", "  " + mark("map.shapeRegister.start") + "\n  shapeRenderer = createShapeRenderManager({", "shape registration start");
             const registered = '  map.on("unload", () => {\n    shapeRenderer.destroy();';
             source = replaceOnce(source, registered, "  " + mark("map.shapeRegister.end") + "\n" + registered, "shape registration end");
-            source = replaceOnce(source, "  shapeRenderer.refresh();\n\n  return {", "  " + mark("map.initialRefresh.start") + "\n  shapeRenderer.refresh();\n  " + mark("map.initialRefresh.end") + "\n\n  return {", "initial refresh");
+            source = replaceOnce(source, "  // 設定・グループ・イベントの初期化後に一度だけ生成を開始する。\n  shapeRenderer.refresh();", "  " + mark("map.initialRefresh.start") + "\n  shapeRenderer.refresh();\n  " + mark("map.initialRefresh.end"), "initial refresh");
             return source;
           }
           if (path === printPreview) {
             const source = await readFile(id, "utf8");
-            const marker = "const runtime = initializeReadOnlyMapPage(page, state);";
+            const marker = "const runtime = initializeReadOnlyMapPage(page, state, snapshotBootstrap);";
             if (!source.includes(marker)) throw Error("Print runtime capture marker changed");
             return source.replace(marker, marker + "\n(window as any).__answerPrintRuntime = runtime;");
           }
@@ -251,6 +284,24 @@ const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
 const query = manifest.query || { mode: "history" };
 const selectedForm = manifest.scenarios?.find((scenario) => scenario.name === "selected_form");
 const filledCase = manifest.scenarios?.find((scenario) => scenario.name === "filled");
+function diagnosticPresets() {
+  assert.ok(filledCase && selectedForm, "Saved-preset comparison requires the selected_form and filled scenarios");
+  const common_form_id = selectedForm.formId;
+  const field = { field_id: filledCase.fieldId, field_type: filledCase.fieldType };
+  const definitions = [
+    { type: "filter", expression: { op: "attribute", common_form_id, conditions: [{ ...field, op: "filled" }] } },
+    { type: "color", common_form_id, rules: ["filled", "empty", "missing"].map((op, i) => ({
+      id: "benchmark-" + op, label: "Benchmark " + op, color: ["#d73027", "#2166ac", "#1a9850"][i],
+      conditions: [{ ...field, op }],
+    })) },
+  ];
+  return definitions.map((definition) => ({
+    id: "benchmark-" + definition.type, name: "Benchmark " + definition.type,
+    kind: definition.type === "filter" ? "filter" : "coloring", definition,
+    schema_version: 2, display: { form_label: null, fields: [] }, create_at: "2026-01-01T00:00:00Z",
+  }));
+}
+const presetFixtures = savedPresets ? diagnosticPresets() : [];
 const harnessOptions = {
   query,
   parentRetained: !!args["parent-retained-html"],
@@ -471,8 +522,10 @@ const server = createServer(async (request, response) => {
       }
       const start = performance.now();
       const replay = !!fixtureHtml && url.pathname === "/form-answers/map";
+      const presetList = savedPresets && request.method === "GET" && url.pathname === "/form-answers/map-presets";
       const useParentBackend = url.pathname === "/profile/parent-map" || (parentRecordsBody && url.pathname.startsWith("/assets/"));
-      const upstream = replay ? { status: 200, ok: true, headers: new Headers({ "content-type": "text/html; charset=utf-8" }) } : await fetch(new URL(url.pathname + url.search, useParentBackend ? parentBackend : backend), {
+      const upstream = presetList ? Response.json({ items: presetFixtures, total: presetFixtures.length, page: 1, page_size: 20 })
+        : replay ? { status: 200, ok: true, headers: new Headers({ "content-type": "text/html; charset=utf-8" }) } : await fetch(new URL(url.pathname + url.search, useParentBackend ? parentBackend : backend), {
         method: request.method,
         headers: {
           ...(request.headers["content-type"] ? { "content-type": request.headers["content-type"] } : {}),
@@ -512,10 +565,10 @@ const server = createServer(async (request, response) => {
       }
       let item;
       if (url.pathname.startsWith("/form-answers/")) {
-        const endpoint = ["/form-answers/map", "/form-answers/map-filter", "/form-answers/map-print", "/form-answers/map-csv-check"].includes(url.pathname) ? url.pathname : "/form-answers/other";
+        const endpoint = ["/form-answers/map", "/form-answers/map-filter", "/form-answers/map-presets", "/form-answers/map-presets/data", "/form-answers/map-print", "/form-answers/map-csv-check"].includes(url.pathname) ? url.pathname : "/form-answers/other";
         item = {
           endpoint, status: upstream.status, requestBytes: bytes, responseBytes: body.length,
-          responseSource: replay ? "frozen-html" : "live-backend",
+          responseSource: presetList ? "diagnostic-presets" : replay ? "frozen-html" : "live-backend",
           serverHandlerMs: handlerTiming(upstream.headers.get("server-timing")),
           proxy: {
             requestReadMs: start - receivedAt,
@@ -680,6 +733,10 @@ try {
     }, { sampleMemory: memorySampling });
     const page = await context.newPage();
     page.on("pageerror", () => { pageErrors++; });
+    let startedHttpCalls = 0;
+    if (savedPresets) page.on("request", request => {
+      if (["fetch", "xhr"].includes(request.resourceType())) startedHttpCalls++;
+    });
     const cdp = await context.newCDPSession(page);
     await cdp.send("Performance.enable");
     if (mobile) await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
@@ -730,10 +787,10 @@ try {
       await page.waitForFunction(() => {
         const value = window.__answerMapBenchmark?.state();
         const colorFieldset = document.querySelector(".color-panel fieldset");
-        return value && !value.closed && (value.error || value.filterError || (value.scopeReady && !value.loading && !value.busy && !colorFieldset?.disabled));
+        return value && !value.closed && (value.error || value.filterError || value.preparationError || (value.scopeReady && !value.loading && !value.busy && !value.preparingData && !colorFieldset?.disabled));
       }, null, { timeout });
       const state = await page.evaluate(() => window.__answerMapBenchmark.state());
-      assert.equal(state.error || state.filterError, false, "Actual map modal reported an error");
+      assert.equal(state.error || state.filterError || state.preparationError, false, "Actual map modal reported an error");
       const frame = mapFrame();
       assert.ok(frame, "Map iframe must exist");
       await frame.waitForFunction(() => !!window.__answerMapRuntimeBenchmark, null, { timeout });
@@ -744,10 +801,12 @@ try {
     const phase = async (name, action, collect = true) => {
       result.attemptedPhase = name;
       const startedAt = Date.now(), started = performance.now(), firstRequest = requests.length;
+      const firstHttpCall = startedHttpCalls;
       await action();
       const frame = collect ? await ready() : null;
       const finishedAt = Date.now();
       const entry = { name, ms: performance.now() - started, requests: requests.slice(firstRequest) };
+      if (savedPresets) entry.startedHttpCalls = startedHttpCalls - firstHttpCall;
       if (name === "initial") entry.cdpAtReady = await performanceMetrics();
       if (frame) {
         entry.map = await frame.evaluate(() => window.__answerMapRuntimeBenchmark.counts());
@@ -898,7 +957,51 @@ try {
       assert.ok(initial.modal.initialCount > 10000, "Real benchmark needs more than 10000 targets");
       assert.equal(initial.map.recordCount, initial.modal.initialCount, "Fixture contains shapes only");
       assert.equal(initial.map.mobileControls, mobile);
-      if (!initialOnly) {
+      if (savedPresets && !initialOnly) {
+        const [filterPreset, colorPreset] = presetFixtures;
+        const prepareServer = preset => page.evaluate(definition => window.__answerMapBenchmark.prepareServer(definition), preset.definition);
+        await phase("prepareServerFilter", () => prepareServer(filterPreset));
+        const before = await phase("serverFilter", () => page.evaluate(() => window.__answerMapBenchmark.applyPreset("filter")));
+        await phase("serverReset", () => page.evaluate(() => window.__answerMapBenchmark.filter("clear")));
+        await phase("prepareServerColor", () => prepareServer(colorPreset));
+        const beforeColor = await phase("serverColor", () => page.evaluate(() => window.__answerMapBenchmark.applyPreset("coloring")));
+        await phase("serverClearColor", () => page.evaluate(() => window.__answerMapBenchmark.color(false)));
+        const list = page.getByRole("dialog", { name: "保存した検索条件", exact: true });
+        const openList = async () => {
+          await page.evaluate(() => window.__answerMapBenchmark.openPresets());
+          await list.getByRole("row", { name: /Benchmark filter/ }).waitFor();
+          await page.evaluate(() => window.__answerMapBenchmark.waitPresetPage());
+        };
+        const cold = await phase("prefetchPresetPage", openList, false);
+        assert.ok(cold.requests.some(r => r.endpoint === "/form-answers/map-presets" && r.status === 200));
+        assert.ok(cold.requests.some(r => r.endpoint === "/form-answers/map-presets/data" && r.status === 200));
+        const local = async (name, action) => {
+          const measured = await phase(name, action);
+          assert.equal(measured.startedHttpCalls, 0, name + " started HTTP requests");
+          assert.equal(measured.requests.length, 0, name + " received API responses");
+          return measured;
+        };
+        const recall = preset => local("recall-" + preset.kind, async () => {
+          await list.getByRole("row").filter({ hasText: preset.name }).getByRole("button", { name: "呼び出し", exact: true }).click();
+          const confirmation = page.locator(".base-modal-overlay:visible").filter({
+            has: page.getByText("呼び出しが完了しました。", { exact: true }),
+          }).last();
+          await confirmation.getByRole("button", { name: "閉じる" }).click();
+          await list.getByRole("button", { name: "閉じる" }).click();
+          await list.waitFor({ state: "hidden" });
+        });
+        const apply = kind => local("local-" + kind, () => page.evaluate(value => window.__answerMapBenchmark.applyPreset(value), kind));
+        await recall(filterPreset);
+        const filtered = await apply("filter");
+        assert.equal(filtered.modal.matchedCount, before.modal.matchedCount);
+        assert.equal(filtered.modal.answerCount, before.modal.answerCount);
+        await apply("reset");
+        const warm = await phase("reopenPresetPage", openList, false);
+        assert.deepEqual(warm.requests.map(r => r.endpoint), ["/form-answers/map-presets"]);
+        await recall(colorPreset);
+        const colored = await apply("coloring");
+        assert.equal(colored.map.coloredTargets, beforeColor.map.coloredTargets);
+      } else if (!initialOnly) {
       await phase("csvAnswerLimit", async () => { result.csvLimit = await page.evaluate(() => window.__answerMapBenchmark.csvCheck()); });
       assert.equal(result.csvLimit.status, 400);
       assert.equal(result.csvLimit.answerLimitRejected, true);
@@ -1117,6 +1220,7 @@ try {
     results,
     notes: [
       "Production-built real PC/mobile AnswerMapModal, map/filter/color/print modules; benchmark-only expose/runtime captures are injected at build time.",
+      ...(savedPresets ? ["The preset-list GET returns two diagnostic v2 definitions based on the manifest. The modal prefetches their field values from the configured backend. Recall uses the actual table button, and recall/apply phases count newly started browser fetch/XHR calls."] : []),
       fixtureHtml
         ? "Initial map HTML is replayed from one private immutable HTML file; the backend map handler is excluded from initial timing and serverHandlerMs is null. Only parentOrigin/requestId are patched for the current frame; query/as_of must match. Filter, CSV and print still use real read-only HTTP endpoints. Original 1MiB request cap remains."
         : "Uses real read-only Rust map, map-filter and map-print HTTP endpoints through a localhost proxy. Original 1MiB request cap is retained.",

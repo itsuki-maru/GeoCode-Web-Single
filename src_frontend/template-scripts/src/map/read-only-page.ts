@@ -4,12 +4,15 @@ import { createAiChat } from "../ai/chat";
 import { createAiLauncher } from "../ai/launcher";
 import { observeAiSuggestionDataChanges } from "../ai/suggestion-events";
 import { aiFetchTransport, type AiExecutionResult } from "../ai/types";
-import { intersectTargetMasks, mergeAiColoring } from "../ai/map-state";
+import { intersectTargetMasks } from "../ai/map-state";
 import { installAnswerColoring, type AnswerColoring } from "./answer-coloring";
 import { createAdvancedMapSearchModal, attributeTransport } from "./common/advanced-map-search";
+import { createOrdinaryPresetData } from "./common/ordinary-preset-data";
+import { toV2PresetDraft } from "./common/answer-map-presets";
 import { createTileOverlayManager } from "./common/tile-overlays";
 import { createTileVisibilityStorage } from "./common/tile-visibility-storage";
 import { createPopupContentRuntime } from "./common/popup-content";
+import { createRouteSearch } from "./common/route-search";
 import { createLazyLayerObjects } from "./common/lazy-layer-objects";
 import { createShareMapSnapshot, resolveShareParentOrigin } from "./common/share-snapshot";
 import { installReadOnlyFullscreenClose } from "./common/read-only-fullscreen-close";
@@ -312,40 +315,48 @@ export function initializeReadOnlyMapPage(
     mapDisposed = true;
     basemapMessages?.dispose();
   });
-  const popupContent =
-    isAnother && !isSnapshotPrint
-      ? createPopupContentRuntime({
-          map,
-          limitMarkerHeight: expectedPage === "map-anather" && !isAnswerPreview && !isPrint,
-          sanitizeHtml: (html) => sanitizeMapHtml(html, filterXSS, xssOptions),
-          analysis: bootstrap.popupAnalysis,
-          renderMarkdown: renderContentMarkdown,
-          setupImages: setupDetailsLazyImages,
-          snapshot: isAnswerPreview ? bootstrap.popupBodies || {} : undefined,
-          answerMap: isAnswerPreview,
-          loadBody: async (kind, id) => {
-            let response = await fetch(`/${kind}/${id}/form/body`, {
-              credentials: "same-origin",
-              cache: "no-store",
-            });
-            if (response.status === 401) {
-              const renewed = await fetch("/account/refresh", {
-                method: "POST",
+  const fullScreenMap = expectedPage === "map-anather" && !isAnswerPreview && !isPrint;
+  const routeSearch = fullScreenMap
+    ? createRouteSearch({ map, leaflet: L, basemap: () => basemapController.getState() })
+    : undefined;
+  const popupContent = !isSnapshotPrint
+    ? createPopupContentRuntime({
+        map,
+        routeSearch,
+        showGoogleMapLink: fullScreenMap || isTemporary,
+        getMarkerRecord: (id) => markerRecords[id],
+        desktopHeightLimit: fullScreenMap ? "marker" : isTemporary && !isMobile ? "all" : undefined,
+        sanitizeHtml: (html) => sanitizeMapHtml(html, filterXSS, xssOptions),
+        analysis: bootstrap.popupAnalysis,
+        renderMarkdown: renderContentMarkdown,
+        setupImages: setupDetailsLazyImages,
+        snapshot: isAnswerPreview ? bootstrap.popupBodies || {} : undefined,
+        answerMap: isAnswerPreview,
+        loadBody: isAnother
+          ? async (kind, id) => {
+              let response = await fetch(`/${kind}/${id}/form/body`, {
                 credentials: "same-origin",
-                headers: { "Content-Type": "application/json" },
-                body: "{}",
+                cache: "no-store",
               });
-              if (renewed.ok)
-                response = await fetch(`/${kind}/${id}/form/body`, {
+              if (response.status === 401) {
+                const renewed = await fetch("/account/refresh", {
+                  method: "POST",
                   credentials: "same-origin",
-                  cache: "no-store",
+                  headers: { "Content-Type": "application/json" },
+                  body: "{}",
                 });
+                if (renewed.ok)
+                  response = await fetch(`/${kind}/${id}/form/body`, {
+                    credentials: "same-origin",
+                    cache: "no-store",
+                  });
+              }
+              if (!response.ok) throw Error("Popup request failed");
+              return response.json();
             }
-            if (!response.ok) throw Error("Popup request failed");
-            return response.json();
-          },
-        })
-      : undefined;
+          : undefined,
+      })
+    : undefined;
   if (isMobileAnswerMap) map.addControl(new MapUiVisibilityToggleControl!());
   if (!isPrint) installMjpegCameras(map);
   if (persistSettings) observeMapView(map);
@@ -358,6 +369,8 @@ export function initializeReadOnlyMapPage(
   let layeredMarkerDisplay: DynamicRecord;
   const clusterGroups: DynamicRecord = {};
   const layerVisibilityGroups: DynamicRecord = {};
+  const getSelectedLayerIds = () =>
+    Object.keys(layerVisibilityGroups).filter((id) => map.hasLayer(layerVisibilityGroups[id]));
   const shapeGroups: DynamicRecord = {};
   const shapeLayers: DynamicRecord = {};
   let shapeRenderer: ReturnType<typeof createShapeRenderManager>;
@@ -368,12 +381,13 @@ export function initializeReadOnlyMapPage(
   let aiMapColoring = null;
   let aiForPresets: ReturnType<typeof createAiChat> | undefined;
   const applyManualMapColoring = (value) => {
-    const next = mergeAiColoring(value, aiMapColoring);
-    coloringController.apply(next);
+    coloringController.apply(aiMapColoring ?? value);
     manualMapColoring = value;
   };
   let refreshColorLegend: (() => void) | undefined;
   let colorSpecification = null;
+  let appliedAttributeSearch = null;
+  let refreshAdvancedSearchButton = () => {};
   let analysisRevision = 0;
   let advancedSearch;
   let advancedSearchAccountInvalid = false;
@@ -411,6 +425,39 @@ export function initializeReadOnlyMapPage(
       throw error;
     }
   };
+  let presetRevision = 0;
+  const presetKey = () =>
+    JSON.stringify([
+      bootstrap.tileVisibilityAccountId,
+      advancedSearchAccountInvalid,
+      getSelectedLayerIds(),
+      presetRevision,
+    ]);
+  const getPresetData = createOrdinaryPresetData(
+    // 選択レイヤーが多数でも、送信する地物IDで取得範囲を厳密に限定する。
+    accountBoundAttributeTransport,
+    presetKey,
+    () => null,
+    () => {
+      const layers = new Set(getSelectedLayerIds());
+      return [
+        ...Object.values(markerRecords)
+          .filter((record) => layers.has(record.layer_id))
+          .map((record) => ({
+            key: `marker:${record.id}`,
+            name: record.marker_name || "",
+            detail: record.detail || "",
+          })),
+        ...getShapeRecords(shapeRecords)
+          .filter((record) => layers.has(record.layer_id))
+          .map((record) => ({
+            key: `shape:${record.id}`,
+            name: record.name || "",
+            detail: getShapeMemoFromGeoJson(record.geojson),
+          })),
+      ];
+    },
+  );
   const shapeSearchMatches = new WeakMap<object, { query: string; result: boolean }>();
   const shapeCreatedListeners = new Set<(layer: any, record: any) => void>();
   const shapeEvictedListeners = new Set<(layer: any, record: any) => void>();
@@ -565,7 +612,7 @@ export function initializeReadOnlyMapPage(
             popupContent.render({
               kind: "marker",
               id: String(record.id),
-              name: record.marker_name,
+              name: record.marker_name || "",
               body: record.detail || "",
             })
         : undefined,
@@ -616,6 +663,36 @@ export function initializeReadOnlyMapPage(
   };
   let attributeTargetMask = null;
   let aiTargetMask = null;
+  const snapshotMapAnalysis = () => ({
+    attributeTargetMask,
+    aiTargetMask,
+    manualMapColoring,
+    aiMapColoring,
+    appliedAttributeSearch,
+    colorSpecification,
+  });
+  const refreshMapAnalysisDisplay = () => {
+    coloringController.apply(aiMapColoring ?? manualMapColoring);
+    layeredMarkerDisplay.rebuildVisibleMarkers();
+    layeredShapeDisplay.rebuildVisibleShapes();
+    groups.syncAllShapeGroupsVisibility();
+    shapeNameLabelManager?.scheduleRefresh();
+    shapeMeasurementManager?.scheduleRefresh();
+    refreshColorLegend?.();
+    refreshAdvancedSearchButton();
+  };
+  const restoreMapAnalysis = (state) => {
+    ({
+      attributeTargetMask,
+      aiTargetMask,
+      manualMapColoring,
+      aiMapColoring,
+      appliedAttributeSearch,
+      colorSpecification,
+    } = state);
+    ++analysisRevision;
+    refreshMapAnalysisDisplay();
+  };
   const isShapeRecordVisible = (record) =>
     map.hasLayer(shapeVisibilityLayer) &&
     layeredMarkerDisplay.isLayerVisible(record.layer_id) &&
@@ -905,20 +982,25 @@ export function initializeReadOnlyMapPage(
       onSearch: searchCoordinator.setMapObjectSearchQuery,
     });
   if (isAnother && !isAnswerPreview && !isPrint) {
-    let appliedAttributeSearch = null;
     const control = L.control({ position: "topleft" });
     const button = document.createElement("button");
     button.type = "button";
     button.className = "custom-control-button";
     button.textContent = "詳しい検索と色分け";
     button.setAttribute("aria-pressed", "false");
+    refreshAdvancedSearchButton = () => {
+      const targets = attributeTargetMask ?? aiTargetMask;
+      const coloring = manualMapColoring || aiMapColoring;
+      button.textContent = targets
+        ? `詳しい検索と色分け（適用中・${targets.size}件）`
+        : coloring
+          ? "詳しい検索と色分け（色分け適用中）"
+          : "詳しい検索と色分け";
+      button.setAttribute("aria-pressed", String(!!targets || !!coloring));
+    };
     const modal = createAdvancedMapSearchModal({
       transport: accountBoundAttributeTransport,
-      applyAiPreset: async (id, signal) => {
-        if (advancedSearchAccountInvalid) throw Error(accountMessage);
-        if (!aiForPresets) throw Error("AIアシスタントの準備ができていません。");
-        await aiForPresets.applyPreset(id, signal);
-      },
+      getPresetData,
       applyAiDefinition: async (definition, signal) => {
         if (advancedSearchAccountInvalid) throw Error(accountMessage);
         if (!aiForPresets) throw Error("AIアシスタントの準備ができていません。");
@@ -930,26 +1012,43 @@ export function initializeReadOnlyMapPage(
         await aiForPresets.clearDefinition(kind, signal);
       },
       getApplied: () => appliedAttributeSearch,
+      hasAppliedPresetFilter: () => aiTargetMask !== null,
       getLayerIds: () => null,
-      getAiContextKey: () => bootstrap.tileVisibilityAccountId || "",
+      getAiContextKey: presetKey,
       getContext: () =>
         `${bootstrap.tileVisibilityAccountId || ""}:${analysisRevision}:${advancedSearchAccountInvalid}`,
       analysis: {
         getSpecification: () => colorSpecification,
-        getColoring: () => manualMapColoring,
+        getColoring: () => manualMapColoring ?? aiMapColoring,
         apply: async (specification, coloring) => {
-          applyManualMapColoring(coloring);
-          colorSpecification = specification;
-          button.setAttribute("aria-pressed", String(!!specification || !!appliedAttributeSearch));
-          button.textContent = specification
-            ? "詳しい検索と色分け（色分け適用中）"
-            : appliedAttributeSearch
-              ? "詳しい検索と色分け（適用中）"
-              : "詳しい検索と色分け";
-          ++analysisRevision;
+          const definition = specification
+            ? toV2PresetDraft({ kind: "coloring", definition: specification }).definition
+            : null;
+          const previous = snapshotMapAnalysis();
+          try {
+            aiMapColoring = null;
+            manualMapColoring = coloring;
+            colorSpecification = specification;
+            ++analysisRevision;
+            refreshMapAnalysisDisplay();
+            aiForPresets?.setAppliedDefinition("color", definition);
+          } catch (error) {
+            restoreMapAnalysis(previous);
+            throw error;
+          }
         },
       },
       onApply: async (request, result, signal) => {
+        const definition = request
+          ? toV2PresetDraft({
+              kind: "filter",
+              definition: {
+                common_form_id: request.common_form_id,
+                conditions: request.conditions,
+              },
+            }).definition
+          : null;
+        let coloring = result?.coloring === undefined ? manualMapColoring : result.coloring;
         if (!result && colorSpecification) {
           const current = analysisRevision;
           const colors = await evaluateMapAnalysis(
@@ -960,29 +1059,26 @@ export function initializeReadOnlyMapPage(
             signal || new AbortController().signal,
           );
           if (signal?.aborted || current !== analysisRevision) return;
-          applyManualMapColoring(colors.coloring);
+          coloring = colors.coloring;
         }
-        if (result?.coloring !== undefined) applyManualMapColoring(result.coloring);
-        appliedAttributeSearch = request;
-        ++analysisRevision;
-        attributeTargetMask = result
-          ? new Set([
-              ...result.marker_ids.map((id) => `marker:${id}`),
-              ...result.shape_ids.map((id) => `shape:${id}`),
-            ])
-          : null;
-        button.textContent = result
-          ? `詳しい検索と色分け（適用中・全レイヤー${result.target_count}件）`
-          : colorSpecification
-            ? "詳しい検索と色分け（色分け適用中）"
-            : "詳しい検索と色分け";
-        button.setAttribute("aria-pressed", String(!!result || !!colorSpecification));
-        layeredMarkerDisplay.rebuildVisibleMarkers();
-        layeredShapeDisplay.rebuildVisibleShapes();
-        groups.syncAllShapeGroupsVisibility();
-        shapeNameLabelManager?.scheduleRefresh();
-        shapeMeasurementManager?.scheduleRefresh();
-        refreshColorLegend?.();
+        const previous = snapshotMapAnalysis();
+        try {
+          manualMapColoring = coloring;
+          aiTargetMask = null;
+          appliedAttributeSearch = request;
+          attributeTargetMask = result
+            ? new Set([
+                ...result.marker_ids.map((id) => `marker:${id}`),
+                ...result.shape_ids.map((id) => `shape:${id}`),
+              ])
+            : null;
+          ++analysisRevision;
+          refreshMapAnalysisDisplay();
+          aiForPresets?.setAppliedDefinition("filter", definition);
+        } catch (error) {
+          restoreMapAnalysis(previous);
+          throw error;
+        }
       },
     });
     advancedSearch = modal;
@@ -1057,8 +1153,6 @@ export function initializeReadOnlyMapPage(
 
   let objectLoader: ReturnType<typeof createLazyLayerObjects> | undefined;
   if (isAnother && !isAnswerPreview && !isSnapshotPrint) {
-    const getSelectedLayerIds = () =>
-      Object.keys(layerVisibilityGroups).filter((id) => map.hasLayer(layerVisibilityGroups[id]));
     const updateLoadStatus = () => {
       markerLayerControl.layersControl
         .getContainer()
@@ -1097,6 +1191,8 @@ export function initializeReadOnlyMapPage(
         layeredMarkerDisplay.rebuildVisibleMarkers();
         layeredShapeDisplay.rebuildVisibleShapes();
         groups.syncAllShapeGroupsVisibility();
+        ++presetRevision;
+        advancedSearch?.refreshPresetData();
         shapeNameLabelManager?.scheduleRefresh();
         shapeMeasurementManager?.scheduleRefresh();
         refreshColorLegend?.();
@@ -1104,9 +1200,15 @@ export function initializeReadOnlyMapPage(
     });
     map.on("overlayadd", ({ layer }) => {
       const id = groups.findLayerIdByMarkerGroup(layer);
-      if (id) void objectLoader!.load(id);
+      if (id) {
+        advancedSearch?.refreshPresetData();
+        void objectLoader!.load(id);
+      }
     });
-    map.on("overlayremove", updateLoadStatus);
+    map.on("overlayremove", ({ layer }) => {
+      updateLoadStatus();
+      if (groups.findLayerIdByMarkerGroup(layer)) advancedSearch?.refreshPresetData();
+    });
     map.on("unload", () => objectLoader!.dispose());
     getSelectedLayerIds().forEach((id) => {
       void objectLoader!.load(id);
@@ -1147,6 +1249,7 @@ export function initializeReadOnlyMapPage(
       );
   };
   const runtime = {
+    getSelectedLayerIds,
     basemapController,
     setColoringController: (controller) => {
       coloringController = controller;
@@ -1293,18 +1396,10 @@ export function initializeReadOnlyMapPage(
       iconUrl: "/assets/ai_assistant.png",
       onActivate: (button) => aiChat?.open(button),
     });
-    const refreshAiDisplay = () => {
-      coloringController.apply(mergeAiColoring(manualMapColoring, aiMapColoring));
-      layeredMarkerDisplay.rebuildVisibleMarkers();
-      layeredShapeDisplay.rebuildVisibleShapes();
-      groups.syncAllShapeGroupsVisibility();
-      shapeNameLabelManager?.scheduleRefresh();
-      shapeMeasurementManager?.scheduleRefresh();
-      refreshColorLegend?.();
-    };
     const applyAiDisplay = async (
       result: AiExecutionResult | { type: "clear"; kind: "filter" | "color" },
       signal: AbortSignal,
+      localPreset = false,
     ) => {
       if (signal.aborted || aiDisposed) throw Error("地図の操作を中止しました。");
       if (result.type === "focus") {
@@ -1316,14 +1411,44 @@ export function initializeReadOnlyMapPage(
           map.setView(before, zoom, { animate: false });
         };
       }
-      const before = { targets: aiTargetMask, coloring: aiMapColoring };
+      const kind =
+        result.type === "clear" ? result.kind : result.type === "reset" ? "all" : result.type;
+      const revision = analysisRevision;
+      let coloring = manualMapColoring;
+      if (kind === "filter" && appliedAttributeSearch && colorSpecification)
+        coloring = localPreset
+          ? getPresetData().evaluate(
+              toV2PresetDraft({
+                kind: "coloring",
+                definition: colorSpecification,
+              }).definition,
+            ).coloring
+          : (
+              await evaluateMapAnalysis(
+                accountBoundAttributeTransport,
+                null,
+                colorSpecification,
+                null,
+                signal,
+              )
+            ).coloring;
+      if (signal.aborted || aiDisposed || revision !== analysisRevision)
+        throw Error("地図の状態が変わりました。再実行してください。");
+      const before = snapshotMapAnalysis();
       const restore = async () => {
         if (aiDisposed) throw Error("地図が閉じられました。");
-        aiTargetMask = before.targets;
-        aiMapColoring = before.coloring;
-        refreshAiDisplay();
+        restoreMapAnalysis(before);
       };
       try {
+        if (kind === "filter" || kind === "all") {
+          appliedAttributeSearch = null;
+          attributeTargetMask = null;
+          manualMapColoring = coloring;
+        }
+        if (kind === "color" || kind === "all") {
+          colorSpecification = null;
+          manualMapColoring = null;
+        }
         if (result.type === "filter") aiTargetMask = new Set(result.targets);
         else if (result.type === "color") aiMapColoring = result.coloring;
         else if (result.type === "clear") {
@@ -1333,7 +1458,8 @@ export function initializeReadOnlyMapPage(
           aiTargetMask = null;
           aiMapColoring = null;
         }
-        refreshAiDisplay();
+        ++analysisRevision;
+        refreshMapAnalysisDisplay();
         return restore;
       } catch (error) {
         await restore();
@@ -1342,6 +1468,11 @@ export function initializeReadOnlyMapPage(
     };
     aiChat = createAiChat({
       mode: "standalone",
+      preparePresetPage: async (presets, signal) => {
+        if (advancedSearchAccountInvalid) throw Error(accountMessage);
+        if (aiDisposed || !advancedSearch) throw Error("詳しい検索の準備ができていません。");
+        await advancedSearch.preparePresetPage(presets, signal);
+      },
       transport: (path, body, signal) =>
         aiFetchTransport(path, body, signal, bootstrap.tileVisibilityAccountId),
       onRecallPreset: async (preset) => {
@@ -1360,7 +1491,7 @@ export function initializeReadOnlyMapPage(
         invalidateAdvancedSearchAccount();
         aiTargetMask = null;
         aiMapColoring = null;
-        refreshAiDisplay();
+        refreshMapAnalysisDisplay();
       },
       onLayerCreated: async (layer, signal) => {
         if (signal.aborted || aiDisposed) throw Error("地図の操作を中止しました。");
@@ -1377,12 +1508,16 @@ export function initializeReadOnlyMapPage(
         synchronizedAiLayers.add(layer.id);
       },
       apply: applyAiDisplay,
-      clear: (kind, signal) => applyAiDisplay({ type: "clear", kind }, signal),
+      evaluatePreset: (definition) => getPresetData().evaluate(definition),
+      applyPreset: (result, signal) => applyAiDisplay(result, signal, true),
+      clear: (kind, signal) => applyAiDisplay({ type: "clear", kind }, signal, true),
     });
     const stopSuggestionUpdates = observeAiSuggestionDataChanges(
       () => bootstrap.tileVisibilityAccountId || "",
       () => {
         ++suggestionRevision;
+        ++presetRevision;
+        advancedSearch?.refreshPresetData(true);
         aiChat.invalidateSuggestions();
       },
     );
@@ -1455,6 +1590,7 @@ export function initializeReadOnlyMapPage(
             sourcePage: expectedPage,
             snapshotShare: Boolean(sharedSnapshot),
             fallbackTileServerId,
+            route: routeSearch?.getPrintRoute(),
             layers,
             markers: markerRecords,
             shapes: getShapeRecords(shapeRecords),

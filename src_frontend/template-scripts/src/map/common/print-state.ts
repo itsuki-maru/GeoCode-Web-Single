@@ -1,6 +1,7 @@
 import type { StoredMapView } from "./map-view-persistence";
 import { isAnswerColoring, type AnswerColoring } from "../answer-coloring";
 import { isClusteringMinZoom } from "./marker-clustering";
+import { isRoutePrintState, type RoutePrintState } from "./route-result";
 
 export interface PrintMapState {
   coloring?: AnswerColoring;
@@ -55,6 +56,19 @@ export function isPrintMapState(value: unknown): value is PrintMapState {
     ) &&
     (state.layerIds === null ||
       (Array.isArray(state.layerIds) && state.layerIds.every((id) => typeof id === "string"))),
+  );
+}
+
+export interface MapPrintPreviewState extends PrintMapState {
+  route?: RoutePrintState;
+}
+
+export function isMapPrintPreviewState(value: unknown): value is MapPrintPreviewState {
+  return (
+    isPrintMapState(value) &&
+    (!("route" in value) ||
+      value.route === undefined ||
+      (isRoutePrintState(value.route) && String(value.route.backgroundId) === value.tileServerId))
   );
 }
 

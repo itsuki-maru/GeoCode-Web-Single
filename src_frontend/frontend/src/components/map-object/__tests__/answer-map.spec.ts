@@ -7,6 +7,7 @@ import AnswerColoringPanel from "../AnswerColoringPanel.vue";
 import SaveMapPresetModal from "../SaveMapPresetModal.vue";
 import SavedMapPresetsModal from "../SavedMapPresetsModal.vue";
 import type { SavedMapPreset } from "@/utils/answer-map-presets";
+import { notifyAiSuggestionDataChanged } from "../../../../../template-scripts/src/ai/suggestion-events";
 import modalSource from "../AnswerMapModal.vue?raw";
 vi.mock("@/axiosClient", () => ({
   default: { post: vi.fn(), get: vi.fn(), isAxiosError: vi.fn(() => false) },
@@ -73,6 +74,7 @@ const send = (
 const ready = async (w: ReturnType<typeof mount>) => {
   send(w, {
     type: "answer-map-ready",
+    accountId: "map-owner",
     answerCount: 2,
     targetCount: 2,
     displayed: 2,
@@ -81,6 +83,46 @@ const ready = async (w: ReturnType<typeof mount>) => {
     targets: keys,
   });
   await flushPromises();
+};
+// 保存一覧の先読みで、iframeが保持する本文と対象IDを親へ渡す。
+const mockPresetFrame = (w: ReturnType<typeof mount>, readKeys = () => keys) => {
+  const frame = (w.get("iframe").element as HTMLIFrameElement).contentWindow!;
+  const message = vi.spyOn(frame, "postMessage").mockImplementation((data) => {
+    if (data.type === "answer-map-preset-scope-request")
+      send(w, {
+        type: "answer-map-preset-scope",
+        scopeId: data.scopeId,
+        targets: readKeys().map((key, i) => ({ key, name: i ? "中学校" : "小学校", detail: "" })),
+      });
+  });
+  post.mockImplementation(async (url, body: any) => {
+    if (!url.endsWith("/map-presets/data")) return { data: result() };
+    const ids: string[] = body.forms[query.common_form_id] ?? [];
+    return {
+      data: {
+        as_of: query.as_of,
+        next_cursor: null,
+        rows: body.targets.map((target: string) => ({
+          target,
+          id: target,
+          revision: 1,
+          form_id: query.common_form_id,
+          fields: Object.fromEntries(
+            ids.map((id) => [
+              id,
+              id === "n"
+                ? {
+                    type: "number",
+                    value: target === keys[0] ? "9007199254740993.1" : "9007199254740993.01",
+                  }
+                : { type: "date", value: "2020-01-01" },
+            ]),
+          ),
+        })),
+      },
+    };
+  });
+  return message;
 };
 const completion = (w: ReturnType<typeof mount>) =>
   w
@@ -485,36 +527,263 @@ describe("登録地図の非同期絞り込み", () => {
     w.unmount();
   });
 
-  const filterPreset = (): SavedMapPreset => ({
-    id: "preset",
-    name: "耐用年数",
-    kind: "filter",
-    schema_version: 1,
-    definition: {
-      common_form_id: query.common_form_id,
-      conditions: [
-        {
-          field_id: "n",
-          field_type: "number",
-          op: "gte",
-          value: "9007199254740993.1",
-          upper: null,
+  const filterPreset = () =>
+    ({
+      id: "preset",
+      name: "耐用年数",
+      kind: "filter",
+      schema_version: 2,
+      definition: {
+        type: "filter",
+        expression: {
+          op: "attribute",
+          common_form_id: query.common_form_id,
+          conditions: [
+            {
+              field_id: "n",
+              field_type: "number",
+              op: "gte",
+              value: "9007199254740993.1",
+              upper: null,
+            },
+          ],
         },
-      ],
-    },
-    display: {
-      form_label: "施設情報",
-      fields: [{ id: "n", field_type: "number", label: "耐用年数" }],
-    },
-    create_at: "2026-10-25T00:00:00Z",
-  });
-  const openSaved = async (w: ReturnType<typeof mount>) => {
+      },
+      display: {
+        form_label: "施設情報",
+        fields: [{ id: "n", field_type: "number", label: "耐用年数" }],
+      },
+      create_at: "2026-10-25T00:00:00Z",
+    }) satisfies SavedMapPreset;
+  const openSaved = async (
+    w: ReturnType<typeof mount>,
+    items: SavedMapPreset[] = [filterPreset()],
+  ) => {
     vi.mocked(apiClient.get).mockResolvedValue({
-      data: { items: [filterPreset()], total: 1, page: 1, page_size: 20 },
+      data: { items, total: items.length, page: 1, page_size: 20 },
     });
     await click(w, "保存した検索条件");
     return w.getComponent(SavedMapPresetsModal);
   };
+  it("保存一覧から絞り込みと色分けを直接適用し、ACK後に通知して入力と一覧を維持する", async () => {
+    const w = await open();
+    try {
+      await ready(w);
+      await w.get('[aria-label="共通フォーム"]').setValue(query.common_form_id);
+      await flushPromises();
+      await click(w, "条件を追加");
+      await w.get('[aria-label="入力項目"]').setValue("n:number");
+      await w.get('[aria-label="条件の値"]').setValue("25");
+      const palette = w.getComponent(AnswerColoringPanel);
+      const colorDraft = {
+        common_form_id: query.common_form_id,
+        rules: [{ id: "draft", label: "編集中", color: "#123456", conditions: [] }],
+      };
+      palette.vm.restoreDraft(colorDraft, fields);
+      const filter = filterPreset();
+      const color: SavedMapPreset = {
+        ...filter,
+        id: "colors",
+        name: "保存した色",
+        kind: "coloring",
+        definition: {
+          type: "color",
+          common_form_id: query.common_form_id,
+          rules: [{ id: "saved", label: "保存済み", color: "#2166ac", conditions: [] }],
+        },
+      };
+      const message = mockPresetFrame(w);
+      const list = await openSaved(w, [filter, color]);
+      const prepared = post.mock.calls.length;
+      const apply = (preset: SavedMapPreset) =>
+        list.get(`button[data-preset-apply-id="${preset.id}"]`);
+      const acknowledge = async (updateId: string) => {
+        send(w, { type: "answer-map-filter-applied", updateId, visible: 1, renderable: 1 });
+        await flushPromises();
+      };
+
+      await apply(filter).trigger("click");
+      await flushPromises();
+      const filtered = message.mock.calls.at(-1)![0];
+      expect(filtered).toMatchObject({ type: "answer-map-filter", targets: [keys[0]] });
+      expect(apply(color).element.hasAttribute("disabled")).toBe(true);
+      await acknowledge("old-update");
+      expect(completion(w)).toBeUndefined();
+      expect(w.get(".map-status").text()).toContain("一覧と同じ範囲");
+      await acknowledge(filtered.updateId);
+      expect(completion(w)?.props("message")).toBe("絞り込みが完了しました。");
+      expect(document.activeElement).toBe(completion(w)?.get("button").element);
+      expect(w.get(".map-status").text()).toContain(filter.name);
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+      await flushPromises();
+      expect(completion(w)).toBeUndefined();
+      expect(list.props("isOpen")).toBe(true);
+      expect(document.activeElement).toBe(apply(filter).element);
+
+      await apply(color).trigger("click");
+      await flushPromises();
+      const colored = message.mock.calls.at(-1)![0];
+      expect(colored).toMatchObject({
+        type: "answer-map-filter",
+        targets: [keys[0]],
+        coloring: { targets: { [keys[0]!]: "saved" } },
+      });
+      expect(palette.props("active")).toBe(false);
+      await acknowledge(colored.updateId);
+      expect(completion(w)?.props("message")).toBe("色分けが完了しました。");
+      expect(palette.props("active")).toBe(true);
+      await dismissCompletion(w);
+      expect(document.activeElement).toBe(apply(color).element);
+      expect(w.get('[aria-label="条件の値"]').element.value).toBe("25");
+      expect(palette.vm.getDraft()).toEqual(colorDraft);
+      expect(post).toHaveBeenCalledTimes(prepared);
+      expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1);
+    } finally {
+      w.unmount();
+    }
+  });
+  it("保存した複合条件の更新失敗を一覧に表示し、同じ行から再試行できる", async () => {
+    const w = await open();
+    try {
+      await ready(w);
+      const message = mockPresetFrame(w);
+      const simple = filterPreset();
+      const preset = {
+        ...simple,
+        definition: {
+          type: "filter",
+          expression: {
+            op: "or",
+            children: [{ op: "text", query1: "存在しない名称" }, simple.definition.expression],
+          },
+        },
+      } satisfies SavedMapPreset;
+      const list = await openSaved(w, [preset]);
+      const prepared = post.mock.calls.length;
+      await list.get("button[data-preset-apply-id]").trigger("click");
+      await flushPromises();
+      const failed = message.mock.calls.at(-1)![0];
+      expect(failed).toMatchObject({ type: "answer-map-filter", targets: [keys[0]] });
+      send(w, {
+        type: "answer-map-filter-error",
+        updateId: failed.updateId,
+        message: "更新に失敗しました。",
+      });
+      await flushPromises();
+      expect(list.get('[role="alert"]').text()).toBe("更新に失敗しました。");
+      expect(list.props("isOpen")).toBe(true);
+      expect(completion(w)).toBeUndefined();
+      expect(w.get(".map-status").text()).toContain("一覧と同じ範囲");
+
+      await list.get("button[data-preset-apply-id]").trigger("click");
+      await flushPromises();
+      const retried = message.mock.calls.at(-1)![0];
+      expect(retried.updateId).not.toBe(failed.updateId);
+      send(w, {
+        type: "answer-map-filter-applied",
+        updateId: failed.updateId,
+        visible: 1,
+        renderable: 1,
+      });
+      await flushPromises();
+      expect(completion(w)).toBeUndefined();
+      send(w, {
+        type: "answer-map-filter-applied",
+        updateId: retried.updateId,
+        visible: 1,
+        renderable: 1,
+      });
+      await flushPromises();
+      expect(completion(w)?.props("message")).toBe("絞り込みが完了しました。");
+      expect(list.find('[role="alert"]').exists()).toBe(false);
+      expect(w.find(".ai-condition-editor").exists()).toBe(false);
+      expect(post).toHaveBeenCalledTimes(prepared);
+    } finally {
+      w.unmount();
+    }
+  });
+  it("保存条件の判定データを待つ間に地図の対象が変わったら、古い適用を中断する", async () => {
+    const w = await open();
+    try {
+      await ready(w);
+      const message = mockPresetFrame(w);
+      const getData = post.getMockImplementation()!;
+      let release!: () => void;
+      const waiting = new Promise<void>((resolve) => (release = resolve));
+      post.mockImplementation(async (...args) => {
+        if (args[0].endsWith("/map-presets/data")) await waiting;
+        return getData(...args);
+      });
+      const list = await openSaved(w);
+      await list.get("button[data-preset-apply-id]").trigger("click");
+      await flushPromises();
+      expect(list.props("applying")).toBe(true);
+      expect(message.mock.calls.some(([data]) => data.type === "answer-map-filter")).toBe(false);
+      send(w, { type: "answer-map-preset-scope-changed" });
+      release();
+      await flushPromises();
+      expect(list.props("applying")).toBe(false);
+      expect(list.get('[role="alert"]').text()).toContain("対象データが変わりました");
+      expect(message.mock.calls.some(([data]) => data.type === "answer-map-filter")).toBe(false);
+      await list.get("button[data-preset-apply-id]").trigger("click");
+      await flushPromises();
+      expect(message.mock.calls.at(-1)![0]).toMatchObject({
+        type: "answer-map-filter",
+        targets: [keys[0]],
+      });
+      expect(completion(w)).toBeUndefined();
+    } finally {
+      w.unmount();
+    }
+  });
+  it("送信後のタイムアウトや対象範囲の変更では、直前の描画を再送し古いACKを無視する", async () => {
+    const w = await open();
+    try {
+      await ready(w);
+      const message = mockPresetFrame(w);
+      const list = await openSaved(w);
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const apply = async () => {
+        await list.get("button[data-preset-apply-id]").trigger("click");
+        await flushPromises();
+        const update = message.mock.calls.at(-1)![0];
+        expect(update).toMatchObject({ type: "answer-map-filter", targets: [keys[0]] });
+        return update.updateId;
+      };
+      const initialDisplay = {
+        type: "answer-map-filter",
+        updateId: "",
+        targets: keys,
+        coloring: null,
+      };
+      const timedOut = await apply();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(message.mock.calls.at(-1)![0]).toMatchObject(initialDisplay);
+      expect(list.get('[role="alert"]').text()).toContain("更新結果を確認できませんでした");
+      const invalidated = await apply();
+      expect(invalidated).not.toBe(timedOut);
+      send(w, { type: "answer-map-preset-scope-changed" });
+      await flushPromises();
+      expect(
+        message.mock.calls
+          .map(([data]) => data)
+          .filter((data) => data.type === "answer-map-filter")
+          .at(-1).updateId,
+      ).toBe("");
+      expect(list.get('[role="alert"]').text()).toContain("対象データが変わりました");
+      send(w, {
+        type: "answer-map-filter-applied",
+        updateId: invalidated,
+        visible: 1,
+        renderable: 1,
+      });
+      await flushPromises();
+      expect(completion(w)).toBeUndefined();
+      expect(w.get(".map-status").text()).toContain("一覧と同じ範囲");
+    } finally {
+      w.unmount();
+    }
+  });
   it("保存は編集中の条件を複製し、モーダル取消で地図・入力・APIを変更しない", async () => {
     const w = await open(true);
     await ready(w);
@@ -528,7 +797,11 @@ describe("登録地図の非同期絞り込み", () => {
     const requests = post.mock.calls.length;
     await click(w, "検索条件を保存");
     const modal = w.getComponent(SaveMapPresetModal);
-    expect(modal.props("draft")).toEqual({ kind: "filter", definition: filterPreset().definition });
+    expect(modal.props("draft")).toEqual({
+      schema_version: 2,
+      kind: "filter",
+      definition: filterPreset().definition,
+    });
     expect(modal.props("endpoint")).toBe("http://localhost:3000/form-answers/map-presets");
     expect(w.get(".content-fullscreen-map").attributes("inert")).toBeDefined();
     const key = new KeyboardEvent("keydown", { key: "p", ctrlKey: true, cancelable: true });
@@ -552,7 +825,7 @@ describe("登録地図の非同期絞り込み", () => {
     const w = await open();
     await ready(w);
     const iframe = w.get("iframe").element as HTMLIFrameElement;
-    const message = vi.spyOn(iframe.contentWindow!, "postMessage").mockImplementation(() => {});
+    const message = mockPresetFrame(w);
     const list = await openSaved(w);
     const requests = post.mock.calls.length;
     list.vm.$emit("restore", filterPreset());
@@ -561,13 +834,15 @@ describe("登録地図の非同期絞り込み", () => {
     expect(w.get('[aria-label="共通フォーム"]').element.value).toBe(query.common_form_id);
     expect(w.get('[aria-label="入力項目"]').element.value).toBe("n:number");
     expect(w.get('[aria-label="条件の値"]').element.value).toBe("9007199254740993.1");
-    expect(post).toHaveBeenCalledTimes(requests + 1);
+    expect(post).toHaveBeenCalledTimes(requests);
     expect(post.mock.calls.at(-1)![1]).toMatchObject({
-      common_form_id: query.common_form_id,
-      conditions: [],
-      options_only: true,
+      forms: { [query.common_form_id]: ["n"] },
+      targets: keys,
+      query,
     });
-    expect(message).not.toHaveBeenCalled();
+    expect(message.mock.calls.map(([data]) => data.type)).toEqual([
+      "answer-map-preset-scope-request",
+    ]);
     expect(w.get(".map-status").text()).toContain("一覧と同じ範囲");
     expect(w.getComponent(AnswerColoringPanel).props("active")).toBe(false);
     expect(w.get("iframe").element).toBe(iframe);
@@ -575,11 +850,332 @@ describe("登録地図の非同期絞り込み", () => {
     list.vm.$emit("close");
     await flushPromises();
     await click(w, "絞り込み実行");
+    expect(post).toHaveBeenCalledTimes(requests);
     expect(message.mock.calls.at(-1)![0]).toMatchObject({
       type: "answer-map-filter",
-      targets: keys,
+      targets: [keys[0]],
     });
     w.unmount();
+  });
+
+  it("同じページの項目をまとめ、回答値の先読み中も条件を復元して完了後に通信なしで適用する", async () => {
+    const w = await open();
+    try {
+      await ready(w);
+      const message = mockPresetFrame(w, () => [keys[0]!]);
+      const sendRequest = post.getMockImplementation()!;
+      let finish!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      post.mockImplementation(async (...args) => {
+        if (args[0].endsWith("/map-presets/data")) await waiting;
+        return sendRequest(...args);
+      });
+      const first = filterPreset();
+      const second = filterPreset();
+      second.id = "date";
+      Object.assign(second.definition.expression.conditions[0]!, {
+        field_id: "d",
+        field_type: "date",
+        value: "2020-01-01",
+      });
+      const list = await openSaved(w, [first, second]);
+      const reads = post.mock.calls.filter(([url]) => url.endsWith("/map-presets/data"));
+      expect(reads).toHaveLength(1);
+      expect(reads[0]![1]).toMatchObject({
+        forms: { [query.common_form_id]: ["n", "d"] },
+        targets: [keys[0]],
+        query,
+      });
+      const requests = post.mock.calls.length;
+      list.vm.$emit("restore", first);
+      await flushPromises();
+      expect(w.get('[aria-label="条件の値"]').element.value).toBe("9007199254740993.1");
+      list.vm.$emit("close");
+      await flushPromises();
+      expect(w.get(".filter-submit").element.disabled).toBe(true);
+      finish();
+      await flushPromises();
+      expect(w.get(".filter-submit").element.disabled).toBe(false);
+      await click(w, "絞り込み実行");
+      expect(message.mock.calls.at(-1)![0]).toMatchObject({ targets: [keys[0]] });
+      expect(post).toHaveBeenCalledTimes(requests);
+    } finally {
+      w.unmount();
+    }
+  });
+  it.each(["呼び出し", "適用"])(
+    "%sではフォーム候補の先読み失敗時に追加通信をせず、一覧を開き直すと回復する",
+    async (operation) => {
+      const w = await open();
+      try {
+        await ready(w);
+        const message = mockPresetFrame(w);
+        post.mockRejectedValueOnce(Error("network"));
+        const list = await openSaved(w);
+        const error = operation === "適用" ? "applyError" : "restoreError";
+        expect(list.text()).toContain(
+          "「耐用年数」の準備に失敗しました。一覧を閉じて開き直してください。",
+        );
+        const calls = post.mock.calls.length;
+        await click(list, operation);
+        expect(list.props(error)).toContain(
+          operation === "適用" ? "一覧を閉じて開き直してから" : "現在の入力を維持",
+        );
+        expect(post).toHaveBeenCalledTimes(calls);
+        await list.get("header button").trigger("click");
+        expect(list.props("isOpen")).toBe(false);
+        await openSaved(w);
+        const reloaded = post.mock.calls.length;
+        await click(list, operation);
+        expect(list.props(error)).toBe("");
+        if (operation === "適用") {
+          expect(message.mock.calls.at(-1)![0]).toMatchObject({
+            type: "answer-map-filter",
+            targets: [keys[0]],
+          });
+        } else {
+          expect(w.get('[aria-label="条件の値"]').element.value).toBe("9007199254740993.1");
+        }
+        expect(post).toHaveBeenCalledTimes(reloaded);
+      } finally {
+        w.unmount();
+      }
+    },
+  );
+  it("複合条件のフォーム候補が見つからなくても、同じページの別条件をすぐ呼び出せる", async () => {
+    const w = await open();
+    try {
+      await ready(w);
+      mockPresetFrame(w);
+      const simple = filterPreset();
+      const unavailable = {
+        ...simple,
+        id: "unavailable",
+        name: "別フォーム",
+        definition: {
+          type: "filter",
+          expression: {
+            op: "not",
+            child: {
+              ...simple.definition.expression,
+              common_form_id: "00000000-0000-4000-8000-000000000099",
+            },
+          },
+        },
+      } satisfies SavedMapPreset;
+      const list = await openSaved(w, [unavailable, simple]);
+      expect(list.props("preparationFailures")).toEqual(["別フォーム"]);
+      const requests = post.mock.calls.length;
+      list.vm.$emit("restore", simple);
+      await flushPromises();
+      expect(list.props("restoreError")).toBe("");
+      expect(w.get('[aria-label="条件の値"]').element.value).toBe("9007199254740993.1");
+      expect(post).toHaveBeenCalledTimes(requests);
+    } finally {
+      w.unmount();
+    }
+  });
+  it("フォーム・回答の更新時に準備済みデータを破棄し、古い候補応答や地図ACKを採用しない", async () => {
+    const w = await open();
+    try {
+      await ready(w);
+      const message = mockPresetFrame(w);
+      const list = await openSaved(w);
+      list.vm.$emit("restore", filterPreset());
+      await flushPromises();
+      list.vm.$emit("close");
+      await click(w, "絞り込み実行");
+      const first = message.mock.calls.at(-1)![0].updateId;
+      send(w, { type: "answer-map-filter-applied", updateId: first, visible: 1, renderable: 1 });
+      await flushPromises();
+      await click(w, "絞り込み実行");
+      const pendingId = message.mock.calls.at(-1)![0].updateId;
+      post.mockClear();
+      notifyAiSuggestionDataChanged("other-owner");
+      window.dispatchEvent(
+        new CustomEvent("geocode-answer-updated", { detail: { id: "outside" } }),
+      );
+      expect(post).not.toHaveBeenCalled();
+      const stale = deferredResult();
+      post.mockImplementationOnce(() => stale.promise);
+      notifyAiSuggestionDataChanged("map-owner");
+      await flushPromises();
+      expect(post.mock.calls[0]![1]).toMatchObject({ options_only: true });
+      window.dispatchEvent(
+        new CustomEvent("geocode-answer-updated", { detail: { id: keys[0]!.slice(7) } }),
+      );
+      await flushPromises();
+      const updated = message.mock.calls.at(-1)![0];
+      expect(updated).toMatchObject({ type: "answer-map-filter", targets: [keys[0]] });
+      expect(updated.updateId).not.toEqual(pendingId);
+      const calls = post.mock.calls.length;
+      stale.resolve({ data: { ...result(), fields: [] } });
+      send(w, {
+        type: "answer-map-filter-applied",
+        updateId: pendingId,
+        visible: 0,
+        renderable: 0,
+      });
+      await flushPromises();
+      expect(w.get('[aria-label="入力項目"]').element.value).toBe("n:number");
+      expect(w.text()).toContain("一致1件");
+      send(w, {
+        type: "answer-map-filter-applied",
+        updateId: updated.updateId,
+        visible: 1,
+        renderable: 1,
+      });
+      await flushPromises();
+      await click(w, "絞り込み実行");
+      expect(post).toHaveBeenCalledTimes(calls);
+    } finally {
+      w.unmount();
+    }
+  });
+  it("2万地物を準備時に分割取得し、保存条件の適用・解除ではAPIへ送らない", async () => {
+    const targets = Array.from({ length: 20_000 }, (_, i) => "shape:object-" + i);
+    const w = await open();
+    try {
+      send(w, {
+        type: "answer-map-ready",
+        query,
+        targets,
+        targetCount: targets.length,
+        answerCount: targets.length,
+        displayed: targets.length,
+        skipped: 0,
+      });
+      await flushPromises();
+      const message = mockPresetFrame(w, () => targets);
+      const preset = filterPreset();
+      preset.definition.expression.conditions[0]!.op = "filled";
+      const list = await openSaved(w, [preset]);
+      const prepared = post.mock.calls.length;
+      list.vm.$emit("restore", preset);
+      await flushPromises();
+      expect(post).toHaveBeenCalledTimes(prepared);
+      expect(list.props("restoreError")).toBe("");
+      const groups = post.mock.calls
+        .filter(([url]) => url.endsWith("/map-presets/data"))
+        .map(([, body]) => (body as { targets: string[] }).targets);
+      expect(groups.length).toBeGreaterThan(1);
+      expect(groups.flat()).toEqual(targets);
+      list.vm.$emit("close");
+      await flushPromises();
+      const calls = post.mock.calls.length;
+      await click(w, "絞り込み実行");
+      const applied = message.mock.calls.at(-1)![0];
+      expect(applied.targets).toEqual(targets);
+      send(w, {
+        type: "answer-map-filter-applied",
+        updateId: applied.updateId,
+        visible: targets.length,
+        renderable: targets.length,
+      });
+      await flushPromises();
+      await click(w, "地図条件を解除");
+      expect(post).toHaveBeenCalledTimes(calls);
+      expect(message.mock.calls.at(-1)![0].targets).toEqual(targets);
+    } finally {
+      w.unmount();
+    }
+  });
+  it("回答地図の保存一覧で複合条件から手動条件へ切り替え、反映済みの式をCSVでも使う", async () => {
+    const w = await open(true);
+    try {
+      await ready(w);
+      const simple = filterPreset();
+      const complex = {
+        ...simple,
+        name: "学校または年数",
+        id: "compound",
+        definition: {
+          type: "filter",
+          expression: {
+            op: "or",
+            children: [{ op: "text", query1: "小学校" }, simple.definition.expression],
+          },
+        },
+      } satisfies SavedMapPreset;
+      const message = mockPresetFrame(w);
+      vi.mocked(apiClient.get).mockResolvedValue({
+        data: { items: [complex, simple], total: 2, page: 1, page_size: 20 },
+      });
+      const recall = async (name: string) => {
+        await click(w, "保存した検索条件");
+        const list = w.getComponent(SavedMapPresetsModal);
+        const row = list.findAll("tbody tr").find((r) => r.get("td:nth-child(2)").text() === name)!;
+        await row
+          .findAll("button")
+          .find((b) => b.text() === "呼び出し")!
+          .trigger("click");
+        await flushPromises();
+        expect(list.props("restoreError")).toBe("");
+        const notice = list
+          .findAllComponents(MessageModal)
+          .find((m) => m.props("message") === "呼び出しが完了しました。")!;
+        await notice.get("button").trigger("click");
+        await list
+          .findAll("button")
+          .find((b) => b.text() === "閉じる")!
+          .trigger("click");
+        await flushPromises();
+      };
+      await recall(complex.name);
+      const preparedCalls = post.mock.calls.length;
+      await w.get('[aria-label="検索語1"]').setValue("中学校");
+      await click(w, "絞り込み実行");
+      const expression = {
+        op: "or",
+        children: [{ op: "text", query1: "中学校" }, simple.definition.expression],
+      };
+      expect(post).toHaveBeenCalledTimes(preparedCalls);
+      expect(message.mock.calls.at(-1)![0]).toMatchObject({
+        type: "answer-map-filter",
+        targets: keys,
+      });
+      const updateId = message.mock.calls.at(-1)![0].updateId;
+      send(w, { type: "answer-map-filter-applied", updateId, visible: 2, renderable: 2 });
+      await flushPromises();
+      await recall(simple.name);
+      expect(w.find(".ai-condition-editor").exists()).toBe(false);
+      await click(w, "CSV出力");
+      const capture = message.mock.calls.at(-1)![0];
+      post.mockResolvedValueOnce({ data: { count: 0 } });
+      send(w, {
+        type: "answer-map-csv-targets",
+        csvRequestId: capture.csvRequestId,
+        updateId,
+        targets: [keys[0]],
+      });
+      await flushPromises();
+      expect(post.mock.calls.at(-1)![1]).toMatchObject({ query, targets: [keys[0]], expression });
+      w.getComponent(AnswerColoringPanel).vm.$emit("apply", {
+        common_form_id: query.common_form_id,
+        rules: [{ id: "a", label: "分類", color: "#2166ac", conditions: [] }],
+      });
+      await flushPromises();
+      expect(post).toHaveBeenCalledTimes(preparedCalls + 1); // CSVの件数確認のみ
+      expect(message.mock.calls.at(-1)![0].coloring.targets).toEqual({
+        [keys[0]!]: "a",
+        [keys[1]!]: "a",
+      });
+      send(w, {
+        type: "answer-map-filter-applied",
+        updateId: message.mock.calls.at(-1)![0].updateId,
+        visible: 2,
+        renderable: 2,
+      });
+      await flushPromises();
+
+      await click(w, "絞り込み実行");
+      expect(message.mock.calls.at(-1)![0].targets).toEqual([keys[0]]);
+      expect(post).toHaveBeenCalledTimes(preparedCalls + 1);
+    } finally {
+      w.unmount();
+    }
   });
   it("色分けの呼び出しは絞り込みの編集中条件と反映済み表示を維持する", async () => {
     const w = await open();
@@ -589,38 +1185,50 @@ describe("登録地図の非同期絞り込み", () => {
     await click(w, "条件を追加");
     await w.get('[aria-label="入力項目"]').setValue("n:number");
     await w.get('[aria-label="条件の値"]').setValue("25");
-    const iframe = w.get("iframe").element as HTMLIFrameElement;
-    const message = vi.spyOn(iframe.contentWindow!, "postMessage").mockImplementation(() => {});
-    const list = await openSaved(w);
+    const message = mockPresetFrame(w);
     const preset: SavedMapPreset = {
       ...filterPreset(),
       kind: "coloring",
       definition: {
+        type: "color",
         common_form_id: query.common_form_id,
         rules: [
           {
-            id: "fifty",
-            label: "50年以上",
+            id: "recent",
+            label: "2020年以降",
             color: "#2166ac",
             conditions: [
-              { field_id: "n", field_type: "number", op: "gte", value: "50", upper: null },
+              { field_id: "d", field_type: "date", op: "gte", value: "2020-01-01", upper: null },
             ],
           },
         ],
       },
     };
+    const list = await openSaved(w, [preset]);
+    const prepared = post.mock.calls.length;
     list.vm.$emit("restore", preset);
     await flushPromises();
+    expect(post).toHaveBeenCalledTimes(prepared);
     expect(list.props("isOpen")).toBe(true);
     expect(w.get('[aria-label="条件の値"]').element.value).toBe("25");
-    expect(w.get('[aria-label="分類名"]').element.value).toBe("50年以上");
-    expect(w.get('[aria-label="色分けの条件値"]').element.value).toBe("50");
+    expect(w.get('[aria-label="分類名"]').element.value).toBe("2020年以降");
+    expect(w.get('[aria-label="色分けの条件値"]').element.value).toBe("2020-01-01");
     expect(w.getComponent(AnswerColoringPanel).props("active")).toBe(false);
-    expect(message).not.toHaveBeenCalled();
+    expect(message.mock.calls.map(([data]) => data.type)).toEqual([
+      "answer-map-preset-scope-request",
+    ]);
     expect(w.get(".map-status").text()).toContain("一覧と同じ範囲");
+    list.vm.$emit("close");
+    await flushPromises();
+    await click(w, "絞り込み実行");
+    expect(message.mock.calls.at(-1)![0]).toMatchObject({
+      type: "answer-map-filter",
+      targets: keys,
+    });
+    expect(post).toHaveBeenCalledTimes(prepared);
     w.unmount();
   });
-  it("項目の不整合や候補取得の失敗では一覧を維持し、現在の入力を消さない", async () => {
+  it("項目の不整合では一覧を維持し、現在の入力を消さない", async () => {
     const w = await open();
     await ready(w);
     await w.get('[aria-label="共通フォーム"]').setValue(query.common_form_id);
@@ -628,23 +1236,19 @@ describe("登録地図の非同期絞り込み", () => {
     await click(w, "条件を追加");
     await w.get('[aria-label="入力項目"]').setValue("n:number");
     await w.get('[aria-label="条件の値"]').setValue("25");
-    const list = await openSaved(w);
+    mockPresetFrame(w);
     const preset = filterPreset();
-    if (preset.kind === "filter") preset.definition.conditions[0]!.field_type = "text";
-    if (preset.kind === "filter") preset.definition.conditions[0]!.op = "eq";
+    if (preset.kind === "filter") preset.definition.expression.conditions[0]!.field_type = "text";
+    if (preset.kind === "filter") preset.definition.expression.conditions[0]!.op = "eq";
+    const list = await openSaved(w, [preset]);
     list.vm.$emit("restore", preset);
     await flushPromises();
     expect(list.props("isOpen")).toBe(true);
     expect(list.props("restoreError")).toContain("項目が見つかりません");
     expect(w.get('[aria-label="条件の値"]').element.value).toBe("25");
-    post.mockRejectedValueOnce(Error("network"));
-    list.vm.$emit("restore", filterPreset());
-    await flushPromises();
-    expect(list.props("restoreError")).toContain("現在の入力を維持");
-    expect(w.get('[aria-label="条件の値"]').element.value).toBe("25");
     const requests = post.mock.calls.length;
     const incompatible = filterPreset();
-    incompatible.definition.common_form_id = "other";
+    incompatible.definition.expression.common_form_id = "other";
     list.vm.$emit("restore", incompatible);
     await flushPromises();
     expect(list.props("restoreError")).toContain("共通フォームが異なる");
@@ -654,7 +1258,7 @@ describe("登録地図の非同期絞り込み", () => {
   it("呼び出し中に一覧を閉じた後の応答は破棄する", async () => {
     const w = await open();
     await ready(w);
-    const list = await openSaved(w);
+    mockPresetFrame(w);
     let resolve!: (response: { data: ReturnType<typeof result> }) => void;
     post.mockImplementationOnce(
       () =>
@@ -662,6 +1266,7 @@ describe("登録地図の非同期絞り込み", () => {
           resolve = done;
         }),
     );
+    const list = await openSaved(w);
     list.vm.$emit("restore", filterPreset());
     await flushPromises();
     expect(list.props("restoring")).toBe(true);
@@ -1364,7 +1969,8 @@ describe("登録地図の復旧と出力境界", () => {
     await flushPromises();
     expect(w.getComponent(SaveMapPresetModal).props("draft")).toEqual({
       kind: "coloring",
-      definition: value,
+      schema_version: 2,
+      definition: { type: "color", ...value },
     });
     value.rules[0]!.label = "未反映";
     expect(

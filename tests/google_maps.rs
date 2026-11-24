@@ -3,9 +3,9 @@ mod common;
 
 use axum::{
     Json, Router,
-    body::to_bytes,
+    body::{Body, to_bytes},
     extract::{Extension, Path, Query, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, Request, StatusCode, header},
     response::IntoResponse,
     routing::{get, post},
 };
@@ -19,6 +19,7 @@ use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
+use tower::ServiceExt;
 
 #[derive(Default)]
 struct Calls {
@@ -111,6 +112,25 @@ async fn google_relay_verifies_current_background_and_view_access_before_contact
         base,
         Some("BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc="),
     ));
+    let enable_routes = || {
+        Json(
+            serde_json::from_value(json!({
+                "revision": uuid::Uuid::nil(), "enabled": true, "requestsPerMinute": 60,
+            }))
+            .unwrap(),
+        )
+    };
+    let without_key = google_maps::routes::admin_update(
+        Extension(admin.clone()),
+        Extension(pool.clone()),
+        Extension(service.clone()),
+        enable_routes(),
+    )
+    .await;
+    assert!(matches!(
+        without_key,
+        Err(geocode_web_single::error::AppError::Validation(_))
+    ));
     let setting = json!({"revision":uuid::Uuid::nil(),"enabled":true,"apiKey":"test-google-key","language":"ja-JP","region":"JP","requestsPerMinute":1200});
     assert!(
         google_maps::admin_update(
@@ -185,6 +205,7 @@ async fn google_relay_verifies_current_background_and_view_access_before_contact
     .await
     .unwrap();
     let grant = body(response).await;
+    assert_eq!(grant["routesEnabled"], false);
     assert!(!grant.to_string().contains("test-google-key"));
     assert!(!grant.to_string().contains("private-google-session"));
     let authorized = grant_headers(&grant);
@@ -231,6 +252,48 @@ async fn google_relay_verifies_current_background_and_view_access_before_contact
             json!(["layerRoadmap"])
         );
     }
+    assert_eq!(
+        google_maps::routes::admin_get(Extension(user.clone()), Extension(pool.clone()))
+            .await
+            .unwrap_err_response_status(),
+        StatusCode::FORBIDDEN
+    );
+    let routes = google_maps::routes::admin_update(
+        Extension(admin.clone()),
+        Extension(pool.clone()),
+        Extension(service.clone()),
+        enable_routes(),
+    )
+    .await
+    .unwrap();
+    let routes = body(routes).await;
+    assert_eq!(
+        routes,
+        json!({"revision": routes["revision"], "enabled": true, "requestsPerMinute": 60})
+    );
+    let routes_readback =
+        google_maps::routes::admin_get(Extension(admin.clone()), Extension(pool.clone()))
+            .await
+            .unwrap();
+    assert_eq!(body(routes_readback).await, routes);
+    let stale = google_maps::routes::admin_update(
+        Extension(admin.clone()),
+        Extension(pool.clone()),
+        Extension(service.clone()),
+        enable_routes(),
+    )
+    .await;
+    assert_eq!(stale.unwrap_err_response_status(), StatusCode::CONFLICT);
+    let enabled_grant = google_maps::context(
+        Extension(pool.clone()),
+        Extension(service.clone()),
+        headers.clone(),
+        input(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(body(enabled_grant).await["routesEnabled"], true);
+
     // 公開ページの閲覧権限を使い、設定変更後の中継を確認する。
     let layer = common::master_layer_id(&pool, &user).await;
     let created = geocode_web_single::handler::onetime_url::generate_url_handler(
@@ -272,6 +335,7 @@ async fn google_relay_verifies_current_background_and_view_access_before_contact
     .await
     .unwrap();
     let shared_grant = body(response).await;
+    assert_eq!(shared_grant["routesEnabled"], false);
     let shared_headers = grant_headers(&shared_grant);
     google_maps::tile(
         Extension(pool.clone()),
@@ -314,7 +378,9 @@ async fn google_relay_verifies_current_background_and_view_access_before_contact
     )
     .await
     .unwrap();
-    let live_headers = grant_headers(&body(live_grant).await);
+    let live_grant = body(live_grant).await;
+    assert_eq!(live_grant["routesEnabled"], false);
+    let live_headers = grant_headers(&live_grant);
     let update_availability =
         |enabled, share, live| {
             background_maps::admin_update(
@@ -449,6 +515,56 @@ async fn google_relay_verifies_current_background_and_view_access_before_contact
     assert_eq!(calls.sessions, 1);
     assert_eq!(calls.viewports, 1);
     server.abort();
+}
+
+// 実際のHTTPルートで、認証、背景の制約、本文上限とno-storeを検証する。
+#[tokio::test]
+async fn routes_compute_requires_account_access_and_an_enabled_google_background() {
+    let pool = common::test_pool().await;
+    let user = common::create_test_user(&pool, "route-user").await;
+    let token = create_token(&user, 30, "access_token", 0).unwrap();
+    sqlx::raw_sql(
+        r#"
+        INSERT INTO google_maps_settings (id, revision, enabled) VALUES (1, 'route-test', true);
+        UPDATE google_routes_settings SET enabled = true WHERE id = 1;
+        INSERT INTO tileserver_model (
+            id, layer_name, label, url, attribution, create_at, updated_at, provider
+        ) VALUES (1, 'default', 'default', '/tile/{z}/{x}/{y}.png', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'generic');
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let app = geocode_web_single::router::build_router(
+        pool,
+        Arc::new(tokio::sync::Mutex::new(tera::Tera::default())),
+        None,
+    );
+    let valid = json!({
+        "backgroundId": 1, "travelMode": "DRIVE",
+        "origin": {"lat": 35, "lng": 139}, "destination": {"lat": 36, "lng": 140},
+    });
+    let mut invalid = valid.clone();
+    invalid["origin"]["lat"] = json!(91);
+    for (authenticated, body, expected) in [
+        (false, valid.to_string(), StatusCode::UNAUTHORIZED),
+        (true, valid.to_string(), StatusCode::FORBIDDEN),
+        (true, invalid.to_string(), StatusCode::BAD_REQUEST),
+        (true, " ".repeat(4097), StatusCode::PAYLOAD_TOO_LARGE),
+    ] {
+        let mut request = Request::post("/google-maps/routes/compute")
+            .header(header::CONTENT_TYPE, "application/json");
+        if authenticated {
+            request = request.header(header::COOKIE, format!("access_token={token}"));
+        }
+        let response = app
+            .clone()
+            .oneshot(request.body(Body::from(body)).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    }
 }
 
 trait ErrorStatus {

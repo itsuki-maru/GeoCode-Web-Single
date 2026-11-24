@@ -4,7 +4,7 @@ import { useMapObjectStore } from "@/stores/mapobjects";
 import { useShapeStore } from "@/stores/shapes";
 import { useAuthStore } from "@/stores/auth";
 import type { AiDefinition } from "../../../template-scripts/src/ai/types";
-import type { AnySavedMapPreset } from "../../../template-scripts/src/map/common/answer-map-presets";
+import type { SavedMapPreset } from "../../../template-scripts/src/map/common/answer-map-presets";
 import {
   attributeSearchPath,
   createAdvancedMapSearchModal,
@@ -18,7 +18,6 @@ export function useAdvancedMapSearch(
   master: Ref<string>,
   apply: () => void,
   message: (text: string) => void,
-  applyAiPreset?: (id: string, signal: AbortSignal) => Promise<void>,
   applyAiDefinition?: (definition: AiDefinition, signal: AbortSignal) => Promise<void>,
   clearAiDefinition?: (kind: "filter" | "color", signal: AbortSignal) => Promise<void>,
 ) {
@@ -118,7 +117,6 @@ export function useAdvancedMapSearch(
           markers.recordCache.generation,
           shapes.recordCache.generation,
         ]),
-      applyAiPreset,
       applyAiDefinition,
       clearAiDefinition,
       onApply: (request, result) => {
@@ -268,7 +266,7 @@ export function useAdvancedMapSearch(
       if (!accountInvalid) void modal?.open();
     },
     invalidateAccount,
-    recallSavedPreset: async (preset: AnySavedMapPreset) => {
+    recallSavedPreset: async (preset: SavedMapPreset) => {
       if (!modal || disposed) throw Error("詳しい検索の準備ができていません。");
       if (accountInvalid) throw Error(accountMessage);
       await modal.recallPreset(preset);

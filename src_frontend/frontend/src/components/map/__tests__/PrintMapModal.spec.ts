@@ -111,8 +111,8 @@ describe("印刷モーダルの地図連携", () => {
     expect(after.defaultPrevented).toBe(false);
   });
   it.each([false, true])(
-    "要求先の地図からの応答だけを採用し、プレビューの準備完了後に状態を送る（色分け: %s）",
-    async (withColoring) => {
+    "要求先の地図からの応答だけを採用し、プレビューの準備完了後に状態を送る（色分けと経路: %s）",
+    async (withExtraState) => {
       const source = document.querySelector("iframe")!;
       const sourcePost = vi.spyOn(source.contentWindow!, "postMessage");
       wrapper = mount(PrintMapModal, { props: { layerIds: ["a"] }, attachTo: document.body });
@@ -148,12 +148,20 @@ describe("印刷モーダルの地図連携", () => {
         tileServerId: "2",
         markerIds: ["matching"],
         shapeIds: [],
-        ...(withColoring
+        ...(withExtraState
           ? {
               coloring: {
                 version: 1,
                 rules: [{ id: "r", label: "分類", color: "#123abc" }],
                 targets: { "marker:matching": "r" },
+              },
+              route: {
+                backgroundId: 2,
+                travelMode: "DRIVE",
+                durationSeconds: 720,
+                distanceMeters: 3_400,
+                encodedPolyline: "_p~iF~ps|U_ulLnnqC_mqNvxq`@",
+                warnings: [],
               },
             }
           : {}),

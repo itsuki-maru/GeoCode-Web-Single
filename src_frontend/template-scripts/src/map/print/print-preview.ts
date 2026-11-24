@@ -2,6 +2,7 @@
 import css from "./print-preview.css?inline";
 import { createPdfControls } from "./pdf-controls";
 import { createPrintMemo } from "./print-memo";
+import { createPrintRoute } from "./print-route";
 import { MAPLIBRE_CANVAS_SELECTOR, prepareMaplibreCanvasPrint } from "./canvas-snapshot";
 import { initializeReadOnlyMapPage } from "../read-only-page";
 import { createLayerBulkToggleControl } from "../common/base";
@@ -12,9 +13,9 @@ import { getBasemapController } from "../common/basemap-controller";
 import type { AnotherMapBootstrap, TemporaryMapBootstrap } from "../types";
 import type { ReadOnlyPrintSnapshot } from "./read-only-print-snapshot";
 import {
-  isPrintMapState,
+  isMapPrintPreviewState,
   PRINT_PAPERS,
-  type PrintMapState,
+  type MapPrintPreviewState,
   type PrintPaper,
 } from "../common/print-state";
 
@@ -33,7 +34,7 @@ export function movePrintMapControls(mapElement: HTMLElement, settings: HTMLElem
 // このページで用紙上の操作と印刷の両方を扱い、印刷用の表示へ切り替えても、
 // 地図の CSS ピクセル単位の寸法を維持する。
 export function createPrintPreview(
-  state: PrintMapState,
+  state: MapPrintPreviewState,
   close: () => void,
   page: "map-anather" | "form-answer-map" | "temporary-map" = "map-anather",
   session?: { parentOrigin: string; requestId: string },
@@ -264,6 +265,10 @@ export function createPrintPreview(
   const resize = new ResizeObserver(fitPaper);
   resize.observe(viewport);
   updatePaper();
+  const printRoute =
+    page === "map-anather" && state.route
+      ? createPrintRoute(map, (window as any).L, state.route, markPrintChanged)
+      : undefined;
 
   const readiness = () => {
     const objects = runtime.getObjectLoadStatus?.() ?? { loading: false, failed: false };
@@ -484,6 +489,7 @@ export function createPrintPreview(
     restoreCanvasPrint?.();
     for (const { element, inert } of canvasPrintInteraction) element.inert = inert;
     canvasPrintInteraction = [];
+    printRoute?.dispose();
     printMemo.dispose();
     legend?.dispose();
     colorController?.dispose();
@@ -543,7 +549,14 @@ export function createReadOnlySnapshotPrintPreview(
             ? { version: snapshot.version, state, tileServers, tileOverlays }
             : null,
         };
-  return createPrintPreview(state, close, snapshot.sourcePage, session, undefined, bootstrap);
+  return createPrintPreview(
+    { ...state, route: snapshot.route },
+    close,
+    snapshot.sourcePage,
+    session,
+    undefined,
+    bootstrap,
+  );
 }
 
 export function initializePrintPreview() {
@@ -558,7 +571,7 @@ export function initializePrintPreview() {
       event.data?.type !== "printInitialize"
     )
       return;
-    if (!isPrintMapState(event.data.state)) return;
+    if (!isMapPrintPreviewState(event.data.state)) return;
     window.removeEventListener("message", receive);
     try {
       createPrintPreview(event.data.state, () => send("printClose"));

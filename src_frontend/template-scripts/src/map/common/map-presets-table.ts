@@ -1,18 +1,16 @@
 import css from "./map-presets-table.css?inline";
 import { node, action } from "./coloring-editor";
-import {
-  describeMapPreset,
-  mapPresetKindLabel,
-  type AnySavedMapPreset,
-} from "./answer-map-presets";
+import { describeMapPreset, mapPresetKindLabel, type SavedMapPreset } from "./answer-map-presets";
 
-export function renderMapPresetsTable<T extends AnySavedMapPreset>(
+export function renderMapPresetsTable<T extends SavedMapPreset>(
   host: HTMLElement,
   options: {
     items: T[];
     disabled: boolean;
     restoreDisabledReason?(preset: T): string | undefined;
+    applyDisabledReason?(preset: T): string | undefined;
     restore(preset: T): void;
+    apply?(preset: T): void;
     remove(preset: T): void;
   },
 ) {
@@ -24,6 +22,7 @@ export function renderMapPresetsTable<T extends AnySavedMapPreset>(
   }
   host.classList.add("table-scroll", "map-presets-table");
   const table = node("table");
+  table.classList.toggle("has-apply-action", !!options.apply);
   table.setAttribute("aria-label", "保存した検索条件一覧");
   const head = node("thead"),
     headers = node("tr");
@@ -37,7 +36,7 @@ export function renderMapPresetsTable<T extends AnySavedMapPreset>(
         /(?:Z|[+-]\d\d:\d\d)$/i.test(preset.create_at) ? preset.create_at : `${preset.create_at}Z`,
       );
     const values = [
-      mapPresetKindLabel(preset.kind) + (preset.schema_version === 2 ? "（AI条件）" : ""),
+      mapPresetKindLabel(preset.kind),
       preset.name,
       preset.display.form_label || "一覧と同じ範囲",
       describeMapPreset(preset),
@@ -51,13 +50,16 @@ export function renderMapPresetsTable<T extends AnySavedMapPreset>(
     const cell = node("td"),
       controls = node("div");
     controls.className = "row-actions";
-    for (const [label, handler] of [
-      ["呼び出し", options.restore],
+    for (const [label, handler, disabledReason] of [
+      ["呼び出し", options.restore, options.restoreDisabledReason],
+      ["適用", options.apply, options.applyDisabledReason],
       ["削除", options.remove],
     ] as const) {
+      if (!handler) continue;
       const button = action(label, () => handler(preset));
       button.className = "btn-close";
-      const reason = label !== "削除" ? options.restoreDisabledReason?.(preset) : undefined;
+      if (label === "適用") button.dataset.presetApplyId = preset.id;
+      const reason = disabledReason?.(preset);
       button.disabled = options.disabled || !!reason;
       if (reason) {
         button.title = reason;

@@ -1,24 +1,24 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch } from "vue";
 import BaseModal from "@/components/common/BaseModal.vue";
 import apiClient from "@/axiosClient";
 import "./form-modal-buttons.css";
 import {
-  clonePresetDraft,
+  toV2PresetDraft,
   isSavedMapPreset,
   mapPresetError,
   mapPresetKindLabel,
-  type MapPresetDraft,
+  type V2MapPresetDraft,
   type SavedMapPreset,
 } from "@/utils/answer-map-presets";
 
-const props = defineProps<{ isOpen: boolean; draft: MapPresetDraft | null; endpoint: string }>();
+const props = defineProps<{ isOpen: boolean; draft: V2MapPresetDraft | null; endpoint: string }>();
 const emit = defineEmits<{ close: []; saved: [preset: SavedMapPreset] }>();
 const name = ref(""),
   error = ref(""),
   busy = ref(false);
 const input = ref<HTMLInputElement | null>(null);
-const snapshot = shallowRef<MapPresetDraft | null>(null);
+const snapshot = shallowRef<V2MapPresetDraft | null>(null);
 let sequence = 0;
 let controller: AbortController | undefined;
 let previousFocus: HTMLElement | null = null;
@@ -41,7 +41,7 @@ watch(
     previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     name.value = "";
     try {
-      snapshot.value = props.draft ? clonePresetDraft(props.draft) : null;
+      snapshot.value = props.draft ? toV2PresetDraft(toRaw(props.draft)) : null;
       if (!snapshot.value) throw Error("保存する検索条件がありません。");
     } catch (cause) {
       snapshot.value = null;
@@ -67,7 +67,7 @@ const save = async () => {
     const data = (
       await apiClient.post(
         props.endpoint,
-        { ...snapshot.value, name: trimmed, schema_version: 1 },
+        { ...snapshot.value, name: trimmed },
         { signal: controller.signal, timeout: 60000 },
       )
     ).data;

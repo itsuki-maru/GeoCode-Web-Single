@@ -1,6 +1,11 @@
 import css from "./chat.css?inline";
 import { awaitWithAbort } from "../map/common/progress-spinner";
-import { cloneSavedMapPreset, type AnySavedMapPreset } from "../map/common/answer-map-presets";
+import {
+  cloneSavedMapPreset,
+  isSavedMapPreset,
+  validateAiPresetDefinition,
+  type SavedMapPreset,
+} from "../map/common/answer-map-presets";
 import {
   validateCapabilities,
   validateExecutionResult,
@@ -26,13 +31,16 @@ interface ChatOptions {
   getContextKey(): string;
   /** 候補だけを失効するためのデータ・フォーム更新世代。会話の範囲とは分離する。 */
   getSuggestionContextKey?(): string;
+  evaluatePreset?(definition: AiDefinition): AiExecutionResult;
   apply(result: AiExecutionResult, signal: AbortSignal): Promise<AiUndo | void>;
-  /** 手動条件ともう一方のAI条件を保持して、指定した表示条件だけを解除する。 */
+  applyPreset?(result: AiExecutionResult, signal: AbortSignal): Promise<AiUndo | void>;
+  /** 絞り込み・色分けのうち指定した側の適用を解除する。 */
   clear?(kind: "filter" | "color", signal: AbortSignal): Promise<AiUndo | void>;
   onEnabledChange?(enabled: boolean): void;
   onAccountChanged?(): void;
   onLayerCreated?(layer: { id: string; name: string }, signal: AbortSignal): Promise<void>;
-  onRecallPreset?(preset: AnySavedMapPreset): void | Promise<void>;
+  onRecallPreset?(preset: SavedMapPreset): void | Promise<void>;
+  preparePresetPage?(presets: SavedMapPreset[], signal: AbortSignal): Promise<void>;
 }
 
 interface ChatEntry {
@@ -206,6 +214,42 @@ export function createAiChat(options: ChatOptions) {
   let appliedState: AiAppliedState = { filter: null, color: null };
   let scopeGeneration = 0;
   let pendingWrite: { attempted: boolean } | undefined;
+  let presetPage: { items: SavedMapPreset[]; key: string; feedback: HTMLElement } | undefined;
+  let presetPreparation: AbortController | undefined;
+  const stopPresetPreparation = () => {
+    presetPreparation?.abort();
+    presetPreparation = undefined;
+  };
+  const prepareVisiblePresetPage = () => {
+    const page = presetPage;
+    if (
+      !page ||
+      !page.items.length ||
+      !options.preparePresetPage ||
+      !options.onRecallPreset ||
+      presetPreparation ||
+      !dialog.open ||
+      document.visibilityState === "hidden" ||
+      accountInvalid ||
+      page.key !== options.getContextKey()
+    )
+      return;
+    const job = new AbortController();
+    presetPreparation = job;
+    page.feedback.replaceChildren();
+    void options.preparePresetPage(page.items, job.signal).catch((error) => {
+      if (job.signal.aborted || presetPage !== page || disposed) return;
+      presetPreparation = undefined;
+      page.feedback.replaceChildren(
+        node("span", "", error instanceof Error ? error.message : "保存条件の準備に失敗しました。"),
+        panelButton("準備を再試行", prepareVisiblePresetPage),
+      );
+    });
+  };
+  const clearPresetPage = () => {
+    stopPresetPreparation();
+    presetPage = undefined;
+  };
   let outsidePointer: number | undefined;
   let outsideClickReady = false;
   let composing = false;
@@ -391,6 +435,7 @@ export function createAiChat(options: ChatOptions) {
     appliedState = { filter: null, color: null };
     activeReply = undefined;
     pendingWrite = undefined;
+    clearPresetPage();
     panel.replaceChildren();
     history.length = 0;
     undos.length = 0;
@@ -413,7 +458,7 @@ export function createAiChat(options: ChatOptions) {
     capabilities = next;
     if (!next.enabled || changed) clearSuggestions();
     options.onEnabledChange?.(next.enabled);
-    if (!next.enabled || (changed && isBusy())) {
+    if (!externalDisplay && (!next.enabled || (changed && isBusy()))) {
       const message =
         failure ??
         (next.enabled
@@ -591,7 +636,6 @@ export function createAiChat(options: ChatOptions) {
   const withPanelRequest = async (
     key: string,
     operation: (signal: AbortSignal, id: number) => Promise<void>,
-    propagate = false,
   ) => {
     if (isBusy() || disposed || accountInvalid || !dialog.open || key !== options.getContextKey())
       return;
@@ -613,7 +657,6 @@ export function createAiChat(options: ChatOptions) {
         }
         setStatus(controller.signal.aborted ? "処理を中止しました。" : message, true);
       }
-      if (propagate) throw error;
     } finally {
       clearTimeout(timer);
       if (id === sequence) {
@@ -679,7 +722,7 @@ export function createAiChat(options: ChatOptions) {
     const next = structuredClone(appliedState);
     if (result.type === "filter" || result.type === "color") {
       // Legacy servers do not return definitions; legacy chat must remain usable.
-      if (capabilities?.protocol_version === 2) {
+      if (externalDisplay?.id === id || capabilities?.protocol_version === 2) {
         const validated = validateDefinition(result.definition ?? action);
         if (validated.type !== result.type) throw Error("適用した条件の種類が一致しません。");
         next[result.type] = validated;
@@ -690,9 +733,13 @@ export function createAiChat(options: ChatOptions) {
     }
     await commitDisplay(
       next,
-      () => options.apply(result, signal),
+      () =>
+        (externalDisplay?.id === id && options.applyPreset ? options.applyPreset : options.apply)(
+          result,
+          signal,
+        ),
       result.type === "filter"
-        ? `検索条件に一致：${result.target_count}件。地図・一覧へ反映しました。手動の検索条件も併用します。`
+        ? `検索条件に一致：${result.target_count}件。地図・一覧へ反映しました。`
         : result.type === "color"
           ? "色分けを地図へ反映しました。"
           : result.type === "reset"
@@ -768,6 +815,7 @@ export function createAiChat(options: ChatOptions) {
       const pending = { attempted: false };
       pendingWrite = pending;
       recordAction(entry, action, "確認待ち・未実行");
+      clearPresetPage();
       panel.replaceChildren(
         node(
           "h3",
@@ -904,23 +952,10 @@ export function createAiChat(options: ChatOptions) {
         Number(resultPage.total) < 0
       )
         throw Error("保存条件の一覧を確認できませんでした。");
+      if (!resultPage.items.every(isSavedMapPreset)) throw Error("保存条件の一覧が不正です。");
+      clearPresetPage();
       panel.replaceChildren(node("h3", "", "保存した条件"));
-      for (const item of resultPage.items) {
-        const preset = item as {
-          id?: unknown;
-          name?: unknown;
-          kind?: unknown;
-          schema_version?: unknown;
-          create_at?: unknown;
-          definition?: unknown;
-        };
-        if (
-          typeof preset.id !== "string" ||
-          typeof preset.name !== "string" ||
-          !["filter", "coloring"].includes(String(preset.kind)) ||
-          ![1, 2].includes(Number(preset.schema_version))
-        )
-          throw Error("保存条件の一覧が不正です。");
+      for (const preset of resultPage.items) {
         const row = node("div", "ai-preset");
         row.append(
           node("strong", "", preset.name),
@@ -939,17 +974,23 @@ export function createAiChat(options: ChatOptions) {
               const generation = scopeGeneration;
               void (async () => {
                 try {
-                  const saved = cloneSavedMapPreset(item as AnySavedMapPreset);
+                  const saved = cloneSavedMapPreset(preset);
                   if (key !== options.getContextKey())
                     throw Error("地図の対象が変わりました。現在の地図で呼び出してください。");
                   // モーダルを重ねず、呼出先で条件を編集してから実行する。
-                  close();
-                  await options.onRecallPreset!(saved);
+                  const listJob = presetPreparation;
+                  dismiss();
+                  try {
+                    await options.onRecallPreset!(saved);
+                  } finally {
+                    if (presetPreparation === listJob && !dialog.open) stopPresetPreparation();
+                  }
                 } catch (error) {
                   if (error instanceof DOMException && error.name === "AbortError") return;
                   if (disposed || generation !== scopeGeneration || key !== options.getContextKey())
                     return;
                   if (!dialog.open) dialog.showModal();
+                  prepareVisiblePresetPage();
                   setStatus(
                     error instanceof Error ? error.message : "保存条件を呼び出せませんでした。",
                     true,
@@ -971,7 +1012,8 @@ export function createAiChat(options: ChatOptions) {
         Number.isSafeInteger(pageSize) &&
         pageSize > 0
       ) {
-        const load = (next: number) =>
+        const load = (next: number) => {
+          stopPresetPreparation();
           void withPanelRequest(key, (controller, sequenceId) =>
             execute(
               {
@@ -986,7 +1028,8 @@ export function createAiChat(options: ChatOptions) {
               key,
               controller,
             ),
-          );
+          ).finally(prepareVisiblePresetPage);
+        };
         panel.append(
           panelButton("前へ", () => load(page - 1), page <= 1),
           node("span", "", ` ${page} `),
@@ -998,17 +1041,19 @@ export function createAiChat(options: ChatOptions) {
           ? "呼び出して内容を確認・編集する条件を選択してください。"
           : "この画面では保存条件の編集に対応していません。詳しい検索から呼び出してください。",
       );
+      const feedback = node("div");
+      feedback.setAttribute("role", "status");
+      panel.append(feedback);
+      presetPage = { items: resultPage.items, key, feedback };
+      prepareVisiblePresetPage();
       return;
     }
     const result = validateExecutionResult(raw);
-    if (externalDisplay?.id === id && result.type !== command.type)
-      throw Error("実行した条件の種類と結果が一致しません。");
     const beforeApply = await loadCapabilities(signal);
     assertCurrent(id, key, signal);
     if (!beforeApply.enabled || beforeApply.revision !== revision)
       throw Error("AI設定が変更されました。指示を送り直してください。");
     await applyDisplay(result, action, id, key, signal, entry);
-    panel.replaceChildren();
   };
   const recordAction = (entry: { content: string } | undefined, action: unknown, state: string) => {
     if (!entry || action === undefined || action === null) return;
@@ -1027,7 +1072,7 @@ export function createAiChat(options: ChatOptions) {
     const message = draft.value.trim();
     if (isBusy() || recording || requestingMicrophone || pendingWrite?.attempted || !message)
       return;
-    panel.replaceChildren();
+    if (!panel.querySelector(".ai-preset")) panel.replaceChildren();
     pendingWrite = undefined;
     const controller = new AbortController();
     request = controller;
@@ -1299,7 +1344,7 @@ export function createAiChat(options: ChatOptions) {
       }
     }
   };
-  const close = () => {
+  const dismiss = () => {
     stopSuggestionRequest();
     cancel();
     capabilityRequest?.abort();
@@ -1308,15 +1353,21 @@ export function createAiChat(options: ChatOptions) {
     update();
     opener?.focus();
   };
+  const close = () => {
+    stopPresetPreparation();
+    dismiss();
+  };
   const hidden = () => {
     if (document.visibilityState === "hidden") {
+      stopPresetPreparation();
       stopSuggestionRequest();
       cancel(dialog.open ? "画面が非表示になったため、録音・通信を中止しました。" : undefined);
       capabilityRequest?.abort();
-    }
+    } else prepareVisiblePresetPage();
   };
   const onFocus = () => void refreshCapabilities();
   const onPageHide = () => {
+    stopPresetPreparation();
     stopSuggestionRequest();
     cancel();
   };
@@ -1439,6 +1490,65 @@ export function createAiChat(options: ChatOptions) {
       update();
     }
   });
+  async function runMapDefinition(
+    command: AiDefinition | { type: "reset"; kind: "filter" | "color" },
+    signal?: AbortSignal,
+  ) {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (
+      disposed ||
+      accountInvalid ||
+      isBusy() ||
+      pendingWrite ||
+      recording ||
+      requestingMicrophone ||
+      stoppingRecording
+    )
+      throw Error("現在のAI処理を完了してから条件を実行してください。");
+    if (command.type === "reset" && !options.clear)
+      throw Error("この画面では条件を個別に解除できません。");
+    const key = options.getContextKey();
+    const id = ++sequence;
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    externalDisplay = { id, generation: scopeGeneration };
+    request = controller;
+    busy = true;
+    signal?.addEventListener("abort", abort, { once: true });
+    const timer = setTimeout(abort, 180000);
+    update();
+    try {
+      assertCurrent(id, key, controller.signal);
+      if (command.type === "reset") {
+        const next = { ...appliedState, [command.kind]: null };
+        await commitDisplay(
+          next,
+          () => options.clear!(command.kind, controller.signal),
+          command.kind === "filter" ? "絞り込み条件を解除しました。" : "色分けを解除しました。",
+          id,
+          key,
+          controller.signal,
+        );
+      } else {
+        if (!options.evaluatePreset) throw Error("保存条件の判定データを準備できませんでした。");
+        const result = validateExecutionResult(options.evaluatePreset(command));
+        if (result.type !== command.type) throw Error("実行した条件の種類と結果が一致しません。");
+        await applyDisplay(result, command, id, key, controller.signal);
+      }
+    } catch (error) {
+      handleAccountError(error);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      if (externalDisplay?.id === id) externalDisplay = undefined;
+      if (id === sequence) {
+        request = undefined;
+        busy = false;
+        update();
+      }
+    }
+  }
   document.addEventListener("visibilitychange", hidden);
   window.addEventListener("focus", onFocus);
   window.addEventListener("pagehide", onPageHide);
@@ -1460,157 +1570,17 @@ export function createAiChat(options: ChatOptions) {
           void refreshSuggestions();
       }, SUGGESTION_REFRESH_DELAY_MS);
     },
-    async applyPreset(presetId: string, signal?: AbortSignal) {
-      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      if (disposed || accountInvalid || isBusy() || pendingWrite?.attempted)
-        throw Error("現在のAI処理を完了してから条件を適用してください。");
-      if (!presetId || presetId.length > 128) throw Error("保存条件のIDが不正です。");
-      if (!dialog.open) dialog.showModal();
-      const key = options.getContextKey(),
-        context = structuredClone(options.getContext());
-      const abort = () => cancel();
-      signal?.addEventListener("abort", abort, { once: true });
-      try {
-        await withPanelRequest(
-          key,
-          async (controller, id) => {
-            const current = await loadCapabilities(controller);
-            assertCurrent(id, key, controller);
-            if (!current.enabled || current.protocol_version !== 2)
-              throw Error("AIで保存した条件の適用にはAI機能の有効化とアプリの更新が必要です。");
-            void refreshSuggestions();
-            await execute(
-              { type: "apply_preset", preset_id: presetId },
-              current.revision,
-              context,
-              id,
-              key,
-              controller,
-            );
-          },
-          true,
-        );
-      } finally {
-        signal?.removeEventListener("abort", abort);
-      }
-    },
-    async clearDefinition(kind: "filter" | "color", signal?: AbortSignal) {
-      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      if (!options.clear || !["filter", "color"].includes(kind))
-        throw Error("この画面ではAI条件を個別に解除できません。");
-      if (
-        disposed ||
-        accountInvalid ||
-        isBusy() ||
-        pendingWrite ||
-        recording ||
-        requestingMicrophone ||
-        stoppingRecording
-      )
-        throw Error("現在のAI処理を完了してから条件を解除してください。");
-      const key = options.getContextKey(),
-        context = structuredClone(options.getContext()),
-        controller = new AbortController(),
-        id = ++sequence;
-      externalDisplay = { id, generation: scopeGeneration };
-      request = controller;
-      busy = true;
-      const abort = () => controller.abort();
-      signal?.addEventListener("abort", abort, { once: true });
-      const timer = setTimeout(abort, 180000);
+    setAppliedDefinition(kind: "filter" | "color", definition: AiDefinition | null) {
+      appliedState[kind] = definition ? validateAiPresetDefinition(definition) : null;
+      // Undo snapshots predate the manual change and would restore a stale map.
+      undos.length = 0;
       update();
-      try {
-        const current = await loadCapabilities(controller.signal);
-        assertCurrent(id, key, controller.signal);
-        if (!current.enabled || current.protocol_version !== 2)
-          throw Error("AI条件の解除にはAI機能の有効化とアプリの更新が必要です。");
-        // resetはサーバーの永続状態を変更しない。既存APIでアカウントと設定版を照合し、
-        // 表示の変更はclear callbackで片側だけに限定する。
-        const result = validateExecutionResult(
-          await options.transport(
-            "/ai/assist/execute",
-            {
-              protocol_version: 2,
-              revision: current.revision,
-              action: { type: "reset" },
-              context,
-            },
-            controller.signal,
-          ),
-        );
-        assertCurrent(id, key, controller.signal);
-        if (result.type !== "reset") throw Error("条件の解除結果を確認できませんでした。");
-        const checked = await loadCapabilities(controller.signal);
-        assertCurrent(id, key, controller.signal);
-        if (!checked.enabled || checked.revision !== current.revision)
-          throw Error("AI設定が変更されました。条件を確認して再実行してください。");
-        const next = structuredClone(appliedState);
-        next[kind] = null;
-        await commitDisplay(
-          next,
-          () => options.clear!(kind, controller.signal),
-          kind === "filter" ? "AIの絞り込み条件を解除しました。" : "AIの色分けを解除しました。",
-          id,
-          key,
-          controller.signal,
-        );
-      } catch (error) {
-        handleAccountError(error);
-        throw error;
-      } finally {
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", abort);
-        if (externalDisplay?.id === id) externalDisplay = undefined;
-        if (id === sequence) {
-          request = undefined;
-          busy = false;
-          update();
-        }
-      }
     },
     async applyDefinition(value: AiDefinition, signal?: AbortSignal) {
-      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      if (
-        disposed ||
-        accountInvalid ||
-        isBusy() ||
-        pendingWrite ||
-        recording ||
-        requestingMicrophone ||
-        stoppingRecording
-      )
-        throw Error("現在のAI処理を完了してから条件を実行してください。");
-      const definition = validateDefinition(value);
-      const key = options.getContextKey(),
-        context = structuredClone(options.getContext()),
-        controller = new AbortController(),
-        id = ++sequence;
-      externalDisplay = { id, generation: scopeGeneration };
-      request = controller;
-      busy = true;
-      const abort = () => controller.abort();
-      signal?.addEventListener("abort", abort, { once: true });
-      const timer = setTimeout(abort, 180000);
-      update();
-      try {
-        const current = await loadCapabilities(controller.signal);
-        assertCurrent(id, key, controller.signal);
-        if (!current.enabled || current.protocol_version !== 2)
-          throw Error("AIで保存した条件の実行にはAI機能の有効化とアプリの更新が必要です。");
-        await execute(definition, current.revision, context, id, key, controller.signal);
-      } catch (error) {
-        handleAccountError(error);
-        throw error;
-      } finally {
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", abort);
-        if (externalDisplay?.id === id) externalDisplay = undefined;
-        if (id === sequence) {
-          request = undefined;
-          busy = false;
-          update();
-        }
-      }
+      return runMapDefinition(validateAiPresetDefinition(value), signal);
+    },
+    clearDefinition(kind: "filter" | "color", signal?: AbortSignal) {
+      return runMapDefinition({ type: "reset", kind }, signal);
     },
     open(trigger?: HTMLElement) {
       if (disposed) return;
@@ -1618,7 +1588,11 @@ export function createAiChat(options: ChatOptions) {
       opener =
         trigger ||
         (document.activeElement instanceof HTMLElement ? document.activeElement : undefined);
-      if (!dialog.open) dialog.showModal();
+      if (!dialog.open) {
+        dialog.showModal();
+        stopPresetPreparation();
+        prepareVisiblePresetPage();
+      }
       if (!accountInvalid) setStatus(capabilities?.enabled ? "" : CHECKING_SETTINGS);
       void refreshCapabilities().then(() => {
         if (dialog.open) void refreshSuggestions();
@@ -1634,6 +1608,7 @@ export function createAiChat(options: ChatOptions) {
       undos.length = 0;
       appliedState = { filter: null, color: null };
       pendingWrite = undefined;
+      clearPresetPage();
       panel.replaceChildren();
       log.replaceChildren();
       draft.value = "";
@@ -1642,6 +1617,7 @@ export function createAiChat(options: ChatOptions) {
     },
     dispose() {
       disposed = true;
+      clearPresetPage();
       clearSuggestions();
       ++scopeGeneration;
       cancel();

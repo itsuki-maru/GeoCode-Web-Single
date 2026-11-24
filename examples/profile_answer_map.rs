@@ -722,6 +722,7 @@ async fn run(options: Options, output: PathBuf) -> anyhow::Result<()> {
         targets,
         common_form_id: None,
         conditions: vec![],
+        expression: None,
         options_only: false,
     };
     let mut cases = vec![];

@@ -26,6 +26,8 @@ pub mod live_map_layers;
 pub mod answer_map;
 pub mod answer_map_csv;
 pub mod answer_map_filter;
+pub mod answer_map_preset_data;
+pub mod answer_map_preset_text;
 pub mod answer_map_presets;
 mod answer_map_transport;
 pub mod form_answers;

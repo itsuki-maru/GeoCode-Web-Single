@@ -47,13 +47,21 @@ const preset = (kind, name, definition, id) => ({
   name,
   kind,
   definition,
-  schema_version: 1,
+  schema_version: 2,
   create_at: "2026-11-02T00:00:00Z",
   display: { form_label: "設備点検", fields },
 });
 const presets = [
-  preset("filter", "50年以上の設備", { common_form_id: formId, conditions: [condition] }, "saved1"),
-  preset("coloring", "耐用年数による分類", specification, "saved2"),
+  preset(
+    "filter",
+    "50年以上の設備",
+    {
+      type: "filter",
+      expression: { op: "attribute", common_form_id: formId, conditions: [condition] },
+    },
+    "saved1",
+  ),
+  preset("coloring", "耐用年数による分類", { type: "color", ...specification }, "saved2"),
 ];
 const fixture = `<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>body{margin:0;font-family:Arial,sans-serif;background:#e5edf0}#panels{display:flex;gap:24px;padding:24px;align-items:start}#panels>section{width:320px;flex-shrink:0;background:whitesmoke}#panels h2{font-size:16px;margin:12px}#output{padding:16px}iframe.responsive{display:block;border:0;margin:0 auto}</style>
@@ -86,17 +94,18 @@ if(params.has('width')) {
   const report=()=>document.querySelector('#output').textContent='検索'+searches+'回・色分け'+applications+'回';
   const pause=()=>new Promise(done=>setTimeout(done,Number(params.get('applyDelay')||0)));
   const transport=(path,body,signal,method)=>attributeTransport(path+(path.includes('?')?'&':'?')+'delay='+Number(params.get('delay')||0),body,signal,method);
-  const modal=createAdvancedMapSearchModal({transport,getApplied:()=>applied,getLayerIds:()=>null,getContext:()=>'',onApply:async request=>{await pause();if(params.has('failApply'))throw Error('確認用の反映エラー');applied=request;searches++;report()},analysis:{getSpecification:()=>colors,getColoring:()=>coloring,apply:async(s,c)=>{await pause();if(params.has('failApply'))throw Error('確認用の反映エラー');colors=s;coloring=c;applications++;report()}}});
+  const updateDisplay=async kind=>{await pause();if(params.has('failApply'))throw Error('確認用の反映エラー');if(kind==='filter')searches++;else applications++;report()};
+  const modal=createAdvancedMapSearchModal({transport,applyAiDefinition:definition=>updateDisplay(definition.type),clearAiDefinition:updateDisplay,getApplied:()=>applied,getLayerIds:()=>null,getContext:()=>'',onApply:async request=>{await pause();if(params.has('failApply'))throw Error('確認用の反映エラー');applied=request;searches++;report()},analysis:{getSpecification:()=>colors,getColoring:()=>coloring,apply:async(s,c)=>{await pause();if(params.has('failApply'))throw Error('確認用の反映エラー');colors=s;coloring=c;applications++;report()}}});
   const open=document.createElement('button');open.textContent='詳しい検索と色分けを開く';open.onclick=()=>modal.open(open);document.querySelector('#app').append(open);modal.open(open);
 } else if(view==='answer') {
   const action=location.origin+'/form-answers/map?applyDelay='+Number(params.get('applyDelay')||1000)+(params.has('failApply')?'&failApply=1':'');
-  createApp({setup(){const open=ref(true);return()=>h(mobile?MobileAnswer:Answer,{isOpen:open.value,action,query:{mode:'latest',as_of:'2026-11-02T00:00:00Z',common_form_id:formId,conditions:[]},onClose:()=>open.value=false})}}).mount('#app');
+  createApp({setup(){const open=ref(true);return()=>h(mobile?MobileAnswer:Answer,{isOpen:open.value,action,query:{mode:'latest',as_of:'2026-11-02T00:00:00Z',common_form_id:formId,conditions:[]},onClose:()=>open.value=false})}}).use(createPinia()).mount('#app');
 } else if(view==='panels') {
   createApp({setup(){const before=ref(),after=ref();onMounted(async()=>{await nextTick();before.value.restoreDraft(specification,fields);after.value.restoreDraft(specification,fields)});
     const props={forms:[{id:formId,label:'設備点検'}],endpoint:'/form-answers/map-filter',query:{mode:'latest'},targets:['marker:one'],requiredForm:'',disabled:false,active:false};
-    return()=>h('div',{id:'panels'},[h('section',{id:'before'},[h('h2','変更前の分析パネル'),h(mobile?BeforeMobile:Before,{...props,ref:before})]),h('section',{id:'after'},[h('h2','修正後の分析パネル'),h(mobile?Mobile:Pc,{...props,ref:after})])]);}}).mount('#app');
+    return()=>h('div',{id:'panels'},[h('section',{id:'before'},[h('h2','変更前の分析パネル'),h(mobile?BeforeMobile:Before,{...props,ref:before})]),h('section',{id:'after'},[h('h2','修正後の分析パネル'),h(mobile?Mobile:Pc,{...props,ref:after})])]);}}).use(createPinia()).mount('#app');
 } else {
-  createApp({setup(){const open=ref(true),restoring=ref(false);return()=>h(mobile?MobileList:List,{isOpen:open.value,restoring:restoring.value,endpoint:'/form-answers/map-presets',onClose:()=>open.value=false,onRestore:async()=>{restoring.value=true;await new Promise(done=>setTimeout(done,Number(params.get('delay')||1000)));document.querySelector('#output').textContent='下書きを呼び出しました（地図への適用なし）';restoring.value=false;}})}}).mount('#app');
+  createApp({setup(){const open=ref(true),restoring=ref(false);return()=>h(mobile?MobileList:List,{isOpen:open.value,restoring:restoring.value,endpoint:'/form-answers/map-presets',onClose:()=>open.value=false,onRestore:async()=>{restoring.value=true;await new Promise(done=>setTimeout(done,Number(params.get('delay')||1000)));document.querySelector('#output').textContent='下書きを呼び出しました（地図への適用なし）';restoring.value=false;}})}}).use(createPinia()).mount('#app');
 }
 </script></html>`;
 
@@ -182,6 +191,7 @@ const server = await createServer({
             res.end(`<!doctype html><html lang="ja"><meta charset="utf-8"><style>body{font:18px sans-serif;background:#e5edf0;padding:24px}</style><h2>確認用地図</h2><p id="state">対象1件</p><script>
               const requestId=${JSON.stringify(requestId)},origin=${JSON.stringify(origin)};
               const send=data=>parent.postMessage({requestId,...data},origin);
+              addEventListener('message',e=>{if(e.source===parent&&e.origin===origin&&e.data.requestId===requestId&&e.data.type==='answer-map-preset-scope-request')send({type:'answer-map-preset-scope',scopeId:e.data.scopeId,targets:[{key:'marker:one',name:'確認用地図',detail:''}]})});
               addEventListener('message',e=>{if(e.source!==parent||e.origin!==origin||e.data.requestId!==requestId)return;const data=e.data;if(data.type==='answer-map-filter')setTimeout(()=>{document.querySelector('#state').textContent='応答対象：'+data.targets.length+'件';send(${url.searchParams.has("failApply") ? "{type:'answer-map-filter-error',updateId:data.updateId,message:'確認用の反映エラー'}" : "{type:'answer-map-filter-applied',updateId:data.updateId,visible:data.targets.length,renderable:data.targets.length}"})},${delay})});
               send({type:'answer-map-ready',query:${JSON.stringify(query)},targets:['marker:one'],targetCount:1,answerCount:1,displayed:1,skipped:0});
             </script></html>`);
@@ -230,6 +240,35 @@ const server = await createServer({
               target_count: targets.length,
               answer_count: targets.length,
               as_of: "2026-11-02T00:00:00Z",
+            });
+          }
+          if (url.pathname === "/ai/capabilities")
+            return json({ enabled: false, voice_enabled: false, revision: null });
+          if (url.pathname === "/form-answers/map-presets/data") {
+            let body = "";
+            for await (const chunk of req) body += chunk;
+            const request = JSON.parse(body);
+            const rows = [
+              ["marker:one", "60"],
+              ["shape:two", "30"],
+            ]
+              .filter(([key]) => request.targets.includes(key))
+              .map(([target, age]) => ({
+                target,
+                id: target,
+                revision: 1,
+                form_id: formId,
+                fields: Object.fromEntries(
+                  (request.forms[formId] || []).map((id) => [
+                    id,
+                    { type: fields.find((field) => field.id === id)?.field_type, value: age },
+                  ]),
+                ),
+              }));
+            return json({
+              rows,
+              as_of: request.query?.as_of || "2026-11-02T00:00:00Z",
+              next_cursor: null,
             });
           }
           if (url.pathname === "/map-objects/search/attributes" && req.method === "POST") {

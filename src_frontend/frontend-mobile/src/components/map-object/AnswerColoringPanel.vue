@@ -11,10 +11,14 @@ const props = defineProps<{
   requiredForm: string;
   disabled: boolean;
   active: boolean;
+  loadFields?: (id: string, signal: AbortSignal) => Promise<AnswerField[]>;
+  applyDisabled?: boolean;
+  preserveDraft?: boolean;
 }>();
 const emit = defineEmits<{
   apply: [value: AnswerColorSpecification | null];
   save: [value: AnswerColorSpecification];
+  fieldsChanged: [];
 }>();
 const host = ref<HTMLElement | null>(null);
 let editor: ReturnType<typeof createColoringEditor> | undefined;
@@ -25,7 +29,11 @@ onMounted(() => {
     requiredForm: () => props.requiredForm,
     disabled: () => props.disabled,
     active: () => props.active,
+    applyDisabled: () => !!props.applyDisabled,
+    preserveDraft: () => !!props.preserveDraft,
+    onFieldsChange: () => emit("fieldsChanged"),
     loadFields: async (id, signal) => {
+      if (props.loadFields) return props.loadFields(id, signal);
       try {
         return (
           await apiClient.post<{ fields: AnswerField[] }>(
@@ -49,12 +57,21 @@ onMounted(() => {
   });
 });
 watch(
-  () => [props.forms, props.requiredForm, props.disabled, props.active],
+  () => [
+    props.forms,
+    props.requiredForm,
+    props.disabled,
+    props.active,
+    props.applyDisabled,
+    props.preserveDraft,
+  ],
   () => editor?.refresh(),
   { deep: true },
 );
 onBeforeUnmount(() => editor?.dispose());
 defineExpose({
+  getDraft: () => editor?.getDraft(),
+  setFields: (id: string, candidates: AnswerField[]) => editor?.setFields(id, candidates),
   restoreDraft: (value: AnswerColorSpecification, fields: AnswerField[]) =>
     editor?.restore(value, fields),
 });

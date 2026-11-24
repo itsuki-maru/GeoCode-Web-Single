@@ -4,6 +4,7 @@ use super::form_answers::{
     validate,
 };
 use crate::{
+    ai::actions::{AiAction, Expression, conditions_for_api},
     error::AppError,
     model::{MarkerFormField, MarkerFormSchema},
 };
@@ -30,6 +31,8 @@ pub struct MapFilterRequest {
     pub common_form_id: Option<String>,
     #[serde(default)]
     pub conditions: Vec<AnswerCondition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expression: Option<Expression>,
     #[serde(default)]
     pub options_only: bool,
 }
@@ -57,8 +60,8 @@ fn invalid(s: &str) -> AppError {
     AppError::Validation(s.into())
 }
 pub(super) struct Scope {
-    markers: Vec<String>,
-    shapes: Vec<String>,
+    pub(super) markers: Vec<String>,
+    pub(super) shapes: Vec<String>,
     layers: Option<Option<Vec<String>>>,
 }
 pub(super) fn scope(keys: &[String]) -> Result<Scope, AppError> {
@@ -129,6 +132,75 @@ fn base(
     b.push(")");
     b
 }
+
+/// 履歴の絞り込み・色分け・CSVで、同じ登録に式全体を適用する。
+fn append_expression(b: &mut QueryBuilder<'_, Sqlite>, user: &str, expression: &Expression) {
+    match expression {
+        Expression::All {} => {
+            b.push("TRUE");
+        },
+        Expression::Text { query1, query2 } => {
+            b.push("(target_type, target_id) IN (");
+            for (index, (kind, table, name, detail)) in [
+                ("marker", "marker_info_model", "marker_name", "detail"),
+                (
+                    "shape",
+                    "shape_model",
+                    "name",
+                    "geojson->'properties'->>'memo'",
+                ),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if index > 0 {
+                    b.push(" UNION ALL ");
+                }
+                b.push(format!("SELECT '{kind}', id FROM {table} WHERE user_id = "))
+                    .push_bind(user.to_owned());
+                for term in [query1, query2].into_iter().filter(|term| !term.is_empty()) {
+                    // ブラウザーと同じリテラルの部分一致で、NULを含む既存テキストも照合する。
+                    b.push(format!(" AND (instr(lower({name}), lower("))
+                        .push_bind(term.clone())
+                        .push(format!(")) > 0 OR instr(lower({detail}), lower("))
+                        .push_bind(term.clone())
+                        .push(")) > 0)");
+                }
+            }
+            b.push(")");
+        },
+        Expression::Attribute {
+            common_form_id,
+            conditions,
+        } => {
+            b.push("COALESCE((source_form->>'id' = ")
+                .push_bind(common_form_id.to_string());
+            append_conditions(b, &conditions_for_api(conditions));
+            b.push("), FALSE)");
+        },
+        Expression::Not { child } => {
+            b.push("NOT (");
+            append_expression(b, user, child);
+            b.push(")");
+        },
+        Expression::And { children } | Expression::Or { children } => {
+            let operator = if matches!(expression, Expression::And { .. }) {
+                " AND "
+            } else {
+                " OR "
+            };
+            b.push("(");
+            for (index, child) in children.iter().enumerate() {
+                if index > 0 {
+                    b.push(operator);
+                }
+                append_expression(b, user, child);
+            }
+            b.push(")");
+        },
+    }
+}
+
 pub(super) fn matched(
     user: &str,
     r: &MapFilterRequest,
@@ -149,6 +221,10 @@ pub(super) fn matched(
             .push_bind(form.to_string());
     }
     append_conditions(&mut b, &r.conditions);
+    if let Some(expression) = &r.expression {
+        b.push(" AND ");
+        append_expression(&mut b, user, expression);
+    }
     b.push(")");
     b
 }
@@ -361,6 +437,7 @@ pub(crate) async fn suggestion_fields(
         }),
         common_form_id: Some(form.to_string()),
         conditions: vec![],
+        expression: None,
         options_only: true,
     };
     let scope = Scope {
@@ -446,6 +523,16 @@ pub(super) async fn validate_conditions(
     scope: &Scope,
     include_missing_history: bool,
 ) -> Result<Vec<FieldOption>, AppError> {
+    if let Some(expression) = &r.expression {
+        super::answer_map_presets::validate_action_tx(
+            tx,
+            user,
+            &AiAction::Filter {
+                expression: expression.clone(),
+            },
+        )
+        .await?;
+    }
     let fields = fields(tx, user, r, at, scope).await?;
     for condition in &r.conditions {
         let mut known = fields

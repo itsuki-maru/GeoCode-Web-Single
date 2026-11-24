@@ -585,6 +585,13 @@ const MIGRATIONS: &[Migration] = &[
             "../../migrations/20261118100000_add_background_map_availability.sql"
         )],
     },
+    Migration {
+        version: 30,
+        name: "add_google_routes_settings",
+        statements: &[include_str!(
+            "../../migrations/20261122120000_add_google_routes_settings.sql"
+        )],
+    },
 ];
 
 // データベース接続の確立
@@ -797,6 +804,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), Error> {
             let completion_marker = match migration.version {
                 28 => Some("google_maps_settings"),
                 29 => Some("remember_background_map_id"),
+                30 => Some("google_routes_settings"),
                 _ => None,
             };
             if let Some(name) = completion_marker {

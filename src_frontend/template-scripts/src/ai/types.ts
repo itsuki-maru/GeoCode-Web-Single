@@ -205,7 +205,10 @@ export async function aiFetchTransport(
           ? { body: body as FormData }
           : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
     };
-    if (path.startsWith("/ai/") && path !== "/ai/capabilities")
+    if (
+      (path.startsWith("/ai/") && path !== "/ai/capabilities") ||
+      path === "/form-answers/map-presets/evaluate"
+    )
       init.headers = { ...init.headers, "X-AI-Account-ID": accountId ?? "" };
     let response = await fetch(path, init);
     if (response.status === 401) {

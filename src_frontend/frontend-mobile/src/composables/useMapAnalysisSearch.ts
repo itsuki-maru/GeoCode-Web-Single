@@ -1,9 +1,11 @@
-import { ref, markRaw, onMounted, onUnmounted, watch, type Ref } from "vue";
+import { computed, ref, markRaw, onMounted, onUnmounted, watch, type Ref } from "vue";
 import apiClient from "@/axiosClient";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useShapeStore } from "@/stores/shapes";
 import type { AiDefinition } from "../../../template-scripts/src/ai/types";
-import type { AnySavedMapPreset } from "../../../template-scripts/src/map/common/answer-map-presets";
+import type { ManualConditionReplacement } from "../../../template-scripts/src/ai/map-state";
+import type { SavedMapPreset } from "../../../template-scripts/src/map/common/answer-map-presets";
+import { toV2PresetDraft } from "../../../template-scripts/src/map/common/answer-map-presets";
 import { useAuthStore } from "@/stores/auth";
 import {
   createAdvancedMapSearchModal,
@@ -13,6 +15,8 @@ import {
   type AttributeTransport,
 } from "../../../template-scripts/src/map/common/advanced-map-search";
 import { evaluateMapAnalysis } from "../../../template-scripts/src/map/common/map-analysis";
+import { createOrdinaryPresetData } from "../../../template-scripts/src/map/common/ordinary-preset-data";
+import { observeAiSuggestionDataChanges } from "../../../template-scripts/src/ai/suggestion-events";
 import type { AnswerColorSpecification, AnswerColoring } from "@/utils/answer-coloring";
 
 export function useMapAnalysisSearch(
@@ -22,9 +26,15 @@ export function useMapAnalysisSearch(
   message: (text: string) => void,
   colorMap: (value: AnswerColoring | null) => Promise<boolean>,
   discardColors: () => Promise<boolean> = () => colorMap(null),
-  applyAiPreset?: (id: string, signal: AbortSignal) => Promise<void>,
   applyAiDefinition?: (definition: AiDefinition, signal: AbortSignal) => Promise<void>,
   clearAiDefinition?: (kind: "filter" | "color", signal: AbortSignal) => Promise<void>,
+  replaceAppliedCondition?: (
+    kind: "filter" | "color",
+    definition: AiDefinition | null,
+    apply: () => Promise<void>,
+    signal?: AbortSignal,
+  ) => Promise<void>,
+  getRecalledColoring?: () => AnswerColoring | null,
 ) {
   const markers = useMapObjectStore(),
     shapes = useShapeStore(),
@@ -132,6 +142,28 @@ export function useMapAnalysisSearch(
       throw e;
     }
   };
+  let formRevision = 0;
+  const presetKey = () =>
+    JSON.stringify([
+      identity(),
+      layer.value,
+      master.value,
+      formRevision,
+      markers.recordCache.dataRevision,
+      shapes.recordCache.dataRevision,
+    ]);
+  const getPresetData = createOrdinaryPresetData(transport, presetKey, layerIds, () => [
+    ...markers.getScopeRecords(layer.value, layer.value === master.value).map((record) => ({
+      key: `marker:${record.id}`,
+      name: record.marker_name ?? "",
+      detail: record.detail ?? "",
+    })),
+    ...shapes.getScopeRecords(layer.value, layer.value === master.value).map((record) => ({
+      key: `shape:${record.id}`,
+      name: record.name ?? "",
+      detail: String(record.geojson?.properties?.memo ?? ""),
+    })),
+  ]);
   const commitColors = async (
     next: AnswerColoring | null,
     job: Operation = { revision, identity: identity() },
@@ -197,97 +229,126 @@ export function useMapAnalysisSearch(
     modal = createAdvancedMapSearchModal({
       transport,
       getApplied: () => markers.attributeSearch,
+      hasAppliedPresetFilter: () => markers.aiFilterTargets !== null,
       getLayerIds: layerIds,
       getContext: context,
-      getAiContextKey: () => JSON.stringify([identity(), layer.value]),
-      applyAiPreset,
+      getAiContextKey: presetKey,
+      getPresetData,
       applyAiDefinition,
       clearAiDefinition,
       analysis: {
         getSpecification: () => specification,
-        getColoring: () => coloring,
-        apply: async (next, state) => {
-          const job = beginOperation();
-          const previous = coloring;
+        getColoring: () => coloring || getRecalledColoring?.() || null,
+        apply: async (next, state, signal) => {
+          const run = async () => {
+            const job = beginOperation(signal);
+            const previous = coloring;
+            try {
+              await commitColors(state, job, !!replaceAppliedCondition);
+              assertCurrent(job);
+              specification = next;
+              analysisLayer = markers.activeLayerId || layer.value;
+            } catch (error) {
+              if (isCurrent(job, true)) {
+                try {
+                  await commitColors(previous, job, true, true);
+                } catch {
+                  /* 元の反映エラーを表示する。 */
+                }
+              }
+              throw error;
+            } finally {
+              finishOperation(job);
+            }
+          };
+          if (replaceAppliedCondition)
+            await replaceAppliedCondition(
+              "color",
+              next ? toV2PresetDraft({ kind: "coloring", definition: next }).definition : null,
+              run,
+              signal,
+            );
+          else await run();
+        },
+      },
+      onApply: async (request, result, signal) => {
+        const run = async () => {
+          const job = beginOperation(signal);
+          const previous = {
+            request: markers.attributeSearch,
+            markerIds: markers.attributeMarkerIds,
+            shapeIds: markers.attributeShapeIds,
+            coloring,
+          };
+          let changedAttributes = false,
+            attemptedColors = false;
           try {
-            await commitColors(state, job);
             assertCurrent(job);
-            specification = next;
-            analysisLayer = markers.activeLayerId || layer.value;
+            let nextColors = result?.coloring || null;
+            if (!result && specification) {
+              const read = new AbortController();
+              controller = read;
+              const data = await evaluateMapAnalysis(
+                transport,
+                null,
+                specification,
+                layerIds(),
+                signal || read.signal,
+              );
+              assertCurrent(job);
+              nextColors = data.coloring;
+            }
+            attemptedColors = !!(nextColors || coloring || coloringPending);
+            await commitColors(nextColors, job);
+            assertCurrent(job);
+            changeAttributes(() => markers.setAttributeSearch(request, result));
+            changedAttributes = true;
+            await apply();
+            assertCurrent(job);
           } catch (error) {
             if (isCurrent(job, true)) {
+              if (changedAttributes)
+                changeAttributes(() => {
+                  markers.attributeSearch = previous.request;
+                  markers.attributeMarkerIds = previous.markerIds;
+                  markers.attributeShapeIds = previous.shapeIds;
+                  ++markers.attributeRevision;
+                  markers.refreshSearchResults(true);
+                });
               try {
-                await commitColors(previous, job, true, true);
+                if (attemptedColors) await commitColors(previous.coloring, job, true, true);
               } catch {
-                /* 元の反映エラーを表示する。 */
+                // 色の復旧が失敗しても、同じ範囲なら絞り込みの復旧は試みる。
+              }
+              if (changedAttributes && isCurrent(job, true)) {
+                try {
+                  await apply();
+                } catch {
+                  /* 元の反映エラーを表示して再試行を促す。 */
+                }
               }
             }
             throw error;
           } finally {
             finishOperation(job);
           }
-        },
-      },
-      onApply: async (request, result, signal) => {
-        const job = beginOperation(signal);
-        const previous = {
-          request: markers.attributeSearch,
-          markerIds: markers.attributeMarkerIds,
-          shapeIds: markers.attributeShapeIds,
-          coloring,
         };
-        let changedAttributes = false,
-          attemptedColors = false;
-        try {
-          assertCurrent(job);
-          let nextColors = result?.coloring || null;
-          if (!result && specification) {
-            const read = new AbortController();
-            controller = read;
-            const data = await evaluateMapAnalysis(
-              transport,
-              null,
-              specification,
-              layerIds(),
-              signal || read.signal,
-            );
-            assertCurrent(job);
-            nextColors = data.coloring;
-          }
-          attemptedColors = !!(nextColors || coloring || coloringPending);
-          await commitColors(nextColors, job);
-          assertCurrent(job);
-          changeAttributes(() => markers.setAttributeSearch(request, result));
-          changedAttributes = true;
-          await apply();
-          assertCurrent(job);
-        } catch (error) {
-          if (isCurrent(job, true)) {
-            if (changedAttributes)
-              changeAttributes(() => {
-                markers.attributeSearch = previous.request;
-                markers.attributeMarkerIds = previous.markerIds;
-                markers.attributeShapeIds = previous.shapeIds;
-                ++markers.attributeRevision;
-                markers.refreshSearchResults(true);
-              });
-            try {
-              if (attemptedColors) await commitColors(previous.coloring, job, true, true);
-            } catch {
-              // 色の復旧が失敗しても、同じ範囲なら絞り込みの復旧は試みる。
-            }
-            if (changedAttributes && isCurrent(job, true)) {
-              try {
-                await apply();
-              } catch {
-                /* 元の反映エラーを表示して再試行を促す。 */
-              }
-            }
-          }
-          throw error;
-        } finally {
-          finishOperation(job);
-        }
+        if (replaceAppliedCondition)
+          await replaceAppliedCondition(
+            "filter",
+            request
+              ? toV2PresetDraft({
+                  kind: "filter",
+                  definition: {
+                    common_form_id: request.common_form_id,
+                    conditions: request.conditions as unknown as Record<string, unknown>[],
+                  },
+                }).definition
+              : null,
+            run,
+            signal,
+          );
+        else await run();
       },
     });
   });
@@ -422,6 +483,7 @@ export function useMapAnalysisSearch(
   }
   const stops = (["marker", "shape"] as const).map((kind) =>
     (kind === "marker" ? markers : shapes).tableChanges.subscribe((change) => {
+      schedulePresetRefresh();
       if (
         accountInvalid ||
         change.type !== "record" ||
@@ -436,6 +498,32 @@ export function useMapAnalysisSearch(
       pending.set(key, { target_type: kind, id: change.id, version });
       queueMicrotask(() => void flush());
     }),
+  );
+  let presetRefreshQueued = false;
+  let refreshFields = false;
+  let lastPresetKey = presetKey();
+  function schedulePresetRefresh() {
+    if (presetRefreshQueued || disposed) return;
+    presetRefreshQueued = true;
+    queueMicrotask(() => {
+      presetRefreshQueued = false;
+      const key = presetKey();
+      if (!disposed && key !== lastPresetKey) {
+        lastPresetKey = key;
+        modal?.refreshPresetData(refreshFields);
+      }
+      refreshFields = false;
+    });
+  }
+  stops.push(
+    observeAiSuggestionDataChanges(
+      () => auth.accountId,
+      () => {
+        ++formRevision;
+        refreshFields = true;
+        schedulePresetRefresh();
+      },
+    ),
   );
   stops.push(
     watch(
@@ -467,18 +555,94 @@ export function useMapAnalysisSearch(
     modal?.dispose();
   });
   return {
+    presetContextKey: presetKey,
+    evaluatePreset: (definition: AiDefinition) => getPresetData().evaluate(definition),
+    async prepareManualReplacement(
+      kind: "filter" | "color" | "all",
+      signal: AbortSignal,
+      localPreset = false,
+    ): Promise<ManualConditionReplacement | undefined> {
+      const previous = {
+        request: markers.attributeSearch,
+        markerIds: markers.attributeMarkerIds,
+        shapeIds: markers.attributeShapeIds,
+        specification,
+        coloring,
+      };
+      const replaceFilter = kind !== "color" && !!previous.request;
+      const replaceColor = kind !== "filter" && !!previous.specification;
+      if (!replaceFilter && !replaceColor) return;
+      const job = beginOperation(signal);
+      try {
+        let next: AnswerColoring | null = null;
+        if (kind === "filter" && previous.specification) {
+          next = localPreset
+            ? getPresetData().evaluate(
+                toV2PresetDraft({
+                  kind: "coloring",
+                  definition: previous.specification,
+                }).definition,
+              ).coloring!
+            : (
+                await evaluateMapAnalysis(
+                  transport,
+                  null,
+                  previous.specification,
+                  layerIds(),
+                  signal,
+                )
+              ).coloring;
+        }
+        assertCurrent(job);
+        let replaced = false;
+        return {
+          coloring: next,
+          apply() {
+            assertCurrent(job);
+            replaced = true;
+            if (replaceFilter) changeAttributes(() => markers.setAttributeSearch(null, null));
+            if (replaceColor) specification = null;
+            coloring = next;
+            coloringActive.value = !!next;
+          },
+          restore() {
+            if (!replaced) return;
+            if (replaceFilter)
+              changeAttributes(() => {
+                markers.attributeSearch = previous.request;
+                markers.attributeMarkerIds = previous.markerIds;
+                markers.attributeShapeIds = previous.shapeIds;
+                ++markers.attributeRevision;
+                markers.refreshSearchResults(true);
+              });
+            if (replaceColor) specification = previous.specification;
+            coloring = previous.coloring;
+            coloringActive.value = !!coloring;
+          },
+          finish: () => finishOperation(job),
+        };
+      } catch (error) {
+        finishOperation(job);
+        throw error;
+      }
+    },
     openAdvancedSearch: () => {
       if (!accountInvalid) void modal?.open();
     },
     invalidateAccount,
-    recallSavedPreset: async (preset: AnySavedMapPreset) => {
+    preparePresetPage: async (presets: SavedMapPreset[], signal: AbortSignal) => {
+      if (!modal || disposed) throw Error("詳しい検索の準備ができていません。");
+      if (accountInvalid) throw Error(accountMessage);
+      await modal.preparePresetPage(presets, signal);
+    },
+    recallSavedPreset: async (preset: SavedMapPreset) => {
       if (!modal || disposed) throw Error("詳しい検索の準備ができていません。");
       if (accountInvalid) throw Error(accountMessage);
       await modal.recallPreset(preset);
     },
     closeAdvancedSearch: () => modal?.close(),
     resetAnalysis,
-    coloringActive,
+    coloringActive: computed(() => coloringActive.value || !!getRecalledColoring?.()),
     getAnalysisState: () => structuredClone({ specification, coloring }),
     restoreAnalysisState: async (state: {
       specification: AnswerColorSpecification | null;

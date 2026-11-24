@@ -58,7 +58,7 @@ it("保存条件の各HTTP操作に元のactorを送り、不一致後は取得�
   api.get.mockResolvedValue({ data: [] });
   api.post.mockResolvedValue({ data: {} });
   api.delete.mockResolvedValue({ data: null });
-  await modal.options.transport("/form-answers/map-presets?versions=1,2", undefined, signal);
+  await modal.options.transport("/form-answers/map-presets?versions=2", undefined, signal);
   await modal.options.transport("/form-answers/map-presets", { name: "編集済み" }, signal);
   await modal.options.transport("/form-answers/map-presets/saved-a", undefined, signal, "DELETE");
   for (const request of [api.get, api.post, api.delete]) {

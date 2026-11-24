@@ -2,12 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   cloneSavedMapPreset,
   describeMapPreset,
-  isAnySavedMapPreset,
   isSavedMapPreset,
-  type SavedAiMapPreset,
+  type SavedMapPreset,
 } from "../src/map/common/answer-map-presets";
 
-const compound = (): SavedAiMapPreset => ({
+const compound = (): SavedMapPreset => ({
   id: "saved-ai",
   name: "関連する設備",
   kind: "filter",
@@ -38,11 +37,11 @@ const compound = (): SavedAiMapPreset => ({
   },
 });
 
-describe("AI保存条件と旧形式の分離", () => {
-  it("旧v1判定を変えず新一覧で複合式を受け取り、条件を省略・再生成しない", () => {
+describe("保存済みv2条件の検証", () => {
+  it("v1を除外し、v2の複合式を保持する", () => {
     const preset = compound();
-    expect(isSavedMapPreset(preset)).toBe(false);
-    expect(isAnySavedMapPreset(preset)).toBe(true);
+    expect(isSavedMapPreset({ ...preset, schema_version: 1 })).toBe(false);
+    expect(isSavedMapPreset(preset)).toBe(true);
     const copied = cloneSavedMapPreset(preset);
     expect(copied).toEqual(preset);
     expect(copied.definition).not.toBe(preset.definition);
@@ -55,7 +54,7 @@ describe("AI保存条件と旧形式の分離", () => {
   });
 
   it("保存した色分けの全件分類を表示できる", () => {
-    const preset: SavedAiMapPreset = {
+    const preset: SavedMapPreset = {
       ...compound(),
       kind: "coloring",
       definition: {
@@ -64,7 +63,7 @@ describe("AI保存条件と旧形式の分離", () => {
         rules: [{ id: "all", label: "全件", color: "#123456", conditions: [] }],
       },
     };
-    expect(isAnySavedMapPreset(preset)).toBe(true);
+    expect(isSavedMapPreset(preset)).toBe(true);
     expect(describeMapPreset(preset)).toContain("全件：すべての対象");
   });
 
@@ -82,7 +81,7 @@ describe("AI保存条件と旧形式の分離", () => {
         },
       },
     ])
-      expect(isAnySavedMapPreset({ ...compound(), definition })).toBe(false);
-    expect(isAnySavedMapPreset({ ...compound(), kind: "coloring" })).toBe(false);
+      expect(isSavedMapPreset({ ...compound(), definition })).toBe(false);
+    expect(isSavedMapPreset({ ...compound(), kind: "coloring" })).toBe(false);
   });
 });

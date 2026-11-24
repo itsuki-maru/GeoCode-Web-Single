@@ -42,6 +42,39 @@ function setup(targets = ["marker:id", "shape:id", "marker:invalid"], bootstrap?
 }
 
 describe("dedicated answer map filter", () => {
+  it("選択レイヤーで保持する元データを返し、直前に非表示にした対象も含める", () => {
+    const s = setup(["marker:id", "shape:id", "marker:unloaded"], {
+      markers: { id: { id: "id", layer_id: "a", marker_name: "名称", detail: "元本文" } },
+      shapes: [{ id: "id", layer_id: "b", name: null, geojson: { properties: { memo: "メモ" } } }],
+    });
+    let layers = ["a", "b"];
+    Object.assign(s.runtime, { getSelectedLayerIds: () => layers });
+    s.send({ targets: ["shape:id"] });
+    const read = { type: "answer-map-preset-scope-request", scopeId: "1" };
+    s.send(read);
+    expect(s.post).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type: "answer-map-preset-scope",
+        targets: [
+          { key: "marker:id", name: "名称", detail: "元本文" },
+          { key: "shape:id", name: "", detail: "メモ" },
+        ],
+      }),
+      location.origin,
+    );
+    layers = ["a"];
+    s.handlers["overlayadd overlayremove"]();
+    expect(s.post).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: "answer-map-preset-scope-changed" }),
+      location.origin,
+    );
+    s.send(read);
+    expect(s.post).toHaveBeenLastCalledWith(
+      expect.objectContaining({ targets: [{ key: "marker:id", name: "名称", detail: "元本文" }] }),
+      location.origin,
+    );
+    s.handlers.unload();
+  });
   it("背景切替中の印刷要求を待ち、待機中に絞り込みが変わった場合は古い要求を拒否する", async () => {
     let ready!: () => void;
     const waiting = new Promise<void>((resolve) => {

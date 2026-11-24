@@ -1,6 +1,8 @@
 import { escapeHtml } from "./marker";
 import { releaseDeferredDetails, disposeMapContent, registerProgressiveHtml } from "./content";
-import { installMarkerPopupHeightLimit, updatePopupLayout } from "./popup-layout";
+import { installDesktopPopupHeightLimit, updatePopupLayout } from "./popup-layout";
+import { createGoogleMapLink, googleMapLocationUrl } from "./google-map-link";
+import { validPoint } from "./route-result";
 
 export interface PopupBody {
   body?: string;
@@ -10,6 +12,7 @@ export interface PopupBody {
 }
 export type PopupBodies = Record<string, PopupBody>;
 type Content = { kind: "marker" | "shape"; id: string; name: string; body: string };
+type RoutePosition = { lat: number; lng: number };
 type MarkdownReferences = Record<string, { href: string; title: string | null }>;
 type RenderMarkdown = (markdown: string, links?: MarkdownReferences) => string;
 interface Options {
@@ -25,8 +28,17 @@ interface Options {
   snapshot?: PopupBodies;
   analysis?: Record<string, string>;
   answerMap?: boolean;
-  limitMarkerHeight?: boolean;
+  desktopHeightLimit?: "marker" | "all";
+  showGoogleMapLink?: boolean;
+  routeSearch?: {
+    isAvailable(): boolean;
+    search(destination: RoutePosition, onLocationError: (message: string) => void): void;
+    cancelPending(): void;
+  };
+  getMarkerRecord?(id: string): { latitude: number; longitude: number } | undefined;
 }
+
+const routeAvailabilityEvents = ["basemapstatechange", "googleroutesavailabilitychange"];
 
 export function isPopupBody(value: any): value is PopupBody {
   return (
@@ -38,10 +50,20 @@ export function isPopupBody(value: any): value is PopupBody {
   );
 }
 
-// 所有者用の五つの地図ページでのみ設定する。内容はページに既存の Markdown サニタイザーで描画し、
-// ツールバーはユーザーの Markdown の外側に構築する。
+// 本文はページの Markdown レンダラーで描画し、操作欄はユーザーの Markdown の外側に構築する。
 export function createPopupContentRuntime(options: Options) {
-  if (options.limitMarkerHeight) installMarkerPopupHeightLimit(options.map);
+  if (options.desktopHeightLimit) installDesktopPopupHeightLimit(options.map);
+  const canSwitchContent = options.snapshot !== undefined || Boolean(options.loadBody);
+  const contentControls = canSwitchContent
+    ? `<label>表示内容<select aria-label="表示内容">
+        <option value="free" disabled>自由入力の内容</option>
+        <option value="answers" disabled>フォームからの登録</option>
+        <option value="normal" selected>通常表示</option>
+      </select></label>`
+    : "";
+  const printModeLabel = canSwitchContent
+    ? '<span class="popup-content-print-label">通常表示</span>'
+    : "";
   const contents = new Map<string, Content & { html: string }>();
   const analysis = new Map<string, string>(Object.entries(options.analysis || {}));
   const cache = new Map<string, { body: string; pending: Promise<PopupBody> }>();
@@ -53,12 +75,12 @@ export function createPopupContentRuntime(options: Options) {
     const previous = contents.get(key);
     if (previous?.body === content.body && previous.name === content.name) return previous.html;
     if (previous) releaseDeferredDetails(previous.html);
-    const html = `<div class="geocode-content-popup" data-content-key="${escapeHtml(key)}">
-      <div class="popup-content-toolbar"><label>表示内容<select aria-label="表示内容">
-        <option value="free" disabled>自由入力の内容</option>
-        <option value="answers" disabled>フォームからの登録</option>
-        <option value="normal" selected>通常表示</option>
-      </select></label></div><span class="popup-content-print-label">通常表示</span>
+    const heightClass =
+      options.desktopHeightLimit === "all" || options.desktopHeightLimit === content.kind
+        ? " popup-content-height-limited"
+        : "";
+    const html = `<div class="geocode-content-popup${heightClass}" data-content-key="${escapeHtml(key)}">
+      <div class="popup-content-toolbar">${contentControls}</div>${printModeLabel}
       <div class="popup-content-analysis"></div>
       <h1 class="popup-content-title">${escapeHtml(content.name)}</h1>
       <p class="popup-content-note" role="status"></p>
@@ -76,20 +98,79 @@ export function createPopupContentRuntime(options: Options) {
     const content = contents.get(key);
     if (!content) return;
     if (sessions.has(root)) return;
-    const select = root.querySelector<HTMLSelectElement>("select")!;
     const note = root.querySelector<HTMLElement>(".popup-content-note")!;
     const body = root.querySelector<HTMLElement>(".popup-content-body")!;
-    const printLabel = root.querySelector<HTMLElement>(".popup-content-print-label")!;
+    const printLabel = root.querySelector<HTMLElement>(".popup-content-print-label");
     const analysisElement = root.querySelector<HTMLElement>(".popup-content-analysis")!;
     const normalBodyHtml = body.innerHTML;
     const toolbar = root.querySelector(".popup-content-toolbar")!;
+    const select = toolbar.querySelector<HTMLSelectElement>("select");
     const toolbarEvents = ["click", "dblclick", "mousedown", "pointerdown", "touchstart", "wheel"];
     let displayedMode = "normal";
     let transientHtml = "";
     let analysisHtml = "";
+    let disposeRouteAction: (() => void) | undefined;
+    let googleMapLink: HTMLAnchorElement | undefined;
+    const mobile = root.ownerDocument.body.classList.contains("map-mobile-controls");
+    const mapContainer =
+      mobile && (options.routeSearch || options.showGoogleMapLink)
+        ? options.map.getContainer?.()
+        : undefined;
+    const oldPaddingTopLeft = popup.options?.autoPanPaddingTopLeft;
+    const oldPaddingBottomRight = popup.options?.autoPanPaddingBottomRight;
+    let actionTopPadding: number | undefined;
+    const restoreActionPadding = () => {
+      if (actionTopPadding === undefined) return;
+      popup.options.autoPanPaddingTopLeft = oldPaddingTopLeft;
+      popup.options.autoPanPaddingBottomRight = oldPaddingBottomRight;
+      actionTopPadding = undefined;
+      root.classList.remove("popup-content-overlaps-controls");
+    };
+    const updateActionPadding = () => {
+      if (!mapContainer || !popup.options) return false;
+      if (!googleMapLink && !toolbar.classList.contains("popup-content-toolbar-route")) {
+        const changed = actionTopPadding !== undefined;
+        restoreActionPadding();
+        return changed;
+      }
+      const mapBounds = mapContainer.getBoundingClientRect();
+      // visibility:hidden でも操作群の高さを保持し、余裕ができたときに復帰できる。
+      const controlsBottom = Math.max(
+        0,
+        ...Array.from(
+          mapContainer.querySelectorAll(".leaflet-top"),
+          (corner) => corner.getBoundingClientRect().bottom - mapBounds.top,
+        ),
+      );
+      const popupElement: HTMLElement = popup.getElement();
+      const marginBottom = parseFloat(getComputedStyle(popupElement).marginBottom) || 0;
+      const popupHeight = popupElement.offsetHeight + marginBottom;
+      const bottomPadding = 45;
+      const controlsPadding = Math.max(10, controlsBottom + 8);
+      // 本文を読める高さを確保し、操作群と同時に収まらない場合だけ操作群を隠す。
+      const overlapsControls = controlsPadding + popupHeight + bottomPadding > mapBounds.height;
+      const topPadding = overlapsControls ? 10 : controlsPadding;
+      root.classList.toggle("popup-content-overlaps-controls", overlapsControls);
+      if (actionTopPadding === topPadding) return false;
+      actionTopPadding = topPadding;
+      popup.options.autoPanPaddingTopLeft = [10, topPadding];
+      popup.options.autoPanPaddingBottomRight = [10, bottomPadding];
+      return true;
+    };
+    const update = () => {
+      updatePopupLayout(popup, root, { force: updateActionPadding() });
+    };
+    const onResize = () => {
+      updateActionPadding();
+      updatePopupLayout(popup, root, { force: true });
+    };
     const session = {
       dispose: () => {
-        select.onchange = null;
+        if (select) select.onchange = null;
+        disposeRouteAction?.();
+        googleMapLink?.remove();
+        restoreActionPadding();
+        if (mapContainer) options.map.off?.("resize", onResize);
         for (const type of toolbarEvents) toolbar.removeEventListener(type, stopToolbarEvent);
         root.removeEventListener("geocode:contentchange", update);
         disposeMapContent(root);
@@ -102,19 +183,91 @@ export function createPopupContentRuntime(options: Options) {
     };
     sessions.set(root, session);
     activeSessions.add(session);
-    const update = () => {
-      updatePopupLayout(popup, root);
+    // 図形はポップアップを開いた地点、マーカーは操作時点の登録座標を使う。
+    const anchor: RoutePosition | undefined =
+      content.kind === "shape" ? popup.getLatLng?.() : undefined;
+    const shapeDestination = anchor ? { lat: anchor.lat, lng: anchor.lng } : undefined;
+    const getDestination = (): RoutePosition | undefined => {
+      const marker = content.kind === "marker" ? options.getMarkerRecord?.(content.id) : undefined;
+      const point = marker ? { lat: marker.latitude, lng: marker.longitude } : shapeDestination;
+      return point && validPoint(point) ? point : undefined;
     };
+    const linkDestination = options.showGoogleMapLink ? getDestination() : undefined;
+    if (linkDestination) {
+      const link = createGoogleMapLink(root.ownerDocument);
+      link.className = "popup-content-google-link";
+      link.href = googleMapLocationUrl(linkDestination);
+      link.addEventListener("click", (click) => {
+        const point = getDestination();
+        if (point) link.href = googleMapLocationUrl(point);
+        else {
+          click.preventDefault();
+          link.remove();
+          googleMapLink = undefined;
+          update();
+        }
+      });
+      for (const type of toolbarEvents) link.addEventListener(type, stopToolbarEvent);
+      googleMapLink = link;
+      toolbar.after(link);
+    }
+    if (options.routeSearch) {
+      const routeSearch = options.routeSearch;
+      const routeButton = root.ownerDocument.createElement("button");
+      routeButton.type = "button";
+      routeButton.className = "popup-content-route-button";
+      routeButton.textContent = "この場所への経路";
+      routeButton.hidden = !routeSearch.isAvailable() || !getDestination();
+      toolbar.classList.toggle("popup-content-toolbar-route", !routeButton.hidden);
+      toolbar.append(routeButton);
+      const routeNote = root.ownerDocument.createElement("p");
+      routeNote.className = "popup-content-route-note";
+      routeNote.setAttribute("role", "status");
+      toolbar.after(routeNote);
+      let startedSearch = false;
+      const refreshRouteAction = () => {
+        const hide = !routeSearch.isAvailable() || !getDestination();
+        if (routeButton.hidden === hide) return;
+        routeButton.hidden = hide;
+        toolbar.classList.toggle("popup-content-toolbar-route", !hide);
+        if (hide) routeNote.textContent = "";
+        update();
+      };
+      routeButton.onclick = () => {
+        const destination = getDestination();
+        if (!destination || !routeSearch.isAvailable()) return;
+        if (routeNote.textContent) {
+          routeNote.textContent = "";
+          update();
+        }
+        startedSearch = true;
+        routeSearch.search(destination, (message) => {
+          if (sessions.get(root) !== session || routeButton.hidden) return;
+          routeNote.textContent = message;
+          update();
+        });
+      };
+      for (const event of routeAvailabilityEvents) options.map.on(event, refreshRouteAction);
+      disposeRouteAction = () => {
+        routeButton.onclick = null;
+        for (const event of routeAvailabilityEvents) options.map.off?.(event, refreshRouteAction);
+        if (startedSearch) routeSearch.cancelPending();
+      };
+    }
+    updateActionPadding();
+    if (mapContainer) options.map.on("resize", onResize);
     root.addEventListener("geocode:contentchange", update);
-    select.value = "normal";
-    for (const option of Array.from(select.options)) option.disabled = option.value !== "normal";
     const analysisContent = analysis.get(key) || "";
     analysisHtml = analysisContent
       ? registerProgressiveHtml(analysisContent, options.sanitizeHtml)
       : "";
     analysisElement.innerHTML = analysisHtml;
-    printLabel.textContent = "通常表示";
-    note.textContent = "表示内容を確認しています…";
+    if (select && printLabel) {
+      select.value = "normal";
+      for (const option of Array.from(select.options)) option.disabled = option.value !== "normal";
+      printLabel.textContent = "通常表示";
+      note.textContent = "表示内容を確認しています…";
+    }
     // キーボードのフォーカスを閉じ込めず、選択欄の操作中に地図がドラッグやズームされることを防ぐ。
     for (const type of toolbarEvents) toolbar.addEventListener(type, stopToolbarEvent);
     // 最初の画像の一括読み込みで、ポップアップのレイアウトが同期的に更新される場合がある。
@@ -122,6 +275,7 @@ export function createPopupContentRuntime(options: Options) {
     if (popup.setContent) popup.setContent(root);
     else update();
     options.setupImages(root, options.renderMarkdown);
+    if (!select || !printLabel) return;
     try {
       let info: PopupBody;
       if (options.snapshot !== undefined) {

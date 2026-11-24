@@ -1,6 +1,7 @@
 import { isAnswerColoring } from "../answer-coloring";
 import { getFallbackTileServerId } from "../common/basemap-definition";
 import type { PrintMapState } from "../common/print-state";
+import { isRoutePrintState, type RoutePrintState } from "../common/route-result";
 import {
   isStoredShareMapSnapshot,
   legacyBasemapFields,
@@ -18,6 +19,7 @@ export interface ReadOnlyPrintSnapshot extends ShareMapSnapshot {
   sourcePage: ReadOnlyPrintSourcePage;
   snapshotShare?: boolean;
   fallbackTileServerId?: string;
+  route?: RoutePrintState;
   shapes: ShapeRecord[];
 }
 
@@ -29,6 +31,7 @@ export interface ReadOnlyPrintSource extends Pick<
   | "sourcePage"
   | "snapshotShare"
   | "fallbackTileServerId"
+  | "route"
   | "markers"
   | "shapes"
   | "tileServers"
@@ -43,6 +46,7 @@ const snapshotFields = [
   "sourcePage",
   "snapshotShare",
   "fallbackTileServerId",
+  "route",
   "state",
   "layers",
   "markers",
@@ -200,6 +204,14 @@ function hasValidFields(value: unknown): value is ReadOnlyPrintSnapshot {
     return false;
 
   const { state, layers, markers, shapes, tileServers, tileOverlays } = value;
+  if (
+    value.route !== undefined &&
+    (value.sourcePage !== "map-anather" ||
+      !isRoutePrintState(value.route) ||
+      String(value.route.backgroundId) !== state.tileServerId ||
+      tileServers[state.tileServerId]?.provider !== "google")
+  )
+    return false;
   const markerIds = Object.keys(markers);
   const layerIds = Object.keys(layers);
   if (
@@ -351,6 +363,7 @@ export function createReadOnlyPrintSnapshot(
     sourcePage: source.sourcePage,
     snapshotShare: source.snapshotShare,
     fallbackTileServerId: source.fallbackTileServerId,
+    route: source.route,
     layers,
     markers,
     shapes,
