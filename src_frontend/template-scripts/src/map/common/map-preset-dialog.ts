@@ -2,19 +2,24 @@ import { action, node } from "./coloring-editor";
 import { createMapMessageDialog } from "./map-message-dialog";
 import { renderMapPresetsTable } from "./map-presets-table";
 import {
-  cloneAnyPresetDraft,
+  toV2PresetDraft,
   cloneSavedMapPreset,
-  isAnySavedMapPreset,
+  isSavedMapPreset,
   type AnyMapPresetDraft,
-  type AnySavedMapPreset,
+  type SavedMapPreset,
 } from "./answer-map-presets";
 import type { AttributeTransport } from "./advanced-map-search";
+import { mapOperationMessages } from "./map-analysis";
 import { createProgressDialog, awaitWithAbort } from "./progress-spinner";
 
 export function createMapPresetDialogs(
   transport: AttributeTransport,
-  restore: (preset: AnySavedMapPreset, signal: AbortSignal) => Promise<void>,
-  options: { filterOnly?: boolean } = {},
+  restore: (preset: SavedMapPreset, signal: AbortSignal) => Promise<void>,
+  options: {
+    filterOnly?: boolean;
+    apply?(preset: SavedMapPreset, signal: AbortSignal): Promise<void>;
+    preparePage?(items: SavedMapPreset[], signal: AbortSignal): Promise<void>;
+  } = {},
 ) {
   const noticeDialog = createMapMessageDialog(() => syncBusy());
   const dialog = node("dialog"),
@@ -31,9 +36,10 @@ export function createMapPresetDialogs(
     busy = false,
     lockClose = false,
     previous: HTMLElement | null = null;
-  let items: AnySavedMapPreset[] = [],
+  let items: SavedMapPreset[] = [],
     total = 0,
     page = 1;
+  let preparation: AbortController | undefined;
   const endpoint = "/form-answers/map-presets";
   const button = (text: string, run: () => void, disabled = false) => {
     const b = action(text, run);
@@ -59,6 +65,7 @@ export function createMapPresetDialogs(
   const close = () => {
     ++seq;
     controller?.abort();
+    preparation?.abort();
     busy = false;
     lockClose = false;
     if (confirmation.open) confirmation.close();
@@ -111,28 +118,43 @@ export function createMapPresetDialogs(
     previous = document.activeElement as HTMLElement;
     dialog.classList.toggle("is-save", mode === "save");
     dialog.setAttribute("aria-label", title);
-    dialog.replaceChildren(node("h2", title));
+    const heading = node("h2", title);
+    if (mode === "list") {
+      const header = node("header");
+      header.className = "preset-list-header";
+      header.append(heading, button("閉じる", dismiss));
+      dialog.replaceChildren(header);
+    } else {
+      dialog.replaceChildren(heading);
+    }
     dialog.showModal();
   };
   const request = async (
     fn: (signal: AbortSignal) => Promise<void>,
     message = "読み込み中…",
-    preventClose = false,
-    useSpinner = false,
+    settings: {
+      preventClose?: boolean;
+      useSpinner?: boolean;
+      timeout?: number;
+      restoreFocus?: () => void;
+    } = {},
   ) => {
     if (busy) return;
     const current = ++seq;
     busy = true;
-    lockClose = preventClose;
+    lockClose = !!settings.preventClose;
     controller = new AbortController();
     const signal = controller.signal,
-      timer = setTimeout(() => controller?.signal === signal && controller.abort(), 60000);
-    dialog.querySelector("[role=alert]")?.remove();
+      timer = setTimeout(
+        () => controller?.signal === signal && controller.abort(),
+        settings.timeout ?? 60000,
+      );
+    dialog.querySelector(".preset-error")?.remove();
     const progress = node("p", message);
     progress.setAttribute("role", "status");
     dialog.insertBefore(progress, dialog.querySelector(".table-scroll"));
     syncBusy();
-    const finishProgress = useSpinner ? progressDialog.show(message) : () => {};
+    const finishProgress = settings.useSpinner ? progressDialog.show(message) : () => {};
     try {
       await awaitWithAbort(fn(signal), signal);
     } catch (e) {
@@ -151,31 +173,65 @@ export function createMapPresetDialogs(
         busy = false;
         lockClose = false;
         syncBusy();
+        if (!notice.open) settings.restoreFocus?.();
       }
     }
   };
   const load = async (requestedPage: number, signal: AbortSignal) => {
     const current = seq;
-    const data = (await transport(
-      `${endpoint}?page=${requestedPage}&page_size=20&versions=1,2`,
-      undefined,
-      signal,
-    )) as { items: AnySavedMapPreset[]; total: number };
-    if (!dialog.open || signal.aborted || current !== seq) return;
-    if (
-      !data ||
-      !Array.isArray(data.items) ||
-      !data.items.every(isAnySavedMapPreset) ||
-      !Number.isSafeInteger(data.total) ||
-      data.total < 0
-    )
-      throw Error("保存条件を確認できませんでした。");
-    items = data.items;
-    total = data.total;
+    const previous = preparation;
+    previous?.abort();
+    dialog.querySelector(".preset-preparation")?.remove();
+    try {
+      const data = (await awaitWithAbort(
+        transport(`${endpoint}?page=${requestedPage}&page_size=20&versions=2`, undefined, signal),
+        signal,
+      )) as { items: SavedMapPreset[]; total: number };
+      if (!dialog.open || signal.aborted || current !== seq) return;
+      if (
+        !data ||
+        !Array.isArray(data.items) ||
+        !data.items.every(isSavedMapPreset) ||
+        !Number.isSafeInteger(data.total) ||
+        data.total < 0
+      )
+        throw Error("保存条件を確認できませんでした。");
+      items = data.items;
+      total = data.total;
+    } catch (error) {
+      // 前の一覧が引き続き表示される場合、そのページの行をそのまま呼び出せるようにする。
+      if (previous && preparation === previous && current === seq && dialog.open)
+        startPreparation();
+      const reason =
+        error instanceof Error ? error.message : "保存した検索条件を取得できませんでした。";
+      throw Error(`${reason} 一覧を閉じて開き直してください。`);
+    }
     page = requestedPage;
     renderList();
+    startPreparation();
   };
-  const confirmDelete = (preset: AnySavedMapPreset) => {
+  function startPreparation() {
+    preparation?.abort();
+    dialog.querySelector(".preset-preparation")?.remove();
+    const eligible = items.filter((preset) => !options.filterOnly || preset.kind === "filter");
+    if (!eligible.length || !options.preparePage) return;
+    const job = new AbortController();
+    preparation = job;
+    const status = node("p", "地図への適用に必要なデータを準備しています…");
+    status.className = "preset-preparation";
+    status.setAttribute("role", "status");
+    dialog.querySelector(".table-scroll")?.before(status);
+    void options.preparePage(eligible, job.signal).then(
+      () => status.remove(),
+      () => {
+        if (!job.signal.aborted && status.isConnected) {
+          status.textContent = "一部の条件を準備できませんでした。一覧を閉じて開き直してください。";
+          status.setAttribute("role", "alert");
+        }
+      },
+    );
+  }
+  const confirmDelete = (preset: SavedMapPreset) => {
     const message = node("p");
     message.className = "preset-confirm-message";
     message.append(node("strong", "削除しますか？"));
@@ -203,7 +259,7 @@ export function createMapPresetDialogs(
               await load(items.length === 1 ? Math.max(1, page - 1) : page, signal);
             },
             "削除しています…",
-            true,
+            { preventClose: true },
           ),
       ),
     );
@@ -211,22 +267,42 @@ export function createMapPresetDialogs(
     confirmation.showModal();
     syncBusy();
   };
+  function applyPreset(preset: SavedMapPreset) {
+    const apply = options.apply;
+    if (!apply) return;
+    const selected = [...dialog.querySelectorAll<HTMLButtonElement>("[data-preset-apply-id]")].find(
+      (button) => button.dataset.presetApplyId === preset.id,
+    );
+    const restoreFocus = () => {
+      if (dialog.open && selected?.isConnected && !selected.disabled) selected.focus();
+    };
+    void request(
+      async (signal) => {
+        await apply(cloneSavedMapPreset(preset), signal);
+        if (!signal.aborted && dialog.open) {
+          progressDialog.clear();
+          noticeDialog.show(
+            mapOperationMessages[preset.kind],
+            preset.kind === "filter" ? "絞り込み完了" : "色分け完了",
+            restoreFocus,
+          );
+        }
+      },
+      "条件を地図へ反映しています",
+      { preventClose: true, useSpinner: true, timeout: 180000, restoreFocus },
+    );
+  }
   function renderList() {
-    dialog.replaceChildren(node("h2", "保存した検索条件"));
+    for (const child of [...dialog.children].slice(1)) child.remove();
     if (options.filterOnly)
       dialog.append(
         node(
           "p",
-          "この画面では絞り込み条件のみ呼び出せます。色分け条件は色分けに対応した画面で呼び出してください。",
+          options.apply
+            ? "この画面では絞り込み条件のみ呼び出し・適用できます。色分け条件は対応した画面で操作してください。"
+            : "この画面では絞り込み条件のみ呼び出せます。色分け条件は色分けに対応した画面で呼び出してください。",
         ),
       );
-    const toolbar = node("div");
-    toolbar.className = "preset-toolbar";
-    toolbar.append(
-      node("span", `${total}件`),
-      button("再読み込み", () => void request((signal) => load(page, signal))),
-    );
-    dialog.append(toolbar);
     if (items.length) {
       const table = node("div");
       renderMapPresetsTable(table, {
@@ -250,9 +326,13 @@ export function createMapPresetDialogs(
               }
             },
             "検索条件を呼び出しています…",
-            true,
-            true,
+            { preventClose: true, useSpinner: true },
           ),
+        apply: options.apply ? applyPreset : undefined,
+        applyDisabledReason: (preset) =>
+          options.filterOnly && preset.kind === "coloring"
+            ? "この画面では色分け条件を適用できません"
+            : undefined,
         remove: confirmDelete,
       });
       dialog.append(table);
@@ -269,16 +349,11 @@ export function createMapPresetDialogs(
       );
       dialog.append(nav);
     }
-    const actions = node("div");
-    actions.className = "preset-actions";
-    actions.append(button("閉じる", dismiss));
-    dialog.append(actions);
     syncBusy();
   }
   return {
     save(value: AnyMapPresetDraft) {
-      const draft = cloneAnyPresetDraft(value);
-      const version = "schema_version" in draft ? draft.schema_version : 1;
+      const draft = toV2PresetDraft(value);
       open("検索条件を保存", "save");
       const label = node("label", "条件名"),
         input = node("input");
@@ -297,21 +372,13 @@ export function createMapPresetDialogs(
                 const name = input.value.trim();
                 if (!name || [...name].length > 100)
                   throw Error("条件名を1〜100文字で入力してください。");
-                const data = await transport(
-                  endpoint,
-                  { ...draft, name, schema_version: version },
-                  signal,
-                );
-                if (
-                  !isAnySavedMapPreset(data) ||
-                  data.schema_version !== version ||
-                  data.kind !== draft.kind
-                )
+                const data = await transport(endpoint, { ...draft, name }, signal);
+                if (!isSavedMapPreset(data) || data.kind !== draft.kind)
                   throw Error("保存結果を確認できませんでした。");
                 if (!signal.aborted) close();
               },
               "保存しています…",
-              true,
+              { preventClose: true },
             ),
         ),
       );
@@ -325,6 +392,11 @@ export function createMapPresetDialogs(
       page = 1;
       renderList();
       void request((signal) => load(1, signal));
+    },
+    refreshPreparation() {
+      if (!dialog.open || dialog.classList.contains("is-save") || !items.length) return false;
+      startPreparation();
+      return true;
     },
     close,
     dispose() {

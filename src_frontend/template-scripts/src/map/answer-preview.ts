@@ -69,6 +69,7 @@ export function finishAnswerPreview(
   window.parent.postMessage(
     {
       type: "answer-map-ready",
+      accountId: bootstrap.tileVisibilityAccountId,
       requestId: preview.requestId,
       answerCount: preview.answerCount,
       targetCount: preview.targetCount,

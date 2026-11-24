@@ -24,6 +24,43 @@ interface LocationMap {
   setView(latLng: object, zoom: number): void;
 }
 
+export const USER_LOCATION_MAX_AGE_MS = 60_000;
+const recentUserLocations = new WeakMap<object, { lat: number; lng: number; timestamp: number }>();
+
+function isRecentLocation(timestamp: number): boolean {
+  const age = Date.now() - timestamp;
+  return Number.isFinite(timestamp) && age >= 0 && age <= USER_LOCATION_MAX_AGE_MS;
+}
+
+export function rememberUserLocation(map: object, position: GeolocationPosition): void {
+  const { latitude, longitude } = position.coords;
+  const { timestamp } = position;
+  if (
+    Number.isFinite(latitude) &&
+    Math.abs(latitude) <= 90 &&
+    Number.isFinite(longitude) &&
+    Math.abs(longitude) <= 180 &&
+    isRecentLocation(timestamp) &&
+    timestamp >= (recentUserLocations.get(map)?.timestamp ?? 0)
+  ) {
+    recentUserLocations.set(map, { lat: latitude, lng: longitude, timestamp });
+  }
+}
+
+export function clearRecentUserLocation(map: object): void {
+  recentUserLocations.delete(map);
+}
+
+export function getRecentUserLocation(map: object): { lat: number; lng: number } | undefined {
+  const position = recentUserLocations.get(map);
+  if (!position) return;
+  if (!isRecentLocation(position.timestamp)) {
+    clearRecentUserLocation(map);
+    return;
+  }
+  return { lat: position.lat, lng: position.lng };
+}
+
 interface FallbackMarker {
   getElement(): HTMLElement | null;
   on(eventName: string, listener: () => void): void;
@@ -118,6 +155,7 @@ export function initializeUserLocation(
   let shouldCenterOnNextUpdate = options.centerOnInitialPosition === true;
   let hasShownError = false;
   let shouldNotifyError = false;
+  let disposed = false;
 
   const cancelInitialCenter = (): void => {
     shouldCenterOnNextUpdate = false;
@@ -130,6 +168,8 @@ export function initializeUserLocation(
   };
 
   const renderUserLocation = (position: GeolocationPosition): void => {
+    if (disposed) return;
+    rememberUserLocation(map, position);
     const { latitude, longitude, accuracy = 0 } = position.coords;
     const latLng = new leaflet.LatLng(latitude, longitude);
     latestUserLatLng = latLng;
@@ -192,6 +232,8 @@ export function initializeUserLocation(
   };
 
   const handleUserLocationError = (error: GeolocationPositionError): void => {
+    if (disposed) return;
+    if (error.code === 1) clearRecentUserLocation(map);
     if (shouldNotifyError && hasShownError) return;
     finishInitialCenter();
     shouldCenterOnNextUpdate = false;
@@ -209,7 +251,7 @@ export function initializeUserLocation(
   };
 
   const startUserLocationWatch = (): void => {
-    if (userLocationWatchId !== null) return;
+    if (disposed || userLocationWatchId !== null) return;
     userLocationWatchId = geolocation.watchPosition(renderUserLocation, handleUserLocationError, {
       enableHighAccuracy: true,
       maximumAge: 5000,
@@ -247,14 +289,21 @@ export function initializeUserLocation(
     },
   });
 
-  map.addControl(new UserLocationControl());
-  startUserLocationWatch();
-  window.addEventListener("beforeunload", () => {
+  const dispose = () => {
+    disposed = true;
+    clearRecentUserLocation(map);
+    map.off("unload", dispose);
+    window.removeEventListener("beforeunload", dispose);
+    finishInitialCenter();
     if (userLocationWatchId !== null) {
       geolocation.clearWatch(userLocationWatchId);
       userLocationWatchId = null;
     }
-  });
+  };
+  map.addControl(new UserLocationControl());
+  map.on("unload", dispose);
+  window.addEventListener("beforeunload", dispose);
+  startUserLocationWatch();
   return userLocationLayer;
 }
 

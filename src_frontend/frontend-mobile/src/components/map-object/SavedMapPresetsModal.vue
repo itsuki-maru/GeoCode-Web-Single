@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import BaseModal from "@/components/common/BaseModal.vue";
 import MessageModal from "@/components/common/MessageModal.vue";
 import ProgressSpinner from "@/components/common/ProgressSpinner.vue";
@@ -7,19 +7,35 @@ import apiClient from "@/axiosClient";
 import "./form-modal-buttons.css";
 import MapPresetsTable from "./MapPresetsTable.vue";
 import {
-  clonePresetDraft,
+  cloneSavedMapPreset,
+  describeMapPreset,
   isSavedMapPreset,
   mapPresetError,
-  type MapPresetPage,
   type SavedMapPreset,
+  type MapPresetPage,
 } from "@/utils/answer-map-presets";
 
 const props = withDefaults(
-  defineProps<{ isOpen: boolean; endpoint: string; restoring?: boolean; restoreError?: string }>(),
+  defineProps<{
+    isOpen: boolean;
+    endpoint: string;
+    restoring?: boolean;
+    restoreError?: string;
+    applying?: boolean;
+    applyError?: string;
+    applyComplete?: string;
+    preparationFailures?: string[];
+  }>(),
   { restoring: false, restoreError: "" },
 );
-const emit = defineEmits<{ close: []; restore: [preset: SavedMapPreset] }>();
-const items = ref<SavedMapPreset[]>([]),
+const emit = defineEmits<{
+  close: [];
+  restore: [preset: SavedMapPreset];
+  apply: [preset: SavedMapPreset];
+  dismissApplyComplete: [];
+  pageItems: [items: SavedMapPreset[]];
+}>();
+const items = shallowRef<SavedMapPreset[]>([]),
   total = ref(0),
   page = ref(1);
 const pageSize = 20;
@@ -28,10 +44,29 @@ const loading = ref(false),
   error = ref("");
 const deleting = ref<SavedMapPreset | null>(null);
 const restoreComplete = ref(false);
+const selection = shallowRef<SavedMapPreset | null>(null);
+const list = ref<HTMLElement | null>(null);
+const applyMessage = ref<InstanceType<typeof MessageModal> | null>(null);
+let appliedRowId = "";
 let restoreRequested = false;
 const pages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)));
 const disabled = computed(
-  () => loading.value || busy.value || props.restoring || restoreComplete.value,
+  () =>
+    loading.value ||
+    busy.value ||
+    props.restoring ||
+    props.applying ||
+    restoreComplete.value ||
+    !!props.applyComplete,
+);
+const closeBlocked = computed(
+  () =>
+    busy.value ||
+    props.restoring ||
+    props.applying ||
+    !!deleting.value ||
+    restoreComplete.value ||
+    !!props.applyComplete,
 );
 let epoch = 0,
   request = 0;
@@ -39,7 +74,7 @@ let controller: AbortController | undefined;
 let previousFocus: HTMLElement | null = null;
 
 const close = () => {
-  if (!busy.value && !props.restoring && !deleting.value && !restoreComplete.value) emit("close");
+  if (!closeBlocked.value) emit("close");
 };
 const load = async (requestedPage: number) => {
   const currentEpoch = epoch,
@@ -48,10 +83,12 @@ const load = async (requestedPage: number) => {
   controller = new AbortController();
   loading.value = true;
   error.value = "";
+  items.value = [];
+  emit("pageItems", []);
   try {
     const data: MapPresetPage = (
       await apiClient.get(props.endpoint, {
-        params: { page: requestedPage, page_size: pageSize },
+        params: { page: requestedPage, page_size: pageSize, versions: "2" },
         signal: controller.signal,
         timeout: 60000,
       })
@@ -70,12 +107,12 @@ const load = async (requestedPage: number) => {
     items.value = data.items;
     total.value = data.total;
     page.value = requestedPage;
+    emit("pageItems", data.items);
   } catch (cause) {
-    if (props.isOpen && currentEpoch === epoch && currentRequest === request)
-      error.value = mapPresetError(
-        cause,
-        "保存した検索条件を取得できませんでした。再読み込みしてください。",
-      );
+    if (props.isOpen && currentEpoch === epoch && currentRequest === request) {
+      const reason = mapPresetError(cause, "保存した検索条件を取得できませんでした。");
+      error.value = `${reason} 一覧を閉じて開き直してください。`;
+    }
   } finally {
     if (currentEpoch === epoch && currentRequest === request) loading.value = false;
   }
@@ -92,6 +129,8 @@ watch(
     deleting.value = null;
     restoreComplete.value = false;
     restoreRequested = false;
+    appliedRowId = "";
+    selection.value = null;
     error.value = "";
     if (!open) {
       await nextTick();
@@ -111,8 +150,29 @@ const restore = (preset: SavedMapPreset) => {
   if (disabled.value || deleting.value) return;
   // 編集画面には別のオブジェクトを渡し、復元した下書きの編集で一覧が変わらないようにする。
   restoreRequested = true;
-  emit("restore", { ...preset, ...clonePresetDraft(preset) });
+  selection.value = preset;
+  emit("restore", cloneSavedMapPreset(preset));
 };
+const apply = (preset: SavedMapPreset) => {
+  if (disabled.value || deleting.value) return;
+  appliedRowId = preset.id;
+  selection.value = preset;
+  emit("apply", cloneSavedMapPreset(preset));
+};
+watch(
+  () => props.applyComplete,
+  async (message) => {
+    await nextTick();
+    if (!props.isOpen || props.applyComplete !== message) return;
+    if (message) applyMessage.value?.$el.querySelector("button")?.focus();
+    else {
+      const buttons = list.value?.querySelectorAll<HTMLButtonElement>("[data-preset-apply-id]");
+      Array.from(buttons ?? [])
+        .find((button) => button.dataset.presetApplyId === appliedRowId)
+        ?.focus();
+    }
+  },
+);
 watch(
   () => props.restoring,
   (value, previous) => {
@@ -155,7 +215,8 @@ const key = (event: KeyboardEvent) => {
     event.preventDefault();
     event.stopImmediatePropagation();
     if (event.key === "Escape") {
-      if (restoreComplete.value) restoreComplete.value = false;
+      if (props.applyComplete) emit("dismissApplyComplete");
+      else if (restoreComplete.value) restoreComplete.value = false;
       else if (deleting.value) {
         if (!busy.value) deleting.value = null;
       } else close();
@@ -172,34 +233,30 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <BaseModal
-    :isOpen="isOpen"
-    :zIndex="110"
-    :closeOnOverlayClick="!busy && !restoring && !deleting && !restoreComplete"
-    @close="close"
-  >
+  <BaseModal :isOpen="isOpen" :zIndex="110" :closeOnOverlayClick="!closeBlocked" @close="close">
     <section
+      ref="list"
       class="form-settings map-presets"
       role="dialog"
       aria-modal="true"
       aria-labelledby="map-presets-title"
     >
-      <h2 id="map-presets-title" class="modal-h2">保存した検索条件</h2>
-      <div class="preset-toolbar">
-        <span>{{ total }}件</span>
-        <button
-          class="btn-close"
-          type="button"
-          :disabled="disabled || !!deleting"
-          @click="load(page)"
-        >
-          再読み込み
+      <header class="preset-header">
+        <h2 id="map-presets-title">保存した検索条件</h2>
+        <button class="btn-close" type="button" :disabled="closeBlocked" @click="close">
+          閉じる
         </button>
-      </div>
+      </header>
       <p v-if="loading" role="status">読み込み中…</p>
       <p v-if="restoring" role="status">検索条件を呼び出しています…</p>
-      <p v-if="error || restoreError" class="preset-error" role="alert">
-        {{ error || restoreError }}
+      <p v-if="applying" role="status">検索条件を適用しています…</p>
+      <p v-if="error || applyError || restoreError" class="preset-error" role="alert">
+        {{ error || applyError || restoreError }}
+      </p>
+      <p v-if="preparationFailures?.length" class="preset-error" role="status">
+        「{{
+          preparationFailures.join("」「")
+        }}」の準備に失敗しました。一覧を閉じて開き直してください。
       </p>
       <p v-if="!loading && !error && !items.length">保存した検索条件はありません。</p>
       <MapPresetsTable
@@ -207,6 +264,7 @@ onBeforeUnmount(() => {
         :items="items"
         :disabled="!!disabled || !!deleting"
         @restore="restore"
+        @apply="apply"
         @remove="deleting = $event"
       />
       <nav v-if="pages > 1" class="preset-pagination" aria-label="保存した検索条件のページ">
@@ -228,16 +286,6 @@ onBeforeUnmount(() => {
           次へ
         </button>
       </nav>
-      <div class="preset-actions">
-        <button
-          class="btn-close"
-          type="button"
-          :disabled="busy || restoring || !!deleting || restoreComplete"
-          @click="close"
-        >
-          閉じる
-        </button>
-      </div>
     </section>
   </BaseModal>
   <MessageModal
@@ -258,14 +306,30 @@ onBeforeUnmount(() => {
     message="呼び出しが完了しました。"
     @close="restoreComplete = false"
   />
+  <MessageModal
+    v-if="applyComplete"
+    ref="applyMessage"
+    class="common-form-confirm"
+    role="dialog"
+    aria-modal="true"
+    aria-label="処理完了"
+    :isOpen="true"
+    :zIndex="120"
+    :message="applyComplete"
+    @close="emit('dismissApplyComplete')"
+  />
   <Teleport to="body">
     <ProgressSpinner
-      v-if="restoring"
+      v-if="restoring || applying"
       :isOpen="true"
       :style="{ zIndex: 130 }"
       role="status"
-      aria-label="検索条件を呼び出しています"
-    />
+      :aria-label="applying ? '検索条件を適用しています' : '検索条件を呼び出しています'"
+    >
+      <template v-if="selection" #controls>
+        <p class="recall-preview">{{ selection.name }}　{{ describeMapPreset(selection) }}</p>
+      </template>
+    </ProgressSpinner>
   </Teleport>
 </template>
 
@@ -279,23 +343,32 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   color: #172033;
 }
-.modal-h2 {
-  border-bottom: solid 2px #acacac;
-  text-align: center;
-  margin: 8px 0 16px;
-}
-.preset-toolbar {
+.preset-header {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #ccc;
+}
+.preset-header h2 {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  font-size: 24px;
+  overflow-wrap: anywhere;
+}
+.preset-header .btn-close {
+  flex-shrink: 0;
+  margin: 0;
+  white-space: nowrap;
 }
 .table-scroll {
   overflow: auto;
   min-height: 0;
 }
-.preset-actions,
 .preset-pagination {
   display: flex;
   align-items: center;
@@ -307,5 +380,19 @@ onBeforeUnmount(() => {
 .preset-error {
   color: #7c3f00;
   overflow-wrap: anywhere;
+}
+.recall-preview {
+  background: white;
+  color: #172033;
+  padding: 0.75em 1em;
+  max-width: min(70ch, 75vw);
+  max-height: 60dvh;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .preset-header h2 {
+    font-size: 22px;
+  }
 }
 </style>

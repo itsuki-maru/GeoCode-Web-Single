@@ -985,3 +985,108 @@ async fn attribute_search_returns_all_twenty_thousand_targets() {
     assert_eq!(result.target_count, 20004);
     assert_eq!(result.marker_ids.len(), 20004);
 }
+
+#[tokio::test]
+async fn compound_expression_keeps_original_scope_history_and_csv_in_sync() {
+    let pool = common::test_pool().await;
+    let f = fixture(&pool).await;
+    sqlx::query("UPDATE shape_model SET name = $1 WHERE id = $2")
+        .bind("図形\0管路Ab%_")
+        .bind(f.ids[0].to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+    for (mode, expected) in [("history", 2), ("latest", 1)] {
+        let mut r = request(&f, mode, json!([]));
+        r.common_form_id = None;
+        r.targets = vec![
+            format!("marker:{}", f.ids[0]),
+            format!("shape:{}", f.ids[0]),
+        ];
+        r.expression = Some(serde_json::from_value(json!({
+            "op":"and","children":[
+                {"op":"or","children":[
+                    {"op":"attribute","common_form_id":f.form,"conditions":[{"field_id":"n","field_type":"number","op":"eq","value":"30"}]},
+                    {"op":"text","query1":"管路aB%_"}
+                ]},
+                {"op":"not","child":{"op":"text","query1":"本文","query2":"施設"}}
+            ]
+        })).unwrap());
+        let found = filter_targets(&pool, &f.owner.to_string(), &r)
+            .await
+            .unwrap();
+        assert_eq!(found.targets, vec![format!("shape:{}", f.ids[0])]);
+        assert_eq!(found.answer_count, 1);
+        assert_eq!(
+            map_csv(&pool, f.owner, &r).await.matches("\r\n").count() - 1,
+            1
+        );
+        r.expression = Some(serde_json::from_value(json!({
+            "op":"or","children":[
+                {"op":"attribute","common_form_id":f.form,"conditions":[{"field_id":"n","field_type":"number","op":"eq","value":"30"}]},
+                {"op":"text","query1":"管路aB%_"}
+            ]
+        })).unwrap());
+        let found = filter_targets(&pool, &f.owner.to_string(), &r)
+            .await
+            .unwrap();
+        assert_eq!(found.target_count, expected);
+        assert_eq!(found.answer_count, expected as i64);
+        assert_eq!(
+            map_csv(&pool, f.owner, &r).await.matches("\r\n").count() - 1,
+            found.answer_count as usize
+        );
+    }
+}
+
+#[tokio::test]
+async fn compound_filter_and_csv_match_individual_submissions_across_forms() {
+    let pool = common::test_pool().await;
+    let f = fixture(&pool).await;
+    let other = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO common_form_model (id, user_id, form_title, form_description, form_schema, create_at, update_at)
+         SELECT $1, user_id, '別のフォーム', '', form_schema, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM common_form_model WHERE id = $2",
+    )
+    .bind(other.to_string())
+    .bind(f.form.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let reassigned = sqlx::query(
+        "UPDATE marker_form_submission_model SET source_form = $1
+         WHERE marker_id = $2 AND submitted_values->>'n' = 10",
+    )
+    .bind(json!({"id": other, "version": 1}))
+    .bind(f.ids[0].to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(reassigned.rows_affected(), 1);
+    let attr = |form: Uuid| json!({"op":"attribute", "common_form_id": form, "conditions":[]});
+    let mut r = request(&f, "history", json!([]));
+    r.common_form_id = None;
+    r.targets = vec![format!("marker:{}", f.ids[0])];
+    for (expression, rows) in [
+        (
+            json!({"op":"or", "children":[attr(f.form), attr(other)]}),
+            2,
+        ),
+        (
+            json!({"op":"and", "children":[attr(f.form), attr(other)]}),
+            0,
+        ),
+        (json!({"op":"not", "child":attr(other)}), 1),
+    ] {
+        r.expression = Some(serde_json::from_value(expression).unwrap());
+        let result = filter_targets(&pool, &f.owner.to_string(), &r)
+            .await
+            .unwrap();
+        assert_eq!(result.answer_count, rows);
+        assert_eq!(result.target_count, usize::from(rows > 0));
+        assert_eq!(
+            map_csv(&pool, f.owner, &r).await.matches("\r\n").count() - 1,
+            rows as usize
+        );
+    }
+}

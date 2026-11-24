@@ -353,11 +353,29 @@ pub(crate) fn build_query(
     build_query_with_projection(user, q, at, AnswerProjection::Full)
 }
 
+/// 最新登録の順位付け前に対象を絞る。空の地物ID一覧には何も一致しない。
+pub(super) struct LoadedAnswerTargets {
+    pub markers: Vec<String>,
+    pub shapes: Vec<String>,
+    pub layers: Option<Vec<String>>,
+    pub forms: Option<Vec<String>>,
+}
+
+pub(super) fn build_target_query(
+    user: &str,
+    q: &AnswerQuery,
+    at: DateTime<Utc>,
+    targets: &LoadedAnswerTargets,
+) -> QueryBuilder<'static, Sqlite> {
+    build_query_with_projection(user, q, at, AnswerProjection::PresetData(targets))
+}
+
 #[derive(Clone, Copy)]
 enum AnswerProjection<'a> {
     Full,
     Search(&'a AnswerQuery),
     Count(&'a AnswerQuery),
+    PresetData(&'a LoadedAnswerTargets),
 }
 
 #[derive(FromRow)]
@@ -441,6 +459,20 @@ fn append_answer_source(
                     b.push(", s.submitted_values, s.form_snapshot");
                 }
             },
+            AnswerProjection::PresetData(_) => {
+                b.push(format!(
+                    r#"
+                    ,
+                    {name} AS target_name,
+                    m.layer_id,
+                    s.create_at COLLATE answer_time AS create_at,
+                    s.revision,
+                    s.submitted_values,
+                    s.form_snapshot,
+                    s.source_form
+                    "#
+                ));
+            },
         }
         // 件数を制限した詳細取得は、送信データの主キー検索から始める。通常の結合では、
         // s.id IN の適用前に、所有するすべての対象が走査される場合がある。
@@ -468,6 +500,26 @@ fn append_answer_source(
                 ids.push_bind(key.id.clone());
             }
             b.push(")");
+        }
+        if let AnswerProjection::PresetData(targets) = projection {
+            let ids = if kind == "marker" {
+                &targets.markers
+            } else {
+                &targets.shapes
+            };
+            b.push(" AND m.id IN (SELECT value FROM json_each(")
+                .push_bind(serde_json::to_string(ids).unwrap())
+                .push("))");
+            if let Some(layers) = &targets.layers {
+                b.push(" AND m.layer_id IN (SELECT value FROM json_each(")
+                    .push_bind(serde_json::to_string(layers).unwrap())
+                    .push("))");
+            }
+            if let Some(forms) = &targets.forms {
+                b.push(" AND s.source_form->>'id' IN (SELECT value FROM json_each(")
+                    .push_bind(serde_json::to_string(forms).unwrap())
+                    .push("))");
+            }
         }
     }
 }

@@ -101,6 +101,7 @@ const showProgressModal = ref(true);
 const mapObjectQueryFormData = ref<QueryForm>({ query1: "", query2: "" });
 
 let mapReloadSequence = 0;
+let analysisScopeRevision = 0;
 let mapReloadController: AbortController | null = null;
 let disposed = false;
 let mapDataRevision = 0;
@@ -217,7 +218,7 @@ const reloadMap = async (
 ): Promise<boolean> => {
   const selectedLayerId = activeLayer.value;
   if (!selectedLayerId || disposed) return false;
-  clearAi();
+  cancelAiRequest();
   const isMaster = selectedLayerId === masterLayerId.value;
   const sequence = ++mapReloadSequence;
   mapReloadController?.abort();
@@ -232,6 +233,7 @@ const reloadMap = async (
     accountId: authStore.accountId,
     search: displayedQuery.query1 || displayedQuery.query2 ? mapobjStore.search : null,
     analysis: getAnalysisState(),
+    recalledAnalysis: getRecalledAnalysisState(),
     markerGeneration: mapobjStore.recordCache.generation,
     shapeGeneration: shapeStore.recordCache.generation,
     attributeSearch: mapobjStore.attributeSearch,
@@ -277,6 +279,8 @@ const reloadMap = async (
     filterMapObjects();
     await restoreAnalysisState(previousDisplay.analysis);
     if (!isCurrent()) return;
+    await restoreRecalledAnalysisState(previousDisplay.recalledAnalysis, controller.signal);
+    if (!isCurrent()) return;
     refreshAttributeSearch();
   };
   if (absolute) showProgressModal.value = true;
@@ -320,6 +324,7 @@ const reloadMap = async (
     await nextTick();
     if (!isCurrent()) return false;
     if (shouldForceIframeReload && !mapIframeRef.value?.reloadMapFrame()) {
+      await restoreDisplay();
       isMapFrameLoading.value = false;
       return false;
     }
@@ -348,7 +353,13 @@ const reloadMap = async (
       initializedAccountId = String(accountId);
       displayedLayerId = selectedLayerId;
       displayedMapUrl = destination;
-      if (absolute) displayedQuery = { query1: "", query2: "" };
+      if (absolute) {
+        displayedQuery = { query1: "", query2: "" };
+        ++analysisScopeRevision;
+        clearAi();
+      } else if (previousDisplay.accountId === authStore.accountId) {
+        await restoreRecalledAnalysisState(previousDisplay.recalledAnalysis, controller.signal);
+      }
     }
     return synchronized;
   } catch (error) {
@@ -502,10 +513,14 @@ const applyMapFilter = async () => {
 };
 const {
   clearAi,
+  cancelAiRequest,
+  getRecalledAnalysisState,
+  restoreRecalledAnalysisState,
   applyManualColoring,
-  applyPreset: applyAiPreset,
   applyDefinition: applyAiDefinition,
   clearDefinition: clearAiDefinition,
+  replaceAppliedCondition,
+  getRecalledColoring,
 } = useAiAssistant(
   activeLayer,
   masterLayerId,
@@ -516,7 +531,13 @@ const {
     focus: async (latitude, longitude, zoom) =>
       (await mapIframeRef.value?.setMapView(latitude, longitude, zoom)) ?? false,
     view: async () => (await mapIframeRef.value?.getMapView()) ?? null,
-    identity: () => String(mapReloadSequence),
+    identity: () => String(analysisScopeRevision),
+    managesReload: true,
+    evaluatePreset: (definition) => evaluatePreset(definition),
+    presetContextKey: () => presetContextKey(),
+    preparePresetPage: (presets, signal) => preparePresetPage(presets, signal),
+    prepareManualReplacement: (kind, signal, localPreset) =>
+      prepareManualReplacement(kind, signal, localPreset),
   },
   async (preset): Promise<void> => {
     await recallSavedPreset(preset);
@@ -527,6 +548,7 @@ const {
 );
 const {
   openAdvancedSearch,
+  preparePresetPage,
   recallSavedPreset,
   invalidateAccount: invalidateAdvancedSearchAccount,
   closeAdvancedSearch,
@@ -535,6 +557,9 @@ const {
   coloringActive,
   getAnalysisState,
   restoreAnalysisState,
+  prepareManualReplacement,
+  evaluatePreset,
+  presetContextKey,
 } = useMapAnalysisSearch(
   activeLayer,
   masterLayerId,
@@ -545,9 +570,10 @@ const {
   (text) => showMessage(text),
   applyManualColoring,
   () => applyManualColoring(null),
-  applyAiPreset,
   applyAiDefinition,
   clearAiDefinition,
+  replaceAppliedCondition,
+  getRecalledColoring,
 );
 watch(activeLayer, () => closeAdvancedSearch());
 watch(() => mapobjStore.attributeRevision, filterMapObjects);
@@ -1125,7 +1151,9 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
     :layerList="layerList"
     :isMasterLayer="isMasterLayer"
     :isHttpsProtocol="isHttpsProtocol"
-    :attributeSearchActive="!!mapobjStore.attributeSearch || coloringActive"
+    :attributeSearchActive="
+      !!mapobjStore.attributeSearch || !!mapobjStore.aiFilterTargets || coloringActive
+    "
     @update:activeLayer="activeLayer = $event"
     @openFunction="onOpenCloseFunctionModal"
     @openToolbar="isOpenToolbar = !isOpenToolbar"
@@ -1269,7 +1297,9 @@ async function syncTileOverlays(tiles: unknown[]): Promise<void> {
             @deleteMarker="handleDeleteMarker"
             @message="showMessage"
             @advancedSearch="openAdvancedSearch"
-            :attributeSearchActive="!!mapobjStore.attributeSearch || coloringActive"
+            :attributeSearchActive="
+              !!mapobjStore.attributeSearch || !!mapobjStore.aiFilterTargets || coloringActive
+            "
             @mapObjectSearch="handleMapObjectSearch"
             @update:mapObjectQueryFormData="mapObjectQueryFormData = $event"
           />
@@ -1705,6 +1735,10 @@ button:active {
   margin-top: 20px;
   text-align: center;
   align-items: center;
+}
+
+.map-message-dialog > .preset-actions > .btn-close {
+  margin-top: 0;
 }
 
 .modal-h2 {

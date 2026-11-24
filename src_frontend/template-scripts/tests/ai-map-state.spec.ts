@@ -1,25 +1,34 @@
 import { expect, it, vi } from "vitest";
-import { mergeAiColoring, intersectTargetMasks } from "../src/ai/map-state";
-import { aiFetchTransport, aiFailureMessage, validateCapabilities, validateExecutionResult } from "../src/ai/types";
+import { intersectTargetMasks } from "../src/ai/map-state";
+import {
+  aiFetchTransport,
+  aiFailureMessage,
+  validateCapabilities,
+  validateExecutionResult,
+} from "../src/ai/types";
 
-it("preserves manual colors and gives AI priority only for classified targets", () => {
-  const manual = {
-    version: 1 as const,
-    rules: [{ id: "same", label: "手動", color: "#ff0000" }],
-    targets: { "marker:a": "same", "shape:b": "same" },
-  };
-  const ai = {
-    version: 1 as const,
-    rules: [{ id: "same", label: "AI", color: "#0000ff" }],
-    targets: { "marker:a": "same" },
-  };
-  const merged = mergeAiColoring(manual, ai)!;
-  expect(merged.targets).toEqual({ "marker:a": "ai-0", "shape:b": "manual-0" });
-  expect(mergeAiColoring(manual, null)).toEqual(manual);
-  expect(manual.targets["marker:a"]).toBe("same");
+it("keeps the map account when retrying a saved condition after authentication refresh", async () => {
+  const fetcher = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response("{}", { status: 401 }))
+    .mockResolvedValueOnce(new Response("{}"))
+    .mockResolvedValueOnce(new Response("{}"));
+  try {
+    const path = "/form-answers/map-presets/evaluate";
+    const body = { context: { layer_ids: null }, definition: { type: "reset" } };
+    await aiFetchTransport(path, body, new AbortController().signal, "map-owner");
+    const requests = fetcher.mock.calls.filter(([url]) => url === path);
+    expect(requests).toHaveLength(2);
+    for (const [, init] of requests) {
+      expect(init?.headers).toMatchObject({ "X-AI-Account-ID": "map-owner" });
+      expect(init?.body).toBe(JSON.stringify(body));
+    }
+  } finally {
+    fetcher.mockRestore();
+  }
 });
 
-it("keeps empty AI search results empty when combined with manual filters", () => {
+it("keeps empty AI search results empty when a separate text filter is active", () => {
   expect([...intersectTargetMasks(new Set(["marker:a"]), new Set())!]).toEqual([]);
   expect(intersectTargetMasks(null, null)).toBeNull();
   expect([...intersectTargetMasks(new Set(["a", "b"]), new Set(["b", "c"]))!]).toEqual(["b"]);
@@ -73,19 +82,35 @@ it("keeps the original actor header across token refresh and sends multipart wit
 });
 
 it("uses the original actor for write-result lookup and normalizes only the denied-operation code", async () => {
-  const fetcher = vi.spyOn(globalThis, "fetch")
+  const fetcher = vi
+    .spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response("{}", { status: 401 }))
     .mockResolvedValueOnce(new Response("{}"))
     .mockResolvedValueOnce(new Response(JSON.stringify({ status: "completed" })));
   try {
-    await aiFetchTransport("/ai/operations/op-id", undefined, new AbortController().signal, "owner-at-prepare");
+    await aiFetchTransport(
+      "/ai/operations/op-id",
+      undefined,
+      new AbortController().signal,
+      "owner-at-prepare",
+    );
     for (const index of [0, 2]) {
-      expect(fetcher.mock.calls[index]![1]!.headers).toEqual({ "X-AI-Account-ID": "owner-at-prepare" });
+      expect(fetcher.mock.calls[index]![1]!.headers).toEqual({
+        "X-AI-Account-ID": "owner-at-prepare",
+      });
       expect(fetcher.mock.calls[index]![1]!.method).toBe("GET");
     }
-  } finally { fetcher.mockRestore(); }
-  expect(aiFailureMessage({ code: "ai_operation_not_allowed", error: "forbidden: arbitrary" }, "fallback"))
-    .toBe("要求された操作は許可されていません。");
+  } finally {
+    fetcher.mockRestore();
+  }
+  expect(
+    aiFailureMessage(
+      { code: "ai_operation_not_allowed", error: "forbidden: arbitrary" },
+      "fallback",
+    ),
+  ).toBe("要求された操作は許可されていません。");
   expect(aiFailureMessage({ error: "ai_account_changed" }, "fallback")).toBe("ai_account_changed");
-  expect(aiFailureMessage({ error: "validation error: invalid form" }, "fallback")).toBe("invalid form");
+  expect(aiFailureMessage({ error: "validation error: invalid form" }, "fallback")).toBe(
+    "invalid form",
+  );
 });

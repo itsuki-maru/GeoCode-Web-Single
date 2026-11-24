@@ -159,6 +159,20 @@ try {
     ]);
     const page = await context.newPage();
     page.on("pageerror", (error) => errors.push(error.message));
+    const closeNotice = (text) =>
+      page
+        .locator(".base-modal-overlay:visible")
+        .filter({ has: page.getByText(text, { exact: true }) })
+        .last()
+        .getByRole("button", { name: "閉じる", exact: true })
+        .click();
+    const leaveList = async () => {
+      await closeNotice("呼び出しが完了しました。");
+      await page
+        .getByRole("dialog", { name: "保存した検索条件" })
+        .getByRole("button", { name: "閉じる", exact: true })
+        .click();
+    };
     const calls = { save: 0, delete: 0, map: 0 };
     page.on("request", (request) => {
       const path = new URL(request.url()).pathname;
@@ -183,10 +197,7 @@ try {
     await filter
       .getByRole("button", { name: "条件を追加", exact: true })
       .click();
-    const number = filter.getByRole("textbox", {
-      name: "条件の値",
-      exact: true,
-    });
+    const number = filter.locator('input[aria-label="条件の値"]');
     await number.fill("50.000000000000000001");
     await filter
       .getByRole("button", { name: "検索条件を保存", exact: true })
@@ -219,6 +230,7 @@ try {
       })
       .getByRole("button", { name: "呼び出し", exact: true })
       .click();
+    await leaveList();
     await page.waitForFunction(
       () =>
         document.querySelector('input[aria-label="条件の値"]')?.value ===
@@ -229,6 +241,7 @@ try {
       .getByRole("button", { name: "絞り込み実行", exact: true })
       .click();
     await page.waitForFunction(() => window.mapUpdates.length === 1);
+    await closeNotice("絞り込みが完了しました。");
     const map = page
       .frames()
       .find((frame) => new URL(frame.url()).pathname === "/form-answers/map");
@@ -243,7 +256,8 @@ try {
       }));
     const beforeColor = await style();
     assert.equal(beforeColor.text, "9");
-    await color.locator("summary").click();
+    if (!(await color.evaluate((element) => element.open)))
+      await color.locator("summary").click();
     await color
       .getByRole("combobox", { name: "色分けの共通フォーム", exact: true })
       .selectOption(manifest.form_id);
@@ -280,6 +294,7 @@ try {
       .filter({ hasText: "点検の分類" })
       .getByRole("button", { name: "呼び出し", exact: true })
       .click();
+    await leaveList();
     await page.waitForFunction(
       () =>
         document.querySelector('input[aria-label="分類名"]')?.value ===
@@ -291,6 +306,7 @@ try {
       .getByRole("button", { name: "色分け実行", exact: true })
       .click();
     await page.waitForFunction(() => window.mapUpdates.length === 2);
+    await closeNotice("色分けが完了しました。");
     assert.deepEqual(
       await style(),
       beforeColor,
@@ -301,8 +317,8 @@ try {
     ).json();
     assert.equal(listed.total, 2);
     assert.equal(
-      listed.items.find((p) => p.kind === "filter").definition.conditions[0]
-        .value,
+      listed.items.find((p) => p.kind === "filter").definition.expression
+        .conditions[0].value,
       "50.000000000000000001",
     );
     const other = await browser.newContext();

@@ -7,7 +7,7 @@ import { setupDetailsLazyImages } from "../src/map/common/content";
 const filterXSS = (html: string) =>
   html.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/ onerror=[^ >]*/gi, "");
 
-function fixture(overrides: Record<string, any> = {}) {
+function fixture(overrides: Record<string, any> = {}, mapContainer?: HTMLElement) {
   const handlers: Record<string, (event: any) => void> = {};
   const loadBody = vi.fn(async () => ({
     body: "自由\n登録",
@@ -19,8 +19,12 @@ function fixture(overrides: Record<string, any> = {}) {
   const renderMarkdown = vi.fn((text: string) => filterXSS(`<p>${text}</p>`));
   const runtime = createPopupContentRuntime({
     map: {
+      ...(mapContainer ? { getContainer: () => mapContainer } : {}),
       on: (event, fn) => {
         handlers[event] = fn;
+      },
+      off: (event, fn) => {
+        if (handlers[event] === fn) delete handlers[event];
       },
     },
     renderMarkdown,
@@ -31,7 +35,12 @@ function fixture(overrides: Record<string, any> = {}) {
   });
   const host = document.createElement("div");
   document.body.append(host);
-  const popup = { getElement: () => host, update: vi.fn(), setContent: vi.fn() };
+  const popup = {
+    getElement: () => host,
+    getLatLng: vi.fn(() => ({ lat: 35.5, lng: 139.5 })),
+    update: vi.fn(),
+    setContent: vi.fn(),
+  };
   const open = (kind: "marker" | "shape" = "marker", body = "自由\n登録") => {
     host.innerHTML = runtime.render({ kind, id: "same", name: "<対象>", body });
     handlers.popupopen({ popup });
@@ -56,8 +65,227 @@ function fixture(overrides: Record<string, any> = {}) {
 }
 afterEach(() => {
   document.body.innerHTML = "";
+  document.body.classList.remove("map-mobile-controls");
 });
 describe("owner popup content selector", () => {
+  it("links to the stored marker position without a route search runtime", () => {
+    let marker = { latitude: 36.25, longitude: 140.75 };
+    const getMarkerRecord = vi.fn(() => marker);
+    const f = fixture({ getMarkerRecord, showGoogleMapLink: true });
+    f.open("marker");
+
+    const link = f.host.querySelector<HTMLAnchorElement>("a.popup-content-google-link")!;
+    expect(getMarkerRecord).toHaveBeenCalledWith("same");
+    expect(link.textContent).toBe("Google Map で開く");
+    expect(link.target).toBe("_blank");
+    expect(link.relList.contains("noopener")).toBe(true);
+    expect(link.relList.contains("noreferrer")).toBe(true);
+    const destination = new URL(link.href);
+    expect(destination.origin).toBe("https://www.google.com");
+    expect(destination.pathname).toBe("/maps/search/");
+    expect(destination.searchParams.get("api")).toBe("1");
+    expect(destination.searchParams.get("query")).toBe("36.25,140.75");
+    expect(f.host.querySelector(".popup-content-route-button")).toBeNull();
+
+    marker = { latitude: 35, longitude: 139 };
+    link.addEventListener("click", (event) => event.preventDefault());
+    link.click();
+    expect(new URL(link.href).searchParams.get("query")).toBe("35,139");
+  });
+
+  it("links to the click position each time a shape popup opens", () => {
+    const f = fixture({ showGoogleMapLink: true });
+    const destination = () => {
+      const link = f.host.querySelector<HTMLAnchorElement>("a.popup-content-google-link")!;
+      return new URL(link.href).searchParams.get("query");
+    };
+    f.open("shape");
+    expect(destination()).toBe("35.5,139.5");
+    f.handlers.popupclose({ popup: f.popup });
+    f.popup.getLatLng.mockReturnValue({ lat: 34, lng: 138 });
+    f.open("shape");
+    expect(destination()).toBe("34,138");
+  });
+
+  it.each([
+    ["unavailable", { isAvailable: () => false, search: vi.fn(), cancelPending: vi.fn() }],
+    ["unconfigured", undefined],
+  ] as const)(
+    "temporarily hides controls that do not fit with the mobile popup when Routes is %s",
+    (_name, routeSearch) => {
+      document.body.classList.add("map-mobile-controls");
+      const mapContainer = document.createElement("div");
+      const controls = document.createElement("div");
+      controls.className = "leaflet-top";
+      mapContainer.append(controls);
+      document.body.append(mapContainer);
+      let mapHeight = 700;
+      vi.spyOn(mapContainer, "getBoundingClientRect").mockImplementation(() =>
+        DOMRect.fromRect({ y: 20, width: 320, height: mapHeight }),
+      );
+      Object.defineProperty(mapContainer, "clientHeight", { get: () => mapHeight });
+      vi.spyOn(controls, "getBoundingClientRect").mockReturnValue(
+        DOMRect.fromRect({ y: 20, width: 110, height: 400 }),
+      );
+      const f = fixture({ routeSearch, showGoogleMapLink: true }, mapContainer);
+      mapContainer.append(f.host);
+      f.host.className = "leaflet-popup";
+      f.host.style.marginBottom = "20px";
+      Object.defineProperty(f.host, "offsetHeight", { value: 240 });
+      const topLeft = [3, 4];
+      const bottomRight = [5, 6];
+      const popupOptions = {
+        autoPanPaddingTopLeft: topLeft,
+        autoPanPaddingBottomRight: bottomRight,
+      };
+      Object.assign(f.popup, { options: popupOptions });
+      const overlapClass = ".popup-content-overlaps-controls";
+      const movesControlsAside = () =>
+        mapContainer.matches(overlapClass) || mapContainer.querySelector(overlapClass) !== null;
+      const resize = (height: number) => {
+        mapHeight = height;
+        f.handlers.resize({ newSize: { x: 320, y: height } });
+      };
+
+      f.open("shape");
+      expect(f.host.querySelector(".popup-content-google-link")).not.toBeNull();
+      expect(movesControlsAside()).toBe(true);
+      expect(popupOptions.autoPanPaddingTopLeft).toEqual([10, 10]);
+      expect(popupOptions.autoPanPaddingBottomRight).toEqual([10, 45]);
+
+      resize(720);
+      expect(movesControlsAside()).toBe(false);
+      expect(popupOptions.autoPanPaddingTopLeft).toEqual([10, 408]);
+      expect(popupOptions.autoPanPaddingBottomRight).toEqual([10, 45]);
+
+      resize(700);
+      expect(movesControlsAside()).toBe(true);
+      expect(popupOptions.autoPanPaddingTopLeft).toEqual([10, 10]);
+      f.handlers.popupclose({ popup: f.popup });
+      expect(movesControlsAside()).toBe(false);
+      expect(popupOptions.autoPanPaddingTopLeft).toBe(topLeft);
+      expect(popupOptions.autoPanPaddingBottomRight).toBe(bottomRight);
+      expect(f.handlers.resize).toBeUndefined();
+    },
+  );
+
+  it("omits the Google Maps link if no marker coordinate provider is configured", () => {
+    const f = fixture({ showGoogleMapLink: true });
+    f.open("marker");
+    expect(f.host.querySelector(".popup-content-google-link")).toBeNull();
+  });
+
+  it.each([
+    ["marker", Number.NaN, 139],
+    ["marker", 35, -181],
+    ["shape", 91, 139],
+    ["shape", 35, Number.POSITIVE_INFINITY],
+  ] as const)(
+    "omits the Google Maps link for an invalid %s position (%s, %s)",
+    (kind, lat, lng) => {
+      const f = fixture({
+        getMarkerRecord: () => ({ latitude: lat, longitude: lng }),
+        showGoogleMapLink: true,
+      });
+      f.popup.getLatLng.mockReturnValue({ lat, lng });
+      f.open(kind);
+      expect(f.host.querySelector(".popup-content-google-link")).toBeNull();
+    },
+  );
+
+  it.each([
+    ["disabled", { showGoogleMapLink: false }],
+    ["omitted", {}],
+  ] as const)("omits the Google Maps link when the option is %s", (_name, option) => {
+    const f = fixture({
+      ...option,
+      getMarkerRecord: () => ({ latitude: 35, longitude: 139 }),
+    });
+    f.open("marker");
+    expect(f.host.querySelector(".popup-content-google-link")).toBeNull();
+    f.handlers.popupclose({ popup: f.popup });
+    f.open("shape");
+    expect(f.host.querySelector(".popup-content-google-link")).toBeNull();
+  });
+
+  it("shows the route button next to the selector only when Routes is available", () => {
+    const routeSearch = {
+      isAvailable: vi.fn(() => false),
+      search: vi.fn(),
+      cancelPending: vi.fn(),
+    };
+    const f = fixture({ routeSearch });
+    f.open("shape", "");
+    const button = f.host.querySelector<HTMLButtonElement>(".popup-content-route-button")!;
+    expect(button.previousElementSibling?.contains(f.select())).toBe(true);
+    expect(button.textContent).toBe("この場所への経路");
+    expect(button.hidden).toBe(true);
+    button.click();
+    expect(routeSearch.search).not.toHaveBeenCalled();
+    routeSearch.isAvailable.mockReturnValue(true);
+    f.handlers.googleroutesavailabilitychange({});
+    expect(button.hidden).toBe(false);
+    routeSearch.isAvailable.mockReturnValue(false);
+    f.handlers.basemapstatechange({});
+    expect(button.hidden).toBe(true);
+    f.handlers.popupclose({ popup: f.popup });
+    expect(f.handlers.basemapstatechange).toBeUndefined();
+    expect(f.handlers.googleroutesavailabilitychange).toBeUndefined();
+  });
+
+  it("does not add a route action to a popup that has not enabled route search", () => {
+    const f = fixture();
+    f.open();
+    expect(f.host.querySelector(".popup-content-route-button")).toBeNull();
+  });
+
+  it("uses the latest stored marker position and keeps its location error separate from the body", async () => {
+    let locationError: ((message: string) => void) | undefined;
+    let marker = { latitude: 35, longitude: 139 };
+    const message = "現在位置の取得に時間がかかっています。時間をおいて再試行してください。";
+    const routeSearch = {
+      isAvailable: () => true,
+      search: vi.fn((_position, onLocationError: (message: string) => void) => {
+        locationError = onLocationError;
+      }),
+      cancelPending: vi.fn(),
+    };
+    const f = fixture({
+      routeSearch,
+      getMarkerRecord: () => marker,
+    });
+    f.open();
+    marker = { latitude: 36, longitude: 140 };
+    f.host.querySelector<HTMLButtonElement>(".popup-content-route-button")!.click();
+    expect(routeSearch.search).toHaveBeenCalledExactlyOnceWith(
+      { lat: 36, lng: 140 },
+      expect.any(Function),
+    );
+    const routeNote = f.host.querySelector(".popup-content-route-note")!;
+    locationError?.(message);
+    await vi.waitFor(() => expect(f.select().options[0].disabled).toBe(false));
+    f.choose("free");
+    expect(f.host.querySelector(".popup-content-body")!.textContent).toBe("自由\n");
+    expect(routeNote.textContent).toBe(message);
+    f.handlers.popupclose({ popup: f.popup });
+    expect(routeSearch.cancelPending).toHaveBeenCalledOnce();
+    routeNote.textContent = "";
+    locationError?.(message);
+    expect(routeNote.textContent).toBe("");
+  });
+
+  it("uses the position where a shape popup was opened", () => {
+    const routeSearch = { isAvailable: () => true, search: vi.fn(), cancelPending: vi.fn() };
+    const f = fixture({ routeSearch });
+    f.open("shape");
+    f.popup.getLatLng.mockReturnValue({ lat: 34, lng: 138 });
+    f.host.querySelector<HTMLButtonElement>(".popup-content-route-button")!.click();
+    expect(routeSearch.search).toHaveBeenCalledExactlyOnceWith(
+      { lat: 35.5, lng: 139.5 },
+      expect.any(Function),
+    );
+  });
+
   it("描画キャッシュの破棄時に準備済み本文を解放し、分類データは印刷用に保持する", async () => {
     const f = fixture();
     const content = { kind: "shape" as const, id: "same", name: "<対象>", body: "自由\n登録" };
@@ -178,7 +406,7 @@ describe("owner popup content selector", () => {
     expect(f.host.querySelector(".popup-content-body")!.textContent).toBe("更新後");
   });
 
-  it("enables selector styling only in the five requested templates", () => {
+  it("loads the common popup styles in the map templates that use them", () => {
     const templates = resolve(process.cwd(), "../../src/templates");
     const actual = readdirSync(templates).filter(
       (name) =>
@@ -192,9 +420,35 @@ describe("owner popup content selector", () => {
         "map-anather.html",
         "form-answer-map.html",
         "form-answer-map-print.html",
+        "temporary-map.html",
+        "temporary-map-mobile.html",
       ].sort(),
     );
   });
+  it.each(["marker", "shape"] as const)(
+    "uses only the shared title, body and destination for a read-only %s popup",
+    (kind) => {
+      const f = fixture({
+        loadBody: undefined,
+        showGoogleMapLink: true,
+        desktopHeightLimit: "all",
+        getMarkerRecord: () => ({ latitude: 36, longitude: 140 }),
+      });
+      f.open(kind);
+      const root = f.host.querySelector(".geocode-content-popup")!;
+      expect(root.classList.contains("popup-content-height-limited")).toBe(true);
+      expect(root.querySelector(".popup-content-title")?.textContent).toBe("<対象>");
+      expect(root.querySelector(".popup-content-note")?.textContent).toBe("");
+      expect(root.querySelector(".popup-content-body")?.textContent).toBe("自由\n登録");
+      expect(root.querySelector(".popup-content-toolbar select")).toBeNull();
+      const link = root.querySelector<HTMLAnchorElement>(".popup-content-google-link")!;
+      expect(new URL(link.href).searchParams.get("query")).toBe(
+        kind === "marker" ? "36,140" : "35.5,139.5",
+      );
+      expect(f.setupImages).toHaveBeenCalledOnce();
+      expect(f.loadBody).not.toHaveBeenCalled();
+    },
+  );
   it.each(["marker", "shape"] as const)(
     "%s defaults to normal and separates Markdown without changing stored content",
     async (kind) => {

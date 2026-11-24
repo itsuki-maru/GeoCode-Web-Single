@@ -10,9 +10,8 @@ interface PopupHeightMap {
   off?(event: string, listener: (event: { popup?: PopupLayout }) => void): unknown;
 }
 
-// PC の通常地図・全画面地図から明示的に有効化する。マーカーの初回 autoPan より前に
-// 地図の実際の高さを CSS に渡し、表示中の回転・リサイズでも同じ制限を使う。
-export function installMarkerPopupHeightLimit(map: PopupHeightMap): () => void {
+// 初回 autoPan より前に地図の高さを CSS に渡し、開いているポップアップをリサイズ後も収める。
+export function installDesktopPopupHeightLimit(map: PopupHeightMap): () => void {
   const container = map.getContainer?.();
   if (!container) return () => {};
   const property = "--geocode-popup-map-height";
@@ -27,7 +26,7 @@ export function installMarkerPopupHeightLimit(map: PopupHeightMap): () => void {
   const open = ({ popup }: { popup?: PopupLayout }) => {
     // 図形名編集など、マーカーと共存するポップアップを開いても追跡を維持する。
     if (
-      popup?.getElement?.()?.querySelector('.geocode-content-popup[data-content-key^="marker:"]')
+      popup?.getElement?.()?.querySelector(".geocode-content-popup.popup-content-height-limited")
     ) {
       activePopup = popup;
     }

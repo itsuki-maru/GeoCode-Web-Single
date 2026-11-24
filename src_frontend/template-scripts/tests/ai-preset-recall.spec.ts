@@ -4,7 +4,7 @@ import {
   type AttributeTransport,
 } from "../src/map/common/advanced-map-search";
 import type { AiDefinition } from "../src/ai/types";
-import type { AnySavedMapPreset, SavedAiMapPreset } from "../src/map/common/answer-map-presets";
+import type { SavedMapPreset } from "../src/map/common/answer-map-presets";
 
 const forms = [
   {
@@ -24,7 +24,7 @@ const fields = {
   first: [{ id: "n", label: "金額", field_type: "number", choices: [] }],
   second: [{ id: "done", label: "完了", field_type: "checkbox", choices: [] }],
 };
-function filter(name = "複合条件の原本"): SavedAiMapPreset {
+function filter(name = "複合条件の原本"): SavedMapPreset {
   return {
     id: "ai-filter",
     kind: "filter",
@@ -70,7 +70,7 @@ function filter(name = "複合条件の原本"): SavedAiMapPreset {
     },
   };
 }
-function coloring(): SavedAiMapPreset {
+function coloring(): SavedMapPreset {
   return {
     id: "ai-coloring",
     kind: "coloring",
@@ -202,7 +202,7 @@ afterEach(() => {
 });
 
 describe("保存したAI条件の呼び出しと明示実行", () => {
-  it("取得失敗時だけ再試行を表示し、復旧・実行前の再検証でも複合条件と編集を保持する", async () => {
+  it("項目取得の失敗から復旧したら複合条件と編集を保持し、追加通信なしで実行する", async () => {
     let fail = true;
     const base = mount();
     base.modal.dispose();
@@ -224,6 +224,9 @@ describe("保存したAI条件の呼び出しと明示実行", () => {
     fail = false;
     button("再試行").click();
     await vi.waitFor(() =>
+      expect(main().querySelector(".ai-condition-editor")?.getAttribute("aria-busy")).toBe("false"),
+    );
+    await vi.waitFor(() =>
       expect(
         [...main().querySelectorAll("button")].some((control) => control.textContent === "再試行"),
       ).toBe(false),
@@ -233,16 +236,12 @@ describe("保存したAI条件の呼び出しと明示実行", () => {
       "再試行後も保持する編集",
     );
     expect(apply).not.toHaveBeenCalled();
-    const beforeExecution = transport.mock.calls.filter(
-      ([path]) => path === "/form-answers/map-filter",
-    ).length;
+    transport.mockClear();
     button("絞り込み実行").click();
     const expected = structuredClone(source.definition) as Record<string, any>;
     expected.expression.children[0].query1 = "再試行後も保持する編集";
     await vi.waitFor(() => expect(apply).toHaveBeenCalledWith(expected, expect.any(AbortSignal)));
-    expect(
-      transport.mock.calls.filter(([path]) => path === "/form-answers/map-filter").length,
-    ).toBeGreaterThan(beforeExecution);
+    expect(transport).not.toHaveBeenCalled();
     expect(source).toEqual(original);
   });
 
@@ -655,29 +654,31 @@ describe("保存したAI条件の呼び出しと明示実行", () => {
     expect(main().textContent).toContain("複合条件の原本");
   });
 
-  it("version1は従来の編集欄へ復元し、通常の実行ボタンで反映する", async () => {
-    const source: AnySavedMapPreset = {
+  it("v2の単純条件も複合条件と同じ編集欄と実行経路を使う", async () => {
+    const source: SavedMapPreset = {
       id: "legacy",
       kind: "filter",
       name: "以前の保存条件",
-      schema_version: 1,
+      schema_version: 2,
       create_at: "2026-11-17T00:00:00Z",
       display: { form_label: "施設台帳", fields: [] },
       definition: {
-        common_form_id: "first",
-        conditions: [{ field_id: "n", field_type: "number", op: "gte", value: "9" }],
+        type: "filter",
+        expression: {
+          op: "attribute",
+          common_form_id: "first",
+          conditions: [{ field_id: "n", field_type: "number", op: "gte", value: "9" }],
+        },
       },
     };
     const { modal, onApply, apply } = mount();
     await modal.recallPreset(source);
-    expect(main().querySelector(".ai-condition-editor")).toBeNull();
-    expect(onApply).not.toHaveBeenCalled();
-    button("絞り込み実行").click();
-    await vi.waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
-    expect(onApply.mock.calls[0]![0]).toMatchObject({
-      common_form_id: "first",
-      conditions: source.definition.conditions,
-    });
+    expect(main().querySelector(".ai-condition-editor")).not.toBeNull();
     expect(apply).not.toHaveBeenCalled();
+    button("絞り込み実行").click();
+    await vi.waitFor(() =>
+      expect(apply).toHaveBeenCalledWith(source.definition, expect.any(AbortSignal)),
+    );
+    expect(onApply).not.toHaveBeenCalled();
   });
 });

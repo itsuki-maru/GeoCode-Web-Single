@@ -9,6 +9,7 @@ import {
   installBasemapController,
 } from "../../../../template-scripts/src/map/common/basemap-controller";
 import { createMapMessageDialog } from "../../../../template-scripts/src/map/common/map-message-dialog";
+import { createRouteSearch } from "../../../../template-scripts/src/map/common/route-search";
 import {
   createMapXssOptions,
   sanitizeMapHtml,
@@ -76,6 +77,7 @@ export function runEditorRuntime(context: Context, entryName: EditorEntryName) {
     getBasemapController,
     installBasemapController,
     createMapMessageDialog,
+    createRouteSearch,
     installAnswerColoring,
     isAnswerColoring,
     createMapXssOptions,

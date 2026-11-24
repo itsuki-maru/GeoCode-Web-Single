@@ -16,14 +16,16 @@ vi.mock(
     ...(await importOriginal<object>()),
     createAdvancedMapSearchModal: (options: any) => {
       modal.options = options;
-      return { open: vi.fn(), close: modal.close, dispose: vi.fn() };
+      return { open: vi.fn(), close: modal.close, dispose: vi.fn(), refreshPresetData: vi.fn() };
     },
   }),
 );
 import { useMapAnalysisSearch } from "../useMapAnalysisSearch";
+import { useAiAssistant } from "../useAiAssistant";
 import { useMapObjectStore } from "@/stores/mapobjects";
 import { useShapeStore } from "@/stores/shapes";
 import { useAuthStore } from "@/stores/auth";
+import { notifyAiSuggestionDataChanged } from "../../../../template-scripts/src/ai/suggestion-events";
 let wrapper: VueWrapper;
 beforeEach(() => {
   setActivePinia(createPinia());
@@ -111,7 +113,7 @@ it("保存条件の取得・保存・削除をactorへ結び付け、不一致�
   api.get.mockResolvedValue({ data: { items: [] } });
   api.post.mockResolvedValue({ data: {} });
   api.delete.mockResolvedValue({ data: null });
-  await modal.options.transport("/form-answers/map-presets?versions=1,2", undefined, signal);
+  await modal.options.transport("/form-answers/map-presets?versions=2", undefined, signal);
   await modal.options.transport("/form-answers/map-presets", { name: "変更後" }, signal);
   await modal.options.transport("/form-answers/map-presets/saved-a", undefined, signal, "DELETE");
   for (const mock of [api.get, api.post, api.delete]) {
@@ -573,4 +575,227 @@ it("色の復旧が失敗しても元の絞り込みと一覧の復旧を試み�
   expect(markers.attributeSearch).toEqual(criteria);
   expect(markers.filteredShapeIds).toEqual(["s1"]);
   expect(apply).toHaveBeenCalledTimes(2);
+});
+
+function setupSharedConditions() {
+  const layer = ref("a");
+  const master = ref("master");
+  const markers = useMapObjectStore();
+  const shapes = useShapeStore();
+  markers.activateScope("a", false);
+  shapes.activateScope("a", false);
+  for (const id of ["s1", "s2", "s3"]) shapes.upsertRecord(shape(id));
+  const filter = vi.fn().mockResolvedValue(true);
+  const color = vi.fn().mockResolvedValue(true);
+  const resetColor = vi.fn().mockResolvedValue(true);
+  const mapBridge = {
+    filter,
+    color,
+    resetColor,
+    focus: vi.fn(),
+    view: vi.fn(),
+    identity: () => "scope",
+    evaluatePreset: (
+      definition: import("../../../../template-scripts/src/ai/types").AiDefinition,
+    ) => analysis.evaluatePreset(definition),
+    prepareManualReplacement: (
+      kind: "filter" | "color" | "all",
+      signal: AbortSignal,
+      localPreset?: boolean,
+    ) => analysis.prepareManualReplacement(kind, signal, localPreset),
+  };
+  let analysis!: ReturnType<typeof useMapAnalysisSearch>;
+  let assistant!: ReturnType<typeof useAiAssistant>;
+  wrapper = mount(
+    defineComponent({
+      setup() {
+        assistant = useAiAssistant(layer, master, mapBridge);
+        analysis = useMapAnalysisSearch(
+          layer,
+          master,
+          async () => {
+            if (!(await filter())) throw Error("filter rejected");
+          },
+          vi.fn(),
+          assistant.applyManualColoring,
+          resetColor,
+          assistant.applyDefinition,
+          assistant.clearDefinition,
+          assistant.replaceAppliedCondition,
+          assistant.getRecalledColoring,
+        );
+        return () => null;
+      },
+    }),
+  );
+  return { analysis, assistant, markers, filter, color };
+}
+const manualFilterResult = {
+  as_of: at,
+  common_form_id: "form",
+  definition_version: 1,
+  marker_ids: [],
+  shape_ids: ["s1"],
+  target_count: 1,
+  coloring: state,
+};
+const savedFilter = (query1: string) => ({
+  type: "filter" as const,
+  expression: { op: "text", query1 },
+});
+
+it("地物または回答の更新後は、前の表示条件と古い判定用データを次の適用へ持ち越さない", async () => {
+  const { markers, shapes, search } = setup();
+  const auth = useAuthStore();
+  auth.accountId = "owner";
+  shapes.upsertRecord(shape("s1"));
+  const original = modal.options.getPresetData();
+  markers.setAiFilter([]);
+  expect(search.evaluatePreset(savedFilter("s1")).targets).toEqual(["shape:s1"]);
+  expect(modal.options.getPresetData()).toBe(original);
+  shapes.upsertRecord({ ...shape("s1", "2"), name: "更新済み" });
+  expect(search.evaluatePreset(savedFilter("更新済み")).targets).toEqual(["shape:s1"]);
+  const updated = modal.options.getPresetData();
+  expect(updated).not.toBe(original);
+  notifyAiSuggestionDataChanged("owner");
+  expect(modal.options.getPresetData()).not.toBe(updated);
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+const savedColor = (value: string) => ({
+  type: "color" as const,
+  common_form_id: "form",
+  rules: [{ ...specification.rules[0], color: value }],
+});
+const presetData = {
+  as_of: at,
+  next_cursor: null,
+  rows: [
+    {
+      target: "shape:s1",
+      id: "answer-s1",
+      form_id: "form",
+      revision: 1,
+      fields: { n: { type: "number", value: "12" } },
+    },
+  ],
+};
+
+it("別の保存済み絞り込みへ連続切替し、失敗した置換では直前の絞り込みと色分けを保持する", async () => {
+  api.get.mockResolvedValue({
+    data: { enabled: false, voice_enabled: false, revision: "disabled" },
+  });
+  api.post.mockResolvedValue({ data: presetData });
+  const { analysis, assistant, markers, filter, color } = setupSharedConditions();
+  await modal.options.analysis.apply(specification, state);
+  await modal.options.onApply(criteria, manualFilterResult);
+  await modal.options
+    .getPresetData()
+    .prepare([savedColor("#ff0000")], new AbortController().signal);
+  api.post.mockClear();
+  filter.mockResolvedValueOnce(false);
+  await expect(assistant.applyDefinition(savedFilter("s2"))).rejects.toThrow("地図への検索");
+  expect(markers.attributeSearch).toEqual(criteria);
+  expect(markers.aiFilterTargets).toBeNull();
+
+  await assistant.applyDefinition(savedFilter("s2"));
+  await assistant.applyDefinition(savedFilter("s3"));
+  expect(markers.attributeSearch).toBeNull();
+  expect(markers.aiFilterTargets).toEqual(new Set(["shape:s3"]));
+  expect(analysis.getAnalysisState().specification).toEqual(specification);
+  expect(color).toHaveBeenLastCalledWith(state);
+  expect(api.post).not.toHaveBeenCalled();
+
+  filter.mockResolvedValueOnce(false);
+  await expect(modal.options.onApply(criteria, manualFilterResult)).rejects.toThrow(
+    "filter rejected",
+  );
+  expect(markers.attributeSearch).toBeNull();
+  expect(markers.aiFilterTargets).toEqual(new Set(["shape:s3"]));
+  await modal.options.onApply(criteria, manualFilterResult);
+  expect(markers.attributeSearch).toEqual(criteria);
+  expect(markers.aiFilterTargets).toBeNull();
+});
+
+it("別の保存済み色分けに続けて切り替え、手動の色分けへ戻しても絞り込みを保持する", async () => {
+  api.get.mockResolvedValue({
+    data: { enabled: false, voice_enabled: false, revision: "disabled" },
+  });
+  api.post.mockResolvedValue({ data: presetData });
+  const { analysis, assistant, markers, color } = setupSharedConditions();
+  await modal.options.analysis.apply(specification, state);
+  await modal.options.onApply(criteria, manualFilterResult);
+  await modal.options
+    .getPresetData()
+    .prepare([savedColor("#223344")], new AbortController().signal);
+  api.post.mockClear();
+  await assistant.applyDefinition(savedColor("#223344"));
+  await assistant.applyDefinition(savedColor("#334455"));
+  expect(api.post).not.toHaveBeenCalled();
+  expect(markers.attributeSearch).toEqual(criteria);
+  expect(analysis.getAnalysisState().specification).toBeNull();
+  expect(color).toHaveBeenLastCalledWith({
+    ...state,
+    rules: [{ ...state.rules[0], color: "#334455" }],
+  });
+
+  color.mockResolvedValueOnce(false);
+  await expect(modal.options.analysis.apply(specification, state)).rejects.toThrow(
+    "地図への色分け",
+  );
+  expect(color).toHaveBeenLastCalledWith({
+    ...state,
+    rules: [{ ...state.rules[0], color: "#334455" }],
+  });
+  await modal.options.analysis.apply(specification, state);
+  expect(markers.attributeSearch).toEqual(criteria);
+  expect(analysis.getAnalysisState().specification).toEqual(specification);
+  expect(color).toHaveBeenLastCalledWith(state);
+});
+
+it("チャットからの解除は絞り込みと色分けを同時に外し、元に戻すと両方を復元する", async () => {
+  api.get.mockResolvedValue({
+    data: { enabled: true, voice_enabled: false, revision: "r1", protocol_version: 2 },
+  });
+  api.post.mockImplementation(async (path) => ({
+    data:
+      path === "/ai/chat"
+        ? { message: "解除", action: { type: "reset" }, revision: "r1" }
+        : path === "/ai/assist/execute"
+          ? { type: "reset" }
+          : { revision: "r1", as_of: at, suggestions: [] },
+  }));
+  const { analysis, assistant, markers, color } = setupSharedConditions();
+  await modal.options.analysis.apply(specification, state);
+  await modal.options.onApply(criteria, manualFilterResult);
+  Object.defineProperties(HTMLDialogElement.prototype, {
+    showModal: {
+      configurable: true,
+      value() {
+        this.setAttribute("open", "");
+      },
+    },
+    close: {
+      configurable: true,
+      value() {
+        this.removeAttribute("open");
+      },
+    },
+  });
+  assistant.openAiChat();
+  await flushPromises();
+  const chat = document.querySelector<HTMLDialogElement>(".geocode-ai-chat")!;
+  chat.querySelector("textarea")!.value = "解除";
+  chat
+    .querySelector("form")!
+    .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  await flushPromises();
+  expect(markers.attributeSearch).toBeNull();
+  expect(analysis.getAnalysisState().specification).toBeNull();
+  expect(color).toHaveBeenLastCalledWith(null);
+  [...chat.querySelectorAll("button")].find((button) => button.textContent === "元に戻す")!.click();
+  await flushPromises();
+  expect(markers.attributeSearch).toEqual(criteria);
+  expect(analysis.getAnalysisState().specification).toEqual(specification);
+  expect(color).toHaveBeenLastCalledWith(state);
 });

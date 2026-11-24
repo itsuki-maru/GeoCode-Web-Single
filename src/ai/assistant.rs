@@ -347,7 +347,7 @@ async fn list(
         pool,
         user,
         ListQuery {
-            versions: Some("1,2".into()),
+            versions: Some("2".into()),
             kind,
             name: name.clone(),
             page,
@@ -396,7 +396,7 @@ async fn run(
                     pool,
                     user,
                     ListQuery {
-                        versions: Some("1,2".into()),
+                        versions: Some("2".into()),
                         kind,
                         name: name.clone(),
                         page: Some(1),

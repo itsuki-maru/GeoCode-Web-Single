@@ -4,7 +4,7 @@ import { PRINT_PAPERS, type PrintPaper } from "../common/print-state";
 import { captureMaplibreCanvases, replaceMaplibreCanvasClones } from "./canvas-snapshot";
 
 const EXCLUDED =
-  ".leaflet-control-zoom, .leaflet-popup-close-button, .measurement-selection-help, .measurement-selection-summary:not(.has-selection), .geocode-content-load-more, .geocode-content-load-all, .print-memo-toolbar, .print-memo-editor";
+  ".leaflet-control-zoom, .leaflet-popup-close-button, .measurement-selection-help, .measurement-selection-summary:not(.has-selection), .geocode-content-load-more, .geocode-content-load-all, .print-memo-toolbar, .print-memo-editor, .route-search-overlay-print .route-search-handle, .route-search-overlay-print .route-search-actions";
 export function pdfScale(width: number, height: number): number {
   return Math.min(150 / 96, Math.sqrt(4_000_000 / (width * height)));
 }

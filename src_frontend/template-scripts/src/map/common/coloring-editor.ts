@@ -4,7 +4,7 @@ import {
   type AnswerField,
   type AnswerColorSpecification,
 } from "./answer-coloring";
-import { validatePresetDraft } from "./answer-map-presets";
+import { toV2PresetDraft } from "./answer-map-presets";
 
 export const node = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) => {
   const el = document.createElement(tag);
@@ -35,10 +35,13 @@ export function createColoringEditor(
     forms(): { id: string; label: string }[];
     requiredForm(): string;
     loadFields(id: string, signal: AbortSignal): Promise<AnswerField[]>;
+    onFieldsChange?(): void;
     apply(value: AnswerColorSpecification | null): Promise<void> | void;
     save(value: AnswerColorSpecification): Promise<void> | void;
     active(): boolean;
+    applyDisabled?(): boolean;
     disabled?(): boolean;
+    preserveDraft?(): boolean;
     lazy?: boolean;
     collapsible?: boolean;
   },
@@ -59,6 +62,11 @@ export function createColoringEditor(
   let error = "",
     started = !options.lazy;
   draft.common_form_id = options.requiredForm();
+  const hasPreservedForm = () =>
+    !!options.preserveDraft?.() &&
+    !!draft.common_form_id &&
+    !!options.requiredForm() &&
+    options.requiredForm() !== draft.common_form_id;
   const panel =
     options.collapsible === false
       ? node("section")
@@ -118,6 +126,7 @@ export function createColoringEditor(
       if (current !== seq || disposed) return;
       draft = { common_form_id: id, rules: [] };
       fields = next;
+      options.onFieldsChange?.();
     });
   function render() {
     if (disposed) return;
@@ -135,7 +144,12 @@ export function createColoringEditor(
         ["", "選択してください"],
         ...options
           .forms()
-          .filter((f) => !options.requiredForm() || f.id === options.requiredForm())
+          .filter(
+            (f) =>
+              !options.requiredForm() ||
+              f.id === options.requiredForm() ||
+              (hasPreservedForm() && f.id === draft.common_form_id),
+          )
           .map((f) => [f.id, f.label] as [string, string]),
       ],
       draft.common_form_id,
@@ -157,18 +171,22 @@ export function createColoringEditor(
         color: palette[draft.rules.length]!,
         conditions: [condition(f)],
       });
+      options.onFieldsChange?.();
       render();
     });
     add.disabled = !fields.length || draft.rules.length >= 10;
     const clear = action("色分け解除", () => void run(() => options.apply(null)));
-    clear.disabled = !options.active();
+    clear.disabled = !options.active() || !!options.applyDisabled?.();
     const panelActions = node("div");
     panelActions.className = "color-actions";
     panelActions.append(add, clear);
     controls.append(panelActions);
     const addCondition = (rule: AnswerColorSpecification["rules"][number]) => {
       const button = action("分類条件を追加", () => {
-        if (fields[0]) rule.conditions.push(condition(fields[0]));
+        if (fields[0]) {
+          rule.conditions.push(condition(fields[0]));
+          options.onFieldsChange?.();
+        }
         render();
       });
       button.disabled = rule.conditions.length >= 10;
@@ -222,7 +240,10 @@ export function createColoringEditor(
           `${c.field_id}:${c.field_type}`,
           (value) => {
             const f = fields.find((f) => `${f.id}:${f.field_type}` === value);
-            if (f) rule.conditions[ci] = condition(f);
+            if (f) {
+              rule.conditions[ci] = condition(f);
+              options.onFieldsChange?.();
+            }
             render();
           },
         );
@@ -301,14 +322,15 @@ export function createColoringEditor(
       controls.append(section);
     });
     const specification = () => {
-      validatePresetDraft({ kind: "coloring", definition: draft });
+      toV2PresetDraft({ kind: "coloring", definition: draft });
       return structuredClone(draft);
     };
     const apply = action("色分け実行", () => void run(() => options.apply(specification()))),
       save = action("検索条件を保存", () => void run(() => options.save(specification())));
     apply.className = "color-submit";
     save.className = "color-save";
-    apply.disabled = save.disabled = !draft.rules.length;
+    save.disabled = !draft.rules.length;
+    apply.disabled = save.disabled || !!options.applyDisabled?.() || hasPreservedForm();
     controls.append(apply, save);
     const help = node(
       "p",
@@ -325,6 +347,14 @@ export function createColoringEditor(
     );
     status.className = "color-help";
     panel.append(controls, help, status);
+    if (hasPreservedForm()) {
+      const message = node(
+        "p",
+        "色分けを実行するには、反映済みの絞り込みと同じ共通フォームを選択してください。",
+      );
+      message.className = "color-help";
+      panel.append(message);
+    }
     if (error) {
       const message = node("p", error);
       message.setAttribute("role", "alert");
@@ -348,6 +378,7 @@ export function createColoringEditor(
       !busy &&
       !options.disabled?.() &&
       required &&
+      !hasPreservedForm() &&
       (required !== draft.common_form_id || (!fields.length && !error))
     )
       load(required);
@@ -363,8 +394,16 @@ export function createColoringEditor(
   render();
   return {
     refresh,
+    refreshDisplay: render,
+    getDraft: () => structuredClone(draft),
+    setFields(formId: string, candidates: AnswerField[]) {
+      if (draft.common_form_id === formId) {
+        fields = candidates;
+        render();
+      }
+    },
     restore(value: AnswerColorSpecification, candidates: AnswerField[]) {
-      validatePresetDraft({ kind: "coloring", definition: value });
+      toV2PresetDraft({ kind: "coloring", definition: value });
       if (options.requiredForm() && value.common_form_id !== options.requiredForm())
         throw Error("現在の絞り込みと共通フォームが異なるため呼び出せません。");
       for (const rule of value.rules)

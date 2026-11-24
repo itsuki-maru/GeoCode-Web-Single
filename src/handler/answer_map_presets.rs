@@ -7,7 +7,7 @@ use super::{
     },
 };
 use crate::{
-    ai::actions::{AiAction, AiCondition, Expression},
+    ai::actions::{AiAction, AiCondition, Expression, MapContext, conditions_for_api},
     error::AppError,
     model::MarkerFormSchema,
 };
@@ -46,26 +46,6 @@ pub struct CreatePreset {
     pub kind: PresetKind,
     pub schema_version: i32,
     pub definition: Value,
-}
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct FilterDefinition {
-    common_form_id: Option<Uuid>,
-    conditions: Vec<AnswerCondition>,
-}
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct ColoringDefinition {
-    common_form_id: Uuid,
-    rules: Vec<ColorRule>,
-}
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct ColorRule {
-    id: String,
-    label: String,
-    color: String,
-    conditions: Vec<AnswerCondition>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DisplayField {
@@ -228,7 +208,6 @@ fn validate_group(
     conditions: &[AnswerCondition],
     fields: &BTreeMap<(String, String), FieldOption>,
     used: &mut BTreeSet<(String, String)>,
-    editor_rules: bool,
 ) -> Result<(), AppError> {
     validate(&AnswerQuery {
         common_form_id: form.map(str::to_owned),
@@ -238,16 +217,6 @@ fn validate_group(
     for condition in conditions {
         if !supported(&condition.field_type) {
             return Err(invalid("地図で利用できない項目の種類です。"));
-        }
-        if editor_rules
-            && matches!(condition.field_type.as_str(), "text" | "textarea")
-            && !matches!(condition.op.as_str(), "empty" | "filled" | "missing")
-            && condition
-                .value
-                .as_str()
-                .is_some_and(|value| value.trim().is_empty())
-        {
-            return Err(invalid("条件の値を入力してください。"));
         }
         let key = (condition.field_id.clone(), condition.field_type.clone());
         let field = fields
@@ -270,70 +239,18 @@ fn validate_group(
     Ok(())
 }
 
-// JSON 数値を f64 経由で丸めず、編集画面の再利用可能な表現に合わせる。
-fn canonicalize_conditions(conditions: &mut [AnswerCondition]) {
-    for condition in conditions {
-        if matches!(condition.op.as_str(), "empty" | "filled" | "missing") {
-            condition.value = Value::Null;
-            condition.upper = Value::Null;
-            continue;
-        }
-        if condition.field_type == "number" {
-            if condition.value.is_number() {
-                condition.value = Value::String(condition.value.to_string());
-            }
-            if condition.upper.is_number() {
-                condition.upper = Value::String(condition.upper.to_string());
-            }
-        } else if matches!(condition.field_type.as_str(), "text" | "textarea") {
-            if let Some(value) = condition.value.as_str() {
-                condition.value = Value::String(value.trim().to_owned());
-            }
-        }
-        if condition.op != "between" {
-            condition.upper = Value::Null;
-        }
-    }
-}
+const MAX_DEFINITION_BYTES: usize = 128 * 1024;
 
-const MAX_AI_DEFINITION_BYTES: usize = 128 * 1024;
-
-fn ai_conditions(conditions: &[AnswerCondition]) -> Vec<AiCondition> {
-    conditions
-        .iter()
-        .map(|condition| AiCondition {
-            field_id: condition.field_id.clone(),
-            field_type: condition.field_type.clone(),
-            op: condition.op.clone(),
-            value: condition.value.clone(),
-            upper: condition.upper.clone(),
-        })
-        .collect()
-}
-
-fn answer_conditions(conditions: &[AiCondition]) -> Vec<AnswerCondition> {
-    conditions
-        .iter()
-        .map(|condition| AnswerCondition {
-            field_id: condition.field_id.clone(),
-            field_type: condition.field_type.clone(),
-            op: condition.op.clone(),
-            value: condition.value.clone(),
-            upper: condition.upper.clone(),
-        })
-        .collect()
-}
-
-fn parse_ai_definition(kind: PresetKind, definition: &Value) -> Result<AiAction, AppError> {
+fn parse_definition(kind: PresetKind, definition: &Value) -> Result<AiAction, AppError> {
     if serde_json::to_vec(definition)
         .map_err(|_| AppError::InternalServerError)?
         .len()
-        > MAX_AI_DEFINITION_BYTES
+        > MAX_DEFINITION_BYTES
     {
-        return Err(invalid("AIの保存条件は128KiB以内にしてください。"));
+        return Err(invalid("保存条件は128KiB以内にしてください。"));
     }
     let mut action: AiAction = serde_json::from_value(definition.clone())
-        .map_err(|_| invalid("AIの保存条件の形式が不正です。"))?;
+        .map_err(|_| invalid("保存条件の形式が不正です。"))?;
     if !matches!(
         (kind, &action),
         (PresetKind::Filter, AiAction::Filter { .. })
@@ -348,9 +265,9 @@ fn parse_ai_definition(kind: PresetKind, definition: &Value) -> Result<AiAction,
     if serde_json::to_vec(&action)
         .map_err(|_| AppError::InternalServerError)?
         .len()
-        > MAX_AI_DEFINITION_BYTES
+        > MAX_DEFINITION_BYTES
     {
-        return Err(invalid("AIの保存条件は128KiB以内にしてください。"));
+        return Err(invalid("保存条件は128KiB以内にしてください。"));
     }
     Ok(action)
 }
@@ -362,48 +279,10 @@ pub fn preset_action(preset: &SavedPreset) -> Result<AiAction, AppError> {
         "coloring" => PresetKind::Coloring,
         _ => return Err(invalid("保存条件の種類に対応していません。")),
     };
-    if preset.schema_version == 2 {
-        return parse_ai_definition(kind, &preset.definition);
-    }
-    if preset.schema_version != 1 {
+    if preset.schema_version != 2 {
         return Err(invalid("保存条件の形式バージョンに対応していません。"));
     }
-    let action = match kind {
-        PresetKind::Filter => {
-            let definition: FilterDefinition = serde_json::from_value(preset.definition.clone())
-                .map_err(|_| invalid("絞り込み条件の形式が不正です。"))?;
-            let expression = match definition.common_form_id {
-                Some(common_form_id) => Expression::Attribute {
-                    common_form_id,
-                    conditions: ai_conditions(&definition.conditions),
-                },
-                None if definition.conditions.is_empty() => Expression::All {},
-                None => return Err(invalid("共通フォームを選択してください。")),
-            };
-            AiAction::Filter { expression }
-        },
-        PresetKind::Coloring => {
-            let definition: ColoringDefinition = serde_json::from_value(preset.definition.clone())
-                .map_err(|_| invalid("色分け条件の形式が不正です。"))?;
-            AiAction::Color {
-                common_form_id: definition.common_form_id,
-                rules: definition
-                    .rules
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, rule)| crate::ai::actions::ColorRule {
-                        // v1の長い編集用IDは、分類順序を維持した実行用IDへ変換する。
-                        id: format!("preset-{index}"),
-                        label: rule.label,
-                        color: rule.color,
-                        conditions: ai_conditions(&rule.conditions),
-                    })
-                    .collect(),
-            }
-        },
-    };
-    action.validate()?;
-    Ok(action)
+    parse_definition(kind, &preset.definition)
 }
 
 fn expression_groups<'a>(expression: &'a Expression, groups: &mut Vec<(Uuid, &'a [AiCondition])>) {
@@ -422,7 +301,7 @@ fn expression_groups<'a>(expression: &'a Expression, groups: &mut Vec<(Uuid, &'a
     }
 }
 
-async fn validate_action_tx(
+pub(super) async fn validate_action_tx(
     tx: &mut Transaction<'_, Sqlite>,
     user: &str,
     action: &AiAction,
@@ -451,10 +330,9 @@ async fn validate_action_tx(
         let mut used = BTreeSet::new();
         validate_group(
             Some(&form.to_string()),
-            &answer_conditions(conditions),
+            &conditions_for_api(conditions),
             fields,
             &mut used,
-            false,
         )?;
         for key in used {
             let field = &fields[&key];
@@ -497,102 +375,6 @@ async fn validate_action_tx(
     })
 }
 
-async fn normalize_legacy(
-    tx: &mut Transaction<'_, Sqlite>,
-    user: &str,
-    request: &CreatePreset,
-) -> Result<(Value, PresetDisplay), AppError> {
-    let filter: Option<FilterDefinition> = if matches!(request.kind, PresetKind::Filter) {
-        Some(
-            serde_json::from_value(request.definition.clone())
-                .map_err(|_| invalid("絞り込み条件の形式が不正です。"))?,
-        )
-    } else {
-        None
-    };
-    let coloring: Option<ColoringDefinition> = if matches!(request.kind, PresetKind::Coloring) {
-        let definition: ColoringDefinition = serde_json::from_value(request.definition.clone())
-            .map_err(|_| invalid("色分け条件の形式が不正です。"))?;
-        if definition.rules.is_empty() || definition.rules.len() > 10 {
-            return Err(invalid("分類は1〜10件で指定してください。"));
-        }
-        let mut ids = BTreeSet::new();
-        for rule in &definition.rules {
-            if rule.id.trim().is_empty()
-                || rule.id.encode_utf16().count() > 100
-                || !ids.insert(rule.id.clone())
-                || rule.label.trim().is_empty()
-                || rule.label.encode_utf16().count() > 100
-                || rule.conditions.is_empty()
-                || rule.color.len() != 7
-                || !rule.color.starts_with('#')
-                || !rule.color[1..].bytes().all(|b| b.is_ascii_hexdigit())
-            {
-                return Err(invalid("分類名・色・条件を確認してください。"));
-            }
-        }
-        Some(definition)
-    } else {
-        None
-    };
-    let form = filter
-        .as_ref()
-        .and_then(|definition| definition.common_form_id)
-        .or_else(|| {
-            coloring
-                .as_ref()
-                .map(|definition| definition.common_form_id)
-        });
-    let (label, fields) = if let Some(form) = form {
-        let (label, fields) = form_fields(tx, user, &form.to_string()).await?;
-        (Some(label), fields)
-    } else {
-        (None, BTreeMap::new())
-    };
-    let mut used = BTreeSet::new();
-    let definition = if let Some(mut definition) = filter {
-        validate_group(
-            form.as_ref().map(ToString::to_string).as_deref(),
-            &definition.conditions,
-            &fields,
-            &mut used,
-            true,
-        )?;
-        canonicalize_conditions(&mut definition.conditions);
-        serde_json::to_value(definition).map_err(|_| AppError::InternalServerError)?
-    } else {
-        let mut definition = coloring.expect("coloring kind has a definition");
-        for rule in &mut definition.rules {
-            validate_group(
-                form.as_ref().map(ToString::to_string).as_deref(),
-                &rule.conditions,
-                &fields,
-                &mut used,
-                true,
-            )?;
-            canonicalize_conditions(&mut rule.conditions);
-            rule.label = rule.label.trim().to_owned();
-        }
-        serde_json::to_value(definition).map_err(|_| AppError::InternalServerError)?
-    };
-    let display = PresetDisplay {
-        form_label: label,
-        fields: used
-            .into_iter()
-            .map(|key| {
-                let field = &fields[&key];
-                DisplayField {
-                    id: field.id.clone(),
-                    field_type: field.field_type.clone(),
-                    label: field.label.clone(),
-                    form_id: None,
-                }
-            })
-            .collect(),
-    };
-    Ok((definition, display))
-}
-
 async fn normalize_preset_tx(
     tx: &mut Transaction<'_, Sqlite>,
     user: &str,
@@ -602,19 +384,15 @@ async fn normalize_preset_tx(
     if name.is_empty() || name.chars().count() > 100 {
         return Err(invalid("条件名を1〜100文字で入力してください。"));
     }
-    if !matches!(request.schema_version, 1 | 2) {
+    if request.schema_version != 2 {
         return Err(invalid("保存条件の形式バージョンに対応していません。"));
     }
-    if request.schema_version == 1 {
-        normalize_legacy(tx, user, request).await
-    } else {
-        let action = parse_ai_definition(request.kind, &request.definition)?;
-        let display = validate_action_tx(tx, user, &action).await?;
-        Ok((
-            serde_json::to_value(action).map_err(|_| AppError::InternalServerError)?,
-            display,
-        ))
-    }
+    let action = parse_definition(request.kind, &request.definition)?;
+    let display = validate_action_tx(tx, user, &action).await?;
+    Ok((
+        serde_json::to_value(action).map_err(|_| AppError::InternalServerError)?,
+        display,
+    ))
 }
 
 /// 確認画面の準備時にも、作成時と同じ検証をINSERTなしで行う。
@@ -702,6 +480,7 @@ pub async fn get_preset(pool: &SqlitePool, user: &str, id: &str) -> Result<Saved
         FROM answer_map_saved_condition_model
         WHERE user_id = $1
             AND id = $2
+            AND schema_version = 2
         "#,
     )
     .bind(user)
@@ -754,7 +533,7 @@ pub async fn list_presets(
         return Err(invalid("ページの指定が不正です。"));
     }
     let versions = match query.versions.as_deref() {
-        None => vec![1],
+        None => vec![2],
         Some(raw) if raw.len() <= 32 => {
             let mut versions = BTreeSet::new();
             for value in raw.split(',') {
@@ -766,7 +545,9 @@ pub async fn list_presets(
                         "保存条件の形式バージョンを1または2で指定してください。",
                     ));
                 }
-                versions.insert(version);
+                if version == 2 {
+                    versions.insert(version);
+                }
             }
             versions.into_iter().collect()
         },
@@ -838,6 +619,7 @@ pub async fn delete_preset(pool: &SqlitePool, user: &str, id: &str) -> Result<()
         DELETE FROM answer_map_saved_condition_model
         WHERE id = $1
             AND user_id = $2
+            AND schema_version = 2
         "#,
     )
     .bind(id)
@@ -850,7 +632,7 @@ pub async fn delete_preset(pool: &SqlitePool, user: &str, id: &str) -> Result<()
     Ok(())
 }
 /// 新しい編集画面は表示時のアカウントを固定する。ヘッダーなしの従来手動画面は互換維持。
-fn validate_optional_account(user: &str, headers: &HeaderMap) -> Result<(), AppError> {
+pub(super) fn validate_optional_account(user: &str, headers: &HeaderMap) -> Result<(), AppError> {
     if headers.contains_key("x-ai-account-id") {
         super::ai::validate_account(user, headers)?;
     }
@@ -897,4 +679,45 @@ pub async fn delete_handler(
         [(header::CACHE_CONTROL, "no-store")],
     )
         .into_response())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EvaluatePreset {
+    pub context: MapContext,
+    pub definition: Value,
+}
+
+pub async fn evaluate_handler(
+    Extension(user): Extension<String>,
+    Extension(pool): Extension<SqlitePool>,
+    headers: HeaderMap,
+    Json(request): Json<EvaluatePreset>,
+) -> Result<Response, AppError> {
+    validate_optional_account(&user, &headers)?;
+    let action = match request.definition.get("type").and_then(Value::as_str) {
+        Some("filter") => parse_definition(PresetKind::Filter, &request.definition)?,
+        Some("color") => parse_definition(PresetKind::Coloring, &request.definition)?,
+        Some("reset") if request.definition == serde_json::json!({"type": "reset"}) => {
+            AiAction::Reset {}
+        },
+        _ => {
+            return Err(invalid(
+                "絞り込み・色分け・解除のいずれかを指定してください。",
+            ));
+        },
+    };
+    let mut result = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        if !matches!(action, AiAction::Reset {}) {
+            validate_action(&pool, &user, &action).await?;
+        }
+        crate::ai::actions::execute_action(&pool, &user, request.context.layer_ids, &action).await
+    })
+    .await
+    .map_err(|_| invalid("検索が時間内に完了しませんでした。条件を絞ってください。"))??;
+    if !matches!(action, AiAction::Reset {}) {
+        result["definition"] =
+            serde_json::to_value(action).map_err(|_| AppError::InternalServerError)?;
+    }
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(result)).into_response())
 }

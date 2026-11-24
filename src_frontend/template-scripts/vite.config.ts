@@ -16,6 +16,7 @@ const templateScriptsDirectory = fileURLToPath(new URL("./", import.meta.url));
 export const editorCommonPrelude = `
 import { createMapXssOptions, sanitizeMapHtml } from "/src/map/common/markdown-sanitizer.ts";
 import { createPopupContentRuntime } from "/src/map/common/popup-content.ts";
+import { createRouteSearch } from "/src/map/common/route-search.ts";
 let popupContent;
 import { installAnswerColoring, isAnswerColoring } from "/src/map/answer-coloring.ts";
 import { createColorLegend } from "/src/map/common/color-legend.ts";

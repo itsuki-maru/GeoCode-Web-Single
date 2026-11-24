@@ -318,9 +318,17 @@ installBasemapController(map, basemapController);
 // マーカーにIDを振るためのオブジェクト
 let markers = {};
 // Leaflet.markerclusterの使用
+const routeSearch = createRouteSearch({
+  map,
+  leaflet: L,
+  basemap: () => basemapController.getState(),
+});
 popupContent = createPopupContentRuntime({
   map,
-  limitMarkerHeight: true,
+  routeSearch,
+  showGoogleMapLink: true,
+  getMarkerRecord: (id) => markersFromAxum[id],
+  desktopHeightLimit: "marker",
   sanitizeHtml: (html) => sanitizeMapHtml(html, filterXSS, xssOptions),
   renderMarkdown: renderMapMarkdown,
   setupImages: setupDetailsLazyImages,

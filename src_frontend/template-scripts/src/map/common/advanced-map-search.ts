@@ -4,14 +4,11 @@ import { createColoringEditor, action, node } from "./coloring-editor";
 import { createMapPresetDialogs } from "./map-preset-dialog";
 import { createMapMessageDialog } from "./map-message-dialog";
 import { evaluateMapAnalysis, mapFilterPath, mapOperationMessages } from "./map-analysis";
-import {
-  cloneSavedMapPreset,
-  validatePresetDraft,
-  type AnySavedMapPreset,
-  type SavedAiMapPreset,
-} from "./answer-map-presets";
+import { cloneSavedMapPreset, toV2PresetDraft, type SavedMapPreset } from "./answer-map-presets";
+import { presetReferences, type LocalPresetData } from "./local-preset";
+import { PresetPageReads } from "./preset-page-reads";
 import type { AiDefinition } from "../../ai/types";
-import { createAiConditionEditor } from "./ai-condition-editor";
+import { createAiConditionEditor, validateAiDefinitionFields } from "./ai-condition-editor";
 import type { AnswerColorSpecification, AnswerColoring, AnswerField } from "./answer-coloring";
 /** Vue の地図ページと、単独で開く全画面の地図で共有する。 */
 export interface AttributeCondition {
@@ -162,12 +159,13 @@ export const attributeTransport: AttributeTransport = async (
 interface ModalOptions {
   transport: AttributeTransport;
   getApplied(): AttributeSearchRequest | null;
+  hasAppliedPresetFilter?(): boolean;
   getLayerIds(): string[] | null;
   getContext(): string;
   /** AI条件は手動検索の再評価世代と分け、アカウント・レイヤー・読込対象を固定する。 */
   getAiContextKey?(): string;
+  getPresetData?(): LocalPresetData;
   savedFilters?: boolean;
-  applyAiPreset?(id: string, signal: AbortSignal): Promise<void>;
   applyAiDefinition?(definition: AiDefinition, signal: AbortSignal): Promise<void>;
   clearAiDefinition?(kind: "filter" | "color", signal: AbortSignal): Promise<void>;
   onApply(
@@ -181,6 +179,7 @@ interface ModalOptions {
     apply(
       specification: AnswerColorSpecification | null,
       coloring: AnswerColoring | null,
+      signal?: AbortSignal,
     ): Promise<void>;
   };
 }
@@ -340,17 +339,25 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
   type AiKind = "filter" | "coloring";
   type AiDraft = {
     editor: ReturnType<typeof createAiConditionEditor>;
+    reloadMetadata(page?: PresetPage): Promise<void>;
     host: HTMLElement;
     name: string;
     message: string;
     error: boolean;
+    waiting?: boolean;
+    retryData?: boolean;
+    page?: PresetPage;
+    preparation?: { data: LocalPresetData; controller: AbortController; read: Promise<void> };
   };
   const aiDrafts: Partial<Record<AiKind, AiDraft>> = {};
   const aiStatuses: Partial<Record<AiKind, HTMLParagraphElement>> = {};
   const clearAiDraft = (kind: AiKind) => {
+    const page = aiDrafts[kind]?.page;
+    aiDrafts[kind]?.preparation?.controller.abort();
     aiDrafts[kind]?.editor.dispose();
     delete aiDrafts[kind];
     delete aiStatuses[kind];
+    if (page?.source.aborted) cancelUnusedPage(page);
   };
   const clearAiDrafts = () => {
     clearAiDraft("filter");
@@ -376,103 +383,95 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
       output.setAttribute("role", failed ? "alert" : "status");
     }
   };
-  const loadFields = async (id: string, signal: AbortSignal): Promise<AnswerField[]> => {
-    const data = (await options.transport(
-      mapFilterPath,
-      {
-        query: { mode: "latest" },
-        scope: { kind: "layers", layer_ids: options.getLayerIds() },
-        common_form_id: id,
-        conditions: [],
-        options_only: true,
-      },
-      signal,
-    )) as { fields: AnswerField[] };
-    if (!Array.isArray(data.fields)) throw Error("入力項目を取得できませんでした。");
-    return data.fields;
-  };
-  const restorePreset = async (preset: AnySavedMapPreset, signal: AbortSignal) => {
-    if (preset.schema_version === 2) {
-      await restoreAiPreset(preset, signal);
-      return;
+  type MapOptions = { forms?: { id: string; label: string }[]; fields: AnswerField[] };
+  const aiContextKey = () => options.getAiContextKey?.() ?? options.getContext();
+  let metadataContext: string | undefined;
+  let cachedForms: CommonForm[] | undefined;
+  const cachedOptions = new Map<string | null, MapOptions>();
+  const formReads = new PresetPageReads<CommonForm[]>();
+  const optionReads = new PresetPageReads<MapOptions>();
+  function resetMetadata() {
+    cachedForms = undefined;
+    cachedOptions.clear();
+    formReads.clear();
+    optionReads.clear();
+  }
+  function checkMetadataContext() {
+    const key = aiContextKey();
+    if (key !== metadataContext) {
+      metadataContext = key;
+      resetMetadata();
     }
-    validatePresetDraft(preset);
-    if (!options.analysis) {
-      if (preset.kind !== "filter") throw Error("この画面では色分け条件を呼び出せません。");
-      const current = sequence,
-        context = options.getContext();
-      const data = await options.transport("/common-forms", undefined, signal);
-      if (signal.aborted || disposed || !dialog.open || current !== sequence) return;
-      if (context !== options.getContext())
-        throw Error("地図データが更新されました。もう一度呼び出してください。");
-      if (!Array.isArray(data)) throw Error("共通フォームを取得できませんでした。");
-      const nextForms = data as CommonForm[];
-      const id = preset.definition.common_form_id;
-      const form = nextForms.find((f) => f.id === id);
-      if (id && !form) throw Error("保存した共通フォームが削除されているため呼び出せません。");
-      for (const c of preset.definition.conditions) {
-        const field = form?.form_schema.fields.find(
-          (f) => f.id === c.field_id && f.type === c.field_type,
-        );
-        if (!field) throw Error("保存した条件の項目が現在の共通フォームに見つかりません。");
-        if (Array.isArray(c.value) && c.value.some((v) => !field.choices?.includes(v)))
-          throw Error("保存した条件の選択肢が変更されています。検索条件を確認してください。");
-      }
-      // 現在の定義で全条件を確認してから、編集中の条件を置き換える。
-      forms = nextForms;
-      clearAiDraft("filter");
-      formId = id || "";
-      conditions = clone(preset.definition.conditions) as unknown as AttributeCondition[];
-      render();
-      status.textContent = "検索条件を呼び出しました。「絞り込み実行」で地図に反映します。";
-      return;
-    }
-    const id = preset.definition.common_form_id;
-    const fields = id ? await loadFields(id, signal) : [];
-    if (signal.aborted || !dialog.open) return;
-    for (const c of preset.kind === "filter"
-      ? preset.definition.conditions
-      : preset.definition.rules.flatMap((r) => r.conditions)) {
-      const f = fields.find((f) => f.id === c.field_id && f.field_type === c.field_type);
-      if (!f || (Array.isArray(c.value) && c.value.some((v) => !f.choices.includes(v))))
-        throw Error("保存した項目または選択肢が見つかりません。");
-    }
-    if (id) {
-      let form = forms.find((f) => f.id === id);
-      if (!form) {
-        form = {
-          id,
-          version: 0,
-          form_title: preset.display.form_label || "過去のフォーム",
-          form_schema: { fields: [] },
-        };
-        forms.push(form);
-      }
-      form.form_schema.fields = fields.map((f) => ({
-        id: f.id,
-        label: f.label,
-        type: f.field_type,
-        choices: f.choices,
-      }));
-    }
-    if (preset.kind === "coloring") {
-      clearAiDraft("coloring");
-      coloringEditor!.restore(preset.definition, fields);
-      render();
-    } else {
-      const colors = options.analysis!.getSpecification();
-      if (colors && id && colors.common_form_id !== id)
-        throw Error("現在の色分けと共通フォームが異なります。");
-      formId = id || "";
-      conditions = clone(preset.definition.conditions) as unknown as AttributeCondition[];
-      clearAiDraft("filter");
-      render();
-    }
-    status.textContent = "検索条件を呼び出しました。実行ボタンで地図に反映します。";
-  };
+    return key;
+  }
+  async function readForms(signal: AbortSignal): Promise<CommonForm[]> {
+    const key = checkMetadataContext();
+    signal.throwIfAborted();
+    if (cachedForms) return cachedForms;
+    return formReads.get("forms", signal, async (request) => {
+      const value = await options.transport("/common-forms", undefined, request);
+      request.throwIfAborted();
+      if (key !== aiContextKey())
+        throw new DOMException("地図の対象が変わりました。", "AbortError");
+      if (
+        !Array.isArray(value) ||
+        value.some(
+          (form) => !form || typeof form.id !== "string" || typeof form.form_title !== "string",
+        )
+      )
+        throw Error("共通フォームを取得できませんでした。");
+      return (cachedForms = value);
+    });
+  }
+  async function readOptions(id: string | null, signal: AbortSignal): Promise<MapOptions> {
+    const key = checkMetadataContext();
+    signal.throwIfAborted();
+    const cached = cachedOptions.get(id);
+    if (cached) return cached;
+    return optionReads.get(id ?? "", signal, async (request) => {
+      const data = (await options.transport(
+        mapFilterPath,
+        {
+          query: { mode: "latest" },
+          scope: { kind: "layers", layer_ids: options.getLayerIds() },
+          common_form_id: id,
+          conditions: [],
+          options_only: true,
+        },
+        request,
+      )) as MapOptions;
+      request.throwIfAborted();
+      if (key !== aiContextKey())
+        throw new DOMException("地図の対象が変わりました。", "AbortError");
+      if (
+        !data ||
+        typeof data !== "object" ||
+        (id &&
+          (!Array.isArray(data.fields) ||
+            data.fields.some(
+              (field) =>
+                !field ||
+                typeof field.id !== "string" ||
+                typeof field.label !== "string" ||
+                typeof field.field_type !== "string" ||
+                !Array.isArray(field.choices) ||
+                field.choices.some((choice) => typeof choice !== "string"),
+            )))
+      )
+        throw Error("入力項目を取得できませんでした。");
+      cachedOptions.set(id, data);
+      return data;
+    });
+  }
+  const loadFields = async (id: string, signal: AbortSignal) =>
+    (await readOptions(id, signal)).fields;
   const presets =
     options.analysis || options.savedFilters
-      ? createMapPresetDialogs(options.transport, restorePreset, { filterOnly: !options.analysis })
+      ? createMapPresetDialogs(options.transport, restorePreset, {
+          filterOnly: !options.analysis,
+          apply: options.applyAiDefinition ? applySavedPreset : undefined,
+          preparePage: preparePresetPage,
+        })
       : undefined;
   const coloringEditor = options.analysis
     ? createColoringEditor(legacyAnalysisHost, {
@@ -522,9 +521,10 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
             )
               throw Error("地図データが更新されました。もう一度実行してください。");
             await awaitWithAbort(
-              options.analysis!.apply(specification, result.coloring),
+              options.analysis!.apply(specification, result.coloring, job.signal),
               job.signal,
             );
+            refreshDraft("filter");
           } finally {
             coloringBusy = false;
             clearTimeout(timeout);
@@ -556,6 +556,10 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
   };
   const close = () => {
     cancel();
+    formReads.clear();
+    optionReads.clear();
+    for (const job of pageJobs) job.abort();
+    currentPage = undefined;
     clearAiDrafts();
     completion.close(false);
     presets?.close();
@@ -572,7 +576,6 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
     status.textContent = message;
     status.className = "attribute-error";
   };
-  const aiContextKey = () => options.getAiContextKey?.() ?? options.getContext();
   const assertAiRequest = (
     seq: number,
     context: string,
@@ -584,29 +587,297 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
     if (context !== key())
       throw Error("地図の対象が変わりました。現在の地図で条件を確認してください。");
   };
-  async function restoreAiPreset(preset: SavedAiMapPreset, signal: AbortSignal) {
+  function requiredDefinitions(definition: AiDefinition, clear = false) {
+    // 手動の絞り込みを置き換えるときは、併用中の手動色分けも全地物で再判定する。
+    const colors =
+      definition.type === "filter" && options.getApplied()
+        ? options.analysis?.getSpecification()
+        : null;
+    const definitions = clear ? [] : [definition];
+    if (colors)
+      definitions.push(toV2PresetDraft({ kind: "coloring", definition: colors }).definition);
+    return definitions;
+  }
+  type PresetPage = {
+    items: SavedMapPreset[];
+    key: string;
+    source: AbortSignal;
+    job: AbortController;
+    finished: boolean;
+    replacement?: Promise<void>;
+    forms: Promise<CommonForm[]>;
+    fields: Map<string | null, Promise<MapOptions>>;
+    values: Promise<void>;
+  };
+  let currentPage: PresetPage | undefined;
+  // 選択時に一覧を閉じても、既に開始した読み込みは下書きが引き継ぐ。
+  const pageJobs = new Set<AbortController>();
+  function cancelUnusedPage(page: PresetPage) {
+    if (!Object.values(aiDrafts).some((draft) => draft.page === page)) page.job.abort();
+  }
+  async function preparePresetPage(items: SavedMapPreset[], signal: AbortSignal) {
+    if (disposed) return;
+    signal.throwIfAborted();
+    const eligible = items.filter((item) => options.analysis || item.kind === "filter");
+    const key = checkMetadataContext();
+    if (!eligible.length) return;
+    const definitions = eligible.flatMap((item) => requiredDefinitions(item.definition));
+    const ids = new Set<string | null>(presetReferences(definitions).keys());
+    if (!dialog.open && options.analysis) {
+      // AIの一覧から初めて検索画面を開く場合は、併用中の手動設定も表示する。
+      ids.add(null);
+      const applied = options.getApplied()?.common_form_id;
+      const coloring = options.analysis.getSpecification()?.common_form_id;
+      if (applied) ids.add(applied);
+      if (coloring) ids.add(coloring);
+    }
+    const data = options.getPresetData?.();
+    const missing = data && !data.ready(definitions);
+    const job = new AbortController();
+    pageJobs.add(job);
+    const fields = new Map<string | null, Promise<MapOptions>>();
+    // 多数のフォームを含むページでも、同時にすべてのリクエストを送らない。
+    const lanes = Array.from({ length: 4 }, () => Promise.resolve());
+    for (const id of ids) {
+      const lane = fields.size % lanes.length;
+      const read = lanes[lane]!.then(() => {
+        if (aiContextKey() !== key)
+          throw new DOMException("地図の対象が変わりました。", "AbortError");
+        return readOptions(id, job.signal);
+      });
+      fields.set(id, read);
+      lanes[lane] = read.then(
+        () => {},
+        () => {},
+      );
+    }
+    const page: PresetPage = {
+      items: eligible,
+      key,
+      source: signal,
+      job,
+      fields,
+      finished: false,
+      forms: readForms(job.signal),
+      values: missing ? data.prepare(definitions, job.signal) : Promise.resolve(),
+    };
+    const abort = () => cancelUnusedPage(page);
+    signal.addEventListener("abort", abort, { once: true });
+    currentPage = page;
+    try {
+      const results = await Promise.allSettled([page.forms, page.values, ...fields.values()]);
+      if (page.replacement) return page.replacement;
+      job.signal.throwIfAborted();
+      const failed = results.find((result) => result.status === "rejected");
+      if (failed?.status === "rejected") throw failed.reason;
+    } finally {
+      page.finished = true;
+      signal.removeEventListener("abort", abort);
+      pageJobs.delete(job);
+    }
+  }
+  function pageFor(preset: SavedMapPreset) {
+    if (!currentPage?.items.some((item) => item.id === preset.id)) return;
+    if (currentPage.key !== aiContextKey() || currentPage.job.signal.aborted)
+      throw Error("地図の対象が変わりました。一覧を閉じて開き直してください。");
+    return currentPage;
+  }
+  function openingOptions(page: PresetPage | undefined, id: string | null, signal: AbortSignal) {
+    if (!page) return readOptions(id, signal);
+    const read = page.fields.get(id);
+    if (!read) throw Error("手動の条件が変更されました。一覧を閉じて開き直してください。");
+    return read;
+  }
+  async function applySavedPreset(preset: SavedMapPreset, outerSignal: AbortSignal) {
+    if (busy || coloringBusy) throw Error("現在の処理が完了してから適用してください。");
+    if (preset.kind === "coloring" && !options.analysis)
+      throw Error("この画面では色分け条件を適用できません。");
+    const apply = options.applyAiDefinition;
+    if (!apply) throw Error("この画面では保存条件の直接適用に対応していません。");
+    outerSignal.throwIfAborted();
+    const page = pageFor(preset);
+    const definitions = requiredDefinitions(preset.definition);
+    const data = options.getPresetData?.();
+    const seq = ++sequence;
+    const context = aiContextKey();
+    controller?.abort();
+    const job = new AbortController();
+    controller = job;
+    const signal = job.signal;
+    const abort = () => job.abort();
+    outerSignal.addEventListener("abort", abort, { once: true });
+    const assertCurrent = () => assertAiRequest(seq, context, signal, aiContextKey);
+    const reuse = <T>(prefetched: Promise<T> | undefined, load: () => Promise<T>) =>
+      prefetched
+        ? prefetched.catch(() => {
+            assertCurrent();
+            return load();
+          })
+        : load();
+    const prepareValues = async () => {
+      if (!data || data.ready(definitions)) return;
+      await page?.values.catch(assertCurrent);
+      assertCurrent();
+      if (!data.ready(definitions)) await data.prepare(definitions, signal);
+    };
+    busy = true;
+    try {
+      assertCurrent();
+      const [, fields] = await awaitWithAbort(
+        Promise.all([
+          reuse(page?.forms, () => readForms(signal)),
+          Promise.all(
+            [...presetReferences([preset.definition]).keys()].map(async (id) => {
+              const metadata = await reuse(page?.fields.get(id), () => readOptions(id, signal));
+              return [id, metadata.fields] as const;
+            }),
+          ),
+          prepareValues(),
+        ]),
+        signal,
+      );
+      assertCurrent();
+      const candidates = new Map(fields);
+      const definition = validateAiDefinitionFields(
+        preset.definition,
+        (id) => candidates.get(id) ?? [],
+        preset.display,
+      );
+      await awaitWithAbort(apply(definition, signal), signal);
+      assertCurrent();
+    } finally {
+      outerSignal.removeEventListener("abort", abort);
+      if (controller === job) controller = undefined;
+      if (seq === sequence) busy = false;
+    }
+    if (!aiDrafts.filter && options.analysis) updateFilterStatus();
+    if (!aiDrafts.coloring) coloringEditor?.refreshDisplay();
+  }
+  async function prepareDraft(kind: AiKind, signal?: AbortSignal) {
+    const draft = aiDrafts[kind];
+    if (!draft || !options.getPresetData) return;
+    const data = options.getPresetData();
+    const definitions = requiredDefinitions(draft.editor.getDraftDefinition());
+    if (data.ready(definitions)) return;
+    if (draft.preparation?.data === data) {
+      await draft.preparation.read;
+      if (draft === aiDrafts[kind] && !signal?.aborted) await prepareDraft(kind, signal);
+      return;
+    }
+    draft.preparation?.controller.abort();
+    const job = new AbortController();
+    const abort = () => job.abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) job.abort();
+    try {
+      aiMessage(kind, "判定に必要な登録データを読み込んでいます…");
+      const read = data.prepare(definitions, job.signal);
+      draft.preparation = { data, controller: job, read };
+      await read;
+      if (job.signal.aborted || options.getPresetData() !== data)
+        throw new DOMException("対象が変更されました。", "AbortError");
+      aiMessage(kind, "実行ボタンで地図に反映します。");
+    } finally {
+      signal?.removeEventListener("abort", abort);
+      if (draft.preparation?.controller === job) {
+        draft.preparation = undefined;
+      }
+    }
+  }
+  function refreshDraft(kind: AiKind) {
+    const draft = aiDrafts[kind];
+    if (!draft) return;
+    void prepareDraft(kind).catch((e) => {
+      if (draft === aiDrafts[kind] && !(e instanceof DOMException && e.name === "AbortError"))
+        aiMessage(
+          kind,
+          e instanceof Error ? e.message : "登録データを取得できませんでした。",
+          true,
+        );
+    });
+  }
+  async function restorePreset(preset: SavedMapPreset, signal: AbortSignal) {
     if (busy || coloringBusy) throw Error("現在の処理が完了してから呼び出してください。");
     const saved = cloneSavedMapPreset(preset);
-    if (saved.schema_version !== 2) throw Error("保存条件の形式を確認してください。");
     if (saved.kind === "coloring" && !options.analysis)
       throw Error("この画面では色分け条件を呼び出せません。");
+    const page = pageFor(saved);
+    let initial = page;
     const host = node("div");
     const editor = createAiConditionEditor(host, {
       definition: saved.definition,
       display: saved.display,
-      transport: options.transport,
-      getLayerIds: options.getLayerIds,
-      onChange: () => aiMessage(saved.kind, "編集中です。実行ボタンで地図に反映します。"),
+      getForms: (signal) => initial?.forms ?? readForms(signal),
+      getFields: (id, signal) => initial?.fields.get(id) ?? readOptions(id, signal),
+      onChange: () => {
+        const draft = aiDrafts[saved.kind];
+        const wasWaiting = draft?.waiting || draft?.retryData;
+        if (draft) {
+          const previous = draft.page;
+          draft.page = undefined;
+          draft.waiting = false;
+          draft.retryData = false;
+          if (previous?.source.aborted) cancelUnusedPage(previous);
+        }
+        aiMessage(saved.kind, "編集中です。実行ボタンで地図に反映します。");
+        refreshDraft(saved.kind);
+        if (wasWaiting) render();
+      },
       onClear: options.clearAiDefinition ? () => void executeAiDraft(saved.kind, true) : undefined,
     });
     clearAiDraft(saved.kind);
+    const reloadMetadata = (source?: PresetPage) => {
+      initial = source;
+      return editor.refreshMetadata().finally(() => {
+        if (initial === source) initial = undefined;
+      });
+    };
     aiDrafts[saved.kind] = {
       editor,
+      reloadMetadata,
       host,
       name: saved.name,
       message: "呼び出した条件は未反映です。内容を確認して実行してください。",
       error: false,
     };
+    if (page) {
+      const draft = aiDrafts[saved.kind]!;
+      const data = options.getPresetData?.();
+      draft.page = page;
+      draft.waiting = !page.finished;
+      aiMessage(saved.kind, "地図への適用に必要なデータを準備しています…");
+      render();
+      // 一覧で開始済みの通信を参照する。編集画面はその完了を待たずに表示する。
+      const metadata = reloadMetadata(page);
+      const values = data?.ready(requiredDefinitions(saved.definition))
+        ? Promise.resolve()
+        : page.values;
+      void Promise.all([metadata, values])
+        .then(() => {
+          if (aiDrafts[saved.kind] === draft && draft.page === page)
+            aiMessage(saved.kind, "実行ボタンで地図に反映します。");
+        })
+        .catch((e) => {
+          if (aiDrafts[saved.kind] === draft && draft.page === page) {
+            draft.retryData = true;
+            aiMessage(
+              saved.kind,
+              e instanceof Error ? e.message : "登録データを取得できませんでした。",
+              true,
+            );
+          }
+        })
+        .finally(() => {
+          if (aiDrafts[saved.kind] !== draft || draft.page !== page) return;
+          if (page.key !== aiContextKey()) {
+            close();
+            return;
+          }
+          draft.waiting = false;
+          render();
+        });
+      return;
+    }
     const seq = ++sequence,
       context = aiContextKey();
     controller?.abort();
@@ -619,7 +890,10 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
     busy = true;
     render();
     try {
-      await awaitWithAbort(editor.refreshMetadata(job.signal), job.signal);
+      await awaitWithAbort(
+        Promise.all([editor.refreshMetadata(job.signal), prepareDraft(saved.kind, job.signal)]),
+        job.signal,
+      );
       assertAiRequest(seq, context, job.signal, aiContextKey);
     } catch (e) {
       if (context !== aiContextKey()) {
@@ -646,7 +920,7 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
   async function executeAiDraft(kind: AiKind, clear = false) {
     if (busy || coloringBusy) return;
     const draft = aiDrafts[kind];
-    if (!draft) return;
+    if (!draft || (!clear && (draft.waiting || draft.retryData))) return;
     if (clear ? !options.clearAiDefinition : !options.applyAiDefinition) {
       aiMessage(
         kind,
@@ -666,6 +940,16 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
     render();
     aiMessage(kind, clear ? "条件を解除しています…" : "条件を確認しています…");
     try {
+      if (!clear) {
+        // 編集中に開始した取得の完了を待つ。ここでは通信を開始しない。
+        await awaitWithAbort(draft.editor.whenMetadataReady(), job.signal);
+        if (draft.preparation) await awaitWithAbort(draft.preparation.read, job.signal);
+      }
+      const data = options.getPresetData?.();
+      if (data && !data.ready(requiredDefinitions(draft.editor.getDraftDefinition(), clear)))
+        throw Error(
+          "登録データの読み込み完了後に実行してください。取得に失敗した場合は条件を呼び出し直してください。",
+        );
       if (clear) {
         // 下書きを書き換えず、適用済み状態の片側だけを既存の地図反映経路で解除する。
         await awaitWithAbort(
@@ -673,7 +957,6 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
           job.signal,
         );
       } else {
-        await awaitWithAbort(draft.editor.refreshMetadata(job.signal), job.signal);
         assertAiRequest(seq, context, job.signal, aiContextKey);
         const definition = draft.editor.getDefinition();
         await awaitWithAbort(options.applyAiDefinition!(definition, job.signal), job.signal);
@@ -682,8 +965,8 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
       aiMessage(
         kind,
         clear
-          ? "呼び出した条件の適用を解除しました。編集内容と手動の条件は保持しています。"
-          : "条件を地図へ反映しました。手動の条件も併用されます。",
+          ? "呼び出した条件の適用を解除しました。編集内容は保持しています。"
+          : "条件を地図へ反映しました。",
       );
       finishProgress();
       if (!clear)
@@ -733,8 +1016,35 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
       `ai-${kind}-submit`,
     );
     submit.className = kind === "filter" ? "attribute-submit" : "color-submit";
-    submit.disabled = !options.applyAiDefinition;
+    submit.disabled = !options.applyAiDefinition || !!draft.waiting || !!draft.retryData;
     actions.append(submit);
+    if (draft.retryData) {
+      actions.append(
+        button("登録データの取得を再試行", async () => {
+          draft.retryData = false;
+          draft.waiting = true;
+          render();
+          try {
+            await prepareDraft(kind);
+            if (aiDrafts[kind] === draft) aiMessage(kind, "実行ボタンで地図に反映します。");
+          } catch (e) {
+            if (aiDrafts[kind] === draft) {
+              draft.retryData = true;
+              aiMessage(
+                kind,
+                e instanceof Error ? e.message : "登録データを取得できませんでした。",
+                true,
+              );
+            }
+          } finally {
+            if (aiDrafts[kind] === draft) {
+              draft.waiting = false;
+              render();
+            }
+          }
+        }),
+      );
+    }
     if (kind === "filter") {
       const clear = button("属性条件を解除", () => void executeAiDraft(kind, true));
       clear.disabled = !options.clearAiDefinition;
@@ -963,6 +1273,14 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
       }
     }
   };
+  function updateFilterStatus() {
+    status.className = "attribute-status";
+    status.textContent = options.getApplied()
+      ? "検索条件を適用中です。編集後は「絞り込み実行」で反映します。"
+      : options.hasAppliedPresetFilter?.()
+        ? "絞り込み条件を適用中です。"
+        : "検索条件は未適用です。";
+  }
   function render(focusKey?: string) {
     const active = document.activeElement;
     if (!focusKey && active instanceof HTMLElement && dialog.contains(active))
@@ -1164,10 +1482,7 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
       status = element("p");
       status.setAttribute("role", "status");
       status.className = "attribute-status";
-      if (options.analysis)
-        status.textContent = options.getApplied()
-          ? "検索条件を適用中です。編集後は「絞り込み実行」で反映します。"
-          : "検索条件は未適用です。";
+      if (options.analysis) updateFilterStatus();
       filterPane.append(status);
       const footer = element("footer"),
         submit = button("絞り込み実行", () => void search());
@@ -1229,9 +1544,41 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
     }
   }
   const modal = {
-    isBusy: () => busy || coloringBusy,
-    async open(from?: HTMLElement) {
+    preparePresetPage,
+    refreshPresetData(metadata = false) {
       if (disposed) return;
+      if (metadata) resetMetadata();
+      const page = currentPage;
+      if (page && (metadata || page.key !== aiContextKey())) {
+        for (const draft of Object.values(aiDrafts)) {
+          draft.page = undefined;
+          draft.waiting = false;
+          draft.retryData = false;
+        }
+        for (const job of pageJobs) job.abort();
+        currentPage = undefined;
+        if (!presets?.refreshPreparation() && !page.source.aborted) {
+          page.replacement = preparePresetPage(page.items, page.source);
+          void page.replacement.catch(() => {
+            // 呼び出した条件は、新しいページの準備結果から個別の失敗を表示する。
+          });
+        }
+      }
+      if (!dialog.open) return;
+      if (metadata || (page && page.key !== aiContextKey())) {
+        for (const draft of Object.values(aiDrafts)) void draft.reloadMetadata(currentPage);
+        render();
+      }
+      refreshDraft("filter");
+      refreshDraft("coloring");
+    },
+    isBusy: () => busy || coloringBusy,
+    async open(from?: HTMLElement, page?: PresetPage) {
+      if (disposed) return;
+      if (!page) {
+        cachedForms = undefined;
+        cachedOptions.clear();
+      }
       cancel();
       clearAiDrafts();
       trigger = from || (document.activeElement as HTMLElement | null);
@@ -1240,28 +1587,20 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
       conditions = clone(applied?.conditions || []);
       const seq = ++sequence;
       controller = new AbortController();
-      busy = true;
+      busy = !page;
       render();
       if (!dialog.open) dialog.showModal();
       status.textContent = "共通フォームを取得中…";
+      const active = () =>
+        !disposed && seq === sequence && dialog.open && (!page || page.key === aiContextKey());
       try {
-        const data = await options.transport("/common-forms", undefined, controller.signal);
-        if (disposed || seq !== sequence || !dialog.open) return;
-        if (!Array.isArray(data)) throw Error("共通フォームを取得できませんでした。");
-        forms = data as CommonForm[];
+        const signal = controller.signal;
+        const data = await (page?.forms ?? readForms(signal));
+        if (!active()) return;
+        forms = structuredClone(data);
         if (options.analysis) {
-          const meta = (await options.transport(
-            mapFilterPath,
-            {
-              query: { mode: "latest" },
-              scope: { kind: "layers", layer_ids: options.getLayerIds() },
-              common_form_id: null,
-              conditions: [],
-              options_only: true,
-            },
-            controller!.signal,
-          )) as { forms: { id: string; label: string }[] };
-          if (disposed || seq !== sequence || !dialog.open) return;
+          const meta = await openingOptions(page, null, signal);
+          if (!active()) return;
           for (const f of meta.forms || [])
             if (!forms.some((form) => form.id === f.id))
               forms.push({
@@ -1271,8 +1610,8 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
                 form_schema: { fields: [] },
               });
           if (formId) {
-            const fields = await loadFields(formId, controller!.signal);
-            if (disposed || seq !== sequence || !dialog.open) return;
+            const fields = (await openingOptions(page, formId, signal)).fields;
+            if (!active()) return;
             const form = forms.find((f) => f.id === formId);
             if (form)
               form.form_schema.fields = fields.map((f) => ({
@@ -1285,8 +1624,9 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
         }
         if (options.analysis?.getSpecification()) {
           const specification = options.analysis.getSpecification()!;
-          const candidates = await loadFields(specification.common_form_id, controller!.signal);
-          if (disposed || seq !== sequence || !dialog.open) return;
+          const id = specification.common_form_id;
+          const candidates = (await openingOptions(page, id, signal)).fields;
+          if (!active()) return;
           coloringEditor!.restore(specification, candidates);
         }
         busy = false;
@@ -1298,49 +1638,29 @@ export function createAdvancedMapSearchModal(options: ModalOptions) {
         )
           error("共通フォームが変更・削除されています。条件を確認してください。");
       } catch (e) {
-        if (!disposed && seq === sequence) {
+        if (active()) {
           busy = false;
           render();
           error(e instanceof Error ? e.message : "取得に失敗しました。");
         }
       }
     },
-    async recallPreset(preset: AnySavedMapPreset) {
+    async recallPreset(preset: SavedMapPreset) {
       if (disposed) return;
-      const saved = cloneSavedMapPreset(preset);
-      const key = saved.schema_version === 2 ? aiContextKey : options.getContext;
-      const context = key();
+      const context = aiContextKey();
       if (!dialog.open) {
-        const opening = modal.open();
+        const page = pageFor(preset);
+        const opening = modal.open(undefined, page);
         const openingSequence = sequence;
-        await opening;
+        if (!page) await opening;
         if (sequence !== openingSequence) return;
       }
       if (disposed || !dialog.open) return;
-      if (context !== key()) {
+      if (context !== aiContextKey()) {
         close();
         return;
       }
-      const job = new AbortController();
-      if (saved.schema_version === 2) {
-        await restoreAiPreset(saved, job.signal);
-        return;
-      }
-      if (busy || coloringBusy) throw Error("現在の処理が完了してから呼び出してください。");
-      controller?.abort();
-      controller = job;
-      const seq = ++sequence;
-      busy = true;
-      render();
-      try {
-        await restorePreset(saved, job.signal);
-        assertAiRequest(seq, context, job.signal);
-      } finally {
-        if (!disposed && seq === sequence) {
-          busy = false;
-          render();
-        }
-      }
+      await restorePreset(preset, new AbortController().signal);
     },
     close,
     dispose() {

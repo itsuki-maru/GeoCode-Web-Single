@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tera::Tera;
 use tokio::sync::Mutex;
-use tower_http::cors::CorsLayer;
+use tower_http::{cors::CorsLayer, set_header::SetResponseHeaderLayer};
 
 use crate::config::CONFIG;
 use crate::handler::account::{
@@ -161,6 +161,11 @@ pub fn build_router_with_local_tiles(
         .route(
             "/admin/google-maps-settings/check",
             post(crate::google_maps::admin_check),
+        )
+        .route(
+            "/admin/google-maps-settings/routes",
+            get(crate::google_maps::routes::admin_get)
+                .put(crate::google_maps::routes::admin_update),
         )
         .route(
             "/admin/tile-server-settings",
@@ -314,6 +319,18 @@ pub fn build_router_with_local_tiles(
                     header::CACHE_CONTROL,
                     HeaderValue::from_static("no-store"),
                 )),
+        )
+        .route(
+            "/form-answers/map-presets/data",
+            post(crate::handler::answer_map_preset_data::data_handler),
+        )
+        .route(
+            "/form-answers/map-presets/text-fold",
+            post(crate::handler::answer_map_preset_text::fold_handler),
+        )
+        .route(
+            "/form-answers/map-presets/evaluate",
+            post(crate::handler::answer_map_presets::evaluate_handler),
         )
         .route(
             "/form-answers/map-presets/{id}",
@@ -511,6 +528,18 @@ pub fn build_router_with_local_tiles(
         .layer(DefaultBodyLimit::max(6 * 1024 * 1024))
         .layer(CookieValidator);
 
+    let google_routes = Router::new()
+        .route(
+            "/google-maps/routes/compute",
+            post(crate::google_maps::routes::compute),
+        )
+        .layer(DefaultBodyLimit::max(4 * 1024))
+        .layer(CookieValidator)
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store"),
+        ));
+
     let import_route = Router::new()
         .route("/file/import", post(import_json_handler))
         .layer(DefaultBodyLimit::max(21 * 1024 * 1024))
@@ -610,6 +639,7 @@ pub fn build_router_with_local_tiles(
         .merge(public_form_routes)
         .merge(image_upload_route)
         .merge(marker_icon_upload_route)
+        .merge(google_routes)
         .merge(import_route)
         .merge(token_refresh_routes)
         .merge(flex_secured_routes)

@@ -5,6 +5,7 @@ import {
   deserializePresetConditions,
   isSavedMapPreset,
   validatePresetDraft,
+  toV2PresetDraft,
   type MapPresetDraft,
   type SavedMapPreset,
 } from "../answer-map-presets";
@@ -31,10 +32,9 @@ const draft = (): MapPresetDraft => ({
   definition: { common_form_id: "form", conditions: structuredClone(conditions) },
 });
 const saved = (): SavedMapPreset => ({
-  ...draft(),
+  ...toV2PresetDraft(draft()),
   id: "one",
   name: "保存条件",
-  schema_version: 1,
   display: { form_label: "点検", fields },
   create_at: "2026-10-25T01:00:00",
 });
@@ -146,19 +146,20 @@ describe("保存した地図検索条件の定義", () => {
       }),
     ).toThrow("10件");
     expect(isSavedMapPreset(saved())).toBe(true);
-    expect(isSavedMapPreset({ ...saved(), schema_version: 2 })).toBe(false);
+    expect(isSavedMapPreset({ ...saved(), schema_version: 1 })).toBe(false);
     expect(isSavedMapPreset({ ...saved(), display: null })).toBe(false);
   });
-  it("保存名は100文字まで扱い、分類は既存の100 UTF-16単位上限を保つ", () => {
+  it("保存名は100文字まで扱い、分類名も100文字まで扱う", () => {
     expect(isSavedMapPreset({ ...saved(), name: "🚧".repeat(100) })).toBe(true);
     expect(isSavedMapPreset({ ...saved(), name: "🚧".repeat(101) })).toBe(false);
     const coloring = {
       ...saved(),
       kind: "coloring" as const,
       definition: {
+        type: "color" as const,
         common_form_id: "form",
         rules: [
-          { id: "color-1", label: "🚧".repeat(50), color: "#d73027", conditions: [conditions[0]] },
+          { id: "color-1", label: "🚧".repeat(100), color: "#d73027", conditions: [conditions[0]] },
         ],
       },
     };

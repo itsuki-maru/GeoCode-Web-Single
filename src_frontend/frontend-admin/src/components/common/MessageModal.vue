@@ -37,4 +37,8 @@ const emit = defineEmits<{ close: [] }>();
   overflow-wrap: anywhere;
   text-align: center;
 }
+
+.button-row {
+  justify-content: center;
+}
 </style>

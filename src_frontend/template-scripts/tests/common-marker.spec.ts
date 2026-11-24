@@ -1,11 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  clearRecentUserLocation,
   createMarkerPopupRuntime,
   enableMarkerIconFallback,
   escapeHtml,
+  getRecentUserLocation,
   initializeUserLocation,
   markerOptionsForLayer,
+  rememberUserLocation,
 } from "../src/map/common/marker";
 
 describe("map common marker", () => {
@@ -15,6 +18,11 @@ describe("map common marker", () => {
     vi.clearAllMocks();
     document.body.innerHTML = "";
     Object.assign(window, { L: leaflet });
+  });
+
+  afterEach(() => {
+    window.dispatchEvent(new Event("beforeunload"));
+    vi.restoreAllMocks();
   });
 
   it("escapes marker and layer labels", () => {
@@ -185,8 +193,8 @@ describe("map common marker", () => {
       addControl: vi.fn(),
       getZoom: () => 8,
       off: vi.fn(),
-      on: vi.fn((_eventName: string, listener: () => void) => {
-        moveStart = listener;
+      on: vi.fn((eventName: string, listener: () => void) => {
+        if (eventName === "movestart") moveStart = listener;
       }),
       setView,
     };
@@ -234,11 +242,113 @@ describe("map common marker", () => {
     expect(setView).not.toHaveBeenCalled();
     expect(map.off).toHaveBeenCalledWith("movestart", expect.any(Function));
   });
+
+  it("shares only recent valid positions from the same map", () => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    const { watchPosition } = mockLocationWatch();
+    const map = locationMap();
+    const otherMap = locationMap();
+    initializeUserLocation(map);
+    initializeUserLocation(otherMap);
+    const reportPosition = watchPosition.mock.calls[0]![0];
+    const reportOtherPosition = watchPosition.mock.calls[1]![0];
+
+    expect(getRecentUserLocation(map)).toBeUndefined();
+    reportPosition(createPosition(35.6812, 139.7671, now));
+    expect(getRecentUserLocation(map)).toEqual({ lat: 35.6812, lng: 139.7671 });
+    expect(getRecentUserLocation(otherMap)).toBeUndefined();
+    reportOtherPosition(createPosition(34.7, 135.5, now));
+    expect(getRecentUserLocation(otherMap)).toEqual({ lat: 34.7, lng: 135.5 });
+
+    reportPosition(createPosition(45, 140, now - 1));
+    reportPosition(createPosition(45, 140, now + 1));
+    reportPosition(createPosition(45, 140, Number.NaN));
+    reportPosition(createPosition(91, 140, now));
+    reportPosition(createPosition(45, -181, now));
+    reportPosition(createPosition(Number.NaN, 140, now));
+    expect(getRecentUserLocation(map)).toEqual({ lat: 35.6812, lng: 139.7671 });
+
+    clock.mockReturnValue(now + 60_000);
+    expect(getRecentUserLocation(map)).toEqual({ lat: 35.6812, lng: 139.7671 });
+    clock.mockReturnValue(now + 60_001);
+    expect(getRecentUserLocation(map)).toBeUndefined();
+  });
+
+  it("keeps a recent position on temporary errors and discards it on permission denial", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { watchPosition } = mockLocationWatch();
+    const map = locationMap();
+    initializeUserLocation(map);
+    const [reportPosition, reportError] = watchPosition.mock.calls[0]!;
+    reportPosition(createPosition(35.6812, 139.7671, Date.now()));
+
+    for (const code of [2, 3]) {
+      reportError?.({ code } as GeolocationPositionError);
+      expect(getRecentUserLocation(map)).toEqual({ lat: 35.6812, lng: 139.7671 });
+    }
+    reportError?.({ code: 1 } as GeolocationPositionError);
+    expect(getRecentUserLocation(map)).toBeUndefined();
+  });
+
+  it("allows a one-time position update without letting a later watch overwrite it with an older fix", () => {
+    const { watchPosition } = mockLocationWatch();
+    const map = locationMap();
+    initializeUserLocation(map);
+    const now = Date.now();
+    rememberUserLocation(map, createPosition(35.6812, 139.7671, now));
+    watchPosition.mock.calls[0]![0](createPosition(45, 140, now - 1000));
+    expect(getRecentUserLocation(map)).toEqual({ lat: 35.6812, lng: 139.7671 });
+
+    clearRecentUserLocation(map);
+    expect(getRecentUserLocation(map)).toBeUndefined();
+  });
+
+  it.each(["unload", "beforeunload"])("stops sharing on %s and ignores queued updates", (event) => {
+    const { watchPosition, clearWatch } = mockLocationWatch();
+    const map = locationMap();
+    initializeUserLocation(map);
+    const [reportPosition] = watchPosition.mock.calls[0]!;
+    reportPosition(createPosition(35.6812, 139.7671, Date.now()));
+    expect(getRecentUserLocation(map)).toEqual({ lat: 35.6812, lng: 139.7671 });
+
+    if (event === "unload") {
+      const stop = map.on.mock.calls.find(([name]) => name === event)?.[1];
+      stop?.();
+    } else {
+      window.dispatchEvent(new Event(event));
+    }
+    expect(clearWatch).toHaveBeenCalledExactlyOnceWith(42);
+    expect(getRecentUserLocation(map)).toBeUndefined();
+    reportPosition(createPosition(35.6812, 139.7671, Date.now()));
+    expect(getRecentUserLocation(map)).toBeUndefined();
+  });
 });
+
+function mockLocationWatch() {
+  const clearWatch = vi.fn();
+  const watchPosition = vi.fn<Geolocation["watchPosition"]>().mockReturnValue(42);
+  Object.defineProperty(navigator, "geolocation", {
+    configurable: true,
+    value: { clearWatch, watchPosition },
+  });
+  return { clearWatch, watchPosition };
+}
+
+function locationMap() {
+  return {
+    addControl: vi.fn(),
+    getZoom: () => 8,
+    on: vi.fn<(_eventName: string, _listener: () => void) => void>(),
+    off: vi.fn(),
+    setView: vi.fn(),
+  };
+}
 
 function createPosition(
   latitude: number,
   longitude: number,
+  timestamp = 1,
 ): GeolocationPosition {
   return {
     coords: {
@@ -251,7 +361,7 @@ function createPosition(
       speed: null,
       toJSON: () => ({}),
     },
-    timestamp: 1,
+    timestamp,
     toJSON: () => ({}),
   };
 }

@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Marked } from "marked";
 import { initializeReadOnlyMapPage } from "../src/map/read-only-page";
+import type { AiDefinition } from "../src/ai/types";
 import { finishAnswerPreview } from "../src/map/answer-preview";
 import type { AnotherMapBootstrap } from "../src/map/types";
 import {
@@ -15,9 +16,29 @@ import { createAnswerPrintSnapshot } from "../src/map/print/answer-print-state";
 import { installAnswerFilter } from "../src/map/answer-filter";
 import { readMapBootstrap } from "../src/map/bootstrap";
 
-// このスイートは地物の遅延取得だけを計測する。AI通信とライフサイクルはai-chatで検証する。
+// 地図の表示経路を実行し、AI通信は行わない。
+const chat = vi.hoisted(() => ({
+  apply: vi.fn(),
+  evaluatePreset: vi.fn(),
+  preparePresetPage: vi.fn(),
+  recallPreset: vi.fn(),
+  setAppliedDefinition: vi.fn(),
+}));
 vi.mock("../src/ai/chat", () => ({
-  createAiChat: () => ({ open: vi.fn(), dispose: vi.fn() }),
+  createAiChat: (options: Parameters<typeof import("../src/ai/chat").createAiChat>[0]) => {
+    chat.apply.mockImplementation(options.apply);
+    chat.evaluatePreset.mockImplementation(options.evaluatePreset!);
+    chat.preparePresetPage.mockImplementation(options.preparePresetPage!);
+    chat.recallPreset.mockImplementation(options.onRecallPreset!);
+    return {
+      open: vi.fn(),
+      dispose: vi.fn(),
+      setAppliedDefinition: chat.setAppliedDefinition,
+      applyDefinition: async (definition: AiDefinition, signal: AbortSignal) => {
+        await options.applyPreset!(options.evaluatePreset!(definition), signal);
+      },
+    };
+  },
 }));
 
 // アプリケーションと同じ Leaflet を使用し、jsdom に必要な SVG 機能を補う。
@@ -139,6 +160,90 @@ const printMapButton = () =>
   );
 
 describe("lazy groups in the actual read-only map runtime", () => {
+  it("保存条件は選択中の読み込み済み地物だけを使い、直前に隠した地物も別条件で復元する", async () => {
+    runtime = initializeReadOnlyMapPage("map-anather");
+    const all = { type: "filter", expression: { op: "all" } };
+    checkbox("a").click();
+    await vi.waitFor(() =>
+      expect(chat.evaluatePreset(all).targets).toEqual(["marker:m-a", "shape:s-a"]),
+    );
+    const loadLayer = fetchData.getMockImplementation()!;
+    fetchData.mockImplementation((url, init) => {
+      if (url === "/common-forms") return Promise.resolve(Response.json([]));
+      if (url === "/form-answers/map-filter")
+        return Promise.resolve(Response.json({ forms: [], fields: [] }));
+      return loadLayer(url, init);
+    });
+    const presets = ["marker", "shape"].map((query1) => ({
+      schema_version: 2,
+      kind: "filter",
+      id: query1,
+      name: query1,
+      create_at: "",
+      display: { form_label: null, fields: [] },
+      definition: { type: "filter", expression: { op: "text", query1 } },
+    }));
+    const page = new AbortController();
+    await chat.preparePresetPage(presets, page.signal);
+    const reads = fetchData.mock.calls.length;
+    const search = document.querySelector<HTMLDialogElement>(".advanced-map-search")!;
+    search.showModal = () => {
+      search.open = true;
+    };
+    search.close = () => {
+      search.open = false;
+    };
+    await chat.recallPreset(presets[0]);
+    expect(search.open).toBe(true);
+    const previous = chat.evaluatePreset(presets[0]!.definition);
+    await chat.apply(previous, new AbortController().signal);
+    expect(runtime!.getShareSnapshot().shapes).toEqual([]);
+    await chat.recallPreset(presets[1]);
+    const shapes = chat.evaluatePreset(presets[1]!.definition);
+    expect(shapes.targets).toEqual(["shape:s-a"]);
+    await chat.apply(shapes, new AbortController().signal);
+    expect(runtime!.getShareSnapshot().shapes.map((record) => record.id)).toEqual(["s-a"]);
+    expect(fetchData).toHaveBeenCalledTimes(reads);
+    page.abort();
+
+    const beforeList = fetchData.getMockImplementation()!;
+    fetchData.mockImplementation((url, init) =>
+      String(url).startsWith("/form-answers/map-presets?")
+        ? Promise.resolve(Response.json({ items: presets, total: 2 }))
+        : beforeList(url, init),
+    );
+    for (const dialog of document.querySelectorAll("dialog")) {
+      dialog.showModal = () => {
+        dialog.open = true;
+      };
+      dialog.close = () => {
+        dialog.open = false;
+      };
+    }
+    [...search.querySelectorAll("button")]
+      .find((button) => button.textContent === "保存した検索条件")!
+      .click();
+    const apply = () =>
+      document.querySelector<HTMLButtonElement>('[data-preset-apply-id="marker"]');
+    await vi.waitFor(() => expect(apply()).not.toBeNull());
+    apply()!.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector('[aria-label="絞り込み完了"][open]')).not.toBeNull(),
+    );
+    expect(runtime!.getShareSnapshot().shapes).toEqual([]);
+    const list = document.querySelector<HTMLDialogElement>(
+      '.map-preset-dialog[aria-label="保存した検索条件"][open]',
+    )!;
+    expect(list).not.toBeNull();
+    document.querySelector<HTMLButtonElement>('[aria-label="絞り込み完了"] button')!.click();
+    expect(document.activeElement).toBe(apply());
+    [...list.querySelectorAll("button")].find((button) => button.textContent === "閉じる")!.click();
+
+    checkbox("b").click();
+    await vi.waitFor(() => expect(chat.evaluatePreset(all).targets).toHaveLength(4));
+    checkbox("a").click();
+    expect(chat.evaluatePreset(all).targets).toEqual(["marker:m-b", "shape:s-b"]);
+  });
   it("共有では論理表示対象だけを複製し、画面外の未描画図形と空グループも保持する", async () => {
     const original = fetchData.getMockImplementation()!;
     fetchData.mockImplementation(async (url, init) => {
@@ -571,6 +676,12 @@ describe("lazy groups in the actual read-only map runtime", () => {
     await vi.waitFor(() =>
       expect(runtime!.map.hasLayer(runtime!.markers["marker-m-a"])).toBe(false),
     );
+    const undo = await chat.apply({ type: "reset" }, new AbortController().signal);
+    expect(runtime.map.hasLayer(runtime.markers["marker-m-a"])).toBe(true);
+    expect(runtime.getPrintState().coloring).toBeUndefined();
+    await undo();
+    expect(runtime.map.hasLayer(runtime.markers["marker-m-a"])).toBe(false);
+    expect(runtime.getPrintState().coloring?.targets["marker:m-b"]).toBeDefined();
     button("属性条件を解除").click();
     await vi.waitFor(() =>
       expect(runtime!.map.hasLayer(runtime!.markers["marker-m-a"])).toBe(true),

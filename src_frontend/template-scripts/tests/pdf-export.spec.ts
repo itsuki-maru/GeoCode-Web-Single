@@ -172,6 +172,13 @@ describe("PDF export browser contracts", () => {
     excluded.className = "leaflet-control-zoom";
     excluded.append(addImage("https://tiles.example/control.png"));
     paper.append(excluded);
+    const route = document.createElement("section");
+    route.className = "route-search-overlay-print";
+    route.innerHTML = `
+      <strong class="route-search-handle">経路</strong>
+      <div class="route-search-actions"><button>経路を消す</button></div>
+      <p class="route-search-status">徒歩・約12分・3.4 km</p>`;
+    paper.append(route);
     const attribution = document.createElement("div");
     attribution.className = "leaflet-control-attribution";
     attribution.innerHTML =
@@ -185,6 +192,8 @@ describe("PDF export browser contracts", () => {
       [...clone.querySelectorAll("img")].every((img) => img.src.startsWith("data:image/png")),
     ).toBe(true);
     expect(clone.querySelector(".leaflet-control-zoom")).toBeNull();
+    expect(clone.querySelector(".route-search-handle, .route-search-actions")).toBeNull();
+    expect(clone.querySelector(".route-search-status")?.textContent).toBe("徒歩・約12分・3.4 km");
     expect(mocks.link).toHaveBeenCalledTimes(1);
     expect(mocks.link.mock.calls[0]![4]).toEqual({ url: "https://source.example/data" });
     expect(mocks.properties).toHaveBeenCalledWith({

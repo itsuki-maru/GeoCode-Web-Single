@@ -180,18 +180,19 @@ it("refreshes examples for same-account form updates and removes the listener on
   notifyAiSuggestionDataChanged("form-owner");
   expect(captured.invalidateSuggestions).toHaveBeenCalledOnce();
 });
-it("reset removes AI colors while preserving manual coloring", async () => {
+it("replaces manual coloring and restores each previous result on undo", async () => {
   const { assistant, bridge } = setup();
   await assistant.applyManualColoring(coloring("手動"));
-  await captured.options.apply(
+  const undoColor = await captured.options.apply(
     { type: "color", coloring: coloring("AI", "m2") },
     new AbortController().signal,
   );
-  expect(bridge.color.mock.lastCall?.[0].rules.map((rule: any) => rule.label)).toEqual([
-    "手動",
-    "AI",
-  ]);
-  await captured.options.apply({ type: "reset" }, new AbortController().signal);
+  expect(bridge.color.mock.lastCall?.[0]).toEqual(coloring("AI", "m2"));
+  const undoReset = await captured.options.apply({ type: "reset" }, new AbortController().signal);
+  expect(bridge.color.mock.lastCall?.[0]).toBeNull();
+  await undoReset();
+  expect(bridge.color.mock.lastCall?.[0]).toEqual(coloring("AI", "m2"));
+  await undoColor();
   expect(bridge.color.mock.lastCall?.[0]).toEqual(coloring("手動"));
 });
 it("rolls AI filter back when the map rejects its update", async () => {
@@ -325,46 +326,30 @@ it("binds write-result GETs to the actor and maps the denied-operation code to i
   }
 });
 
-it.each(["filter", "color"] as const)(
-  "AIの%sだけを解除し、手動条件ともう一方のAI条件を保持してUndoできる",
-  async (kind) => {
-    const { markers, bridge, assistant } = setup();
-    markers.setAttributeSearch(
-      { common_form_id: "f", definition_version: 1, layer_ids: ["l1"], conditions: [] },
-      {
-        common_form_id: "f",
-        definition_version: 1,
-        as_of: "now",
-        marker_ids: ["m1"],
-        shape_ids: [],
-        target_count: 1,
-      },
-    );
-    await assistant.applyManualColoring(coloring("手動"));
-    await captured.options.apply(
-      { type: "filter", targets: ["marker:m2"], target_count: 1 },
-      new AbortController().signal,
-    );
-    await captured.options.apply(
-      { type: "color", coloring: coloring("AI", "m2") },
-      new AbortController().signal,
-    );
-    const beforeColoring = structuredClone(bridge.color.mock.lastCall![0]);
-    const undo = await captured.options.clear(kind, new AbortController().signal);
-    expect(markers.attributeSearch?.common_form_id).toBe("f");
-    if (kind === "filter") {
-      expect(markers.aiFilterTargets).toBeNull();
-      expect([...markers.mapObjectList.keys()]).toEqual(["m1"]);
-      expect(bridge.color.mock.lastCall![0]).toEqual(beforeColoring);
-    } else {
-      expect([...markers.aiFilterTargets!]).toEqual(["marker:m2"]);
-      expect(bridge.color.mock.lastCall![0]).toEqual(coloring("手動"));
-    }
-    await undo();
-    expect([...markers.aiFilterTargets!]).toEqual(["marker:m2"]);
+it.each(["filter", "color"] as const)("%sの解除で他方の条件を維持し、Undoで戻す", async (kind) => {
+  const { markers, bridge, assistant } = setup();
+  await assistant.applyManualColoring(coloring("手動"));
+  await captured.options.apply(
+    { type: "filter", targets: ["marker:m2"], target_count: 1 },
+    new AbortController().signal,
+  );
+  await captured.options.apply(
+    { type: "color", coloring: coloring("AI", "m2") },
+    new AbortController().signal,
+  );
+  const beforeColoring = structuredClone(bridge.color.mock.lastCall![0]);
+  const undo = await captured.options.clear(kind, new AbortController().signal);
+  if (kind === "filter") {
+    expect(markers.aiFilterTargets).toBeNull();
     expect(bridge.color.mock.lastCall![0]).toEqual(beforeColoring);
-  },
-);
+  } else {
+    expect([...markers.aiFilterTargets!]).toEqual(["marker:m2"]);
+    expect(bridge.color.mock.lastCall![0]).toBeNull();
+  }
+  await undo();
+  expect([...markers.aiFilterTargets!]).toEqual(["marker:m2"]);
+  expect(bridge.color.mock.lastCall![0]).toEqual(beforeColoring);
+});
 
 it("AI条件の解除に失敗した場合は片側だけ消えた状態を残さない", async () => {
   const { markers, bridge } = setup();

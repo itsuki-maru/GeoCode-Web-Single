@@ -1,6 +1,8 @@
 import type { FormAnswerMapBootstrap } from "./types";
 import { createAnswerPrintSnapshot } from "./print/answer-print-state";
 import { isAnswerColoring } from "./answer-coloring";
+import { getShapeMemoFromGeoJson } from "./common/shape-memo";
+import type { PresetTarget } from "./common/local-preset";
 import {
   extendAnswerShapeBounds,
   hasRenderableAnswerShape,
@@ -45,6 +47,15 @@ export function installAnswerFilter(
       preview.parentOrigin,
     );
   const visibleTargets = () => [...allowed].filter(isVisible);
+  let presetLayers: string | undefined;
+  const selectedLayers = (): string[] => runtime.getSelectedLayerIds();
+  const notifyPresetLayers = () => {
+    if (presetLayers === undefined) return;
+    const current = JSON.stringify(selectedLayers());
+    if (current === presetLayers) return;
+    presetLayers = current;
+    send("answer-map-preset-scope-changed");
+  };
   const fit = () => {
     const bounds = leaflet.latLngBounds([]);
     for (const key of allowed) {
@@ -67,6 +78,30 @@ export function installAnswerFilter(
       return;
     if (event.data.type === "answer-map-print-enable") {
       printEnabled = event.data.enabled === true;
+      return;
+    }
+    if (event.data.type === "answer-map-preset-scope-request" && bootstrap) {
+      const scopeId = event.data.scopeId;
+      if (typeof scopeId !== "string" || scopeId.length > 128) return;
+      const layers = selectedLayers();
+      presetLayers = JSON.stringify(layers);
+      const selected = new Set(layers);
+      const targets: PresetTarget[] = [];
+      for (const marker of Object.values(bootstrap.markers)) {
+        const key = `marker:${marker.id}`;
+        if (initial.has(key) && selected.has(marker.layer_id ?? ""))
+          targets.push({ key, name: marker.marker_name, detail: marker.detail });
+      }
+      for (const shape of bootstrap.shapes) {
+        const key = `shape:${shape.id}`;
+        if (initial.has(key) && selected.has(shape.layer_id))
+          targets.push({
+            key,
+            name: shape.name ?? "",
+            detail: getShapeMemoFromGeoJson(shape.geojson),
+          });
+      }
+      send("answer-map-preset-scope", { scopeId, targets });
       return;
     }
     if (event.data.type === "answer-map-csv-request") {
@@ -180,6 +215,7 @@ export function installAnswerFilter(
   window.addEventListener("keydown", onKey);
   runtime.map.on("layeradd layerremove overlayadd overlayremove answerfilterchange", update);
   runtime.map.on("shaperenderchange", update);
+  runtime.map.on("overlayadd overlayremove", notifyPresetLayers);
   runtime.map.on("unload", () => {
     disposed = true;
     clearTimeout(timer);
@@ -187,6 +223,7 @@ export function installAnswerFilter(
     window.removeEventListener("message", onMessage);
     runtime.map.off("layeradd layerremove overlayadd overlayremove answerfilterchange", update);
     runtime.map.off("shaperenderchange", update);
+    runtime.map.off("overlayadd overlayremove", notifyPresetLayers);
   });
   return { counts };
 }

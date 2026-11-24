@@ -143,9 +143,10 @@ async function restoreSavedColoring() {
   const preset = {
     id: "saved-colors",
     kind: "coloring",
-    schema_version: 1,
+    schema_version: 2,
     name: "年数の分類",
     definition: {
+      type: "color",
       common_form_id: "form",
       rules: [
         {
@@ -176,16 +177,31 @@ async function restoreSavedColoring() {
         ? Promise.resolve({ data: { items: [preset], total: 1 } })
         : get(url),
   );
-  api.post.mockResolvedValue({
-    data: {
-      fields,
-      forms: [{ id: "form", label: "設備" }],
-      targets: ["shape:a"],
-      target_count: 1,
-      answer_count: 1,
-      as_of: "2026-11-05T00:00:00Z",
-    },
-  });
+  api.post.mockImplementation(async (url, body) => ({
+    data:
+      url === "/form-answers/map-presets/data"
+        ? {
+            as_of: "2026-11-05T00:00:00Z",
+            rows: [
+              {
+                target: "shape:a",
+                id: "answer",
+                revision: 1,
+                form_id: "form",
+                fields: { n: { type: "number", value: "55" } },
+              },
+            ],
+            next_cursor: null,
+          }
+        : {
+            fields,
+            forms: [{ id: "form", label: "設備" }],
+            targets: ["shape:a"],
+            target_count: 1,
+            answer_count: 1,
+            as_of: "2026-11-05T00:00:00Z",
+          },
+  }));
   localStorage.setItem(LAST_ACTIVE_LAYER_STORAGE_KEY, "a");
   mountView();
   await flushPromises();
@@ -198,6 +214,13 @@ async function restoreSavedColoring() {
   await clickIn(list, "呼び出し");
   await clickIn(document.querySelector('[aria-label="呼び出し完了"]')!, "閉じる");
   await clickIn(list, "閉じる");
+  expect(api.post).toHaveBeenCalledWith(
+    "/form-answers/map-presets/data",
+    expect.objectContaining({ targets: ["marker:a", "shape:a"], forms: { form: ["n"] } }),
+    expect.anything(),
+  );
+  api.post.mockClear();
+  api.get.mockClear();
   return { dialog, preset };
 }
 
@@ -1374,86 +1397,6 @@ describe("削除後の描画復旧", () => {
     }
     await flushPromises();
   };
-  const clickIn = async (root: Element, text: string) => {
-    [...root.querySelectorAll<HTMLButtonElement>("button")]
-      .find((b) => b.textContent === text)!
-      .click();
-    await flushPromises();
-  };
-  async function restoreSavedColoring() {
-    Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
-      configurable: true,
-      value() {
-        this.open = true;
-      },
-    });
-    Object.defineProperty(HTMLDialogElement.prototype, "close", {
-      configurable: true,
-      value() {
-        this.open = false;
-      },
-    });
-    const fields = [{ id: "n", label: "年数", field_type: "number", choices: [] }];
-    const preset = {
-      id: "saved-colors",
-      kind: "coloring",
-      schema_version: 1,
-      name: "年数の分類",
-      definition: {
-        common_form_id: "form",
-        rules: [
-          {
-            id: "r",
-            label: "50年以上",
-            color: "#ff0000",
-            conditions: [{ field_id: "n", field_type: "number", op: "gte", value: "50" }],
-          },
-        ],
-      },
-      display: { form_label: "設備", fields },
-      create_at: "2026-11-05T00:00:00Z",
-    };
-    const get = api.get.getMockImplementation()!;
-    api.get.mockImplementation((url: string) =>
-      url === "/common-forms"
-        ? Promise.resolve({
-            data: [
-              {
-                id: "form",
-                version: 1,
-                form_title: "設備",
-                form_schema: { fields: [{ id: "n", type: "number", label: "年数" }] },
-              },
-            ],
-          })
-        : url.startsWith("/form-answers/map-presets")
-          ? Promise.resolve({ data: { items: [preset], total: 1 } })
-          : get(url),
-    );
-    api.post.mockResolvedValue({
-      data: {
-        fields,
-        forms: [{ id: "form", label: "設備" }],
-        targets: ["shape:a"],
-        target_count: 1,
-        answer_count: 1,
-        as_of: "2026-11-05T00:00:00Z",
-      },
-    });
-    localStorage.setItem(LAST_ACTIVE_LAYER_STORAGE_KEY, "a");
-    mountView();
-    await flushPromises();
-    wrapper!.getComponent({ name: "MapToolbar" }).vm.$emit("advancedSearch");
-    await flushPromises();
-    const dialog = document.querySelector<HTMLDialogElement>(".advanced-map-search")!;
-    await clickIn(dialog, "保存した検索条件");
-    const list = document.querySelector(".map-preset-dialog.form-settings")!;
-    expect(list.textContent).not.toContain("絞り込み条件のみ");
-    await clickIn(list, "呼び出し");
-    await clickIn(document.querySelector('[aria-label="呼び出し完了"]')!, "閉じる");
-    await clickIn(list, "閉じる");
-    return { dialog, preset };
-  }
 
   beforeEach(() => {
     if (OPERATIONS_MOBILE) api.delete.mockResolvedValue({});
@@ -1502,86 +1445,6 @@ describe("JSON出力のダウンロードと失敗後の再試行", () => {
   const createUrl = vi.fn();
   const revokeUrl = vi.fn();
   const downloads: { href: string; name: string; connected: boolean }[] = [];
-  const clickIn = async (root: Element, text: string) => {
-    [...root.querySelectorAll<HTMLButtonElement>("button")]
-      .find((b) => b.textContent === text)!
-      .click();
-    await flushPromises();
-  };
-  async function restoreSavedColoring() {
-    Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
-      configurable: true,
-      value() {
-        this.open = true;
-      },
-    });
-    Object.defineProperty(HTMLDialogElement.prototype, "close", {
-      configurable: true,
-      value() {
-        this.open = false;
-      },
-    });
-    const fields = [{ id: "n", label: "年数", field_type: "number", choices: [] }];
-    const preset = {
-      id: "saved-colors",
-      kind: "coloring",
-      schema_version: 1,
-      name: "年数の分類",
-      definition: {
-        common_form_id: "form",
-        rules: [
-          {
-            id: "r",
-            label: "50年以上",
-            color: "#ff0000",
-            conditions: [{ field_id: "n", field_type: "number", op: "gte", value: "50" }],
-          },
-        ],
-      },
-      display: { form_label: "設備", fields },
-      create_at: "2026-11-05T00:00:00Z",
-    };
-    const get = api.get.getMockImplementation()!;
-    api.get.mockImplementation((url: string) =>
-      url === "/common-forms"
-        ? Promise.resolve({
-            data: [
-              {
-                id: "form",
-                version: 1,
-                form_title: "設備",
-                form_schema: { fields: [{ id: "n", type: "number", label: "年数" }] },
-              },
-            ],
-          })
-        : url.startsWith("/form-answers/map-presets")
-          ? Promise.resolve({ data: { items: [preset], total: 1 } })
-          : get(url),
-    );
-    api.post.mockResolvedValue({
-      data: {
-        fields,
-        forms: [{ id: "form", label: "設備" }],
-        targets: ["shape:a"],
-        target_count: 1,
-        answer_count: 1,
-        as_of: "2026-11-05T00:00:00Z",
-      },
-    });
-    localStorage.setItem(LAST_ACTIVE_LAYER_STORAGE_KEY, "a");
-    mountView();
-    await flushPromises();
-    wrapper!.getComponent({ name: "MapToolbar" }).vm.$emit("advancedSearch");
-    await flushPromises();
-    const dialog = document.querySelector<HTMLDialogElement>(".advanced-map-search")!;
-    await clickIn(dialog, "保存した検索条件");
-    const list = document.querySelector(".map-preset-dialog.form-settings")!;
-    expect(list.textContent).not.toContain("絞り込み条件のみ");
-    await clickIn(list, "呼び出し");
-    await clickIn(document.querySelector('[aria-label="呼び出し完了"]')!, "閉じる");
-    await clickIn(list, "閉じる");
-    return { dialog, preset };
-  }
 
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
@@ -2149,6 +2012,8 @@ describe("地図再生成中の保存と失敗時の再同期", () => {
 it("レイヤ切替の認証確認で通信失敗しても元の色分けを維持する", async () => {
   const { dialog } = await restoreSavedColoring();
   await clickIn(dialog, "色分け実行");
+  expect(api.post).not.toHaveBeenCalled();
+  expect(api.get).not.toHaveBeenCalled();
   await clickIn(document.querySelector('[aria-label="色分け完了"]')!, "閉じる");
   const get = api.get.getMockImplementation()!;
   api.get.mockImplementation((url: string, ...args: unknown[]) =>

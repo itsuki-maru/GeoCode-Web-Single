@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import MapToolbar from "../src/components/map/MapToolbar.vue";
 import MapIframe from "../src/components/map/MapIframe.vue";
 import { useMapAnalysisSearch } from "../src/composables/useMapAnalysisSearch";
+import { useAiAssistant } from "../src/composables/useAiAssistant";
 import { useMapObjectStore } from "../src/stores/mapobjects";
 import { useShapeStore } from "../src/stores/shapes";
 
@@ -46,26 +47,54 @@ markers.upsertRecord(marker);
 shapes.upsertRecord(shape);
 const error = ref("");
 const origin = window.location.origin;
-const { openAdvancedSearch, coloringActive } = useMapAnalysisSearch(
+const applyFilter = async () => {
+  const active = !!markers.attributeSearch || !!markers.aiFilterTargets;
+  return (
+    (await frame.value?.filterMapObjectsAndWait(
+      active ? [...markers.mapObjectList.keys()] : null,
+      active ? markers.filteredShapeIds : null,
+    )) ?? false
+  );
+};
+const assistant = useAiAssistant(
+  layer,
+  master,
+  {
+    filter: applyFilter,
+    color: async (value) => (await frame.value?.setColoring(value)) ?? false,
+    resetColor: async () => (await frame.value?.discardColoring()) ?? false,
+    focus: async () => false,
+    view: async () => null,
+    identity: () => layer.value,
+    evaluatePreset: (definition) => analysis.evaluatePreset(definition),
+    preparePresetPage: (presets, signal) => analysis.preparePresetPage(presets, signal),
+    prepareManualReplacement: (kind, signal, localPreset) =>
+      analysis.prepareManualReplacement(kind, signal, localPreset),
+  },
+  (preset) => analysis.recallSavedPreset(preset),
+);
+const analysis = useMapAnalysisSearch(
   layer,
   master,
   async () => {
-    const active = !!markers.attributeSearch;
-    if (
-      !(await frame.value?.filterMapObjectsAndWait(
-        active ? [...markers.mapObjectList.keys()] : null,
-        active ? markers.filteredShapeIds : null,
-      ))
-    )
-      throw Error("絞り込みを反映できませんでした。");
+    if (!(await applyFilter())) throw Error("絞り込みを反映できませんでした。");
   },
   (message) => {
     error.value = message;
   },
-  async (value) => (await frame.value?.setColoring(value)) ?? false,
-  async () => (await frame.value?.discardColoring()) ?? false,
+  assistant.applyManualColoring,
+  () => assistant.applyManualColoring(null),
+  assistant.applyDefinition,
+  assistant.clearDefinition,
+  assistant.replaceAppliedCondition,
+  assistant.getRecalledColoring,
 );
-const active = computed(() => !!markers.attributeSearch || coloringActive.value);
+const { openAdvancedSearch } = analysis;
+const coloringActive = computed(
+  () => analysis.coloringActive.value || !!assistant.getRecalledColoring(),
+);
+const filterActive = computed(() => !!markers.attributeSearch || !!markers.aiFilterTargets);
+const active = computed(() => filterActive.value || coloringActive.value);
 const initialize = () =>
   frame.value?.initializeMapObjects({
     markers: { one: marker },
@@ -94,7 +123,7 @@ onMounted(() => void initialize());
     @advancedSearch="openAdvancedSearch"
   />
   <output class="fixture-state" aria-label="地図への適用状況"
-    >絞り込み：{{ markers.attributeSearch ? "適用中" : "なし" }} ／ 色分け：{{
+    >絞り込み：{{ filterActive ? "適用中" : "なし" }} ／ 色分け：{{
       coloringActive ? "適用中" : "なし"
     }}</output
   >

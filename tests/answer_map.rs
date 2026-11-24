@@ -1022,6 +1022,7 @@ async fn twenty_thousand_targets_support_map_and_filter_without_truncation() {
         targets: expected.iter().cloned().collect(),
         common_form_id: Some(form),
         conditions: vec![],
+        expression: None,
         options_only: false,
     };
     let filtered =

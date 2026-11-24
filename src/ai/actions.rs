@@ -42,7 +42,7 @@ pub struct AiCondition {
     pub upper: Value,
 }
 
-fn conditions_for_api(conditions: &[AiCondition]) -> Vec<AnswerCondition> {
+pub(crate) fn conditions_for_api(conditions: &[AiCondition]) -> Vec<AnswerCondition> {
     conditions
         .iter()
         .map(|c| AnswerCondition {
@@ -295,6 +295,7 @@ fn filter_request(
         }),
         common_form_id: form.map(|id| id.to_string()),
         conditions,
+        expression: None,
         options_only: options,
     }
 }

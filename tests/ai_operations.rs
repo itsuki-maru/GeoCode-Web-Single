@@ -635,17 +635,17 @@ async fn manual_preset_crud_checks_optional_actor_before_accessing_cookie_accoun
     let definition = json!({"type":"filter","expression":{
         "op":"text","query1":"Cookie利用者だけの非公開条件","query2":""
     }});
-    let version_one = json!({
-        "name":"Cookie利用者だけの非公開条件1","kind":"filter","schema_version":1,
-        "definition":{"common_form_id":null,"conditions":[]}
+    let all_filter = json!({
+        "name":"Cookie利用者だけの非公開条件1","kind":"filter","schema_version":2,
+        "definition":{"type":"filter","expression":{"op":"all"}}
     });
-    let version_two = json!({
+    let text_filter = json!({
         "name":"Cookie利用者だけの非公開条件2","kind":"filter","schema_version":2,
         "definition":definition
     });
     // AIが未設定でも、正しいヘッダーを付けた利用者の明示保存は従来どおり利用できる。
     let mut saved_ids = vec![];
-    for body in [version_one.clone(), version_two.clone()] {
+    for body in [all_filter.clone(), text_filter.clone()] {
         let (status, saved) = request_with_expected_account(
             &app,
             Some(&cookie_user),
@@ -670,7 +670,7 @@ async fn manual_preset_crud_checks_optional_actor_before_accessing_cookie_accoun
 
     for expected_actor in [original_header.as_str(), "not-the-cookie-account", ""] {
         for (method, path, body) in [
-            ("POST", base.to_string(), version_two.clone()),
+            ("POST", base.to_string(), text_filter.clone()),
             ("GET", format!("{base}?versions=1,2"), Value::Null),
             ("DELETE", delete_path.clone(), Value::Null),
         ] {
@@ -707,7 +707,7 @@ async fn manual_preset_crud_checks_optional_actor_before_accessing_cookie_accoun
             "拒否した保存・削除では行を変更しない"
         );
     }
-    // ヘッダーが一致する場合と、省略する旧クライアントのv1/v2を両方維持する。
+    // 一致するアカウントヘッダーを付けた場合も、省略した場合もversion 2を取得できる。
     for expected_actor in [Some(cookie_header.as_str()), None] {
         let (status, list) = request_with_expected_account(
             &app,
@@ -725,7 +725,7 @@ async fn manual_preset_crud_checks_optional_actor_before_accessing_cookie_accoun
             original_count as usize
         );
     }
-    for body in [version_one, version_two] {
+    for body in [all_filter, text_filter] {
         let (status, saved) =
             request_with_expected_account(&app, Some(&cookie_user), None, "POST", base, body).await;
         assert_eq!(status, StatusCode::CREATED, "{saved}");

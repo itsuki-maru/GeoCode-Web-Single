@@ -11,7 +11,7 @@ export interface BasemapState {
   provider: BasemapProvider;
   ready: boolean;
   pending: boolean;
-  /** 背景側の表示条件。将来のRoutes APIの権限・有効化は別に確認する。 */
+  /** 背景側の表示条件。Routes APIの権限・有効化は別に確認する。 */
   googleRoutesAvailable: boolean;
 }
 

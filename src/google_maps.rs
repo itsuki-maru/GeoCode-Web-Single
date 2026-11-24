@@ -1,5 +1,6 @@
 //! Google Maps 接続。資格情報・Googleセッションはブラウザーへ公開しない。
-//! Routes API は将来この設定単位に追加する（今回の課金要求はMap Tilesのみ）。
+pub mod routes;
+
 use crate::{
     auth::verify_access_token,
     config::CONFIG,
@@ -33,6 +34,9 @@ use std::{
 use tokio::sync::{Mutex, Semaphore};
 use uuid::Uuid;
 
+// 背景地図機能が保存済みのキーを復号できるよう、既存の AAD を引き継ぐ。
+const GOOGLE_MAPS_KEY_AAD: &[u8] = b"google-maps-tiles-v1";
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum MapType {
@@ -58,6 +62,7 @@ pub struct GoogleMaps {
     sessions: Mutex<HashMap<String, Session>>,
     limits: Mutex<HashMap<String, (Instant, u32)>>,
     concurrent: Semaphore,
+    routes: routes::RoutesService,
 }
 
 #[derive(Clone)]
@@ -96,6 +101,7 @@ impl GoogleMaps {
             sessions: Mutex::new(HashMap::new()),
             limits: Mutex::new(HashMap::new()),
             concurrent: Semaphore::new(32),
+            routes: routes::RoutesService::default(),
         }
     }
 
@@ -111,7 +117,7 @@ impl GoogleMaps {
         cipher
             .seal_in_place_append_tag(
                 Nonce::assume_unique_for_key(nonce),
-                Aad::from(b"google-maps-tiles-v1"),
+                Aad::from(GOOGLE_MAPS_KEY_AAD),
                 &mut bytes,
             )
             .map_err(|_| AppError::InternalServerError)?;
@@ -127,11 +133,20 @@ impl GoogleMaps {
         let clear = cipher
             .open_in_place(
                 Nonce::assume_unique_for_key(*nonce),
-                Aad::from(b"google-maps-tiles-v1"),
+                Aad::from(GOOGLE_MAPS_KEY_AAD),
                 &mut bytes,
             )
             .map_err(|_| AppError::InternalServerError)?;
         String::from_utf8(clear.to_vec()).map_err(|_| AppError::InternalServerError)
+    }
+
+    fn api_key(&self, settings: &Settings) -> Result<String, AppError> {
+        self.decrypt(
+            settings
+                .encrypted_tiles_key
+                .as_deref()
+                .ok_or(AppError::BadGateway)?,
+        )
     }
 
     async fn limit(&self, actor: &str, maximum: u32) -> Result<(), AppError> {
@@ -160,12 +175,7 @@ impl GoogleMaps {
         if let Some(session) = sessions.get(&cache_key) {
             return Ok(session.clone());
         }
-        let key = self.decrypt(
-            settings
-                .encrypted_tiles_key
-                .as_deref()
-                .ok_or(AppError::BadGateway)?,
-        )?;
+        let key = self.api_key(settings)?;
         let mut body = json!({"mapType": map_type, "language": settings.language, "region": settings.region, "imageFormat":"png"});
         if map_type == MapType::Terrain {
             body["layerTypes"] = json!(["layerRoadmap"]);
@@ -211,12 +221,7 @@ impl GoogleMaps {
         params: &[(String, String)],
     ) -> Result<reqwest::Response, AppError> {
         let session = self.session(settings, map_type).await?;
-        let key = self.decrypt(
-            settings
-                .encrypted_tiles_key
-                .as_deref()
-                .ok_or(AppError::BadGateway)?,
-        )?;
+        let key = self.api_key(settings)?;
         let response = self
             .client
             .get(format!("{}{path}", self.base_url))
@@ -379,7 +384,7 @@ pub async fn admin_update(
     };
     if input.enabled && encrypted.is_none() {
         return Err(AppError::Validation(
-            "Map Tiles APIキーを入力してください。".into(),
+            "Google Maps APIキーを入力してください。".into(),
         ));
     }
     let next = Settings {
@@ -445,7 +450,7 @@ pub async fn admin_check(
     }
     if candidate.encrypted_tiles_key.is_none() {
         return Err(AppError::Validation(
-            "Map Tiles APIキーを入力してください。".into(),
+            "Google Maps APIキーを入力してください。".into(),
         ));
     }
     candidate.revision = Uuid::new_v4().to_string();
@@ -665,6 +670,7 @@ pub async fn context(
     if !settings.enabled {
         return Err(AppError::Forbidden("Google背景地図は無効です。".into()));
     }
+    let routes_enabled = access.scope == "account" && routes::enabled(&pool).await?;
     service
         .limit(
             &format!("{}:{}", access.scope, access.id),
@@ -683,9 +689,12 @@ pub async fn context(
     access.exp = access.exp.min((Utc::now().timestamp() + 600) as usize);
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
-        Json(
-            json!({"grant":sign(&access, CONFIG.secret_key.as_bytes())?,"expiresAt":access.exp,"tileSize":256}),
-        ),
+        Json(json!({
+            "grant": sign(&access, CONFIG.secret_key.as_bytes())?,
+            "expiresAt": access.exp,
+            "tileSize": 256,
+            "routesEnabled": routes_enabled,
+        })),
     ))
 }
 

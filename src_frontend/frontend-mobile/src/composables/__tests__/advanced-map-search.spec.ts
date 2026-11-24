@@ -171,9 +171,9 @@ it("保存条件一覧から削除するとDELETEで送信し、一覧を更新�
   const preset = {
     id: "saved",
     kind: "filter",
-    schema_version: 1,
+    schema_version: 2,
     name: "設備",
-    definition: { common_form_id: "form", conditions: [] },
+    definition: { type: "filter", expression: { op: "all" } },
     display: { form_label: "設備", fields: [] },
     create_at: "2026-11-05T00:00:00Z",
   };

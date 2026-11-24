@@ -20,16 +20,23 @@ afterEach(() => {
   dialogs.dispose();
   document.body.replaceChildren();
 });
-const preset = {
-  id: "saved",
+const manualDraft = {
   kind: "filter" as const,
-  schema_version: 1,
-  name: "画像あり",
   definition: {
     common_form_id: "form",
     conditions: [
       { field_id: "photo", field_type: "image", op: "filled", value: null, upper: null },
     ],
+  },
+};
+const preset = {
+  id: "saved",
+  kind: "filter" as const,
+  schema_version: 2 as const,
+  name: "画像あり",
+  definition: {
+    type: "filter" as const,
+    expression: { op: "attribute", ...manualDraft.definition },
   },
   display: { form_label: "設備", fields: [{ id: "photo", field_type: "image", label: "写真" }] },
   create_at: "2026-10-30T00:00:00Z",
@@ -38,24 +45,102 @@ const click = (text: string) =>
   [...document.querySelectorAll<HTMLButtonElement>("button")]
     .find((b) => b.textContent === text)!
     .click();
-it("絞り込み専用画面では色分けの呼び出しを無効にし、再読み込み後も維持する", async () => {
+
+it("一覧の先頭に閉じる操作を維持し、開き直すたびに最新の条件を取得する", async () => {
+  const updated = { ...preset, name: "更新後の名前" };
+  const transport = vi
+    .fn()
+    .mockRejectedValueOnce(Error("通信に失敗しました。"))
+    .mockResolvedValueOnce({ items: [preset], total: 1 })
+    .mockResolvedValueOnce({ items: [updated], total: 1 });
+  const preparePage = vi
+    .fn()
+    .mockRejectedValueOnce(Error("先読み失敗"))
+    .mockResolvedValue(undefined);
+  const opener = document.createElement("button");
+  document.body.append(opener);
+  opener.focus();
+  dialogs = createMapPresetDialogs(transport, vi.fn(), { preparePage });
+  dialogs.list();
+
+  const list = document.querySelector<HTMLDialogElement>('dialog[aria-label="保存した検索条件"]')!;
+  await vi.waitFor(() =>
+    expect(list.querySelector('[role="alert"]')?.textContent).toContain(
+      "一覧を閉じて開き直してください。",
+    ),
+  );
+  list.querySelector<HTMLButtonElement>("header button")!.click();
+  dialogs.list();
+
+  const header = list.querySelector("header")!;
+  const close = header.querySelector("button")!;
+  expect(header.querySelector("h2")?.textContent).toBe("保存した検索条件");
+  expect(close.textContent).toBe("閉じる");
+  close.focus();
+  await vi.waitFor(() =>
+    expect(list.querySelector("tbody tr")?.textContent).toContain(preset.name),
+  );
+  expect(document.activeElement).toBe(close);
+  expect(list.querySelector(".preset-count")).toBeNull();
+  expect([...list.querySelectorAll("button")].map((button) => button.textContent)).toEqual([
+    "閉じる",
+    "呼び出し",
+    "削除",
+  ]);
+  expect(list.querySelector('[role="alert"]')?.textContent).toContain(
+    "一覧を閉じて開き直してください。",
+  );
+
+  close.click();
+  expect(list.open).toBe(false);
+  expect(document.activeElement).toBe(opener);
+  dialogs.list();
+  await vi.waitFor(() =>
+    expect(list.querySelector("tbody tr")?.textContent).toContain(updated.name),
+  );
+  expect(transport.mock.calls.map(([path]) => path)).toEqual([
+    "/form-answers/map-presets?page=1&page_size=20&versions=2",
+    "/form-answers/map-presets?page=1&page_size=20&versions=2",
+    "/form-answers/map-presets?page=1&page_size=20&versions=2",
+  ]);
+  expect(list.querySelector('[role="alert"]')).toBeNull();
+});
+
+it("絞り込み専用画面では色分けの呼び出しと適用を無効にする", async () => {
   const coloring = {
     ...preset,
     id: "colors",
     kind: "coloring",
     name: "写真による色分け",
     definition: {
+      type: "color",
       common_form_id: "form",
       rules: [
-        { id: "r", label: "写真あり", color: "#2166ac", conditions: preset.definition.conditions },
+        {
+          id: "r",
+          label: "写真あり",
+          color: "#2166ac",
+          conditions: manualDraft.definition.conditions,
+        },
       ],
     },
   };
   const restore = vi.fn();
+  const apply = vi.fn();
+  const preparePage = vi.fn(
+    async (_items: unknown[], signal: AbortSignal) =>
+      new Promise<void>((resolve) =>
+        signal.addEventListener("abort", () => resolve(), { once: true }),
+      ),
+  );
+  const next = { ...preset, id: "next", name: "次の条件" };
   dialogs = createMapPresetDialogs(
-    vi.fn().mockResolvedValue({ items: [preset, coloring], total: 21 }),
+    vi
+      .fn()
+      .mockResolvedValueOnce({ items: [preset, coloring], total: 21 })
+      .mockResolvedValueOnce({ items: [next, coloring], total: 21 }),
     restore,
-    { filterOnly: true },
+    { filterOnly: true, preparePage, apply },
   );
   dialogs.list();
   await vi.waitFor(() => expect(document.querySelectorAll("tbody tr")).toHaveLength(2));
@@ -66,11 +151,22 @@ it("絞り込み専用画面では色分けの呼び出しを無効にし、再�
   expect(buttons()[1]!.disabled).toBe(true);
   expect(buttons()[1]!.title).toContain("色分け条件を呼び出せません");
   buttons()[1]!.click();
+  const applyButtons = () => [
+    ...document.querySelectorAll<HTMLButtonElement>("[data-preset-apply-id]"),
+  ];
+  expect(applyButtons().map((button) => button.disabled)).toEqual([false, true]);
+  expect(applyButtons()[1]!.title).toContain("色分け条件を適用できません");
+  applyButtons()[1]!.click();
+  expect(apply).not.toHaveBeenCalled();
   expect(restore).not.toHaveBeenCalled();
+  expect(preparePage).toHaveBeenCalledExactlyOnceWith([preset], expect.any(AbortSignal));
   click("次へ");
   await vi.waitFor(() => expect(document.querySelector("nav")?.textContent).toContain("2 / 2"));
   expect(buttons()[0]!.disabled).toBe(false);
   expect(buttons()[1]!.disabled).toBe(true);
+  expect(applyButtons().map((button) => button.disabled)).toEqual([false, true]);
+  expect(preparePage.mock.calls[0]![1].aborted).toBe(true);
+  expect(preparePage).toHaveBeenLastCalledWith([next], expect.any(AbortSignal));
 });
 
 it("既存の再利用可能な定義を保存し、地図に適用せずに呼び出す", async () => {
@@ -80,7 +176,7 @@ it("既存の再利用可能な定義を保存し、地図に適用せずに呼�
       .mockResolvedValueOnce({ items: [preset], total: 1 }),
     restore = vi.fn();
   dialogs = createMapPresetDialogs(transport, restore);
-  dialogs.save(preset);
+  dialogs.save(manualDraft);
   document.querySelector<HTMLInputElement>("input")!.value = "画像あり";
   click("保存");
   await vi.waitFor(() =>
@@ -89,7 +185,7 @@ it("既存の再利用可能な定義を保存し、地図に適用せずに呼�
   expect(transport.mock.calls[0]![1]).toEqual({
     name: "画像あり",
     kind: "filter",
-    schema_version: 1,
+    schema_version: 2 as const,
     definition: preset.definition,
   });
   dialogs.list();
@@ -119,7 +215,7 @@ it("既存の再利用可能な定義を保存し、地図に適用せずに呼�
   );
 });
 
-it("v1とAI複合条件を同じ呼び出し操作に揃え、AI定義を改変せず編集へ渡す", async () => {
+it("手動条件とAI複合条件を同じ呼び出し操作に揃え、AI定義を改変せず編集へ渡す", async () => {
   const ai = {
     ...preset,
     id: "ai-saved",
@@ -141,7 +237,7 @@ it("v1とAI複合条件を同じ呼び出し操作に揃え、AI定義を改変�
   dialogs = createMapPresetDialogs(transport, restore);
   dialogs.list();
   await vi.waitFor(() => expect(document.querySelectorAll("tbody tr")).toHaveLength(2));
-  expect(transport.mock.calls[0]![0]).toContain("versions=1,2");
+  expect(transport.mock.calls[0]![0]).toContain("versions=2");
   expect(document.querySelectorAll("tbody tr")[1]!.textContent).toContain("点検");
   expect(document.querySelectorAll("tbody tr")[1]!.textContent).toContain(" または ");
   expect(document.querySelector("tbody img")).toBeNull();

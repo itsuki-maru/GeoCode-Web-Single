@@ -12,10 +12,9 @@ export type MapPresetDraft =
   | { kind: "filter"; definition: AnswerMapFilter }
   | { kind: "coloring"; definition: AnswerColorSpecification };
 
-export type SavedMapPreset = MapPresetDraft & {
+export type SavedMapPreset = V2MapPresetDraft & {
   id: string;
   name: string;
-  schema_version: 1;
   display: {
     form_label: string | null;
     fields: { id: string; field_type: string; label: string; form_id?: string }[];
@@ -23,32 +22,43 @@ export type SavedMapPreset = MapPresetDraft & {
   create_at: string;
 };
 
-export type SavedAiMapPreset = Omit<SavedMapPreset, "schema_version" | "definition"> & {
-  schema_version: 2;
-  definition: AiDefinition;
-};
-export type AnySavedMapPreset = SavedMapPreset | SavedAiMapPreset;
-
-/** 編集中のAI定義も元の形式を保ち、保存済みレコードとは分離する。 */
-export type AiMapPresetDraft = {
+/** 手動・AIで共通の保存形式。名前とIDは保存時に付与する。 */
+export type V2MapPresetDraft = {
   schema_version: 2;
   kind: "filter" | "coloring";
   definition: AiDefinition;
 };
-export type AnyMapPresetDraft = MapPresetDraft | AiMapPresetDraft;
+export type AnyMapPresetDraft = MapPresetDraft | V2MapPresetDraft;
 
-export function cloneAnyPresetDraft(value: AnyMapPresetDraft): AnyMapPresetDraft {
-  if ("schema_version" in value && value.schema_version === 2) {
-    const definition = validateAiPresetDefinition(value.definition);
-    if (
-      (value.kind === "filter" && definition.type !== "filter") ||
-      (value.kind === "coloring" && definition.type !== "color") ||
-      !["filter", "coloring"].includes(value.kind)
-    )
-      throw Error("保存する条件の種類を確認してください。");
-    return { schema_version: 2, kind: value.kind, definition };
+export function toV2PresetDraft(value: AnyMapPresetDraft): V2MapPresetDraft {
+  let definition: AiDefinition;
+  if ("schema_version" in value) {
+    if (value.schema_version !== 2) throw Error("保存条件の形式を確認してください。");
+    definition = value.definition;
+  } else {
+    const draft = clonePresetDraft(value);
+    if (draft.kind === "coloring") {
+      definition = { type: "color", ...draft.definition };
+    } else {
+      definition = {
+        type: "filter",
+        expression: draft.definition.common_form_id
+          ? { op: "attribute", ...draft.definition }
+          : { op: "all" },
+      };
+    }
   }
-  return clonePresetDraft(value as MapPresetDraft);
+  if (
+    (value.kind === "filter" && definition.type !== "filter") ||
+    (value.kind === "coloring" && definition.type !== "color") ||
+    !["filter", "coloring"].includes(value.kind)
+  )
+    throw Error("保存する条件の種類を確認してください。");
+  return {
+    schema_version: 2,
+    kind: value.kind,
+    definition: validateAiPresetDefinition(definition),
+  };
 }
 
 export interface MapPresetPage {
@@ -145,7 +155,6 @@ export function validatePresetDraft(draft: MapPresetDraft): void {
       throw Error("分類名・色・分類の識別情報を確認してください。");
     ids.add(rule.id);
     validateConditions(rule.conditions);
-    if (!rule.conditions.length) throw Error("各分類に条件を追加してください。");
   }
 }
 
@@ -221,35 +230,6 @@ export function deserializePresetConditions(
     if (row.op === "between") row.upper = condition.upper as string;
     return row;
   });
-}
-
-export function isSavedMapPreset(value: unknown): value is SavedMapPreset {
-  if (
-    !record(value) ||
-    !text(value.id, 128) ||
-    typeof value.name !== "string" ||
-    !value.name.trim() ||
-    [...value.name].length > 100 ||
-    value.schema_version !== 1 ||
-    !text(value.create_at, 100) ||
-    !record(value.display) ||
-    (value.display.form_label !== null && !text(value.display.form_label, 1000)) ||
-    !Array.isArray(value.display.fields) ||
-    value.display.fields.some(
-      (field) =>
-        !record(field) ||
-        !text(field.id, 40) ||
-        !text(field.field_type, 30) ||
-        !text(field.label, 1000),
-    )
-  )
-    return false;
-  try {
-    validatePresetDraft(value as SavedMapPreset);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export function validateAiPresetDefinition(value: unknown): AiDefinition {
@@ -372,9 +352,7 @@ export function validateAiPresetDefinition(value: unknown): AiDefinition {
   return definition;
 }
 
-/** 旧画面のv1判定を変えず、新しい共通一覧だけでv2を受け付ける。 */
-export function isAnySavedMapPreset(value: unknown): value is AnySavedMapPreset {
-  if (isSavedMapPreset(value)) return true;
+export function isSavedMapPreset(value: unknown): value is SavedMapPreset {
   if (
     !record(value) ||
     value.schema_version !== 2 ||
@@ -410,18 +388,16 @@ export function isAnySavedMapPreset(value: unknown): value is AnySavedMapPreset 
   }
 }
 
-export function cloneSavedMapPreset(preset: AnySavedMapPreset): AnySavedMapPreset {
-  if (!isAnySavedMapPreset(preset)) throw Error("保存条件を確認できませんでした。");
-  return preset.schema_version === 1
-    ? { ...preset, ...clonePresetDraft(preset) }
-    : structuredClone(preset);
+export function cloneSavedMapPreset(preset: SavedMapPreset): SavedMapPreset {
+  if (!isSavedMapPreset(preset)) throw Error("保存条件を確認できませんでした。");
+  return structuredClone(preset);
 }
 
 export function mapPresetKindLabel(kind: MapPresetDraft["kind"]): string {
   return kind === "filter" ? "地図上で絞り込み" : "地図で色分け";
 }
 
-export function describeMapPreset(preset: AnySavedMapPreset): string {
+export function describeMapPreset(preset: SavedMapPreset): string {
   const describe = (condition: Record<string, unknown>, form?: string) => {
     const label =
       preset.display.fields.find(
@@ -445,57 +421,40 @@ export function describeMapPreset(preset: AnySavedMapPreset): string {
           : String(condition.value ?? "");
     return `${label} ${operation}${value ? ` ${value}` : ""}${condition.op === "between" ? `〜${condition.upper}` : ""}`;
   };
-  if (preset.schema_version === 2) {
-    const expression = (value: unknown): string => {
-      const part = value as Record<string, unknown>;
-      if (part.op === "all") return "すべての対象";
-      if (part.op === "text")
-        return (
-          "名前・本文・メモに「" +
-          String(part.query1) +
-          "」" +
-          (part.query2 ? "かつ「" + String(part.query2) + "」" : "")
-        );
-      if (part.op === "attribute")
-        return (
-          (part.conditions as Record<string, unknown>[])
-            .map((condition) => describe(condition, String(part.common_form_id)))
-            .join(" かつ ") || "指定フォームの登録あり"
-        );
-      if (part.op === "not") return "除外（" + expression(part.child) + "）";
+  const expression = (value: unknown): string => {
+    const part = value as Record<string, unknown>;
+    if (part.op === "all") return "すべての対象";
+    if (part.op === "text")
       return (
-        "（" +
-        (part.children as unknown[])
-          .map(expression)
-          .join(part.op === "or" ? " または " : " かつ ") +
-        "）"
+        "名前・本文・メモに「" +
+        String(part.query1) +
+        "」" +
+        (part.query2 ? "かつ「" + String(part.query2) + "」" : "")
       );
-    };
-    if (preset.definition.type === "filter")
-      return "AI条件：" + expression(preset.definition.expression);
+    if (part.op === "attribute")
+      return (
+        (part.conditions as Record<string, unknown>[])
+          .map((condition) => describe(condition, String(part.common_form_id)))
+          .join(" かつ ") || "指定フォームの登録あり"
+      );
+    if (part.op === "not") return "除外（" + expression(part.child) + "）";
     return (
-      "AI条件：" +
-      (preset.definition.rules as Record<string, unknown>[])
-        .map(
-          (rule) =>
-            String(rule.label) +
-            "：" +
-            ((rule.conditions as Record<string, unknown>[])
-              .map((condition) => describe(condition, String(preset.definition.common_form_id)))
-              .join(" ／ ") || "すべての対象"),
-        )
-        .join("\n")
+      "（" +
+      (part.children as unknown[]).map(expression).join(part.op === "or" ? " または " : " かつ ") +
+      "）"
     );
-  }
-  return preset.kind === "filter"
-    ? preset.definition.conditions.map((condition) => describe(condition)).join(" ／ ") ||
-        "登録条件なし"
-    : preset.definition.rules
-        .map(
-          (rule) =>
-            `${rule.label}：${rule.conditions.map((condition) => describe(condition)).join(" ／ ")}`,
-        )
-        .join("\n");
+  };
+  if (preset.definition.type === "filter") return expression(preset.definition.expression);
+  return (preset.definition.rules as Record<string, unknown>[])
+    .map(
+      (rule) =>
+        String(rule.label) +
+        "：" +
+        ((rule.conditions as Record<string, unknown>[])
+          .map((condition) => describe(condition, String(preset.definition.common_form_id)))
+          .join(" ／ ") || "すべての対象"),
+    )
+    .join("\n");
 }
 
 export function mapPresetError(error: unknown, fallback: string): string {

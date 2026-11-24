@@ -684,12 +684,13 @@ async fn protocol_two_preserves_applied_definitions_through_confirmed_save_and_r
     assert_eq!(listed["total"], 1);
     assert_eq!(listed["items"][0]["schema_version"], 2);
     assert_eq!(listed["items"][0]["definition"], applied);
-    let (_, legacy) = request(&app, &user, "GET", "/form-answers/map-presets", Value::Null).await;
-    assert_eq!(
-        legacy["total"], 0,
-        "旧クライアントへバージョン2の定義を返さない"
-    );
-    let id = completed["result"]["id"].clone();
+    let (status, map_list) =
+        request(&app, &user, "GET", "/form-answers/map-presets", Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{map_list}");
+    assert_eq!(map_list["total"], 1);
+    assert_eq!(map_list["items"], listed["items"]);
+    let id = map_list["items"][0]["id"].clone();
+    assert_eq!(id, completed["result"]["id"]);
     insert_marker(&pool, &user, "避難所", "NEW-DATA-MUST-STAY-LOCAL").await;
     let (status, restored) = request(
         &app,

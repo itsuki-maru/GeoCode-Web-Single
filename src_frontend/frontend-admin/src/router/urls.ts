@@ -19,3 +19,4 @@ export const adminTileServerSettingsUrl = baseUrl + "/admin/tile-server-settings
 export const adminAiSettingsUrl = baseUrl + "/admin/ai-settings";
 
 export const adminGoogleMapsSettingsUrl = baseUrl + "/admin/google-maps-settings";
+export const adminGoogleMapsRoutesSettingsUrl = adminGoogleMapsSettingsUrl + "/routes";

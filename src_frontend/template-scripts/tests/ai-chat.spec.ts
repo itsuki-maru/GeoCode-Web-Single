@@ -1,6 +1,23 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createAiChat } from "../src/ai/chat";
+import { createAiChat as createChat } from "../src/ai/chat";
+import type { AiDefinition, AiExecutionResult } from "../src/ai/types";
 import { createAiOperationId } from "../src/ai/types";
+
+function createAiChat(options: Parameters<typeof createChat>[0]) {
+  const evaluatePreset = (definition: AiDefinition): AiExecutionResult =>
+    definition.type === "filter"
+      ? { type: "filter", definition, targets: [], target_count: 0 }
+      : {
+          type: "color",
+          definition,
+          coloring: {
+            version: 1,
+            rules: [{ id: "red", label: "10年以上", color: "#ff0000" }],
+            targets: {},
+          },
+        };
+  return createChat({ evaluatePreset, ...options });
+}
 
 const capabilities = { enabled: true, voice_enabled: false, revision: "r1" };
 const modernCapabilities = { ...capabilities, protocol_version: 2, write_enabled: true };
@@ -28,20 +45,6 @@ it.each(["filter", "color"] as const)(
       if (path === "/ai/capabilities") return modernCapabilities;
       if (path === "/ai/suggestions")
         return { revision: "r1", as_of: "2026-11-17T00:00:00Z", suggestions: [] };
-      if (path === "/ai/assist/execute") {
-        if (body.action.type === "reset") return { type: "reset" };
-        if (body.action.type === "filter")
-          return { type: "filter", targets: [], target_count: 0, definition: body.action };
-        return {
-          type: "color",
-          definition: body.action,
-          coloring: {
-            version: 1,
-            rules: [{ id: "red", label: "10年以上", color: "#ff0000" }],
-            targets: {},
-          },
-        };
-      }
       if (path === "/ai/chat") return { message: "確認しました", revision: "r1", action: null };
       throw Error("unexpected request");
     });
@@ -59,16 +62,7 @@ it.each(["filter", "color"] as const)(
     expect(clear).toHaveBeenCalledWith(kind, expect.any(AbortSignal));
     expect(apply).toHaveBeenCalledTimes(2);
     expect(transport.mock.calls.some(([path]) => path === "/ai/chat")).toBe(false);
-    expect(transport).toHaveBeenCalledWith(
-      "/ai/assist/execute",
-      {
-        protocol_version: 2,
-        revision: "r1",
-        action: { type: "reset" },
-        context: { layer_ids: ["l1"] },
-      },
-      expect.any(AbortSignal),
-    );
+    expect(transport.mock.calls.map(([path]) => path)).toEqual(["/ai/capabilities"]);
     chat.open();
     await flush();
     submit("現在の条件を確認");
@@ -91,23 +85,20 @@ it.each(["filter", "color"] as const)(
   },
 );
 
-it.each(["account", "context", "abort", "revision"])(
-  "編集画面の解除で%sが変わっても遅延応答を地図へ反映しない",
+it.each(["account", "context", "abort"])(
+  "編集画面の解除で%sが変わると遅延した描画の完了を受理しない",
   async (reason) => {
-    let finish!: (value: unknown) => void;
-    let key = "owner",
-      revision = "r1";
-    const accountChanged = vi.fn(),
-      clear = vi.fn();
+    let finish!: () => void;
+    let key = "owner";
+    const accountChanged = vi.fn();
+    const clear = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      if (reason === "account") throw Error("ai_account_changed");
+    });
     const transport = vi.fn(async (path: string) => {
-      if (path === "/ai/capabilities") return { ...modernCapabilities, revision };
-      if (path === "/ai/assist/execute") {
-        const response = await new Promise((resolve) => {
-          finish = resolve;
-        });
-        if (reason === "account") throw Error("ai_account_changed");
-        return response;
-      }
+      if (path === "/ai/capabilities") return modernCapabilities;
       throw Error("unexpected request");
     });
     chat = createAiChat({
@@ -126,12 +117,12 @@ it.each(["account", "context", "abort", "revision"])(
     await flush();
     if (reason === "context") key = "other-owner";
     if (reason === "abort") controller.abort();
-    if (reason === "revision") revision = "r2";
-    finish({ type: "reset" });
+    finish();
     expect(await pending).toMatchObject({
-      name: reason === "abort" || reason === "revision" ? "AbortError" : "Error",
+      name: reason === "abort" ? "AbortError" : "Error",
     });
-    expect(clear).not.toHaveBeenCalled();
+    expect(clear).toHaveBeenCalledOnce();
+    expect(transport.mock.calls.map(([path]) => path)).toEqual(["/ai/capabilities"]);
     if (reason === "account") expect(accountChanged).toHaveBeenCalledOnce();
   },
 );
@@ -153,7 +144,6 @@ it("解除の表示処理中に中止しても復元完了まで次の表示操�
   );
   const transport = vi.fn(async (path: string) => {
     if (path === "/ai/capabilities") return modernCapabilities;
-    if (path === "/ai/assist/execute") return { type: "reset" };
     throw Error("unexpected request");
   });
   chat = createAiChat({
@@ -399,8 +389,6 @@ it.each(["cancel", "close", "revision"])(
       if (path === "/ai/capabilities") return { ...modernCapabilities, revision };
       if (path === "/ai/suggestions")
         return { revision, as_of: "2026-11-17T00:00:00Z", suggestions: [] };
-      if (path === "/ai/assist/execute")
-        return { type: "filter", targets: [], target_count: 0, definition: body.action };
       if (path === "/ai/chat") {
         const action = saveNext ? { type: "save_preset", kind: "filter", name: "復元後" } : null;
         saveNext = false;
@@ -680,6 +668,10 @@ it("forces the denied message and never executes an action attached to a denied 
 it.each(["loaded", "aborted"])(
   "保存条件一覧をテキストで表示し、呼び出しで地図へ適用せず中断後もチャットを開かない: %s",
   async (outcome) => {
+    const secondDefinition = {
+      type: "filter" as const,
+      expression: { op: "text", query1: "病院" },
+    };
     const transport = vi.fn(async (path: string, body?: any) => {
       if (path === "/ai/capabilities") return modernCapabilities;
       if (path === "/ai/chat")
@@ -702,32 +694,53 @@ it.each(["loaded", "aborted"])(
               definition: filterDefinition,
               display: { form_label: null, fields: [] },
             },
+            {
+              id: "preset-three",
+              name: "病院",
+              kind: "filter",
+              schema_version: 2,
+              create_at: "2026-11-17",
+              definition: secondDefinition,
+              display: { form_label: null, fields: [] },
+            },
           ],
-          total: 1,
+          total: 2,
           page: 1,
           page_size: 20,
           kind: "filter",
         };
-      if (path === "/ai/assist/execute")
-        return { type: "filter", targets: [], target_count: 0, definition: filterDefinition };
       throw Error("unexpected request");
     });
     const apply = vi.fn().mockResolvedValue(undefined);
     const recall = vi.fn(async () => {
+      expect(preparePresetPage.mock.calls.at(-1)![1].aborted).toBe(false);
       if (outcome === "aborted") throw new DOMException("Aborted", "AbortError");
     });
+    let finishPreparation!: () => void;
+    const preparePresetPage = vi.fn<
+      NonNullable<Parameters<typeof createChat>[0]["preparePresetPage"]>
+    >(
+      () =>
+        new Promise((resolve) => {
+          finishPreparation = resolve;
+        }),
+    );
     chat = createAiChat({
       transport,
       getContext: () => ({ layer_ids: ["l1"] }),
       getContextKey: () => "owner",
       apply,
       onRecallPreset: recall,
+      preparePresetPage,
     });
     chat.open();
     await flush();
     submit("絞り込み条件一覧");
     await flush();
     expect(document.querySelector(".ai-panel img")).toBeNull();
+    expect(preparePresetPage).toHaveBeenCalledOnce();
+    const [presets, signal] = preparePresetPage.mock.calls[0]!;
+    expect(presets.map((p) => p.id)).toEqual(["preset-two", "preset-three"]);
     [...document.querySelectorAll<HTMLButtonElement>("button")]
       .find((button) => button.textContent === "呼び出し")!
       .click();
@@ -740,10 +753,120 @@ it.each(["loaded", "aborted"])(
       }),
     );
     expect(document.querySelector<HTMLDialogElement>(".geocode-ai-chat")!.open).toBe(false);
+    expect(signal.aborted).toBe(true);
+    finishPreparation();
     expect(transport.mock.calls.filter(([path]) => path === "/ai/assist/execute")).toHaveLength(1);
     expect(apply).not.toHaveBeenCalled();
+    if (outcome === "loaded") {
+      await chat.applyDefinition(filterDefinition);
+      chat.open();
+      await flush();
+      const candidates = document.querySelectorAll<HTMLButtonElement>(".ai-preset button");
+      expect(candidates).toHaveLength(2);
+      expect(preparePresetPage).toHaveBeenCalledTimes(2);
+      candidates[1]!.click();
+      await flush();
+      expect(recall).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          id: "preset-three",
+          definition: secondDefinition,
+        }),
+      );
+      await chat.applyDefinition(secondDefinition);
+      expect(apply).toHaveBeenCalledTimes(2);
+    }
   },
 );
+
+it("AIの保存一覧は表示ページの先読みを切り替え、タブに戻ると中断したページを再開する", async () => {
+  const prepare = vi
+    .fn<NonNullable<Parameters<typeof createChat>[0]["preparePresetPage"]>>()
+    .mockResolvedValue(undefined);
+  const transport = vi.fn(async (path, body) => {
+    if (path === "/ai/capabilities") return modernCapabilities;
+    if (path === "/ai/suggestions")
+      return { revision: "r1", as_of: "2026-11-17T00:00:00Z", suggestions: [] };
+    if (path === "/ai/chat")
+      return {
+        message: "保存条件",
+        action: { type: "list_presets" },
+        revision: "r1",
+        outcome: "action",
+      };
+    const page = body.action.page ?? 1;
+    return {
+      type: "presets",
+      page,
+      total: 2,
+      page_size: 1,
+      items: [
+        {
+          id: String(page),
+          name: "条件" + page,
+          kind: "filter",
+          schema_version: 2,
+          create_at: "",
+          definition: filterDefinition,
+          display: { form_label: null, fields: [] },
+        },
+      ],
+    };
+  });
+  chat = createAiChat({
+    transport,
+    getContext: () => ({ layer_ids: null }),
+    getContextKey: () => "owner",
+    apply: vi.fn(),
+    onRecallPreset: vi.fn(),
+    preparePresetPage: prepare,
+  });
+  chat.open();
+  await flush();
+  submit("保存条件を表示");
+  await flush();
+  [...document.querySelectorAll<HTMLButtonElement>(".ai-panel button")]
+    .find((button) => button.textContent === "次へ")!
+    .click();
+  await flush();
+  expect(prepare.mock.calls.map(([items]) => items.map((p) => p.id))).toEqual([["1"], ["2"]]);
+  expect(prepare.mock.calls[0]![1].aborted).toBe(true);
+  const visibility = vi.spyOn(document, "visibilityState", "get");
+  try {
+    visibility.mockReturnValue("hidden");
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(prepare.mock.calls[1]![1].aborted).toBe(true);
+    visibility.mockReturnValue("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(prepare.mock.calls.at(-1)![0][0]!.id).toBe("2");
+    expect(prepare).toHaveBeenCalledTimes(3);
+    chat.close();
+    expect(prepare.mock.calls.at(-1)![1].aborted).toBe(true);
+  } finally {
+    visibility.mockRestore();
+  }
+});
+
+it("AIを無効にしても編集画面から保存条件を実行して解除できる", async () => {
+  const apply = vi.fn(),
+    clear = vi.fn();
+  const transport = vi.fn(async (path: string, body?: any) => {
+    if (path === "/ai/capabilities") return { ...modernCapabilities, enabled: false };
+    throw Error("unexpected request");
+  });
+  chat = createAiChat({
+    transport,
+    getContext: () => ({ layer_ids: null }),
+    getContextKey: () => "owner",
+    apply,
+    clear,
+  });
+  await flush();
+  await chat.applyDefinition(filterDefinition);
+  await chat.clearDefinition("filter");
+  expect(apply).toHaveBeenCalledOnce();
+  expect(clear).toHaveBeenCalledWith("filter", expect.any(AbortSignal));
+  expect(transport.mock.calls.map(([path]) => path)).not.toContain("/ai/assist/execute");
+});
 
 it("チャットを開かず複合下書きを実行し、実際の定義を次の保存要求へ引き継ぐ", async () => {
   const definition = {
@@ -770,8 +893,6 @@ it("チャットを開かず複合下書きを実行し、実際の定義を次�
     if (path === "/ai/capabilities") return modernCapabilities;
     if (path === "/ai/suggestions")
       return { revision: "r1", as_of: "2026-11-17T00:00:00Z", suggestions: [] };
-    if (path === "/ai/assist/execute")
-      return { type: "filter", targets: [], target_count: 0, definition: body.action };
     if (path === "/ai/chat")
       return {
         message: "保存します",
@@ -805,16 +926,7 @@ it("チャットを開かず複合下書きを実行し、実際の定義を次�
   expect(document.querySelector<HTMLDialogElement>(".geocode-ai-chat")!.open).toBe(false);
   expect(apply).toHaveBeenCalledOnce();
   expect(transport.mock.calls.filter(([path]) => path === "/ai/chat")).toHaveLength(0);
-  expect(transport).toHaveBeenCalledWith(
-    "/ai/assist/execute",
-    {
-      protocol_version: 2,
-      action: original,
-      revision: "r1",
-      context: { layer_ids: ["layer-one"] },
-    },
-    expect.any(AbortSignal),
-  );
+  expect(transport.mock.calls.map(([path]) => path)).toEqual(["/ai/capabilities"]);
   definition.expression.children.reverse();
   chat.open();
   await flush();
@@ -832,8 +944,6 @@ it("編集画面からの実行も元に戻す操作で適用済み定義と地�
     if (path === "/ai/capabilities") return modernCapabilities;
     if (path === "/ai/suggestions")
       return { revision: "r1", as_of: "2026-11-17T00:00:00Z", suggestions: [] };
-    if (path === "/ai/assist/execute")
-      return { type: "filter", targets: [], target_count: 0, definition: body.action };
     if (path === "/ai/chat") return { message: "現在の条件です", revision: "r1", action: null };
     throw Error("unexpected request");
   });
@@ -860,22 +970,22 @@ it("編集画面からの実行も元に戻す操作で適用済み定義と地�
   });
 });
 
-it.each(["abort", "context", "revision"])(
-  "編集画面実行の%s後に遅延応答が届いても地図へ反映しない",
+it.each(["abort", "context"])(
+  "ローカル判定の描画応答待ちで%sすると適用済みの状態を確定しない",
   async (reason) => {
-    let resolve!: (value: unknown) => void;
-    let key = "owner:layer-one",
-      revision = "r1";
+    let resolve!: () => void;
+    let key = "owner:layer-one";
     const transport = vi.fn(async (path: string) => {
-      if (path === "/ai/capabilities") return { ...modernCapabilities, revision };
-      if (path === "/ai/assist/execute")
-        return new Promise((done) => {
-          resolve = done;
-        });
+      if (path === "/ai/capabilities") return modernCapabilities;
       throw Error("unexpected request");
     });
-    const apply = vi.fn(),
-      controller = new AbortController();
+    const apply = vi.fn(
+      () =>
+        new Promise<void>((done) => {
+          resolve = done;
+        }),
+    );
+    const controller = new AbortController();
     chat = createAiChat({
       transport,
       getContext: () => ({ layer_ids: ["layer-one"] }),
@@ -894,15 +1004,9 @@ it.each(["abort", "context", "revision"])(
     ).rejects.toThrow("現在のAI処理");
     if (reason === "abort") controller.abort();
     else if (reason === "context") key = "owner:layer-two";
-    else revision = "r2";
-    resolve({
-      type: "filter",
-      targets: [],
-      target_count: 0,
-      definition: { type: "filter", expression: { op: "all" } },
-    });
+    resolve();
     await failure;
-    expect(apply).not.toHaveBeenCalled();
+    expect(apply).toHaveBeenCalledOnce();
     expect(transport.mock.calls.filter(([path]) => path === "/ai/chat")).toHaveLength(0);
   },
 );
@@ -912,8 +1016,6 @@ it("地図の反映応答直後に編集画面が取り消された場合は反�
     undo = vi.fn().mockResolvedValue(undefined);
   const transport = vi.fn(async (path: string, body?: any) => {
     if (path === "/ai/capabilities") return modernCapabilities;
-    if (path === "/ai/assist/execute")
-      return { type: "filter", targets: [], target_count: 0, definition: body.action };
     throw Error("unexpected request");
   });
   chat = createAiChat({
@@ -932,9 +1034,9 @@ it("地図の反映応答直後に編集画面が取り消された場合は反�
   expect(undo).toHaveBeenCalledOnce();
 });
 
-it("設定変更で通信を取り消しても旧表示の復元完了まで新しい表示操作を始めない", async () => {
-  let revision = "r1",
-    painted = "baseline",
+it("操作を取り消しても旧表示の復元完了まで新しい表示操作を始めない", async () => {
+  const { revision } = modernCapabilities;
+  let painted = "baseline",
     first = true;
   let finishApply!: () => void, finishRollback!: () => void;
   const rollback = vi.fn(
@@ -947,9 +1049,7 @@ it("設定変更で通信を取り消しても旧表示の復元完了まで新�
       }),
   );
   const transport = vi.fn(async (path: string, body?: any) => {
-    if (path === "/ai/capabilities") return { ...modernCapabilities, revision };
-    if (path === "/ai/assist/execute")
-      return { type: "filter", targets: [], target_count: 0, definition: body.action };
+    if (path === "/ai/capabilities") return modernCapabilities;
     if (path === "/ai/suggestions")
       return { revision, as_of: "2026-11-17T00:00:00Z", suggestions: [] };
     if (path === "/ai/chat") return { message: "現在の条件です", revision, action: null };
@@ -976,15 +1076,18 @@ it("設定変更で通信を取り消しても旧表示の復元完了まで新�
     apply,
   });
   await flush();
-  const pending = chat.applyDefinition({
-    type: "filter",
-    expression: { op: "text", query1: "old" },
-  });
+  const controller = new AbortController();
+  const pending = chat.applyDefinition(
+    {
+      type: "filter",
+      expression: { op: "text", query1: "old" },
+    },
+    controller.signal,
+  );
   const failure = expect(pending).rejects.toThrow();
   await flush();
   expect(painted).toBe("old");
-  revision = "r2";
-  await chat.refreshCapabilities();
+  controller.abort();
   const nextDefinition = { type: "filter" as const, expression: { op: "text", query1: "new" } };
   await expect(chat.applyDefinition(nextDefinition)).rejects.toThrow("現在のAI処理");
   chat.open();

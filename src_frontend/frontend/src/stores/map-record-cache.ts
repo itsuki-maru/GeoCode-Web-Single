@@ -25,6 +25,10 @@ export class MapRecordCache<T extends LayerRecord> {
   private leases = new Map<string, number>();
   private removed = new Set<string>();
   private readSequence = 0;
+  /** 読み込み済み地物と、その属性データを同じ世代へ結び付ける。 */
+  get dataRevision() {
+    return this.revision;
+  }
   private observed = new Map<string, { sequence: number; deleted: boolean }>();
   get generation() {
     return this.accountEpoch;
@@ -135,6 +139,7 @@ export class MapRecordCache<T extends LayerRecord> {
     if (!this.pending) this.changes.clear();
   }
   invalidate() {
+    ++this.revision;
     ++this.epoch;
     for (const scope of this.scopes.values()) {
       ++scope.generation;
@@ -257,6 +262,7 @@ export class MapRecordCache<T extends LayerRecord> {
         }
         scope.ids = new Set(incoming.keys());
         scope.loaded = true;
+        ++this.revision;
         return true;
       } catch {
         return false;

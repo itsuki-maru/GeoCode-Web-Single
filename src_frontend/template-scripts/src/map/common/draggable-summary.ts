@@ -80,11 +80,15 @@ export function makeSummaryDraggable(
     dragHandle.style.cursor = "grab";
     if (panel.hasPointerCapture(event.pointerId)) panel.releasePointerCapture(event.pointerId);
   };
-  const resize = new ResizeObserver(() => {
-    if (floating && !panel.hidden) place(parseFloat(panel.style.left), parseFloat(panel.style.top));
-  });
-  resize.observe(mapElement);
-  resize.observe(panel);
+  const resize =
+    typeof ResizeObserver === "undefined"
+      ? undefined
+      : new ResizeObserver(() => {
+          if (floating && !panel.hidden)
+            place(parseFloat(panel.style.left), parseFloat(panel.style.top));
+        });
+  resize?.observe(mapElement);
+  resize?.observe(panel);
   dragHandle.addEventListener("pointerdown", down);
   panel.addEventListener("pointermove", move);
   panel.addEventListener("pointerup", finish);
@@ -93,7 +97,7 @@ export function makeSummaryDraggable(
   return () => {
     if (drag && panel.hasPointerCapture(drag.id)) panel.releasePointerCapture(drag.id);
     drag = null;
-    resize.disconnect();
+    resize?.disconnect();
     dragHandle.removeEventListener("pointerdown", down);
     panel.removeEventListener("pointermove", move);
     panel.removeEventListener("pointerup", finish);

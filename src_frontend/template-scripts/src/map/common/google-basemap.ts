@@ -4,7 +4,7 @@ import type { TileServerRecord } from "./basemap-definition";
 import type { BasemapHandle } from "./basemap-layer";
 import { BASEMAP_TIMEOUT_MS } from "./map-timeouts";
 
-type Grant = { grant: string; expiresAt: number; tileSize: number };
+type Grant = { grant: string; expiresAt: number; tileSize: number; routesEnabled?: boolean };
 
 /** 同一originの印刷iframeからも閲覧権限を引き継ぐ。保存用スナップショットには含めない。 */
 export function googleMapsAccess(): string | undefined {
@@ -88,7 +88,9 @@ export function createGoogleBasemap(
           value.tileSize !== 256
         )
           throw error();
+        const routesChanged = Boolean(grant?.routesEnabled) !== (value.routesEnabled === true);
         grant = value;
+        if (routesChanged && attached && !disposed) map.fire("googleroutesavailabilitychange");
         return value;
       })().finally(() => {
         granting = undefined;
@@ -259,6 +261,10 @@ export function createGoogleBasemap(
     },
     getAttribution: attribution,
     getContainer: () => grid.getContainer?.(),
+    getGoogleRoutesBackground: () =>
+      visible && attached && !disposed && !failed && grant?.routesEnabled === true
+        ? { id: record.id, minZoom: grid.options.minZoom, maxZoom: grid.options.maxZoom }
+        : undefined,
     getPrintStatus: () => ({
       loading: !disposed && !failed && (viewportLoading || !firstTiles || grid.isLoading()),
       failed,

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { installMarkerPopupHeightLimit, updatePopupLayout } from "../src/map/common/popup-layout";
+import { installDesktopPopupHeightLimit, updatePopupLayout } from "../src/map/common/popup-layout";
 
 function fixture() {
   const root = document.createElement("div");
@@ -49,7 +49,7 @@ function heightMapFixture() {
   document.body.append(container);
   let height = 610;
   Object.defineProperty(container, "clientHeight", { get: () => height });
-  type Listener = Parameters<Parameters<typeof installMarkerPopupHeightLimit>[0]["on"]>[1];
+  type Listener = Parameters<Parameters<typeof installDesktopPopupHeightLimit>[0]["on"]>[1];
   const listeners = new Map<string, Set<Listener>>();
   const on = vi.fn((event: string, listener: Listener) => {
     if (!listeners.has(event)) listeners.set(event, new Set());
@@ -230,7 +230,7 @@ describe("popup layout measurements", () => {
 describe("PC marker popup height limit", () => {
   it("sets the actual map height before a popup is opened and follows map resizing", () => {
     const f = heightMapFixture();
-    installMarkerPopupHeightLimit(f.map);
+    installDesktopPopupHeightLimit(f.map);
     expect(f.container.classList.contains("pc-map-popup-height")).toBe(true);
     expect(f.container.style.getPropertyValue("--geocode-popup-map-height")).toBe("610px");
     f.setHeight(997);
@@ -241,8 +241,8 @@ describe("PC marker popup height limit", () => {
   it("repositions an open marker on resize even when its capped geometry is unchanged", () => {
     const f = heightMapFixture();
     const p = fixture();
-    p.content.dataset.contentKey = "marker:one";
-    installMarkerPopupHeightLimit(f.map);
+    p.content.classList.add("popup-content-height-limited");
+    installDesktopPopupHeightLimit(f.map);
     updatePopupLayout(p.popup);
     f.emit("popupopen", p.popup);
     f.setHeight(800);
@@ -262,7 +262,7 @@ describe("PC marker popup height limit", () => {
       const f = heightMapFixture();
       const p = fixture();
       if (key) p.content.dataset.contentKey = key;
-      installMarkerPopupHeightLimit(f.map);
+      installDesktopPopupHeightLimit(f.map);
       f.emit("popupopen", p.popup);
       f.emit("resize");
       expect(p.popup.update).not.toHaveBeenCalled();
@@ -274,11 +274,11 @@ describe("PC marker popup height limit", () => {
     (key) => {
       const f = heightMapFixture();
       const marker = fixture();
-      marker.content.dataset.contentKey = "marker:one";
+      marker.content.classList.add("popup-content-height-limited");
       const other = fixture();
       if (key) other.content.dataset.contentKey = key;
       else other.content.className = "shape-name-editor";
-      installMarkerPopupHeightLimit(f.map);
+      installDesktopPopupHeightLimit(f.map);
       f.emit("popupopen", marker.popup);
       f.emit("popupopen", other.popup);
       f.emit("resize");
@@ -297,7 +297,7 @@ describe("PC marker popup height limit", () => {
   it("retains reading position and focus through resize layout updates", () => {
     const f = heightMapFixture();
     const p = fixture();
-    p.content.dataset.contentKey = "marker:one";
+    p.content.classList.add("popup-content-height-limited");
     const body = p.content.querySelector<HTMLElement>(".md-detail-contents")!;
     const button = body.querySelector<HTMLButtonElement>("button")!;
     button.focus();
@@ -310,7 +310,7 @@ describe("PC marker popup height limit", () => {
       p.outer.append(p.content);
       body.scrollTop = p.outer.scrollTop = p.content.scrollTop = p.content.scrollLeft = 0;
     });
-    installMarkerPopupHeightLimit(f.map);
+    installDesktopPopupHeightLimit(f.map);
     f.emit("popupopen", p.popup);
     f.setHeight(450);
     f.emit("resize");
@@ -324,8 +324,8 @@ describe("PC marker popup height limit", () => {
   it("removes its listeners and newly installed styles when the map unloads", () => {
     const f = heightMapFixture();
     const p = fixture();
-    p.content.dataset.contentKey = "marker:one";
-    const dispose = installMarkerPopupHeightLimit(f.map);
+    p.content.classList.add("popup-content-height-limited");
+    const dispose = installDesktopPopupHeightLimit(f.map);
     f.emit("popupopen", p.popup);
     f.emit("unload");
     expect(f.container.classList.contains("pc-map-popup-height")).toBe(false);
@@ -342,7 +342,7 @@ describe("PC marker popup height limit", () => {
     const f = heightMapFixture();
     f.container.classList.add("pc-map-popup-height");
     f.container.style.setProperty("--geocode-popup-map-height", "400px", "important");
-    const dispose = installMarkerPopupHeightLimit(f.map);
+    const dispose = installDesktopPopupHeightLimit(f.map);
     dispose();
     expect(f.container.classList.contains("pc-map-popup-height")).toBe(true);
     expect(f.container.style.getPropertyValue("--geocode-popup-map-height")).toBe("400px");

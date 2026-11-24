@@ -32,6 +32,33 @@ const click = async (wrapper: ReturnType<typeof create>, text: string) => {
   await flushPromises();
 };
 describe("色分けの分類編集", () => {
+  it.each([0, 1])(
+    "直接適用で必要なフォームが変わっても、分類%d件の下書きを保持する",
+    async (count) => {
+      const w = create();
+      try {
+        const draft = {
+          common_form_id: "form",
+          rules: count
+            ? [{ id: "draft", label: "編集中の色分け", color: "#2166ac", conditions: [] }]
+            : [],
+        };
+        if (count) w.vm.restoreDraft(draft, fields);
+        await w.setProps({ requiredForm: "other", preserveDraft: true });
+        await flushPromises();
+        const picker = w.get<HTMLSelectElement>('[aria-label="色分けの共通フォーム"]');
+        expect(picker.element.value).toBe("form");
+        expect(w.vm.getDraft()).toEqual(draft);
+        expect(w.get<HTMLButtonElement>(".color-submit").element.disabled).toBe(true);
+        expect(apiClient.post).not.toHaveBeenCalled();
+        await picker.setValue("other");
+        await flushPromises();
+        expect(w.vm.getDraft()).toEqual({ common_form_id: "other", rules: [] });
+      } finally {
+        w.unmount();
+      }
+    },
+  );
   it("保存は編集中の定義だけを渡し、呼び出しも実行せずに数値・falseを復元する", async () => {
     const w = create();
     const definition = {
@@ -230,8 +257,11 @@ describe("分類の入力検証と削除", () => {
       .findAll("button")
       .find((b) => b.text() === "分類条件を削除")!
       .trigger("click");
+    await w.get('[aria-label="色分けの条件値"]').setValue("5");
     await click(w, "色分け実行");
-    expect(w.text()).toContain("各分類に条件");
+    expect(w.emitted("apply")!.at(-1)![0]).toMatchObject({
+      rules: [{ label: "後続", conditions: [] }, { label: "先頭" }],
+    });
     await w
       .findAll("button")
       .find((b) => b.text() === "分類条件を追加")!

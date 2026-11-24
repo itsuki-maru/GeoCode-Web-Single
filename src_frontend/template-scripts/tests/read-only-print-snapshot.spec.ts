@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PrintMapState } from "../src/map/common/print-state";
+import type { RoutePrintState } from "../src/map/common/route-result";
 import { MAX_SHARE_BYTES, MAX_SHARE_OBJECTS } from "../src/map/common/share-snapshot";
 import {
   createReadOnlyPrintSnapshot,
@@ -115,6 +116,53 @@ function fixture() {
 }
 
 describe("read-only print snapshot", () => {
+  it("全画面のGoogle背景に表示済みの経路を印刷専用データに含める", () => {
+    const { source, state, keys } = fixture();
+    const route: RoutePrintState = {
+      backgroundId: 2,
+      travelMode: "DRIVE",
+      durationSeconds: 720,
+      distanceMeters: 3_400,
+      encodedPolyline: "_p~iF~ps|U_ulLnnqC_mqNvxq`@",
+      warnings: [],
+    };
+    const snapshot = createReadOnlyPrintSnapshot(
+      {
+        ...source,
+        sourcePage: "map-anather",
+        route,
+        tileServers: {
+          ...source.tileServers,
+          "2": {
+            ...source.tileServers["1"],
+            id: 2,
+            kind: "raster",
+            provider: "google",
+            google_map_type: "roadmap",
+            url: "/google-maps/tiles/{z}/{x}/{y}",
+            min_zoom: 0,
+          },
+        },
+      },
+      { ...state, tileServerId: "2" },
+      keys,
+    );
+    expect(snapshot.route).toEqual(route);
+    expect(snapshot.state).not.toHaveProperty("route");
+    expect(isReadOnlyPrintSnapshot(snapshot)).toBe(true);
+    expect(isReadOnlyPrintSnapshot({ ...snapshot, sourcePage: "temporary-map" })).toBe(false);
+    expect(isReadOnlyPrintSnapshot({ ...snapshot, route: { ...route, backgroundId: 1 } })).toBe(
+      false,
+    );
+    expect(
+      isReadOnlyPrintSnapshot({
+        ...snapshot,
+        state: { ...snapshot.state, tileServerId: "1" },
+        route: { ...route, backgroundId: 1 },
+      }),
+    ).toBe(false);
+  });
+
   it("旧共有から表示対象のレコードと描画設定だけを固定する", () => {
     const { source, state, keys } = fixture();
     const snapshot = createReadOnlyPrintSnapshot(

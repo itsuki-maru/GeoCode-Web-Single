@@ -1,0 +1,122 @@
+.route-search-overlay {
+  --route-panel-margin: 8px;
+  position: absolute;
+  inset: 0 0 max(var(--route-attribution-height, 0px), var(--route-map-toolbar-height, 0px));
+  z-index: 1101;
+  pointer-events: none;
+}
+
+.map-mobile-controls .route-search-overlay:not(.route-search-overlay-print) {
+  /* MapToolbar の下余白 (6% + 10px) とレイヤー選択の高さ (40px)。 */
+  --route-map-toolbar-height: calc(6vh + 50px);
+}
+
+.route-search-panel {
+  position: absolute;
+  bottom: var(--route-panel-margin);
+  left: var(--route-panel-margin);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: min(352px, calc(100% - 16px));
+  max-height: min(40vh, calc(100% - 16px));
+  overflow: hidden;
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #182638;
+  font:
+    14px/1.45 system-ui,
+    sans-serif;
+  box-shadow: 0 1px 6px rgb(15 23 42 / 18%);
+  pointer-events: auto;
+}
+
+.route-search-overlay-print .route-search-panel {
+  max-height: calc(100% - 16px);
+}
+
+.route-search-handle {
+  flex: none;
+  display: block;
+  margin: -4px -4px 4px;
+  padding: 4px;
+  user-select: none;
+}
+
+.route-search-body {
+  min-height: 0;
+  overflow: auto;
+}
+
+.route-search-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.route-search-actions button {
+  min-height: 36px;
+  padding: 4px 10px;
+  border: 1px solid #94a3b8;
+  border-radius: 6px;
+  background: #fff;
+  color: #182638;
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.route-search-actions button[aria-pressed="true"] {
+  border-color: #1958b0;
+  background: #e7f0ff;
+  color: #124790;
+  font-weight: 600;
+}
+
+.route-search-actions button:focus-visible {
+  outline: 2px solid #1958b0;
+  outline-offset: 2px;
+}
+
+.route-search-status {
+  margin: 0;
+  font-weight: 600;
+}
+
+.route-search-actions:not(:empty) + .route-search-status {
+  margin-top: 8px;
+}
+
+.route-search-warnings {
+  margin: 6px 0 0;
+  padding-inline-start: 16px;
+}
+
+.route-search-warnings:empty {
+  display: none;
+}
+
+.route-search-panel .route-search-google-link {
+  display: block;
+  width: fit-content;
+  margin-top: 6px;
+  color: #1958b0;
+  text-decoration: underline;
+  touch-action: manipulation;
+}
+
+@media print {
+  .route-search-overlay:not(.route-search-overlay-print),
+  .route-search-line:not(.route-search-print-line),
+  .route-search-overlay-print .route-search-handle,
+  .route-search-overlay-print .route-search-actions {
+    display: none !important;
+  }
+
+  .route-search-overlay-print .route-search-actions + .route-search-status {
+    margin-top: 0;
+  }
+}
