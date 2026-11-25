@@ -282,6 +282,19 @@ fn settings(root: &Path, database: &Path) -> std::path::PathBuf {
     path
 }
 
+async fn initialized_settings(
+    root: &Path,
+    database: &Path,
+    pool: &SqlitePool,
+) -> std::path::PathBuf {
+    let config = LocalTileConfig::defaults(root);
+    let catalog = catalog::TileCatalog::new(config.catalog_database_path.clone(), pool.clone())
+        .with_config(&config);
+    catalog.initialize().await.unwrap();
+    catalog.close().await;
+    settings(root, database)
+}
+
 fn binary() -> std::path::PathBuf {
     // 配布用exeを再ビルドせず、同じ一時データ試験を最終成果物にも適用できる。
     std::env::var_os("GEOCODE_TEST_CLI_EXE")
@@ -294,9 +307,9 @@ async fn report_binary_import_failure_causes_in_json_and_stderr() {
     let root = tempfile::tempdir().unwrap();
     let database = root.path().join("app.sqlite");
     let pool = pool(&database).await;
+    let settings = initialized_settings(root.path(), &database, &pool).await;
     pool.close().await;
     drop(pool);
-    let settings = settings(root.path(), &database);
     let input = root.path().join("map.pbf");
     let dem = root.path().join("dem.xml");
     standard_fixture::write_inputs(&input, &dem);
@@ -990,7 +1003,7 @@ async fn use_only_temporary_configuration_for_binary_import_and_return_json_and_
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("app.sqlite");
     let pool = pool(&path).await;
-    let setting = settings(root.path(), &path);
+    let setting = initialized_settings(root.path(), &path, &pool).await;
     let before = std::fs::read(&setting).unwrap();
     let input = root.path().join("input.osm.pbf");
     support::Fixture::sample().write(&input);

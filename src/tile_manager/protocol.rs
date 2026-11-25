@@ -1,4 +1,5 @@
 use super::message;
+pub(super) use crate::utils::is_link;
 use crate::{
     local_tiles::jobs::{ImportRequest, PrecomputeRequest},
     tilegen::render_spec::RenderSpec,
@@ -21,12 +22,20 @@ use std::{
 )]
 pub(super) enum Operation {
     Import(ImportRequest),
+    #[serde(rename = "route_build")]
+    RouteBuild(RouteBuild),
     Register(Register),
     Prepare(Prepare),
     Precompute(PrecomputeRequest),
     Resume(Job),
     Background(Background),
     Rebind(crate::local_tiles::catalog::rebind::Request),
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RouteBuild {
+    pub input_path: PathBuf,
+    pub name: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -90,6 +99,13 @@ impl Operation {
         if let Self::Register(request) = &value {
             absolute(&request.database)?;
         }
+        if let Self::RouteBuild(request) = &mut value {
+            absolute(&request.input_path)?;
+            request.name = request.name.trim().to_owned();
+            if request.name.is_empty() || request.name.chars().count() > 120 {
+                return Err("経路データの名前は1〜120文字で指定してください。".into());
+            }
+        }
         if let Self::Prepare(request) = &mut value {
             if let Some(spec) = request.spec {
                 spec.validate().map_err(message)?;
@@ -101,6 +117,7 @@ impl Operation {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Import(_) => "import",
+            Self::RouteBuild(_) => "route_build",
             Self::Register(_) => "register",
             Self::Prepare(_) => "prepare",
             Self::Precompute(_) => "precompute",
@@ -181,11 +198,7 @@ pub(super) fn file_hash(path: &Path) -> Result<String, String> {
     Ok(format!("{:x}", hash.finalize()))
 }
 pub(super) fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, String> {
-    let meta = fs::symlink_metadata(path).map_err(message)?;
-    if !meta.is_file() || is_link(&meta) || meta.len() > 1024 * 1024 {
-        return Err("管理ファイルの形式・容量が不正です。".into());
-    }
-    serde_json::from_slice(&fs::read(path).map_err(message)?).map_err(message)
+    crate::utils::read_managed_json(path).map_err(message)
 }
 pub(super) fn atomic_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
     if path.exists() && is_link(&fs::symlink_metadata(path).map_err(message)?) {
@@ -224,20 +237,6 @@ fn persist_with_retry(
         wait();
     }
     temporary.persist(destination)
-}
-
-pub(super) fn is_link(meta: &fs::Metadata) -> bool {
-    if meta.file_type().is_symlink() {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        if meta.file_attributes() & 0x400 != 0 {
-            return true;
-        }
-    }
-    false
 }
 
 #[cfg(all(test, windows))]

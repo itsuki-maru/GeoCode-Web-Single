@@ -85,7 +85,7 @@ async fn separate_catalog_preserves_data_and_reopens_without_touching_app_schema
         .await?;
     assert_eq!(app_value, "original");
     cat.close().await;
-    // 通常のファイルサイズ・更新時刻の変化では、不変のファイルIDを無効化しない。
+    // 本体DBのデータ変更後も同じカタログを利用できる。
     sqlx::query("INSERT INTO app_data VALUES (2,'changed')")
         .execute(&pool)
         .await?;
@@ -288,7 +288,7 @@ async fn app_database_and_hardlink_aliases_cannot_be_used_as_catalog() -> Result
 }
 
 #[tokio::test]
-async fn another_app_database_is_rejected_but_catalog_can_move_independently() -> Result<()> {
+async fn catalog_can_be_reused_by_another_app_database_and_moved_independently() -> Result<()> {
     let root = tempfile::tempdir()?;
     let pool = app_pool(&root.path().join("app.sqlite")).await?;
     let path = root.path().join("catalog.sqlite");
@@ -296,14 +296,9 @@ async fn another_app_database_is_rejected_but_catalog_can_move_independently() -
     catalog::insert_dataset(&cat, &dataset("one")).await?;
     cat.close().await;
     let other = app_pool(&root.path().join("another-app.sqlite")).await?;
-    let invalid = TileCatalog::new(path.clone(), other.clone());
-    assert!(
-        invalid
-            .initialize()
-            .await
-            .unwrap_err()
-            .contains("別の本体DB")
-    );
+    let other_catalog = TileCatalog::new(path.clone(), other.clone());
+    assert_eq!(catalog::list_datasets(&other_catalog).await?.len(), 1);
+    other_catalog.close().await;
     other.close().await;
     let moved = root.path().join("other disk catalog.sqlite");
     fs::rename(&path, &moved).with_context(|| {
@@ -414,7 +409,11 @@ async fn independent_in_memory_app_pools_are_never_interpreted_as_files() -> Res
     let same_pool = TileCatalog::new(path.clone(), pool.clone());
     same_pool.initialize().await.map_err(anyhow::Error::msg)?;
     let different_pool = TileCatalog::new(path, other.clone());
-    assert!(different_pool.initialize().await.is_err());
+    different_pool
+        .initialize()
+        .await
+        .map_err(anyhow::Error::msg)?;
+    different_pool.close().await;
     cat.close().await;
     same_pool.close().await;
     pool.close().await;
@@ -423,7 +422,7 @@ async fn independent_in_memory_app_pools_are_never_interpreted_as_files() -> Res
 }
 
 #[tokio::test]
-async fn identical_memory_option_names_do_not_rebind_a_saved_catalog() -> Result<()> {
+async fn another_in_memory_application_can_open_a_saved_catalog() -> Result<()> {
     let root = tempfile::tempdir()?;
     let path = root.path().join("catalog.sqlite");
     let options = || SqliteConnectOptions::new().in_memory(true);
@@ -441,14 +440,9 @@ async fn identical_memory_option_names_do_not_rebind_a_saved_catalog() -> Result
         .max_connections(1)
         .connect_with(options())
         .await?;
-    let invalid = TileCatalog::new(path, replacement.clone());
-    assert!(
-        invalid
-            .initialize()
-            .await
-            .unwrap_err()
-            .contains("別の本体DB")
-    );
+    let reopened = TileCatalog::new(path, replacement.clone());
+    reopened.initialize().await.map_err(anyhow::Error::msg)?;
+    reopened.close().await;
     replacement.close().await;
     Ok(())
 }

@@ -1,7 +1,8 @@
 //! 明示的な移設操作。通常起動の対応確認や生成runtimeを経由しない。
 use super::{file_identity, lock_path, path_key, validate_catalog, validate_filename};
 use crate::{
-    init::read_env_json_readonly, local_tiles::config::LocalTileConfig,
+    init::read_env_json_readonly,
+    local_tiles::config::{DatabaseReplacement, LocalTileConfig},
     tilegen::cancel::CancellationToken,
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -20,6 +21,11 @@ use std::{
     str::FromStr,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+#[path = "relocation.rs"]
+pub mod relocation;
+#[path = "storage.rs"]
+pub mod storage;
 
 type Result<T> = std::result::Result<T, String>;
 const PLAN_LIFETIME: u64 = 900;
@@ -131,7 +137,9 @@ struct Context {
     config_sha256: String,
     catalog: Binding,
     target: Binding,
+    replacement: Option<DatabaseReplacement>,
     key: Vec<u8>,
+    config_pins: Vec<File>,
     _pins: Vec<File>,
 }
 
@@ -235,6 +243,10 @@ fn is_link(meta: &fs::Metadata) -> bool {
 // 本体DBは書込共有も許可しない。稼働中の通常アプリがRW接続を持つ場合も拒否する。
 fn pin(path: &Path, freeze: bool) -> Result<Vec<File>> {
     validate_filename(path)?;
+    pin_components(path, freeze)
+}
+
+fn pin_components(path: &Path, freeze: bool) -> Result<Vec<File>> {
     #[cfg(windows)]
     {
         use std::path::{Component, Prefix};
@@ -338,26 +350,53 @@ fn open_readonly(path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
+fn signing_key(saved: &Value, settings: &crate::model::ApplicationInitSetup) -> Result<Vec<u8>> {
+    let raw_key = saved["tile_settings_encryption_key"]
+        .as_str()
+        .filter(|v| *v == settings.tile_settings_encryption_key)
+        .ok_or("保存済みのタイル設定暗号鍵が必要です。元の設定JSONを引き継いでください。")?;
+    let master = STANDARD
+        .decode(raw_key)
+        .map_err(|_| "タイル設定暗号鍵が不正です。")?;
+    if master.len() != 32 {
+        return Err("タイル設定暗号鍵が不正です。".into());
+    }
+    let mut mac = Hmac::<Sha256>::new_from_slice(&master).map_err(message)?;
+    mac.update(b"geocode-catalog-relocation-key-v1");
+    Ok(mac.finalize().into_bytes().to_vec())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OpenFor {
+    Inspect,
+    Maintenance,
+}
+
 impl Context {
-    fn load(config_path: &Path, freeze: bool) -> Result<Self> {
-        let mut pins = pin(config_path, true)?;
+    fn with_locations(
+        config_path: &Path,
+        purpose: OpenFor,
+        paths: Option<&storage::Locations>,
+    ) -> Result<Self> {
+        let config_pins = pin(config_path, true)?;
+        let mut pins = Vec::new();
         let config_path = config_path.canonicalize().map_err(message)?;
         let raw = fs::read(&config_path).map_err(message)?;
         let saved: Value = serde_json::from_slice(&raw).map_err(message)?;
-        let settings = read_env_json_readonly(&config_path).map_err(message)?;
-        let raw_key = saved["tile_settings_encryption_key"]
-            .as_str()
-            .filter(|v| *v == settings.tile_settings_encryption_key)
-            .ok_or("保存済みのタイル設定暗号鍵が必要です。元の設定JSONを引き継いでください。")?;
-        let master = STANDARD
-            .decode(raw_key)
-            .map_err(|_| "タイル設定暗号鍵が不正です。")?;
-        if master.len() != 32 {
-            return Err("タイル設定暗号鍵が不正です。".into());
+        let mut settings = if paths.is_some() {
+            crate::init::read_relocation_settings(&config_path)
+        } else {
+            read_env_json_readonly(&config_path)
         }
-        let mut mac = Hmac::<Sha256>::new_from_slice(&master).map_err(message)?;
-        mac.update(b"geocode-catalog-relocation-key-v1");
-        let key = mac.finalize().into_bytes().to_vec();
+        .map_err(message)?;
+        if let Some(paths) = paths {
+            paths.set(&mut settings)?;
+        }
+        let key = signing_key(&saved, &settings)?;
+        // 旧版で署名された中断記録とCLIの移設確認だけに過去の許可を使用する。
+        let replacement = saved
+            .get("tile_database_replacement")
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
         let config = LocalTileConfig::from_setup(&settings)?;
         let options = SqliteConnectOptions::from_str(&settings.database_url).map_err(message)?;
         if options
@@ -373,8 +412,10 @@ impl Context {
         if !app.is_absolute() {
             return Err("移設操作のdatabase_urlには本体DBの絶対パスが必要です。".into());
         }
-        pins.extend(pin(app, freeze)?);
-        pins.extend(pin(&config.catalog_database_path, false)?);
+        pins.extend(
+            pin(app, purpose != OpenFor::Inspect)
+                .map_err(|e| format!("本体DBを確認できません。 {}　{e}", app.display()))?,
+        );
         let target = binding(app)?;
         if settings
             .sqlite_database_path
@@ -384,14 +425,12 @@ impl Context {
         {
             return Err("database_urlとsqlite_database_pathが同じ本体DBを指していません。".into());
         }
-        let catalog = binding(&config.catalog_database_path)?;
-        if catalog.file_id == target.file_id {
-            return Err("本体DBとcatalogには別のファイルが必要です。".into());
-        }
-        for root in [&config.dataset_path, &config.cache_path, &config.work_path] {
+        let catalog_path = super::physical_path(&config.catalog_database_path)?;
+        let roots = [config.dataset_path, config.cache_path, config.work_path];
+        for root in &roots {
             let root = super::physical_path(root)?;
-            if super::same_or_below(&catalog.path, &root)
-                || super::same_or_below(&root, &catalog.path)
+            if super::same_or_below(&catalog_path, &root)
+                || super::same_or_below(&root, &catalog_path)
             {
                 return Err("catalogとタイル保存先が重なっています。".into());
             }
@@ -404,15 +443,35 @@ impl Context {
         if result != "ok" {
             return Err("本体DBの整合性検査に失敗しました。".into());
         }
+        pins.extend(pin(&config.catalog_database_path, false).map_err(|e| {
+            format!(
+                "タイル管理DBを確認できません。 {}　{e}",
+                config.catalog_database_path.display()
+            )
+        })?);
+        let catalog = binding(&config.catalog_database_path)?;
+        if catalog.file_id == target.file_id {
+            return Err("本体DBとcatalogには別のファイルが必要です。".into());
+        }
         Ok(Self {
             config_path,
             config_sha256: bytes_hash(&raw),
             catalog,
             target,
+            replacement,
             key,
+            config_pins,
             _pins: pins,
         })
     }
+    fn accepts(&self, stored: &Binding, actual: &Binding) -> bool {
+        same(stored, actual)
+            || (path_key(&stored.path) == path_key(&actual.path)
+                && self.replacement.as_ref().is_some_and(|rule| {
+                    rule.matches(&actual.path, &self.catalog.path, &self.catalog.file_id)
+                }))
+    }
+
     fn recheck(&self) -> Result<()> {
         if !same(&binding(&self.target.path)?, &self.target)
             || !same(&binding(&self.catalog.path)?, &self.catalog)
@@ -426,8 +485,83 @@ impl Context {
     }
 }
 
+// 所有者ロックと本体DBの保護を取得した明示操作からだけ呼ぶ。通常の照会では書き込まない。
+fn record_accepted_binding(ctx: &Context, expected: &Binding) -> Result<()> {
+    if same(expected, &ctx.target) {
+        return Ok(());
+    }
+    if !ctx.accepts(expected, &ctx.target) {
+        return Err(
+            "この本体DBとタイル管理DBの組み合わせには差し替えが許可されていません。".into(),
+        );
+    }
+    let mut db = Connection::open_with_flags(&ctx.catalog.path, OpenFlags::SQLITE_OPEN_READ_WRITE)
+        .map_err(message)?;
+    let tx = db
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(message)?;
+    if stored_binding(&tx)? != *expected {
+        return Err("タイル管理DBの対応先が変更されました。もう一度確認してください。".into());
+    }
+    ctx.recheck()?;
+    let changed = tx
+        .execute(
+            r#"
+        UPDATE tile_catalog_binding
+        SET app_file_id = ?1
+        WHERE id = 1 AND app_database_path = ?2 AND app_file_id = ?3
+        "#,
+            (
+                &ctx.target.file_id,
+                expected.path.to_string_lossy(),
+                &expected.file_id,
+            ),
+        )
+        .map_err(message)?;
+    if changed != 1 {
+        return Err("タイル管理DBの対応先を更新できませんでした。".into());
+    }
+    tx.commit().map_err(message)
+}
+
+// 差し替え後のカタログを単体で移動できるよう、記録した識別子を本体に反映してから証明を公開する。
+// 他の読取接続が残っていた場合や、更新後に中断して再試行した場合はWALが残ることがある。
+fn checkpoint_proof_catalog(ctx: &Context) -> Result<()> {
+    if !ctx
+        .replacement
+        .as_ref()
+        .is_some_and(|rule| rule.matches(&ctx.target.path, &ctx.catalog.path, &ctx.catalog.file_id))
+    {
+        return Ok(());
+    }
+    let mut wal = ctx.catalog.path.as_os_str().to_owned();
+    wal.push("-wal");
+    match fs::metadata(wal) {
+        Ok(metadata) if metadata.len() > 0 => {},
+        Ok(_) => return Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(message(e)),
+    }
+    let db = Connection::open_with_flags(&ctx.catalog.path, OpenFlags::SQLITE_OPEN_READ_WRITE)
+        .map_err(message)?;
+    db.busy_timeout(Duration::from_secs(2)).map_err(message)?;
+    let (busy, total, saved): (i64, i64, i64) = db
+        .query_row("PRAGMA wal_checkpoint(FULL)", [], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .map_err(message)?;
+    if busy != 0 || saved != total {
+        return Err("タイル管理DBの更新をファイルに反映できません。ほかの利用を終了してから移設前の記録を保存してください。".into());
+    }
+    Ok(())
+}
+
 fn acquire_owner(ctx: &Context, create: bool) -> Result<Option<File>> {
-    let path = lock_path(&ctx.catalog.path);
+    acquire_catalog_owner(&ctx.catalog.path, create)
+}
+
+fn acquire_catalog_owner(catalog: &Path, create: bool) -> Result<Option<File>> {
+    let path = lock_path(catalog);
     if !create && !path.exists() {
         return Ok(None);
     }
@@ -578,25 +712,37 @@ fn snapshot(conn: &Connection, skip_binding: bool, control: &mut Control<'_>) ->
     })
 }
 
-fn create_document<T: Serialize>(path: &Path, value: &T, permissions: &Path) -> Result<()> {
+fn stage_document<T: Serialize>(
+    path: &Path,
+    value: &T,
+    permissions: &Path,
+) -> Result<(Vec<File>, tempfile::NamedTempFile)> {
     validate_filename(path)?;
     if path.exists() {
         return Err("移設記録の保存先は既に存在します。上書きしません。".into());
     }
     let parent = path.parent().ok_or("保存先が不正です。")?;
-    let _parents = pin_directory(parent)?;
+    let parents = pin_directory(parent)?;
     let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(message)?;
     crate::init::protect_maintenance_file(permissions, temp.path()).map_err(message)?;
     serde_json::to_writer_pretty(&mut temp, value).map_err(message)?;
     temp.write_all(b"\n").map_err(message)?;
     temp.as_file().sync_all().map_err(message)?;
+    Ok((parents, temp))
+}
+
+fn create_document<T: Serialize>(path: &Path, value: &T, permissions: &Path) -> Result<()> {
+    let (_parents, temp) = stage_document(path, value, permissions)?;
     temp.persist_noclobber(path).map_err(message)?;
     Ok(())
 }
 
 fn pin_directory(path: &Path) -> Result<Vec<File>> {
-    // pin()の最終要素がディレクトリでも、ファイル識別と再解析ポイント検査を適用できる。
-    pin(path, false)
+    // ドライブ直下を保存先にする場合、ルートにはファイル名がない。
+    if !(path.is_absolute() && path.parent().is_none()) {
+        validate_filename(path)?;
+    }
+    pin_components(path, false)
 }
 
 fn backup(
@@ -671,39 +817,55 @@ pub fn execute(
     if !cfg!(all(windows, target_pointer_width = "64")) {
         return Err("本体DBの移設操作はWindows 64bitのローカルディスクに対応しています。".into());
     }
-    let mut control = Control {
-        cancellation,
-        progress,
+    let purpose = if matches!(request, Request::Inspect) {
+        OpenFor::Inspect
+    } else {
+        OpenFor::Maintenance
     };
-    let ctx = Context::load(config_path, !matches!(request, Request::Inspect))?;
-    let _owner = acquire_owner(
+    let ctx = Context::with_locations(config_path, purpose, None)?;
+    execute_in_context(
         &ctx,
+        request,
+        &mut Control {
+            cancellation,
+            progress,
+        },
+    )
+}
+
+fn execute_in_context(ctx: &Context, request: Request, control: &mut Control<'_>) -> Result<Value> {
+    let _owner = acquire_owner(
+        ctx,
         matches!(request, Request::Prepare { .. } | Request::Apply { .. }),
     )?;
     let catalog = open_readonly(&ctx.catalog.path)?;
     catalog.execute_batch("BEGIN").map_err(message)?;
     let previous = stored_binding(&catalog)?;
+    let accepted = ctx.accepts(&previous, &ctx.target);
     if matches!(request, Request::Inspect) {
         return Ok(
-            json!({"binding_matches":same(&previous,&ctx.target),"previous":previous,"target":ctx.target,
+            json!({"binding_matches":accepted,"previous":previous,"target":ctx.target,
             "catalog":ctx.catalog,"same_file":previous.file_id==ctx.target.file_id,
-            "message":if same(&previous,&ctx.target){"対応付けは一致しています。"}else{"移設計画で同一性を確認してください。元DBまたは移設前の記録が必要な場合があります。"}}),
+            "message":if same(&previous,&ctx.target){"対応付けは一致しています。"}else if accepted{"この保存先の本体DB差し替えは許可されています。"}else{"移設計画で同一性を確認してください。元DBまたは移設前の記録が必要な場合があります。"}}),
         );
     }
     if let Request::Apply { plan } = request {
         drop(catalog);
-        return apply(&ctx, plan, &mut control);
+        return apply(ctx, plan, control);
+    }
+    if matches!(request, Request::Prepare { .. }) && !accepted {
+        return Err("移設前の正しい対応付けを確認できません。既に移設した場合は元DBとの照合を使用してください。".into());
+    }
+    if matches!(request, Request::Plan { .. }) && accepted {
+        return Err("対応付けは既に有効です。更新は不要です。".into());
     }
     let app = open_readonly(&ctx.target.path)?;
     app.execute_batch("BEGIN").map_err(message)?;
-    let application = snapshot(&app, false, &mut control)?;
-    let contents = snapshot(&catalog, true, &mut control)?;
+    let application = snapshot(&app, false, control)?;
+    let contents = snapshot(&catalog, true, control)?;
     let created = now()?;
     match request {
         Request::Prepare { output } => {
-            if !same(&previous, &ctx.target) {
-                return Err("移設前の正しい対応付けを確認できません。既に移設した場合は元DBとの照合を使用してください。".into());
-            }
             let proof = sign(
                 &ctx.key,
                 "proof",
@@ -711,101 +873,126 @@ pub fn execute(
                     version: 1,
                     created,
                     expires: created + PROOF_LIFETIME,
-                    binding: previous,
+                    binding: Binding {
+                        path: previous.path.clone(),
+                        file_id: ctx.target.file_id.clone(),
+                    },
                     application,
                     catalog_contents: contents,
                 },
             )?;
             ctx.recheck()?;
             control.tick("saving_proof", 0)?;
-            create_document(&output, &proof, &ctx.catalog.path)?;
+            // 保存先と署名済みの記録を準備してから、現在許可されている実体を移設の基準とする。
+            let (_parents, temp) = stage_document(&output, &proof, &ctx.catalog.path)?;
+            // 読取トランザクションを閉じ、対応先の更新がカタログ本体に反映できるようにする。
+            drop(catalog);
+            record_accepted_binding(ctx, &previous)?;
+            checkpoint_proof_catalog(ctx)?;
+            temp.persist_noclobber(&output).map_err(message)?;
             Ok(json!({"state":"succeeded","proof_path":output,"expires":created+PROOF_LIFETIME}))
         },
         Request::Plan {
             source_database,
             proof,
-        } => {
-            if same(&previous, &ctx.target) {
-                return Err("対応付けは既に一致しています。更新は不要です。".into());
-            }
-            if source_database.is_some() && proof.is_some() {
-                return Err("元DBと移設記録はどちらか一方を指定してください。".into());
-            }
-            let mut original_binding = None;
-            let mut _original_pins = Vec::new();
-            let evidence = if previous.file_id == ctx.target.file_id {
-                "same_file"
-            } else if let Some(source) = source_database {
-                _original_pins = pin(&source, true)?;
-                let source_binding = binding(&source)?;
-                if source_binding.file_id != previous.file_id {
-                    return Err("指定した元DBはcatalogが記録した実ファイルと一致しません。通常のバックアップコピーだけでは証明できません。".into());
-                }
-                let original = open_readonly(&source_binding.path)?;
-                original.execute_batch("BEGIN").map_err(message)?;
-                crate::db::pool::validate_existing_schema_sync(&original)?;
-                if snapshot(&original, false, &mut control)? != application {
-                    return Err(
-                        "元DBと移設先DBの内容が一致しません。対応付けを更新しません。".into(),
-                    );
-                }
-                original_binding = Some(source_binding);
-                "original_database"
-            } else if let Some(path) = proof {
-                let signed: Signed<Proof> = read_document(&path)?;
-                verify(&ctx.key, "proof", &signed)?;
-                let evidence = signed.payload;
-                if evidence.version != 1
-                    || evidence.created > created
-                    || evidence.expires < created
-                    || evidence.expires - evidence.created != PROOF_LIFETIME
-                    || evidence.binding != previous
-                    || evidence.application != application
-                    || evidence.catalog_contents != contents
-                {
-                    return Err("移設記録の期限・元DB・catalogの内容が一致しません。".into());
-                }
-                if previous.path.is_file() {
-                    _original_pins = pin(&previous.path, true)?;
-                    let old = binding(&previous.path)?;
-                    if old.file_id != previous.file_id {
-                        return Err("移動前の本体DBのパスが別ファイルに置換されています。".into());
-                    }
-                    let source = open_readonly(&old.path)?;
-                    source.execute_batch("BEGIN").map_err(message)?;
-                    if snapshot(&source, false, &mut control)? != application {
-                        return Err("移設記録の作成後に元DBが変更されています。".into());
-                    }
-                    original_binding = Some(old);
-                }
-                "prepared_proof"
-            } else {
-                return Err("同一性を確認できません。catalogと一致する元ファイル、または移設前に作成した記録を指定してください。強制更新は行いません。".into());
-            };
-            ctx.recheck()?;
-            control.tick("planned", application.rows.values().sum())?;
-            serde_json::to_value(sign(
-                &ctx.key,
-                "plan",
-                Plan {
-                    version: 1,
-                    id: uuid::Uuid::new_v4().to_string(),
-                    created,
-                    expires: created + PLAN_LIFETIME,
-                    config_sha256: ctx.config_sha256.clone(),
-                    catalog: ctx.catalog.clone(),
-                    previous,
-                    target: ctx.target.clone(),
-                    original: original_binding,
-                    application,
-                    catalog_contents: contents,
-                    evidence: evidence.into(),
-                },
-            )?)
-            .map_err(message)
-        },
+        } => serde_json::to_value(make_plan(
+            ctx,
+            previous,
+            application,
+            contents,
+            source_database,
+            proof,
+            control,
+        )?)
+        .map_err(message),
         _ => unreachable!(),
     }
+}
+
+fn make_plan(
+    ctx: &Context,
+    previous: Binding,
+    application: Snapshot,
+    contents: Snapshot,
+    source_database: Option<PathBuf>,
+    proof: Option<PathBuf>,
+    control: &mut Control<'_>,
+) -> Result<Signed<Plan>> {
+    let created = now()?;
+    if source_database.is_some() && proof.is_some() {
+        return Err("元DBと移設記録はどちらか一方を指定してください。".into());
+    }
+    let mut original_binding = None;
+    let mut _original_pins = Vec::new();
+    let evidence = if previous.file_id == ctx.target.file_id {
+        "same_file"
+    } else if ctx.accepts(&previous, &ctx.target) {
+        "authorized_replacement"
+    } else if let Some(source) = source_database {
+        _original_pins = pin(&source, true)?;
+        let source_binding = binding(&source)?;
+        if source_binding.file_id != previous.file_id && !ctx.accepts(&previous, &source_binding) {
+            return Err("指定した元DBはcatalogが記録した実ファイルと一致しません。通常のバックアップコピーだけでは証明できません。".into());
+        }
+        let original = open_readonly(&source_binding.path)?;
+        original.execute_batch("BEGIN").map_err(message)?;
+        crate::db::pool::validate_existing_schema_sync(&original)?;
+        if snapshot(&original, false, control)? != application {
+            return Err("元DBと移設先DBの内容が一致しません。対応付けを更新しません。".into());
+        }
+        original_binding = Some(source_binding);
+        "original_database"
+    } else if let Some(path) = proof {
+        let signed: Signed<Proof> = read_document(&path)?;
+        verify(&ctx.key, "proof", &signed)?;
+        let evidence = signed.payload;
+        if evidence.version != 1
+            || evidence.created > created
+            || evidence.expires < created
+            || evidence.expires - evidence.created != PROOF_LIFETIME
+            || evidence.binding != previous
+            || evidence.application != application
+            || evidence.catalog_contents != contents
+        {
+            return Err("移設記録の期限・元DB・catalogの内容が一致しません。".into());
+        }
+        if previous.path.is_file() {
+            _original_pins = pin(&previous.path, true)?;
+            let old = binding(&previous.path)?;
+            if old.file_id != previous.file_id {
+                return Err("移動前の本体DBのパスが別ファイルに置換されています。".into());
+            }
+            let source = open_readonly(&old.path)?;
+            source.execute_batch("BEGIN").map_err(message)?;
+            if snapshot(&source, false, control)? != application {
+                return Err("移設記録の作成後に元DBが変更されています。".into());
+            }
+            original_binding = Some(old);
+        }
+        "prepared_proof"
+    } else {
+        return Err("同一性を確認できません。catalogと一致する元ファイル、または移設前に作成した記録を指定してください。強制更新は行いません。".into());
+    };
+    ctx.recheck()?;
+    control.tick("planned", application.rows.values().sum())?;
+    sign(
+        &ctx.key,
+        "plan",
+        Plan {
+            version: 1,
+            id: uuid::Uuid::new_v4().to_string(),
+            created,
+            expires: created + PLAN_LIFETIME,
+            config_sha256: ctx.config_sha256.clone(),
+            catalog: ctx.catalog.clone(),
+            previous,
+            target: ctx.target.clone(),
+            original: original_binding,
+            application,
+            catalog_contents: contents,
+            evidence: evidence.into(),
+        },
+    )
 }
 
 fn apply(ctx: &Context, signed: Signed<Plan>, control: &mut Control<'_>) -> Result<Value> {
@@ -862,27 +1049,8 @@ fn apply(ctx: &Context, signed: Signed<Plan>, control: &mut Control<'_>) -> Resu
                 .into(),
         );
     }
-    let app = open_readonly(&ctx.target.path)?;
-    app.execute_batch("BEGIN").map_err(message)?;
-    let _original_pins = if let Some(original) = &plan.original {
-        let pins = pin(&original.path, true)?;
-        if original.file_id != plan.previous.file_id || !same(&binding(&original.path)?, original) {
-            return Err(
-                "確認後に元DBが移動・置換されました。新しい計画を作成してください。".into(),
-            );
-        }
-        let source = open_readonly(&original.path)?;
-        source.execute_batch("BEGIN").map_err(message)?;
-        if snapshot(&source, false, control)? != plan.application {
-            return Err("計画後に元DBの内容が変更されました。".into());
-        }
-        pins
-    } else {
-        Vec::new()
-    };
-    if snapshot(&app, false, control)? != plan.application
-        || snapshot(&tx, true, control)? != plan.catalog_contents
-    {
+    let _original_pins = verify_application(ctx, &plan, control)?;
+    if snapshot(&tx, true, control)? != plan.catalog_contents {
         return Err("計画後にDBの内容が変更されました。対応付けを更新しません。".into());
     }
     control.tick("before_backup", 0)?;
@@ -968,4 +1136,30 @@ fn apply(ctx: &Context, signed: Signed<Plan>, control: &mut Control<'_>) -> Resu
     Ok(
         json!({"state":"succeeded","already_applied":false,"backup":backup_path,"receipt":receipt_path,"warning":warning}),
     )
+}
+
+fn verify_application(ctx: &Context, plan: &Plan, control: &mut Control<'_>) -> Result<Vec<File>> {
+    let app = open_readonly(&ctx.target.path)?;
+    app.execute_batch("BEGIN").map_err(message)?;
+    let _original_pins = if let Some(original) = &plan.original {
+        let pins = pin(&original.path, true)?;
+        // 元ファイルは署名済み計画の作成時に照合済み。適用時もその実体と全内容を照合する。
+        if !same(&binding(&original.path)?, original) {
+            return Err(
+                "確認後に元DBが移動・置換されました。新しい計画を作成してください。".into(),
+            );
+        }
+        let source = open_readonly(&original.path)?;
+        source.execute_batch("BEGIN").map_err(message)?;
+        if snapshot(&source, false, control)? != plan.application {
+            return Err("計画後に元DBの内容が変更されました。".into());
+        }
+        pins
+    } else {
+        Vec::new()
+    };
+    if snapshot(&app, false, control)? != plan.application {
+        return Err("計画後に本体DBの内容が変更されました。".into());
+    }
+    Ok(_original_pins)
 }

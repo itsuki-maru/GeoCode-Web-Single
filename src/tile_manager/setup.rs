@@ -1,6 +1,6 @@
 //! サーバを起動せず、新規の設定と本体DBを準備する。
 //!
-//! 利用者の既存DBへmigrationをかけない。一時DBで全準備を終えた後だけ公開する。
+//! 新しい本体DBは一時ファイルで準備し、管理DBも確認してから設定を公開する。
 //! DB公開と設定公開の間で停止した場合は、receiptと内容hashが一致する自作DBだけを
 //! 次回の初期設定で回収する。設定が存在する場合は復旧も上書きも行わない。
 
@@ -34,6 +34,19 @@ struct PendingSetup {
 }
 
 pub async fn initialize(config_path: &Path, form: SetupForm) -> Result<(), String> {
+    initialize_setup(config_path, form, false).await
+}
+
+/// 通常アプリの初期設定は、保存済みの互換本体DBがあれば復元したデータを引き継ぐ。
+pub async fn initialize_desktop(config_path: &Path, form: SetupForm) -> Result<(), String> {
+    initialize_setup(config_path, form, true).await
+}
+
+async fn initialize_setup(
+    config_path: &Path,
+    form: SetupForm,
+    accept_existing: bool,
+) -> Result<(), String> {
     if !config_path.is_absolute() || config_path.file_name().is_none() {
         return Err("初期設定には設定JSONの絶対パスを指定してください。".into());
     }
@@ -61,7 +74,29 @@ pub async fn initialize(config_path: &Path, form: SetupForm) -> Result<(), Strin
     let settings = build_env_settings(&parent, form)?;
     let database = settings.sqlite_database_path.clone();
     recover_unpublished_setup(&parent, &config_path, &database)?;
+    let mut staging_config = Builder::new()
+        .prefix(".tile-manager-config-")
+        .tempfile_in(&parent)
+        .map_err(message)?;
+    serde_json::to_writer_pretty(staging_config.as_file_mut(), &settings).map_err(message)?;
+    staging_config.write_all(b"\n").map_err(message)?;
+    staging_config.as_file().sync_all().map_err(message)?;
+
     if entry_exists(&database)? {
+        if accept_existing {
+            let pool = crate::db::pool::setup_database_pool_with_settings(&settings)
+                .await
+                .map_err(message)?;
+            close_pool(&pool).await;
+            crate::local_tiles::catalog::initialize_setup_catalog(&settings)?;
+            fs::create_dir_all(&settings.image_file_path).map_err(message)?;
+            staging_config
+                .persist_noclobber(&config_path)
+                .map_err(message)?
+                .sync_all()
+                .map_err(message)?;
+            return Ok(());
+        }
         return Err(format!(
             "既存の本体DBを初期設定で上書きしません。対応する設定JSONを指定してください: {}",
             database.display()
@@ -100,14 +135,6 @@ pub async fn initialize(config_path: &Path, form: SetupForm) -> Result<(), Strin
     staging_database.as_file().sync_all().map_err(message)?;
     fs::create_dir_all(&settings.image_file_path).map_err(message)?;
 
-    let mut staging_config = Builder::new()
-        .prefix(".tile-manager-config-")
-        .tempfile_in(&parent)
-        .map_err(message)?;
-    serde_json::to_writer_pretty(staging_config.as_file_mut(), &settings).map_err(message)?;
-    staging_config.write_all(b"\n").map_err(message)?;
-    staging_config.as_file().sync_all().map_err(message)?;
-
     let pending = PendingSetup {
         version: 1,
         request_id: Uuid::new_v4(),
@@ -122,6 +149,7 @@ pub async fn initialize(config_path: &Path, form: SetupForm) -> Result<(), Strin
         .map_err(|error| format!("本体DBを公開できません: {}", error.error))?;
     published_database.sync_all().map_err(message)?;
     drop(published_database);
+    crate::local_tiles::catalog::initialize_setup_catalog(&settings)?;
     let published_config = staging_config
         .persist_noclobber(&config_path)
         .map_err(|error| format!("設定JSONを公開できません: {}", error.error))?;
@@ -248,6 +276,7 @@ mod tests {
         let settings = crate::init::read_env_json_readonly(&path).unwrap();
         assert_eq!(settings.admin_username, "manager-admin");
         assert_eq!(settings.local_tile_workers, "4");
+        assert!(Path::new(&settings.tile_catalog_database_path).is_file());
         assert!(
             !path
                 .parent()

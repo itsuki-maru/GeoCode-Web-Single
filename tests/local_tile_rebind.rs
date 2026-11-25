@@ -24,6 +24,334 @@ use std::{
 
 #[path = "support/process_output.rs"]
 mod process_output;
+#[path = "tilegen_support/mod.rs"]
+mod relocation_pbf;
+
+fn move_gui(f: &Fixture, request: Value) -> Result<Value, String> {
+    rebind::storage::run(&f.config, serde_json::from_value(request).unwrap())
+}
+
+fn make_relocation_map(f: &Fixture) -> (PathBuf, PathBuf) {
+    use geocode_web_single::tilegen::{
+        dataset::Dataset,
+        import::{self, ImportOptions, MissingNodes},
+    };
+    let input = f._root.path().join("roads.pbf");
+    relocation_pbf::Fixture::sample().write(&input);
+    let path = Path::new(&f.settings.tile_dataset_path).join("one/data.sqlite");
+    fs::create_dir(path.parent().unwrap()).unwrap();
+    import::run(&ImportOptions {
+        input: input.clone(),
+        store: path.clone(),
+        work_dir: f._root.path().join("import"),
+        missing_nodes: MissingNodes::Error,
+    })
+    .unwrap();
+    let id = Dataset::open(&path).unwrap().info().dataset_id.clone();
+    Connection::open(&f.settings.tile_catalog_database_path)
+        .unwrap()
+        .execute(
+            "UPDATE local_tile_datasets SET dataset_key = ?1 WHERE id = 'dataset'",
+            [id],
+        )
+        .unwrap();
+    (path, input)
+}
+
+#[tokio::test]
+async fn gui_moves_application_tiles_or_both_and_preserves_maps_routes_and_history() {
+    use geocode_web_single::local_routing::{self, Coord, TravelMode};
+    for (app, tiles) in [(true, false), (false, true), (true, true)] {
+        let f = Fixture::new().await;
+        let (_, input) = make_relocation_map(&f);
+        let generation = uuid::Uuid::new_v4().to_string();
+        let graph = Path::new(&f.settings.tile_dataset_path)
+            .join("routing")
+            .join(&generation);
+        fs::create_dir_all(&graph).unwrap();
+        let info = local_routing::build(&input, &graph.join("graph.sqlite"), || Ok(()), |_, _| {})
+            .unwrap();
+        fs::write(graph.join("generation.json"),serde_json::to_vec(&json!({"id":generation,"name":"test","sequence":1,"created_at":"2026","info":info})).unwrap()).unwrap();
+        let png = Path::new("dataset/profile/0/0/0.png");
+        let cache = Path::new(&f.settings.tile_cache_path).join(png);
+        fs::create_dir_all(cache.parent().unwrap()).unwrap();
+        fs::write(&cache, b"preserved png").unwrap();
+        let mut document: Value = serde_json::from_slice(&fs::read(&f.config).unwrap()).unwrap();
+        document["future_setting"] = json!({"nested":42});
+        fs::write(&f.config, serde_json::to_vec_pretty(&document).unwrap()).unwrap();
+        let config_before = hash(&f.config);
+        let manager = geocode_web_single::tile_manager::Manager::new(
+            f.config.clone(),
+            std::env::current_exe().unwrap(),
+        );
+        let url_args = json!({"dataset":"dataset","render":"profile"});
+        let old_url = manager.query("url", url_args.clone()).await.unwrap();
+        let old_data = f.contents();
+        let mut selection = json!({});
+        let moved = f._root.path().join("移設先 #100%");
+        if app {
+            fs::rename(&f.old, &f.new).unwrap();
+            selection["database"] = json!(f.new);
+        }
+        if tiles {
+            fs::rename(
+                Path::new(&f.settings.tile_catalog_database_path)
+                    .parent()
+                    .unwrap(),
+                &moved,
+            )
+            .unwrap();
+            selection["tiles"] = json!(moved);
+        }
+        let preview = move_gui(&f, json!({"action":"check","selection":selection})).unwrap();
+        assert_eq!(preview["maps"].as_array().unwrap().len(), 1);
+        assert_eq!(hash(&f.config), config_before);
+        move_gui(
+            &f,
+            json!({"action":"apply","selection":selection,"expected":preview["expected"]}),
+        )
+        .unwrap();
+        assert_eq!(hash(&f.config.with_added_extension("bak")), config_before);
+        let settings = geocode_web_single::init::read_env_json_readonly(&f.config).unwrap();
+        let saved: Value = serde_json::from_slice(&fs::read(&f.config).unwrap()).unwrap();
+        assert_eq!(saved["future_setting"], document["future_setting"]);
+        assert_eq!(
+            saved["tile_settings_encryption_key"],
+            document["tile_settings_encryption_key"]
+        );
+        let graph = Path::new(&settings.tile_dataset_path)
+            .join("routing")
+            .join(&generation)
+            .join("graph.sqlite");
+        for mode in [TravelMode::Car, TravelMode::Foot] {
+            local_routing::search(
+                &graph,
+                mode,
+                Coord {
+                    lat: 35.7,
+                    lon: 139.699,
+                },
+                Coord {
+                    lat: 35.701,
+                    lon: 139.701,
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            fs::read(Path::new(&settings.tile_cache_path).join(png)).unwrap(),
+            b"preserved png"
+        );
+        let f = Fixture { settings, ..f };
+        assert_eq!(old_data, f.contents());
+        assert_eq!(manager.query("url", url_args).await.unwrap(), old_url);
+        assert_eq!(
+            manager.snapshot().await.unwrap()["jobs"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(
+            move_gui(&f, json!({"action":"check","selection":{}})).unwrap()["state"],
+            "checked"
+        );
+    }
+}
+
+#[tokio::test]
+async fn gui_relocates_an_individual_map_and_recovers_after_catalog_commit() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let f = Fixture::new().await;
+    let (old, _) = make_relocation_map(&f);
+    let map = f._root.path().join("個別.sqlite");
+    fs::rename(&old, &map).unwrap();
+    fs::rename(&f.old, &f.new).unwrap();
+    let preview = move_gui(&f, json!({"action":"check","selection":{"database":f.new}})).unwrap();
+    assert_eq!(preview["state"], "needs_files");
+    assert!(preview["maps"][0]["error"].is_string());
+    let selection = json!({"database":f.new,"files":{"dataset":map}});
+    let preview = move_gui(&f, json!({"action":"check","selection":selection})).unwrap();
+    // 設定ファイルを読取共有で保持し、カタログの確定後のJSON置換だけを失敗させる。
+    let held = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .open(&f.config)
+        .unwrap();
+    let before = hash(&f.config);
+    let error = move_gui(
+        &f,
+        json!({"action":"apply","selection":selection,"expected":preview["expected"]}),
+    )
+    .unwrap_err();
+    assert!(error.contains("再開"), "{error}");
+    assert_eq!(hash(&f.config), before);
+    assert!(geocode_web_single::init::read_env_json_readonly(&f.config).is_err());
+    drop(held);
+    assert_eq!(
+        move_gui(&f, json!({"action":"current"})).unwrap()["pending"],
+        true
+    );
+    move_gui(&f, json!({"action":"recover"})).unwrap();
+    assert_eq!(
+        move_gui(&f, json!({"action":"current"})).unwrap()["pending"],
+        false
+    );
+    let db = Connection::open(&f.settings.tile_catalog_database_path).unwrap();
+    let pair: (String, String) = db
+        .query_row(
+            "SELECT storage_kind, database_path FROM local_tile_datasets",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(pair.0, "external");
+    assert_eq!(Path::new(&pair.1), map.canonicalize().unwrap());
+}
+
+#[tokio::test]
+async fn storage_switches_to_different_content_and_catalog_without_originals_or_proof() {
+    let f = Fixture::new().await;
+    make_relocation_map(&f);
+    // 別の環境で作成した独立カタログ、異なる内容のアプリDBを選択する。
+    let target = Fixture::new().await;
+    make_relocation_map(&target);
+    Connection::open(&target.old)
+        .unwrap()
+        .execute(
+            r#"
+        UPDATE application_settings
+        SET setting_value = '他の業務の内容'
+        WHERE id = 'fixture'
+        "#,
+            [],
+        )
+        .unwrap();
+    let folder = Path::new(&target.settings.tile_catalog_database_path)
+        .parent()
+        .unwrap();
+    let selection = json!({"database":target.old,"tiles":folder});
+    fs::rename(&f.old, f._root.path().join("停止した本体.sqlite")).unwrap();
+    let old_catalog = Path::new(&f.settings.tile_catalog_database_path);
+    fs::rename(old_catalog, f._root.path().join("停止したカタログ.sqlite")).unwrap();
+    let current = move_gui(&f, json!({"action":"current"})).unwrap();
+    assert_eq!(current["catalog_missing"], true);
+    let missing = f._root.path().join("missing.sqlite");
+    assert!(
+        move_gui(
+            &f,
+            json!({"action":"apply","selection":{"catalog":missing},"expected":current["expected"]})
+        )
+        .is_err()
+    );
+    assert!(!missing.exists());
+    let manager = geocode_web_single::tile_manager::Manager::new(
+        f.config.clone(),
+        std::env::current_exe().unwrap(),
+    );
+    let contents = target.contents();
+    let mut document: Value = serde_json::from_slice(&fs::read(&f.config).unwrap()).unwrap();
+    document["tile_database_replacement"] =
+        json!({"catalog_file_id":"obsolete","database_path":"X","catalog_path":"Y"});
+    document["future_option"] = json!(3);
+    document["local_routing_http"] = json!({"enabled":true,"dataset":"全国道路網"});
+    fs::write(&f.config, serde_json::to_vec(&document).unwrap()).unwrap();
+    assert!(
+        move_gui(
+            &f,
+            json!({"action":"apply","selection":selection,"expected":current["expected"]})
+        )
+        .is_err()
+    );
+    let preview = move_gui(&f, json!({"action":"check","selection":selection})).unwrap();
+    let changed = move_gui(
+        &f,
+        json!({"action":"apply","selection":selection,"expected":preview["expected"]}),
+    )
+    .unwrap();
+    assert_eq!(changed["state"], "succeeded");
+    let saved: Value = serde_json::from_slice(&fs::read(&f.config).unwrap()).unwrap();
+    assert_eq!(saved["sqlite_database_path"], json!(target.old));
+    assert_eq!(
+        saved["tile_catalog_database_path"],
+        json!(folder.join("catalog.sqlite"))
+    );
+    assert!(saved.get("tile_database_replacement").is_none());
+    assert_eq!(saved["future_option"], 3);
+    assert_eq!(saved["local_routing_http"], document["local_routing_http"]);
+    assert!(
+        changed["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|message| { message.as_str().unwrap().contains("全国道路網") })
+    );
+    assert_eq!(contents, target.contents());
+    assert!(manager.snapshot().await.unwrap()["error"].is_null());
+    assert!(!f.old.exists() && !old_catalog.exists());
+}
+
+#[tokio::test]
+async fn independently_switches_one_side_with_unusable_data_on_the_other_side() {
+    let f = Fixture::new().await;
+    let other = Fixture::new().await;
+    {
+        let db = Connection::open(&other.old).unwrap();
+        db.execute("DELETE FROM schema_migrations WHERE version = (SELECT MAX(version) FROM schema_migrations)", []).unwrap();
+    }
+    let versions = |db: &Path| {
+        Connection::open(db)
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap()
+    };
+    let old_versions = versions(&other.old);
+    let current = move_gui(&f, json!({"action":"current"})).unwrap();
+    // 現カタログの地図が欠けた状態でも、本体だけを別のDBに切り替えられる。
+    let switched = move_gui(
+        &f,
+        json!({"action":"apply","selection":{"database":other.old},"expected":current["expected"]}),
+    )
+    .unwrap();
+    assert_eq!(switched["state"], "succeeded");
+    assert!(
+        switched["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("本体アプリを一度起動"))
+    );
+    assert_eq!(versions(&other.old), old_versions);
+    assert_eq!(
+        switched["current"]["catalog"],
+        current["current"]["catalog"]
+    );
+    // 未選択の本体DBの中身が使えない場合も、tiles の切り替え結果に警告を添える。
+    fs::write(&other.old, b"unavailable main database").unwrap();
+    make_relocation_map(&other);
+    let tiles = Path::new(&other.settings.tile_catalog_database_path)
+        .parent()
+        .unwrap();
+    let current = move_gui(&f, json!({"action":"current"})).unwrap();
+    let switched = move_gui(
+        &f,
+        json!({"action":"apply","selection":{"tiles":tiles},"expected":current["expected"]}),
+    )
+    .unwrap();
+    assert_eq!(switched["state"], "succeeded");
+    assert!(
+        switched["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("本体DB"))
+    );
+    assert_eq!(switched["current"]["database"], json!(other.old));
+    assert_eq!(fs::read(other.old).unwrap(), b"unavailable main database");
+}
+
 #[cfg(windows)]
 #[path = "support/worker_cleanup.rs"]
 mod worker_cleanup;
@@ -64,7 +392,17 @@ impl Fixture {
             .await
             .unwrap();
         run_migrations(&pool).await.unwrap();
-        sqlx::query("INSERT INTO application_settings(id,setting_key,setting_value,description,create_at,updated_at) VALUES ('fixture','relocation-test','sensitive-preserved-value','test','2026','2026')").execute(&pool).await.unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO application_settings (
+                id, setting_key, setting_value, description, create_at, updated_at
+            )
+            VALUES ('fixture', 'relocation-test', 'sensitive-preserved-value', 'test', '2026', '2026')
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         let config = LocalTileConfig::from_setup(&settings).unwrap();
         fs::create_dir_all(&config.dataset_path).unwrap();
         fs::create_dir_all(&config.cache_path).unwrap();
@@ -145,12 +483,35 @@ impl Fixture {
         self.settings.database_url = format!("sqlite:{}", self.new.display());
         self.save();
     }
+    fn substitute_at_authorized_path(&mut self) {
+        let before = self.call(Request::Inspect).unwrap();
+        let mut doc = serde_json::to_value(&self.settings).unwrap();
+        doc["tile_database_replacement"] = json!({
+            "database_path":before["target"]["path"],"catalog_path":before["catalog"]["path"],"catalog_file_id":before["catalog"]["file_id"]
+        });
+        fs::write(&self.config, serde_json::to_vec_pretty(&doc).unwrap()).unwrap();
+        let archived = self._root.path().join("旧本体.sqlite");
+        fs::rename(&self.old, &archived).unwrap();
+        fs::copy(archived, &self.old).unwrap();
+        Connection::open(&self.old)
+            .unwrap()
+            .execute(
+                r#"
+            UPDATE application_settings
+            SET setting_value = '差し替え後'
+            WHERE id = 'fixture'
+            "#,
+                [],
+            )
+            .unwrap();
+    }
     fn save(&self) {
-        fs::write(
-            &self.config,
-            serde_json::to_vec_pretty(&self.settings).unwrap(),
-        )
-        .unwrap();
+        let before: Value = serde_json::from_slice(&fs::read(&self.config).unwrap()).unwrap();
+        let mut doc = serde_json::to_value(&self.settings).unwrap();
+        if let Some(legacy) = before.get("tile_database_replacement") {
+            doc["tile_database_replacement"] = legacy.clone();
+        }
+        fs::write(&self.config, serde_json::to_vec_pretty(&doc).unwrap()).unwrap();
     }
     fn call(&self, request: Request) -> Result<Value, String> {
         rebind::execute(
@@ -262,6 +623,139 @@ async fn copied_application_rebind_preserves_every_record_and_creates_verified_b
     assert_eq!(catalog::list_jobs(&normal, 100, 0).await.unwrap().len(), 3);
     normal.close().await;
     pool.close().await;
+}
+
+#[tokio::test]
+async fn replacement_is_read_only_until_preparing_a_proof_for_a_later_copy() {
+    use process_output::CommandTestExt;
+    let mut f = Fixture::new().await;
+    make_relocation_map(&f);
+    let manager = geocode_web_single::tile_manager::Manager::new(
+        f.config.clone(),
+        std::env::current_exe().unwrap(),
+    );
+    let args = json!({"dataset":"dataset","render":"profile"});
+    let url = manager.query("url", args.clone()).await.unwrap();
+    let history = manager.snapshot().await.unwrap()["jobs"].clone();
+    assert_eq!(history.as_array().unwrap().len(), 3);
+    let old_proof = f._root.path().join("旧記録.json");
+    f.call(Request::Prepare {
+        output: old_proof.clone(),
+    })
+    .unwrap();
+    f.substitute_at_authorized_path();
+    assert_eq!(manager.query("url", args).await.unwrap(), url);
+    assert_eq!(manager.snapshot().await.unwrap()["jobs"], history);
+    let cli = std::process::Command::new(env!("CARGO_BIN_EXE_geocode_web_single"))
+        .args([
+            "local-tiles",
+            "url",
+            "--dataset",
+            "dataset",
+            "--render",
+            "profile",
+            "--json",
+            "--config",
+        ])
+        .arg(&f.config)
+        .output_with_timeout(std::time::Duration::from_secs(30))
+        .unwrap();
+    assert!(
+        cli.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cli.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&cli.stdout).unwrap()["url"],
+        url["url"]
+    );
+    let state = f.call(Request::Inspect).unwrap();
+    assert_eq!(state["binding_matches"], true);
+    assert_eq!(state["same_file"], false);
+    assert_eq!(
+        move_gui(&f, json!({"action":"check","selection":{}})).unwrap()["state"],
+        "checked"
+    );
+    assert_eq!(f.call(Request::Inspect).unwrap()["same_file"], false);
+    assert!(
+        f.call(Request::Prepare {
+            output: f.config.clone()
+        })
+        .is_err()
+    );
+    assert_eq!(f.call(Request::Inspect).unwrap()["same_file"], false);
+    // 別の画面が以前の行を参照している間は、WALの変更を反映できるまで記録の公開を待つ。
+    let reader = Connection::open_with_flags(
+        &f.settings.tile_catalog_database_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    reader
+        .execute_batch("BEGIN; SELECT app_file_id FROM tile_catalog_binding")
+        .unwrap();
+    let blocked_proof = f._root.path().join("読取中の記録.json");
+    let error = f
+        .call(Request::Prepare {
+            output: blocked_proof.clone(),
+        })
+        .unwrap_err();
+    assert!(error.contains("反映できません"), "{error}");
+    assert!(!blocked_proof.exists());
+    drop(reader);
+    let proof = f._root.path().join("移設記録.json");
+    f.call(Request::Prepare {
+        output: proof.clone(),
+    })
+    .unwrap();
+    assert_eq!(f.call(Request::Inspect).unwrap()["same_file"], true);
+    fs::copy(&f.old, &f.new).unwrap();
+    fs::remove_file(&f.old).unwrap();
+    let catalog = Path::new(&f.settings.tile_catalog_database_path);
+    let moved_catalog = f._root.path().join("移設先のカタログ.sqlite");
+    fs::copy(catalog, &moved_catalog).unwrap();
+    fs::remove_file(catalog).unwrap();
+    f.settings.sqlite_database_path = f.new.clone();
+    f.settings.database_url = format!("sqlite:{}", f.new.display());
+    f.settings.tile_catalog_database_path = moved_catalog.to_string_lossy().into_owned();
+    f.save();
+    let check = |proof| {
+        f.call(Request::Plan {
+            source_database: None,
+            proof: Some(proof),
+        })
+    };
+    assert!(check(old_proof).is_err());
+    let plan = serde_json::from_value(check(proof).unwrap()).unwrap();
+    f.call(Request::Apply { plan }).unwrap();
+    assert_eq!(f.call(Request::Inspect).unwrap()["same_file"], true);
+}
+
+#[tokio::test]
+async fn moving_a_substitution_uses_only_the_authorized_source_or_verified_evidence() {
+    let mut f = Fixture::new().await;
+    f.substitute_at_authorized_path();
+    f.copy_app();
+    assert_eq!(f.call(Request::Inspect).unwrap()["binding_matches"], false);
+    assert!(
+        f.call(Request::Plan {
+            source_database: None,
+            proof: None
+        })
+        .is_err()
+    );
+    let unrelated = f._root.path().join("別のコピー.sqlite");
+    fs::copy(&f.old, &unrelated).unwrap();
+    assert!(
+        f.call(Request::Plan {
+            source_database: Some(unrelated),
+            proof: None
+        })
+        .is_err()
+    );
+    let plan = f.plan();
+    assert_eq!(plan.payload.evidence, "original_database");
+    f.call(Request::Apply { plan }).unwrap();
+    assert_eq!(f.call(Request::Inspect).unwrap()["same_file"], true);
 }
 
 #[tokio::test]
@@ -716,7 +1210,7 @@ async fn cli_inspects_and_applies_signed_plans_without_a_server_or_configuration
 
 #[cfg(windows)]
 #[tokio::test]
-async fn gui_backend_can_diagnose_mismatch_and_worker_finishes_after_manager_is_dropped() {
+async fn gui_uses_current_database_and_legacy_rebind_worker_survives_manager_restart() {
     use geocode_web_single::tile_manager::Manager;
     let mut f = Fixture::new().await;
     f.copy_app();
@@ -724,7 +1218,7 @@ async fn gui_backend_can_diagnose_mismatch_and_worker_finishes_after_manager_is_
     let exe = PathBuf::from(env!("CARGO_BIN_EXE_geocode_web_single"));
     let manager = Manager::new(f.config.clone(), exe.clone());
     let snapshot = manager.snapshot().await.unwrap();
-    assert_eq!(snapshot["rebind"]["binding_matches"], false);
+    assert!(snapshot["error"].is_null(), "{snapshot}");
     let plan = manager
         .query("rebind_plan", json!({"source_database":f.old,"proof":null}))
         .await

@@ -21,6 +21,7 @@ pub mod handler;
 pub mod image;
 pub mod init;
 pub mod launch;
+pub mod local_routing;
 pub mod local_tiles;
 pub mod middleware;
 pub mod model;

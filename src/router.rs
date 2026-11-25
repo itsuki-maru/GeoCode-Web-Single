@@ -118,6 +118,24 @@ pub fn build_router_with_local_tiles(
     tile_settings: Arc<TileSettings>,
     local_tiles: Arc<crate::local_tiles::LocalTiles>,
 ) -> Router {
+    build_router_with_local_services(
+        pool,
+        tera,
+        tile_cache,
+        tile_settings,
+        local_tiles,
+        Router::new(),
+    )
+}
+
+pub fn build_router_with_local_services(
+    pool: SqlitePool,
+    tera: Arc<Mutex<Tera>>,
+    tile_cache: Option<redis::aio::ConnectionManager>,
+    tile_settings: Arc<TileSettings>,
+    local_tiles: Arc<crate::local_tiles::LocalTiles>,
+    local_routes: Router,
+) -> Router {
     // CORSの設定
     let mut cors = CorsLayer::new()
         .allow_methods(vec![Method::GET, Method::POST, Method::PUT, Method::DELETE])
@@ -645,6 +663,7 @@ pub fn build_router_with_local_tiles(
         .merge(image_upload_route)
         .merge(marker_icon_upload_route)
         .merge(route_search)
+        .merge(local_routes)
         .merge(import_route)
         .merge(token_refresh_routes)
         .merge(flex_secured_routes)

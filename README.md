@@ -83,7 +83,7 @@ AI・音声入力・作成保存は初期無効です。管理者が接続先と
 
 ログイン後のPC・モバイルの通常地図とPCの全画面地図では、マーカーまたは図形のポップアップから現在地を起点に経路を検索できる。利用するサービスは選択中の背景で決まり、Google背景ではGoogle Routes API、その他の背景では接続先を登録したOSRMを使う。[Google背景地図と経路検索](docs/GOOGLE_MAPS.md)・[OSRMの接続・利用手順](docs/OSRM.md)
 
-OSRMのAPIキーを保護する暗号鍵は、通常起動時に設定JSONの `osrm_encryption_key` へ補完する。既存の `OSRM_ENCRYPTION_KEY` がある場合は、その値を実行時に優先する。HTTP・LAN内の接続先を許可する `OSRM_ALLOWED_ORIGINS` は起動プロセスの環境変数に設定する。[OSRMの暗号鍵と接続設定](docs/OSRM.md#接続設定)
+同じSingle版が配信する経路を使う場合は、`local-tiles gui` の「経路」→「GeoCode-Webへの経路配信」で道路網と許可オリジン（既定は `http://127.0.0.1:3000`）を保存し、Single本体を再起動する。旧版で環境変数 `OSRM_ALLOWED_ORIGINS` を指定していた場合は、更新後の初回だけ同じ環境で通常起動すると、許可先が設定JSONへ移行する。管理画面の「OSRM設定」には車用・徒歩用の絶対URLを登録する。OSRMのAPIキーを保護する暗号鍵は、通常起動時に設定JSONの `osrm_encryption_key` へ補完する。既存の `OSRM_ENCRYPTION_KEY` がある場合は、その値を実行時に優先する。[OSRMの接続設定](docs/OSRM.md#接続設定)
 
 ### 重ね合わせタイル
 
@@ -351,6 +351,8 @@ User-Agent に `Mobile` が含まれるアクセスにはモバイル向け UI (
 
 同じexeの`local-tiles` CLIまたは`local-tiles gui`で開く専用Tauri管理画面で、PBF取り込み、完成DB登録、背景追加、事前生成を行う。管理画面では通常アプリ・HTTPサーバー・タイル配信を起動しない。起動・操作方法は[ローカル地図](docs/LOCAL_TILES.md#サーバを起動せず管理画面を開く)を参照する。
 
+同じ管理画面の「経路」では、元のOSM PBFから道路網を作成し、車・徒歩の経路線、距離、概算所要時間をオフラインで確認できる。作成済みの道路網はSingle版のHTTP窓口から配信でき、Single版・PostgreSQL版の通常地図の「OSRM設定」に登録できる。[道路網の作成](docs/LOCAL_TILES.md#車徒歩の経路を調べる)・[通常地図からの接続](docs/OSRM.md#作成済みのローカル道路網を使う)
+
 `import --features standard-v2`では、建物・土地被覆・水域に加えて地名・主要なランドマーク名を持つ別完成DBを作る。`datasets prepare --style osm-like-v1`で道路・建物・文字・等高線・陰影・名称の言語を選び、同じDBから通常地図と地形付き地図を異なる描画世代として利用できる。通常地図は道路・建物・文字がon、等高線・陰影がoff、日本語優先となる。背景には`background add --render RENDER_ID --name 表示名`で別名を付けられる。
 
 取り込みの既定は従来の道路形式で、文字のない`standard-v1`も継続利用できる。既存DBへ名称だけを追加することはできないため、名称表示には元PBFから新しい`standard-v2` DBを作る。既存のDB・PNG・背景・履歴は保持する。`--elevation-input`の国土地理院FGD-GMLから陰影・等高線、`--landmask-input`の処理済みWGS84陸域から海陸を生成する。新形式の`--contour-data off`は等高線をDBへ収録しない指定、準備時の`--contours off`は収録済み等高線を表示しない指定となる。元データの準備と四国の実行例は[ローカル地図](docs/LOCAL_TILES.md)を参照する。表示はPostgreSQL版と共通の`src_frontend`・`src/templates`、背景設定と通常のXYZ URLを使い、文字を含む生成処理は本体内で動く。同梱フォントと生成認定は`local-tiles build-info --json`の`font`・`osm_generation_verified`で確認できる。
@@ -359,7 +361,7 @@ User-Agent に `Mobile` が含まれるアクセスにはモバイル向け UI (
 
 全国の地名・ランドマーク名付き地図を初めて導入する場合は、[初回セットアップからの手順書](docs/JAPAN_LOCAL_TILES_SETUP.md)と[PowerShellスクリプト](scripts/setup-japan-local-tiles.ps1)を利用できる。全国PBF・陸域資料の取得、事前確認、名称付き再取り込み、背景登録に対応し、DEMを省略した通常地図から始められる。
 
-`geocode-web-single.env.json`の`tile_catalog_database_path`・`tile_dataset_path`・`tile_cache_path`・`tile_work_path`で、管理DB・完成DB・PNG・作業領域を個別指定できる。PNGだけ別ディスクへ配置でき、変更時に既存ファイルを自動移動しない。取り込み中の旧版は完了後に切り替える。操作・移設・バックアップは[ローカル地図](docs/LOCAL_TILES.md)を参照する。
+`local-tiles gui` の「データの保存先」で、本体DBと `tiles` フォルダーを個別に切り替えられる。外付けドライブに移す場合は、アプリと生成処理を終了してファイルを移動し、このタブで新しい場所を選ぶ。管理DB・完成DB・PNG・作業領域の個別指定もできる。[データの保存先を変更する](docs/LOCAL_TILES.md#データの保存先を変更する)
 
 ## 起動方法
 
@@ -397,7 +399,7 @@ Ctrl+C でグレースフルシャットダウンする。
 - `tauri-cli`
 - Windows では WebView2 が利用可能であること
 
-開発ツール用に `.env.example` を `.env` としてコピーする。配布アプリの実行時設定は `~/.geocode-web-single/geocode-web-single.env.json` を使用する。AIとOSRMの接続例外許可は起動プロセスへ環境変数で供給する。[AIの導入](docs/AI_ASSISTANT.md#管理者による導入)・[OSRMの接続設定](docs/OSRM.md#接続設定)
+開発ツール用に `.env.example` を `.env` としてコピーする。配布アプリの実行時設定は `~/.geocode-web-single/geocode-web-single.env.json` を使用する。OSRMの接続例外はこのJSONの `osrm_allowed_origins` に、AIの接続例外は起動プロセスの環境変数 `AI_ALLOWED_ORIGINS` に指定する。[AIの導入](docs/AI_ASSISTANT.md#管理者による導入)・[OSRMの接続設定](docs/OSRM.md#接続設定)
 
 ```powershell
 Copy-Item .env.example .env

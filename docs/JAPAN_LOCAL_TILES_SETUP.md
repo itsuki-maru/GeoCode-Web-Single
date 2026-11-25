@@ -58,7 +58,7 @@ $OutputEncoding = [Console]::OutputEncoding
 
 1. 本体exeをエクスプローラーから起動します。
 2. 「初回セットアップ」でアプリタイトル、管理者ユーザー名・パスワード、ログイン試行制限等を設定し、完了します。初期のユーザー名・パスワードはともに`geocodeweb`です。共有するPCやLAN配信では、利用環境に合う管理者パスワードに変更します。
-3. 通常画面が表示されるまで待ちます。この段階で設定JSON、本体SQLite DB、初期管理者が作成されます。
+3. 通常画面が表示されるまで待ちます。この段階で設定JSON、本体SQLite DB、初期管理者、タイル管理DBが作成されます。
 4. アプリを正常終了します。サーバー単体モードを起動している場合は、それもCtrl+Cで終了します。
 
 CLIは初回セットアップや本体DBのmigrationを代行しません。設定JSONだけを手作業で作って取り込みを始めることはできません。
@@ -70,7 +70,7 @@ CLIは初回セットアップや本体DBのmigrationを代行しません。設
   geocode-web-single.env.json   設定
   geocode-web.sqlite            本体DB（認証・背景設定等）
   images\                      アップロードファイル
-  tiles\                       ローカル地図の利用時に作成
+  tiles\                       ローカル地図の保存先
     catalog.sqlite             タイル管理DB
     datasets\                  完成DB
     png\                       生成済みPNG
@@ -79,29 +79,14 @@ CLIは初回セットアップや本体DBのmigrationを代行しません。設
 
 ### 任意：取り込み前に生成データの保存先を変更する
 
-全国データの取り込みには、入力PBF、陸域ZIPと展開物、作業DB、完成DB、SQLiteの一時領域、閲覧に伴い増えるPNGの容量が必要です。必要容量と時間はデータ版・DEM範囲・PCで変わるため、一律には保証できません。入力を置くドライブに加え、完成DB・作業領域・catalog・OSの`TEMP`があるドライブの空き容量を確認してください。完成DBの保存先にはhard linkを利用できるファイルシステムを使います。通常のWindowsローカルNTFSドライブが適しています。
+全国データの取り込みには、入力PBF、陸域ZIPと展開物、作業DB、完成DB、SQLiteの一時領域、閲覧に伴い増えるPNGの容量が必要です。必要容量と時間はデータ版・DEM範囲・PCで変わります。入力を置くドライブに加え、完成DB・作業領域・catalog・OSの`TEMP`があるドライブの空き容量と、保存できるファイルサイズの上限を確認してください。
 
-`-DataDirectory`はダウンロード資料とスクリプトの記録先です。**アプリの完成DB・PNG・作業領域の保存先は変更しません。** Cドライブの使用を抑えたい場合は、最初の取り込み前に設定JSONを変更します。
+`-DataDirectory` はダウンロード資料とスクリプトの記録先です。完成DB・PNG・作業領域を別ドライブへ置く場合は、最初の取り込み前に次の操作を行います。
 
-アプリと`-s`を終了し、設定をバックアップします。
+1. アプリと `-s` を終了し、エクスプローラーで `catalog.sqlite` を含む `tiles` フォルダー全体を希望する場所に移します。
+2. `local-tiles gui` の「データの保存先」で移動後のフォルダーを選び、「この保存先を使う」を押します。
 
-```powershell
-Copy-Item -LiteralPath $config -Destination "$config.before-japan-$(Get-Date -Format yyyyMMdd-HHmmss).bak"
-notepad.exe $config
-```
-
-既存JSONの他の項目を保持し、次の4項目の値を変更して保存します。この抜粋でファイル全体を置き換えないでください。絶対パスを指定し、JSON内の区切りには`/`を使うとエスケープが不要です。
-
-```json
-{
-  "tile_catalog_database_path": "D:/GeoCode-Tiles/catalog.sqlite",
-  "tile_dataset_path": "D:/GeoCode-Tiles/datasets",
-  "tile_cache_path": "D:/GeoCode-Tiles/png",
-  "tile_work_path": "D:/GeoCode-Tiles/work"
-}
-```
-
-`datasets`・`png`・`work`は同じ場所や互いの配下へ置かず、catalogもその中へ置きません。`.env`への追記は不要です。すでにタイルを作成済みの場合は、値の変更だけでは既存ファイルは移りません。[保存先の移設・バックアップ](LOCAL_TILES.md#保存先を移設する)を先に確認してください。
+`datasets`・`png`・`work` をそれぞれ別の場所に配置する場合も、同じタブで個別に指定できます。[データの保存先を変更する](LOCAL_TILES.md#データの保存先を変更する)
 
 ## 3. オンラインで全国PBFと陸域資料を取得する
 

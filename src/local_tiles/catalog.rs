@@ -8,6 +8,9 @@ use std::path::{Component, Path, PathBuf};
 mod database;
 pub use database::TileCatalog;
 pub use database::rebind;
+pub(crate) use database::{
+    create_empty_catalog, initialize_setup_catalog, missing_catalog_message,
+};
 
 /// 競合試験では実際の接続を保持し、製品用の制御フックを追加せず待機を作る。
 #[cfg(test)]

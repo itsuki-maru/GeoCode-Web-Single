@@ -27,7 +27,7 @@
     "src/tilegen/metrics.rs": "57e012fa13bfa4e1033bf6511d7c6ecc37094a9ac6555d1e20618af162f467ec",
     "src/tilegen/mod.rs": "d964fcddd2f0077584b0189acabadae3f45f68089fbac7a1fcabe7f50a24110b",
     "src/tilegen/operation.rs": "174e01b1ed82dea4b4fd30abcc6f633c57cbf0d20bb3b0d7ce9b14235c190d32",
-    "src/tilegen/pbf.rs": "fad2bd499982bf011072e4c01fe90d35f21c4f4f9237972a69422cb9e7fb1d6f",
+    "src/tilegen/pbf.rs": "30b16f4d7e8bcda2610957ce3d77a1e245d66cf26179f6074db3007c4cfcd77f",
     "src/tilegen/render_spec.rs": "5034b72f66714ab2491e5a0a6ba041843c224bf136979dbafeba491999b778f1",
     "src/tilegen/renderer.rs": "ab11e8a50aaec7ed51b9365c1da34829c403de6c7382f3caa1ddfd862d162d3e",
     "src/tilegen/simplify.rs": "646e62f0319325720cfca4f5f8c483f99a306b32d9fb4764ed9a0c272d641f2b",
@@ -73,7 +73,7 @@
   ],
   "review": {
     "baseline_ref": "9c30ae1",
-    "reason": "SQLを複数行raw文字列へ整理し、SQLトークンとバインド順の同一性を照合した。固定画像・取込・SDK・世代管理を含む通常実行対象807テストの成功を確認し、描画互換性の各版を維持する。",
+    "reason": "経路用のWay・Relation走査と全ノードタグ走査を追加。既存のタイル用走査は従来のタグ選別と地物順を維持し、描画方式・形式・描画世代を共有できる。",
     "required_validation": "render_golden、standard_tile_render、carto_tile_render、取り込み・SDK・世代管理の回帰試験"
   },
   "source_scope": "src/tilegen/**/*.rs + render-profile-policy + execution-certification + fixed-golden-inputs + font-assets",

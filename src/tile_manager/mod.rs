@@ -1,8 +1,9 @@
-//! HTTPサーバーを使わないローカル地図管理。画面は照会し、書込は独立workerだけが行う。
+//! HTTPサーバーを使わないローカル地図管理。地図・道路網の生成は独立workerが行う。
 
 pub mod desktop;
 mod process;
 mod protocol;
+mod routing;
 pub mod setup;
 mod worker;
 
@@ -27,12 +28,15 @@ use sqlx::{
 use std::{
     path::{Path, PathBuf},
     str::FromStr,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
 pub struct Manager {
     config_path: PathBuf,
     executable: PathBuf,
+    route_search: Mutex<Option<(uuid::Uuid, CancellationToken)>>,
+    route_search_slot: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Manager {
@@ -40,28 +44,47 @@ impl Manager {
         Self {
             config_path,
             executable,
+            route_search: Mutex::new(None),
+            route_search_slot: Arc::default(),
         }
     }
 
     pub async fn snapshot(&self) -> Result<Value, String> {
         if !self.config_path.is_file() {
             return Ok(json!({"configured":false,"config_path":self.config_path,
-                "datasets":[],"jobs":[],"requests":[],"owner_available":true}));
+                "datasets":[],"jobs":[],"requests":[],"routing":{"datasets":[],"jobs":[]},"owner_available":true}));
         }
-        let (_, config) = match load_configuration(&self.config_path) {
+        if crate::local_tiles::catalog::rebind::relocation::pending_path(&self.config_path)
+            .try_exists()
+            .map_err(message)?
+        {
+            return Ok(json!({"configured":true,"config_path":self.config_path,
+                "error":"保存先の変更が中断しています。「データの保存先」で再開してください。","relocation_pending":true,
+                "datasets":[],"jobs":[],"requests":[],"routing":{"datasets":[],"jobs":[]},"owner_available":false}));
+        }
+        let (settings, config) = match load_configuration(&self.config_path) {
             Ok(value) => value,
             Err(error) => {
                 return Ok(json!({"configured":false,"config_path":self.config_path,
-                "error":error,"datasets":[],"jobs":[],"requests":[],"owner_available":false}));
+                    "error":error,"datasets":[],"jobs":[],"requests":[],"routing":{"datasets":[],"jobs":[]},"owner_available":false}));
             },
         };
-        let settings = read_env_json_readonly(&self.config_path).map_err(message)?;
+        let route_snapshot = |requests: &[Value], jobs: &mut Value| {
+            let mut routing = routing::snapshot(&config, requests, jobs);
+            routing["http"] = json!(settings.local_routing_http);
+            routing["allowed_origins"] = json!(settings.osrm_allowed_origins);
+            routing
+        };
         let pool = match open_existing_pool(&settings.database_url, false).await {
             Ok(pool) => pool,
             Err(error) => {
+                let requests =
+                    process::list_receipts(&config, &self.config_path).unwrap_or_default();
+                let mut jobs = json!([]);
+                let routing = route_snapshot(&requests, &mut jobs);
                 return Ok(json!({"configured":true,"config_path":self.config_path,
-                "config":config_value(&config),"error":error,"datasets":[],"jobs":[],
-                "requests":process::list_receipts(&config, &self.config_path)?,"owner_available":false}));
+                "config":config_value(&config),"error":error,"datasets":[],"jobs":jobs,
+                "requests":requests,"routing":routing,"owner_available":false}));
             },
         };
         let result: Result<Value,String> = async {
@@ -70,40 +93,65 @@ impl Manager {
             let mut jobs = execute_reader(Command::JobsList { limit:100, offset:0 }, &config, &pool).await?;
             let mut requests = process::list_receipts(&config, &self.config_path)?;
             overlay_interrupted_jobs(&mut jobs,&mut requests,status["owner_available"]==true);
+            let routing = route_snapshot(&requests, &mut jobs);
             Ok(json!({"configured":true,"config_path":self.config_path,"config":config_value(&config),
                 "owner_available":status["owner_available"],"status":status,
-                "datasets":datasets,"jobs":jobs,"requests":requests}))
+                "datasets":datasets,"jobs":jobs,"requests":requests,"routing":routing}))
         }.await;
         close_pool(&pool).await;
         match result {
             Ok(value) => Ok(value),
             Err(error) => {
-                let requests = process::list_receipts(&config, &self.config_path)?;
-                // 受付直後のworkerと、状態ポーリングの自動診断が同じcatalogの所有者ロックを競合しないようにする。
-                let rebind_active = requests.iter().any(|request| {
-                    request["action"] == "rebind"
-                        && request["state"].as_str().is_some_and(process::active)
-                });
-                let diagnosis = if rebind_active {
-                    None
-                } else {
-                    crate::local_tiles::catalog::rebind::run(
-                        self.config_path.clone(),
-                        crate::local_tiles::catalog::rebind::Request::Inspect,
-                        CancellationToken::new(),
-                    )
-                    .await
-                    .ok()
-                };
+                let requests =
+                    process::list_receipts(&config, &self.config_path).unwrap_or_default();
+                let mut jobs = json!([]);
+                let routing = route_snapshot(&requests, &mut jobs);
                 Ok(
                     json!({"configured":true,"config_path":self.config_path,"config":config_value(&config),"error":error,
-                    "datasets":[],"jobs":[],"requests":requests,"owner_available":false,"rebind":diagnosis}),
+                    "datasets":[],"jobs":jobs,"requests":requests,"routing":routing,"owner_available":false}),
                 )
             },
         }
     }
 
     pub async fn query(&self, action: &str, payload: Value) -> Result<Value, String> {
+        if action == "route_search" {
+            let query = decode::<routing::Search>(payload)?;
+            let (_, config) = load_configuration(&self.config_path)?;
+            let id = query.search_id.unwrap_or_else(uuid::Uuid::new_v4);
+            let token = CancellationToken::new();
+            {
+                let mut active = self.route_search.lock().unwrap();
+                if active.as_ref().is_some_and(|(current, _)| *current == id) {
+                    return Err("同じ検索を実行中です。".into());
+                }
+                if let Some((_, previous)) = active.replace((id, token.clone())) {
+                    previous.cancel();
+                }
+            }
+            let slot = self.route_search_slot.clone().lock_owned().await;
+            let result = tokio::task::spawn_blocking(move || {
+                let _slot = slot;
+                routing::search(&config, query, token)
+            })
+            .await;
+            self.route_search
+                .lock()
+                .unwrap()
+                .take_if(|(current, _)| *current == id);
+            return result
+                .map_err(message)?
+                .map_err(|error| format!("{error:#}"));
+        }
+        if action == "route_search_cancel" {
+            let request = decode::<SearchCancel>(payload)?;
+            let active = self.route_search.lock().unwrap();
+            let cancel = active.as_ref().filter(|(id, _)| *id == request.search_id);
+            if let Some((_, token)) = cancel {
+                token.cancel();
+            }
+            return Ok(json!({"cancel_requested":cancel.is_some()}));
+        }
         if action == "rebind_inspect" || action == "rebind_plan" {
             use crate::local_tiles::catalog::rebind;
             let request = if action == "rebind_inspect" {
@@ -145,6 +193,13 @@ impl Manager {
             _ => return Err("未対応の照会操作です。".into()),
         };
         let (settings, config) = load_configuration(&self.config_path)?;
+        if let Command::Cancel { job } | Command::JobShow { job } = &command {
+            if let Some(result) =
+                routing::job_query(&config, &self.config_path, job, action == "cancel")?
+            {
+                return Ok(result);
+            }
+        }
         let pool = open_existing_pool(&settings.database_url, false).await?;
         let result = execute_reader(command, &config, &pool).await;
         close_pool(&pool).await;
@@ -225,6 +280,11 @@ struct JobQuery {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct SearchCancel {
+    search_id: uuid::Uuid,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct LogQuery {
     request_id: String,
 }
@@ -256,10 +316,10 @@ pub(crate) async fn open_existing_pool(
         .query_pairs()
         .any(|(key, value)| key == "mode" && value == "memory");
     if memory || !options.get_filename().is_file() {
-        return Err(
-            "セットアップ済みの本体DBが見つかりません。管理画面で初期設定を完了してください。"
-                .into(),
-        );
+        return Err(format!(
+            "本体DBを開けません。ドライブを接続するか、「データの保存先」で本体DBを選んでください。 {}",
+            options.get_filename().display()
+        ));
     }
     let pool = SqlitePoolOptions::new()
         .max_connections(2)
@@ -354,6 +414,27 @@ fn overlay_interrupted_jobs(jobs: &mut Value, requests: &mut [Value], owner_avai
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn cancel_only_the_search_selected_by_the_window() {
+        let manager = Manager::new(PathBuf::from("unused"), PathBuf::from("unused"));
+        let current = uuid::Uuid::new_v4();
+        let token = CancellationToken::new();
+        *manager.route_search.lock().unwrap() = Some((current, token.clone()));
+        let old = json!({"search_id":uuid::Uuid::new_v4()});
+        assert_eq!(
+            manager.query("route_search_cancel", old).await.unwrap()["cancel_requested"],
+            false
+        );
+        assert!(!token.is_cancelled());
+        assert_eq!(
+            manager
+                .query("route_search_cancel", json!({"search_id":current}))
+                .await
+                .unwrap()["cancel_requested"],
+            true
+        );
+        assert!(token.is_cancelled());
+    }
     #[tokio::test]
     async fn snapshot_without_setup_does_not_create_config_or_catalog() {
         let root = tempfile::tempdir().unwrap();

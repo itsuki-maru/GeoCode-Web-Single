@@ -26,6 +26,8 @@ PostgreSQL から SQLite を使用することによる差分吸収は **全て�
 
 タイル生成の管理は同じ本体exeの`local-tiles` CLIと、`local-tiles gui`で開く独立したTauri管理画面から行う。管理画面では通常アプリ・HTTPサーバー・タイル配信を起動しない。共通Webフロントに生成管理画面を追加せず、管理HTTP APIも設けない。操作方法は[ローカル地図](docs/LOCAL_TILES.md)を参照する。
 
+同じ管理画面の「経路」タブからOSM PBFを指定すると、非表示ワーカーが普通乗用車・徒歩の両方に対応する道路網を専用SQLiteに構築する。完成世代に対する経路検索は管理画面からTauri IPCで実行し、経路線・距離・静的な所要時間を表示する。背景にはローカルの事前生成済みPNGを利用できる。構築の進捗・取消・履歴はタイル管理画面に統合する。
+
 ## 2. システム構成
 
 ### 2.1 バックエンド
@@ -122,7 +124,7 @@ PostgreSQL から SQLite を使用することによる差分吸収は **全て�
 - `VECTOR_TILE_ALLOWED_ORIGINS`
 - `TILE_PROXY_ALLOWED_ORIGINS`
 - `TILE_SETTINGS_ENCRYPTION_KEY`
-- `OSRM_ALLOWED_ORIGINS`（HTTP・内部ネットワークへの接続例外）
+- `OSRM_ALLOWED_ORIGINS`（設定JSONの `osrm_allowed_origins` から反映する、呼び出し側の接続許可オリジン）
 - `OSRM_ENCRYPTION_KEY`（OSRM暗号鍵の任意の実行時優先指定）
 - `REDIS_URL`
 - `REDIS_CONNECT_TIMEOUT_SECONDS`
@@ -139,7 +141,9 @@ PostgreSQL から SQLite を使用することによる差分吸収は **全て�
 
 AIの配備鍵は設定JSONの `ai_encryption_key` に保存し、通常起動・サーバー単体モードとも未設定・`null` なら補完する。既存の環境変数 `AI_ENCRYPTION_KEY` があれば同じ値を採用し、なければ暗号学的乱数で32バイトを生成してBase64で保存する。実行時は環境変数を優先するが、既存JSON鍵は上書きしない。不正な明示鍵や、全鍵不在で本体DBに暗号化APIキーがある場合は再生成せず拒否する。読み取り専用のタイルCLIでは鍵の生成・保存をしない。`AI_ALLOWED_ORIGINS` は引き続き起動プロセスの環境変数で、配布アプリは `.env` を自動読込しない。[AIの導入](docs/AI_ASSISTANT.md#管理者による導入)を参照する。
 
-OSRMの暗号鍵は32バイトをBase64で表した値とし、設定JSONの `osrm_encryption_key` に保存する。通常起動・サーバー単体モードでは、項目が未指定または `null` の場合に既存の `OSRM_ENCRYPTION_KEY` から補完する。両方が未設定で暗号化済みのOSRM APIキーが存在しない場合は、暗号学的乱数で鍵を生成して設定JSONへ保存する。実行時には環境変数を優先し、保存済みのJSON鍵を保持する。不正な明示鍵や、暗号化済みのAPIキーがある状態で鍵が失われた場合は起動エラーとする。読み取り専用のローカル地図CLIは鍵の生成・保存を行わない。接続例外の `OSRM_ALLOWED_ORIGINS` は起動プロセスの環境変数から読み取る。[OSRMの接続設定](docs/OSRM.md#接続設定)
+OSRMの暗号鍵は32バイトをBase64で表した値とし、設定JSONの `osrm_encryption_key` に保存する。通常起動・サーバー単体モードでは、項目が未指定または `null` の場合に既存の `OSRM_ENCRYPTION_KEY` から補完する。両方が未設定で暗号化済みのOSRM APIキーが存在しない場合は、暗号学的乱数で鍵を生成して設定JSONへ保存する。実行時には環境変数を優先し、保存済みのJSON鍵を保持する。不正な明示鍵や、暗号化済みのAPIキーがある状態で鍵が失われた場合は起動エラーとする。読み取り専用のローカル地図CLIは鍵の生成・保存を行わない。
+
+OSRMの接続例外は、設定JSONの `osrm_allowed_origins` を通常起動・サーバー単体起動時に反映する。新規セットアップ時は空文字列とする。既存の設定JSONに項目が欠けている場合のみ、初回の通常起動またはサーバー単体起動で、起動元の `OSRM_ALLOWED_ORIGINS` に含まれる有効なオリジンをJSONへ移行する。JSONの空文字列と明示的な `null` は接続例外0件を意味する。ローカル経路を配信するSingle版の受信用キーは、配信プロセスの環境変数 `LOCAL_ROUTING_HTTP_API_KEY` に指定する。[OSRMの接続設定](docs/OSRM.md#接続設定)
 
 設定 JSON は `src/model/common.rs` の `ApplicationInitSetup` に対応する。起動時の読み込みは `src/init.rs` の `read_env_json` が行い、環境変数への注入は `src/main.rs` の `apply_env_vars` が行う。
 
@@ -178,7 +182,9 @@ Redisは現在位置共有機能の必須構成ではない。接続がない場
 - `tile_proxy_allowed_origins`（既定空、HTTP・LANの中継先を許可する場合に指定）
 - `tile_settings_encryption_key`（項目省略・`null`の場合は生成して設定JSONへ保存。不正な文字列は起動時に拒否）
 - `ai_encryption_key`（項目省略・`null`の場合は既存の環境変数から継承、または安全を確認して生成・保存。不正な明示鍵は起動時に拒否）
+- `osrm_allowed_origins`（既定は空文字列。OSRMへのHTTP・内部ネットワーク接続を許可するオリジンをカンマ区切りで指定）
 - `osrm_encryption_key`（項目省略・`null`の場合は既存の環境変数から継承、または暗号化済みのOSRM APIキーがないことを確認して生成・保存）
+- `local_routing_http` の `enabled` と `dataset` で、完成済み道路網の表示名を指定して車・徒歩のOSRM互換窓口を有効にできる。既定は無効。`local-tiles gui` の「経路」から配信設定と任意の許可オリジン1件（入力の初期値は `http://127.0.0.1:3000`）を同時に保存できる。Single本体の次回起動で反映し、同名の新しい完成世代は次の検索から利用する。[ローカル道路網の公開設定](docs/OSRM.md#作成済みのローカル道路網を使う)
 - `redis_url`
 - `redis_connect_timeout_seconds`
 - `tile_cache_ttl_seconds`
@@ -1381,7 +1387,9 @@ OSM-Tile-Generatorの生成核を`src/tilegen/`へ移植し、本体の`src/loca
 - 専用workerと有限queueを使い、sessionはworker専用で再利用し、contextはjobごとに作る。オンデマンドと事前生成で描画枠を共有し、個々のHTTP待機期限と共有生成job期限を分ける。実処理終了まで枠を保持し、全起動経路の終了時に取消とworker回収を行う。
 - 事前生成は`local_tile_workers`・タイルqueue容量・購読上限の最小値を投入窓とする有界並列処理とし、完了順で件数を集計する。`local_tile_workers`の既定値は4とし、新規設定・未指定時の補完・環境変数の未指定時で共通の値を使う。既存JSONの明示値は維持する。取消・失敗時は投入を止め、非共有の未開始タイルをキューから除去し、稼働中の実描画を回収してから事前生成枠を解放する。共有HTTPの生成は継続し、最初の失敗原因と回収後の最終件数を保持する。並列数によるDB・描画世代・PNGの変更は行わない。
 - 同じ保存先へのwriterはプロセス間lockにより単一ownerとする。取り込みと事前生成は各1実行、待機枠は共通。実行元不在を確認できたジョブだけを起動時に中断として復旧する。
-- 本体DBの移設は専用の`catalog rebind inspect/prepare/plan/apply`とTauri管理GUIから明示操作する。同じ実ファイル、catalogと対応する元ファイルとの全内容一致、または元の設定暗号鍵で検証した移設前記録を必要とする。計画は15分、移設前記録は7日間有効。適用時に再検査し、catalogの整合バックアップ・専用receiptを作成して対応先2項目だけをtransactionで更新する。通常起動の対応検査、catalog schema v1、全データ・ジョブ履歴・描画識別を維持する。証明なしの強制更新・HTTP経由の更新は提供しない。
+- 管理GUIの「データの保存先」で、本体DBとタイル一式を独立して切り替えられる。内容の異なる対応DB、別ドライブへコピーしたカタログも選択できる。通常の起動・切り替えでは、旧DBとの内容照合、永続的なファイルID、移設記録を要求しない。
+- 標準のタイル構成はフォルダー単位で選択できる。個別に移動した完成DBはデータセットIDに基づいて参照先を更新する。保存先が未接続のときは設定を保持して再選択を案内し、新しいDBは初期設定または明示した作成操作でのみ用意する。
+- CLIの `local-tiles catalog rebind inspect/prepare/plan/apply` は設定JSONを手動更新する場合に利用できる。カタログの対応先2項目をトランザクションで更新し、catalog schema v1・登録・履歴を保持する。
 - CLIは既存JSONと本体DBだけを使用し、共通migration・初期ユーザー作成を実行しない。照会はowner・profile・job状態を変えず、writerは既存ownerと競合したら停止する。別CLIの取消だけは条件付き制御更新とし、実行元がtokenへ反映する。PNG容量は`cache scan`で明示集計する。
 - 背景は通常の同一オリジンラスタ定義として明示追加し、既存背景を自動置換しない。出典を共通地図・共有・印刷へ引き継ぐ。既存外部`/tile/`プロキシ、Redis、revision、z0〜19の契約を維持する。
 - 描画互換性を確認できない旧世代は保存済みPNGだけを配信し、missは410とする。利用停止済みも410。ビルド来歴だけが違う互換世代は同じURLへ生成できる。背景・保存済み共有が参照するデータセットの停止・清掃は拒否し、完成DBと元PBFをキャッシュ清掃で削除しない。

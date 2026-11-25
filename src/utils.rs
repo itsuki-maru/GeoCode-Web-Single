@@ -9,6 +9,31 @@ use std::path::Path;
 use tokio::fs;
 use tokio::io;
 
+/// Windows のジャンクションなど、シンボリックリンク以外の再解析ポイントも含む。
+pub(crate) fn is_link(meta: &std::fs::Metadata) -> bool {
+    if meta.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if meta.file_attributes() & 0x400 != 0 {
+            return true;
+        }
+    }
+    false
+}
+
+/// ワーカーの受付記録や公開済み世代のマニフェストを通常ファイルから読み取る。
+pub(crate) fn read_managed_json<T: serde::de::DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
+    let meta = std::fs::symlink_metadata(path)?;
+    anyhow::ensure!(
+        meta.is_file() && !is_link(&meta) && meta.len() <= 1024 * 1024,
+        "管理ファイルの形式・容量が不正です。"
+    );
+    Ok(serde_json::from_slice(&std::fs::read(path)?)?)
+}
+
 const MIN_PASSWORD_LENGTH: usize = 8;
 const MIN_USERNAME_LENGTH: usize = 3;
 const MAX_USERNAME_LENGTH: usize = 256;

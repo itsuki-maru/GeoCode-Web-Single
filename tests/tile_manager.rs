@@ -72,7 +72,156 @@ async fn keep_configuration_database_and_generation_ownership_unchanged_after_in
         std::fs::read(&settings.sqlite_database_path).unwrap(),
         database_bytes
     );
-    assert!(!Path::new(&settings.tile_catalog_database_path).exists());
+    assert!(Path::new(&settings.tile_catalog_database_path).is_file());
+    assert!(
+        !Path::new(&settings.tile_dataset_path)
+            .join("routing")
+            .exists()
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn use_independent_databases_after_a_drive_move_or_a_same_path_replacement() {
+    use geocode_web_single::local_tiles::catalog::rebind::storage;
+    use std::fs;
+
+    let root = tempfile::tempdir().unwrap();
+    let local = root.path().join("アプリ");
+    let external = root.path().join("外付け #100%");
+    let config = local.join("設定.json");
+    let other_config = external.join("別の設定.json");
+    setup::initialize(&config, form()).await.unwrap();
+    let mut other_form = form();
+    other_form.admin_username = "second-admin".into();
+    setup::initialize(&other_config, other_form).await.unwrap();
+    let settings = geocode_web_single::init::read_env_json_readonly(&config).unwrap();
+    let original = settings.sqlite_database_path;
+    let second = external.join("geocode-web.sqlite");
+    assert_ne!(fs::read(&original).unwrap(), fs::read(&second).unwrap());
+
+    // 旧形式の許可や将来の未知項目を含む既存設定でも、新しい保存先を一度で選択できる。
+    let mut document: Value = serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();
+    document["tile_database_replacement"] = json!({"catalog_file_id":"旧ドライブの識別子"});
+    document["future_option"] = json!({"value": "保持"});
+    fs::write(&config, serde_json::to_vec_pretty(&document).unwrap()).unwrap();
+    let manager = Manager::new(config.clone(), std::env::current_exe().unwrap());
+    let run = |request| storage::run(&config, serde_json::from_value(request).unwrap());
+    let apply = |selection| {
+        let current = run(json!({"action":"current"})).unwrap();
+        run(json!({"action":"apply","expected":current["expected"],"selection":selection})).unwrap()
+    };
+    // 元の本体を外しても、元のカタログを使いながら別内容のDBを選べる。
+    fs::rename(&original, local.join("保管.sqlite")).unwrap();
+    assert!(manager.snapshot().await.unwrap()["error"].is_string());
+    assert_eq!(apply(json!({"database":second}))["state"], "succeeded");
+    assert!(manager.snapshot().await.unwrap()["error"].is_null());
+    let updated: Value = serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();
+    assert!(updated.get("tile_database_replacement").is_none());
+    assert_eq!(updated["future_option"], document["future_option"]);
+    assert_eq!(
+        updated["tile_catalog_database_path"],
+        document["tile_catalog_database_path"]
+    );
+    assert!(!original.exists());
+
+    // 保存先を同じ名前の別ファイルに入れ替えても設定の書き換えは不要。
+    fs::rename(&second, external.join("前の本体.sqlite")).unwrap();
+    fs::copy(local.join("保管.sqlite"), &second).unwrap();
+    assert!(manager.snapshot().await.unwrap()["error"].is_null());
+    let before = fs::read(&config).unwrap();
+    let offline = local.join("取り外したtiles");
+    fs::rename(local.join("tiles"), &offline).unwrap();
+    assert!(manager.snapshot().await.unwrap()["error"].is_string());
+    assert_eq!(fs::read(&config).unwrap(), before);
+    assert!(!local.join("tiles").exists());
+    // 外付け側の別のカタログに切り替える。元のカタログを復元する必要はない。
+    assert_eq!(
+        apply(json!({"tiles":external.join("tiles")}))["state"],
+        "succeeded"
+    );
+    assert!(manager.snapshot().await.unwrap()["error"].is_null());
+    assert!(!local.join("tiles").exists());
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn invalid_or_missing_selected_files_leave_settings_and_existing_databases_intact() {
+    use geocode_web_single::local_tiles::catalog::rebind::storage;
+    use std::fs;
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("設定.json");
+    setup::initialize(&config, form()).await.unwrap();
+    let before = fs::read(&config).unwrap();
+    let unrelated = root.path().join("別形式.sqlite");
+    let db = rusqlite::Connection::open(&unrelated).unwrap();
+    db.execute("CREATE TABLE unrelated (n INTEGER)", [])
+        .unwrap();
+    drop(db);
+    let unrelated_before = fs::read(&unrelated).unwrap();
+    let corrupt = root.path().join("参照の壊れたカタログ.sqlite");
+    fs::copy(root.path().join("tiles/catalog.sqlite"), &corrupt).unwrap();
+    let db = rusqlite::Connection::open(&corrupt).unwrap();
+    db.execute_batch(
+        r#"
+        PRAGMA foreign_keys = OFF;
+        INSERT INTO local_tile_render_profiles (id, dataset_id, build_id, info_json, retired)
+        VALUES ('profile', 'missing-dataset', 'build', '{}', FALSE);
+        "#,
+    )
+    .unwrap();
+    drop(db);
+    let run = |request| storage::run(&config, serde_json::from_value(request).unwrap());
+    let current = run(json!({"action":"current"})).unwrap();
+    let missing = root.path().join("未接続").join("tiles");
+    for selection in [
+        json!({"database":unrelated}),
+        json!({"catalog":unrelated}),
+        json!({"catalog":corrupt}),
+        json!({"tiles":missing}),
+    ] {
+        assert!(
+            run(json!({"action":"apply","expected":current["expected"],"selection":selection}))
+                .is_err()
+        );
+    }
+    assert!(!missing.exists());
+    assert_eq!(fs::read(&config).unwrap(), before);
+    assert_eq!(fs::read(&unrelated).unwrap(), unrelated_before);
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn create_a_catalog_only_after_explicitly_choosing_an_empty_location() {
+    use geocode_web_single::local_tiles::catalog::rebind::storage;
+    use std::fs;
+
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("設定.json");
+    setup::initialize(&config, form()).await.unwrap();
+    let tiles = root.path().join("tiles");
+    fs::rename(&tiles, root.path().join("元のカタログ")).unwrap();
+    let run = |request| storage::run(&config, serde_json::from_value(request).unwrap());
+    let current = run(json!({"action":"current"})).unwrap();
+    assert_eq!(current["can_initialize_catalog"], true);
+    assert!(!tiles.exists());
+    let initialize = json!({"action":"initialize_catalog","expected":current["expected"]});
+
+    // 元のSQLiteに付随するファイルが残っているときは、空の管理DBを重ねない。
+    fs::create_dir(&tiles).unwrap();
+    let wal = tiles.join("catalog.sqlite-wal");
+    fs::write(&wal, b"existing journal").unwrap();
+    assert!(run(initialize.clone()).is_err());
+    assert!(!tiles.join("catalog.sqlite").exists());
+    assert_eq!(fs::read(&wal).unwrap(), b"existing journal");
+    fs::remove_file(wal).unwrap();
+    fs::write(tiles.join("catalog.sqlite.owner.lock"), b"").unwrap();
+
+    assert_eq!(run(initialize.clone()).unwrap()["state"], "succeeded");
+    assert!(tiles.join("catalog.sqlite").is_file());
+    assert!(run(initialize).is_err());
+    let manager = Manager::new(config, std::env::current_exe().unwrap());
+    assert!(manager.snapshot().await.unwrap()["error"].is_null());
 }
 
 #[cfg(windows)]
@@ -202,6 +351,93 @@ async fn complete_independent_worker_jobs_after_dropping_the_manager_and_support
     let resumed = terminal(&manager, &resume_id).await;
     assert_eq!(resumed["state"], "succeeded", "{resumed}");
     assert_eq!(manager.snapshot().await.unwrap()["owner_available"], true);
+    cleanup.finish().unwrap();
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn routing_worker_reconnects_and_publishes_only_complete_generations() {
+    let exe = std::env::var_os("GEOCODE_TILE_MANAGER_TEST_EXE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| Path::new(env!("CARGO_BIN_EXE_geocode_web_single")).to_owned());
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("設定.json");
+    setup::initialize(&config, form()).await.unwrap();
+    let input = root.path().join("市街地.osm.pbf");
+    fixture::write_inputs(&input, &root.path().join("unused.xml"));
+    let manager = Manager::new(config.clone(), exe.clone());
+    let mut cleanup = worker_cleanup::WorkerCleanup::new(&config, &exe).unwrap();
+    let id = uuid::Uuid::new_v4().to_string();
+    let payload = json!({"name":"市街地","input_path":input});
+    cleanup
+        .submit(&manager, "route_build", payload.clone(), id.clone())
+        .await
+        .unwrap();
+    drop(manager);
+    let manager = Manager::new(config, exe);
+    let receipt = terminal(&manager, &id).await;
+    assert_eq!(receipt["state"], "succeeded", "{receipt}");
+    assert_eq!(receipt["result"]["dataset_id"], id);
+    assert_eq!(
+        manager
+            .submit("route_build", payload.clone(), id.clone())
+            .await
+            .unwrap()["id"],
+        id
+    );
+    assert!(
+        manager
+            .submit(
+                "route_build",
+                json!({"name":"別条件","input_path":input}),
+                id.clone()
+            )
+            .await
+            .is_err()
+    );
+    let route = |dataset: &str| {
+        json!({"dataset":dataset,"mode":"car",
+        "start":{"lat":35.7,"lon":139.699},"end":{"lat":35.701,"lon":139.701}})
+    };
+    let path = manager.query("route_search", route(&id)).await.unwrap();
+    assert!(path["distance_m"].as_f64().unwrap() > 100.);
+    let second_id = uuid::Uuid::new_v4().to_string();
+    cleanup
+        .submit(&manager, "route_build", payload.clone(), second_id.clone())
+        .await
+        .unwrap();
+    let receipt = terminal(&manager, &second_id).await;
+    assert_eq!(receipt["state"], "succeeded", "{receipt}");
+    let snapshot = manager.snapshot().await.unwrap();
+    let datasets = snapshot["routing"]["datasets"].as_array().unwrap();
+    assert_eq!(datasets.len(), 1);
+    assert_eq!(datasets[0]["id"], second_id);
+    assert_eq!(snapshot["routing"]["jobs"].as_array().unwrap().len(), 2);
+    assert_eq!(snapshot["datasets"], json!([]));
+    assert_eq!(
+        manager.query("route_search", route(&id)).await.unwrap(),
+        path
+    );
+    let third_id = uuid::Uuid::new_v4().to_string();
+    cleanup
+        .submit(&manager, "route_build", payload, third_id.clone())
+        .await
+        .unwrap();
+    let _ = manager
+        .query("cancel", json!({"job":third_id}))
+        .await
+        .unwrap();
+    let receipt = terminal(&manager, &third_id).await;
+    assert!(
+        matches!(receipt["state"].as_str(), Some("cancelled" | "succeeded")),
+        "{receipt}"
+    );
+    if receipt["state"] == "cancelled" {
+        assert_eq!(
+            manager.snapshot().await.unwrap()["routing"]["datasets"][0]["id"],
+            second_id
+        );
+    }
     cleanup.finish().unwrap();
 }
 

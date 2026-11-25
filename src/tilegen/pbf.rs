@@ -157,7 +157,7 @@ impl<R: Read> Read for HashedReader<R> {
 /// フレーム構造と圧縮形式の検証後に無視する。Relationは実体化しない。
 /// 各圧縮ブロックは一度だけ展開する。
 pub fn scan(path: &Path, visitor: impl FnMut(Object) -> Result<()>) -> Result<ScanReport> {
-    scan_with_check(path, visitor, || Ok(()))
+    scan_with_check(path, visitor, || Ok(()), |_, _| {})
 }
 
 /// 操作単位の取り込みに使う、検査付きの走査。
@@ -166,8 +166,9 @@ pub(crate) fn scan_with_check(
     path: &Path,
     visitor: impl FnMut(Object) -> Result<()>,
     check: impl FnMut() -> Result<()>,
+    frame_done: impl FnMut(u64, u64),
 ) -> Result<ScanReport> {
-    scan_selected(path, visitor, check, false, false)
+    scan_selected(path, visitor, check, frame_done, Selection::Roads)
 }
 
 /// 新形式だけが使用する、Relationを含む上限付き走査。
@@ -175,8 +176,9 @@ pub(crate) fn scan_all_with_check(
     path: &Path,
     visitor: impl FnMut(Object) -> Result<()>,
     check: impl FnMut() -> Result<()>,
+    frame_done: impl FnMut(u64, u64),
 ) -> Result<ScanReport> {
-    scan_selected(path, visitor, check, true, false)
+    scan_selected(path, visitor, check, frame_done, Selection::Features)
 }
 
 /// 旧走査のNode型や割当量を変えず、名称に必要なNodeタグだけを追加取得する。
@@ -184,19 +186,51 @@ pub(crate) fn scan_with_node_tags_with_check(
     path: &Path,
     visitor: impl FnMut(Object) -> Result<()>,
     check: impl FnMut() -> Result<()>,
+    frame_done: impl FnMut(u64, u64),
 ) -> Result<ScanReport> {
-    scan_selected(path, visitor, check, false, true)
+    scan_selected(path, visitor, check, frame_done, Selection::Labels)
+}
+
+/// 経路取り込みの1回目で道路と規制を読み、ノード検証は同じ入力の2回目で行う。
+pub(crate) fn scan_routing_ways(
+    path: &Path,
+    visitor: impl FnMut(Object) -> Result<()>,
+    check: impl FnMut() -> Result<()>,
+    frame_done: impl FnMut(u64, u64),
+) -> Result<ScanReport> {
+    scan_selected(path, visitor, check, frame_done, Selection::RoutingWays)
+}
+
+/// 経路グラフで使用するノードのタグを走査する。バリアや車種別の条件も保持する。
+pub(crate) fn scan_routing_nodes(
+    path: &Path,
+    visitor: impl FnMut(Object) -> Result<()>,
+    check: impl FnMut() -> Result<()>,
+    frame_done: impl FnMut(u64, u64),
+) -> Result<ScanReport> {
+    scan_selected(path, visitor, check, frame_done, Selection::RoutingNodes)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Selection {
+    Roads,
+    Features,
+    Labels,
+    RoutingWays,
+    RoutingNodes,
 }
 
 fn scan_selected(
     path: &Path,
     mut visitor: impl FnMut(Object) -> Result<()>,
     mut check: impl FnMut() -> Result<()>,
-    relations: bool,
-    node_tags: bool,
+    mut frame_done: impl FnMut(u64, u64),
+    selection: Selection,
 ) -> Result<ScanReport> {
     check()?;
     let file = File::open(path).with_context(|| format!("opening PBF {}", path.display()))?;
+    let file_bytes = file.metadata()?.len();
+    frame_done(0, file_bytes);
     let mut reader = HashedReader {
         inner: BufReader::new(file),
         hash: Sha256::new(),
@@ -230,13 +264,13 @@ fn scan_selected(
                     dense_enabled,
                     &mut visitor,
                     &mut check,
-                    relations,
-                    node_tags,
+                    selection,
                 )
                 .with_context(|| format!("PBF frame {frame}: invalid OSMData"))?;
             },
             _ => {},
         }
+        frame_done(reader.bytes, file_bytes);
     }
     ensure!(seen_header, "PBF does not contain an OSMHeader");
     check()?;
@@ -416,7 +450,12 @@ fn visit_block_selected(
     check: &mut impl FnMut() -> Result<()>,
     relations: bool,
 ) -> Result<()> {
-    visit_block_selected_with_tags(block, dense_enabled, visitor, check, relations, false)
+    let selection = if relations {
+        Selection::Features
+    } else {
+        Selection::Roads
+    };
+    visit_block_selected_with_tags(block, dense_enabled, visitor, check, selection)
 }
 
 fn selected_node_tag(key: &str) -> bool {
@@ -450,10 +489,14 @@ fn visit_block_selected_with_tags(
     dense_enabled: bool,
     visitor: &mut impl FnMut(Object) -> Result<()>,
     check: &mut impl FnMut() -> Result<()>,
-    relations: bool,
-    node_tags: bool,
+    selection: Selection,
 ) -> Result<()> {
     check()?;
+    let node_tags: Option<fn(&str) -> bool> = match selection {
+        Selection::Labels => Some(selected_node_tag),
+        Selection::RoutingNodes => Some(|_| true),
+        _ => None,
+    };
     ensure!(block.granularity() > 0, "invalid coordinate granularity");
     let strings = &block
         .stringtable
@@ -466,7 +509,12 @@ fn visit_block_selected_with_tags(
     );
     for group in &block.primitivegroup {
         check()?;
-        for node in &group.nodes {
+        let nodes = if selection == Selection::RoutingWays {
+            &[][..]
+        } else {
+            group.nodes.as_slice()
+        };
+        for node in nodes {
             check()?;
             validate_tags(&node.keys, &node.vals, strings, check)?;
             ensure!(
@@ -481,11 +529,11 @@ fn visit_block_selected_with_tags(
                 lon: coordinate(node.lon(), block.lon_offset(), block.granularity(), 180.0)?,
                 lat: coordinate(node.lat(), block.lat_offset(), block.granularity(), 90.0)?,
             };
-            if node_tags {
+            if let Some(select) = node_tags {
                 let mut tags = BTreeMap::new();
                 for (key, value) in node.keys.iter().zip(&node.vals) {
                     let key = string(strings, *key)?;
-                    if selected_node_tag(key) {
+                    if select(key) {
                         let value = string(strings, *value)?;
                         let value = if value.len() <= 4096 { value } else { "\u{7f}" };
                         ensure!(
@@ -502,7 +550,9 @@ fn visit_block_selected_with_tags(
                 visitor(Object::Node(node_value))?;
             }
         }
-        if let Some(dense) = group.dense.as_ref() {
+        if selection != Selection::RoutingWays
+            && let Some(dense) = group.dense.as_ref()
+        {
             ensure!(
                 dense_enabled,
                 "DenseNodes data is missing the required feature declaration"
@@ -560,7 +610,7 @@ fn visit_block_selected_with_tags(
                         ensure!(key > 0 && value >= 0, "negative DenseNode string index");
                         let key = string(strings, key as u32)?;
                         let value = string(strings, value as u32)?;
-                        if node_tags && selected_node_tag(key) {
+                        if node_tags.is_some_and(|select| select(key)) {
                             let value = if value.len() <= 4096 { value } else { "\u{7f}" };
                             ensure!(
                                 tags.insert(key.to_owned(), value.to_owned()).is_none(),
@@ -574,7 +624,7 @@ fn visit_block_selected_with_tags(
                     lon: coordinate(lon, block.lon_offset(), block.granularity(), 180.0)?,
                     lat: coordinate(lat, block.lat_offset(), block.granularity(), 90.0)?,
                 };
-                if node_tags {
+                if node_tags.is_some() {
                     visitor(Object::TaggedNode(TaggedNode {
                         node: node_value,
                         tags,
@@ -588,7 +638,12 @@ fn visit_block_selected_with_tags(
                 "extra DenseNode tag data"
             );
         }
-        for way in &group.ways {
+        let ways = if selection == Selection::RoutingNodes {
+            &[][..]
+        } else {
+            group.ways.as_slice()
+        };
+        for way in ways {
             check()?;
             ensure!(
                 way.refs.len() <= MAX_WAY_NODES,
@@ -633,7 +688,7 @@ fn visit_block_selected_with_tags(
                 tags,
             }))?;
         }
-        if relations {
+        if matches!(selection, Selection::Features | Selection::RoutingWays) {
             for relation in &group.relations {
                 check()?;
                 let count = relation.memids.len();
@@ -769,6 +824,7 @@ mod checked_tests {
                     .any(|object| matches!(object, Object::TaggedNode(_)))
             );
             let mut tagged = Vec::new();
+            let mut frames = Vec::new();
             let after = scan_with_node_tags_with_check(
                 &path,
                 |object| {
@@ -778,7 +834,16 @@ mod checked_tests {
                     Ok(())
                 },
                 || Ok(()),
+                |done, total| frames.push((done, total)),
             )?;
+            let size = std::fs::metadata(&path)?.len();
+            assert_eq!(frames.first(), Some(&(0, size)));
+            assert_eq!(frames.last(), Some(&(size, size)));
+            assert!(
+                frames
+                    .windows(2)
+                    .all(|pair| pair[0].0 < pair[1].0 && pair[1].1 == size)
+            );
             assert_eq!(before.source_sha256, after.source_sha256);
             assert_eq!(
                 tagged[0].tags.get("name:ja").map(String::as_str),
@@ -834,6 +899,7 @@ mod checked_tests {
                         Ok(())
                     },
                     || Ok(()),
+                    |_, _| {},
                 )?;
                 assert_eq!(a.source_sha256, b.source_sha256);
                 let relations: Vec<_> = new

@@ -145,7 +145,7 @@ fn png_only_override_does_not_change_catalog_default() {
 }
 
 #[test]
-fn catalog_path_cannot_overlap_storage_roots_or_be_a_directory() {
+fn catalog_path_is_validated_without_needing_the_original_drive_contents() {
     let dir = TestDirectory::new();
     dir.write(required_settings());
     let setup = read_env_json(&dir.0).unwrap();
@@ -174,6 +174,8 @@ fn catalog_path_cannot_overlap_storage_roots_or_be_a_directory() {
     assert!(LocalTileConfig::from_setup(&value).is_err());
     assert!(LocalTileConfig::from_setup(&setup).is_ok());
     assert!(!dir.0.join("tiles").exists());
+    std::fs::create_dir_all(&setup.tile_catalog_database_path).unwrap();
+    assert!(read_env_json(&dir.0).is_ok());
 }
 
 fn dataset(id: &str) -> DatasetRecord {

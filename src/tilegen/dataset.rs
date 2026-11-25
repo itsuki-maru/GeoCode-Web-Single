@@ -198,7 +198,7 @@ enum FileIdentity {
     Unix { device: u64, inode: u64 },
     #[cfg(windows)]
     Windows { volume: u32, index: u64 },
-    #[cfg(not(any(unix, windows)))]
+    #[cfg(not(unix))]
     Unavailable,
 }
 
@@ -321,7 +321,12 @@ fn windows_file_identity(file: &File) -> std::io::Result<FileIdentity> {
     // BY_HANDLE_FILE_INFORMATIONと同じ配置で、この呼び出し中も書き込み可能である。
     let success = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) };
     if success == 0 {
-        return Err(std::io::Error::last_os_error());
+        let error = std::io::Error::last_os_error();
+        // 媒体が識別情報を提供しない場合も、サイズ・更新時刻と開いたDBのメタデータを検証する。
+        if matches!(error.raw_os_error(), Some(1 | 50 | 87)) {
+            return Ok(FileIdentity::Unavailable);
+        }
+        return Err(error);
     }
     Ok(FileIdentity::Windows {
         volume: information.volume_serial,

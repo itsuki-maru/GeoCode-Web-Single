@@ -7,8 +7,9 @@ use std::{
 use tokio::sync::{Mutex, Semaphore, SemaphorePermit};
 
 mod osrm;
+pub(crate) mod osrm_origins;
 
-pub use osrm::Osrm;
+pub use osrm::{LocalRoutingListener, Osrm};
 pub(crate) use osrm::{compute_osrm, osrm_admin_check, osrm_admin_get, osrm_admin_update};
 
 const MAX_REQUESTS_PER_ACCOUNT: u32 = 10;

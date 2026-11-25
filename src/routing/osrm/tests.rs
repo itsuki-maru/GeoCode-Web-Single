@@ -51,6 +51,44 @@ async fn serve(mock: Router) -> (String, JoinHandle<()>) {
     (url, task)
 }
 
+#[test]
+fn local_listener_matches_only_its_own_endpoint_for_the_requested_mode() {
+    let listener = LocalRoutingListener("127.0.0.1:3000".parse().unwrap());
+    for (mode, endpoint) in [
+        (TravelMode::Drive, "http://127.0.0.1:3000/local-routing/car"),
+        (TravelMode::Walk, "http://127.0.0.1:3000/local-routing/foot"),
+        (
+            TravelMode::Walk,
+            "http://localhost:3000/local-routing/foot/",
+        ),
+    ] {
+        assert!(listener.serves(&Url::parse(endpoint).unwrap(), mode));
+    }
+    for endpoint in [
+        "http://127.0.0.1:4000/local-routing/car",
+        "http://osrm.example:3000/local-routing/car",
+        "http://192.0.2.1:3000/local-routing/car",
+        "https://127.0.0.1:3000/local-routing/car",
+        "http://127.0.0.1:3000/other/local-routing/car",
+        "http://127.0.0.1:3000/local-routing/car-extra",
+        "http://127.0.0.1:3000/local-routing/foot",
+    ] {
+        assert!(
+            !listener.serves(&Url::parse(endpoint).unwrap(), TravelMode::Drive),
+            "{endpoint}"
+        );
+    }
+    for (address, endpoint) in [
+        ("0.0.0.0:3000", "http://127.0.0.1:3000/local-routing/car"),
+        ("[::]:4000", "http://[::1]:4000/local-routing/car"),
+    ] {
+        assert!(
+            LocalRoutingListener(address.parse().unwrap())
+                .serves(&Url::parse(endpoint).unwrap(), TravelMode::Drive)
+        );
+    }
+}
+
 #[tokio::test]
 async fn route_requests_use_each_mode_endpoint_and_longitude_first() {
     let calls = Arc::new(Mutex::new(Vec::new()));
@@ -80,7 +118,14 @@ async fn route_requests_use_each_mode_endpoint_and_longitude_first() {
         let request = input(mode);
         let endpoint = service.upstream.validate_base_url(&url).unwrap();
         let found = service
-            .fetch_route(&endpoint, mode, &request.origin, &request.destination, None)
+            .fetch_route(
+                &endpoint,
+                mode,
+                &request.origin,
+                &request.destination,
+                None,
+                None,
+            )
             .await
             .unwrap()
             .unwrap();
@@ -99,8 +144,9 @@ async fn route_requests_use_each_mode_endpoint_and_longitude_first() {
         calls[1].path(),
         "/routed-foot/route/v1/foot/139.767125,35.681235;139.769000,35.684000"
     );
+    let external_query = format!("{ROUTE_QUERY}&radiuses=100;100");
     for call in calls.iter() {
-        assert_eq!(call.query(), Some(ROUTE_QUERY));
+        assert_eq!(call.query(), Some(external_query.as_str()));
     }
     drive_server.abort();
     walk_server.abort();
@@ -176,6 +222,7 @@ async fn upstream_responses_distinguish_no_route_and_failures() {
                 &input.origin,
                 &input.destination,
                 None,
+                None,
             )
             .await
         {
@@ -213,6 +260,7 @@ async fn upstream_timeout_is_reported_as_a_gateway_failure() {
             &request.origin,
             &request.destination,
             None,
+            None,
         )
         .await;
     assert!(matches!(
@@ -231,11 +279,16 @@ async fn compute_checks_input_background_and_modes_before_calling_osrm() {
         INSERT INTO tileserver_model (
             id, layer_name, label, url, attribution, create_at, updated_at,
             provider, google_map_type, kind, style_url, enabled
-        ) VALUES
-            (1, 'osm', 'OSM', '/tile/{z}/{x}/{y}', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'generic', NULL, 'raster', NULL, true),
-            (2, 'google', 'Google', '/google-maps/tiles/{z}/{x}/{y}', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'google', 'roadmap', 'raster', NULL, true),
-            (3, 'disabled', 'Disabled', '/tile/{z}/{x}/{y}', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'generic', NULL, 'raster', NULL, false),
-            (4, 'vector', 'Vector', '', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'generic', NULL, 'vector', '/style.json', true)
+        )
+        VALUES
+            (1, 'osm', 'OSM', '/tile/{z}/{x}/{y}', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+             'generic', NULL, 'raster', NULL, true),
+            (2, 'google', 'Google', '/google-maps/tiles/{z}/{x}/{y}', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+             'google', 'roadmap', 'raster', NULL, true),
+            (3, 'disabled', 'Disabled', '/tile/{z}/{x}/{y}', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+             'generic', NULL, 'raster', NULL, false),
+            (4, 'vector', 'Vector', '', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+             'generic', NULL, 'vector', '/style.json', true)
         "#,
     )
     .execute(&pool)
@@ -261,6 +314,7 @@ async fn compute_checks_input_background_and_modes_before_calling_osrm() {
             Extension(account.clone()),
             Extension(pool.clone()),
             Extension(service.clone()),
+            None,
             Json(input),
         )
     };
@@ -269,12 +323,20 @@ async fn compute_checks_input_background_and_modes_before_calling_osrm() {
         compute(input(TravelMode::Drive)).await,
         Err(AppError::Forbidden(_))
     ));
-    sqlx::query("UPDATE osrm_settings SET revision = $1, drive_base_url = $2 WHERE id = 1")
-        .bind(Uuid::new_v4().to_string())
-        .bind(Url::parse(&url).unwrap().as_str())
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE osrm_settings
+        SET
+            revision = $1,
+            drive_base_url = $2
+        WHERE id = 1
+        "#,
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(Url::parse(&url).unwrap().as_str())
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(
         service.available_modes(&pool).await.unwrap(),
         [TravelMode::Drive]
@@ -317,6 +379,107 @@ async fn settings_body(response: impl IntoResponse) -> Value {
     assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
     let body = to_bytes(response.into_body(), 4096).await.unwrap();
     serde_json::from_slice(&body).unwrap()
+}
+
+#[tokio::test]
+async fn published_local_graph_supports_admin_checks_saved_settings_and_both_route_modes() {
+    let api_key = "local-routing-integration-key";
+    let (_dataset, provider) = crate::local_routing::http::app_with_graph(Some(api_key.into()));
+    let (url, server) = serve(provider).await;
+    let local = LocalRoutingListener(url.strip_prefix("http://").unwrap().parse().unwrap());
+    let encryption_key = STANDARD.encode([7; 32]);
+    let service = Arc::new(Osrm::new(
+        UpstreamPolicy::new(Some(&url)),
+        Some(&encryption_key),
+    ));
+    let pool = test_pool().await;
+    let admin =
+        crate::db::create_user_with_master_layer(&pool, "local-routing-admin", "test-hash", true)
+            .await
+            .unwrap()
+            .id;
+    sqlx::query(
+        r#"
+        INSERT INTO tileserver_model (
+            id, layer_name, label, url, attribution, create_at, updated_at
+        )
+        VALUES (
+            1, 'osm', 'OSM', '/tile/{z}/{x}/{y}', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let start = json!({"lat":35.7, "lng":139.699});
+    // 目的地を道路の北端から約300 m離し、車・徒歩でローカル配信の検索半径を確認する。
+    let end = json!({"lat":35.7037, "lng":139.701});
+    let key = json!({"action":"set", "apiKey":api_key});
+    let drive = format!("{url}/local-routing/car");
+    let walk = format!("{url}/local-routing/foot");
+
+    for (mode, base) in [(TravelMode::Drive, &drive), (TravelMode::Walk, &walk)] {
+        let candidate = json!({"revision":null, "travelMode":mode, "baseUrl":base,
+                              "key":key, "origin":start, "destination":end});
+        let response = osrm_admin_check(
+            Extension(admin.clone()),
+            Extension(pool.clone()),
+            Extension(service.clone()),
+            Some(Extension(local)),
+            Ok(Json(serde_json::from_value(candidate).unwrap())),
+        )
+        .await
+        .unwrap();
+        assert_eq!(settings_body(response).await, json!({"routeFound":true}));
+    }
+    let settings = json!({"revision":null,
+        "drive":{"baseUrl":drive, "key":key}, "walk":{"baseUrl":walk, "key":key}});
+    let saved = osrm_admin_update(
+        Extension(admin.clone()),
+        Extension(pool.clone()),
+        Extension(service.clone()),
+        Ok(Json(serde_json::from_value(settings).unwrap())),
+    )
+    .await
+    .unwrap();
+    let saved = settings_body(saved).await;
+    assert_eq!(saved["drive"]["baseUrl"], drive);
+    assert_eq!(saved["walk"]["baseUrl"], walk);
+    assert_eq!(
+        service.available_modes(&pool).await.unwrap(),
+        [TravelMode::Drive, TravelMode::Walk]
+    );
+
+    let compute = |mode: TravelMode, origin: &Value, destination: &Value| {
+        let query = json!({"backgroundId":1, "travelMode":mode, "origin":origin, "destination":destination});
+        compute_osrm(
+            Extension(admin.clone()),
+            Extension(pool.clone()),
+            Extension(service.clone()),
+            Some(Extension(local)),
+            Json(serde_json::from_value(query).unwrap()),
+        )
+    };
+    let car = settings_body(compute(TravelMode::Drive, &start, &end).await.unwrap()).await;
+    let foot = settings_body(compute(TravelMode::Walk, &start, &end).await.unwrap()).await;
+    for response in [&car, &foot] {
+        assert!(response["route"]["distanceMeters"].as_u64().unwrap() > 200);
+        assert!(response["route"]["encodedPolyline"].as_str().unwrap().len() > 8);
+    }
+    assert!(
+        car["route"]["durationSeconds"].as_f64().unwrap()
+            < foot["route"]["durationSeconds"].as_f64().unwrap()
+    );
+    let reverse_car = settings_body(compute(TravelMode::Drive, &end, &start).await.unwrap()).await;
+    assert_eq!(reverse_car["route"], Value::Null);
+    let reverse_foot = settings_body(compute(TravelMode::Walk, &end, &start).await.unwrap()).await;
+    assert!(reverse_foot["route"]["distanceMeters"].as_u64().unwrap() > 200);
+    let outside = json!({"lat":35.70551, "lng":139.701});
+    for mode in [TravelMode::Drive, TravelMode::Walk] {
+        let no_segment = settings_body(compute(mode, &start, &outside).await.unwrap()).await;
+        assert_eq!(no_segment["route"], Value::Null);
+    }
+    server.abort();
 }
 
 async fn mode_key(
@@ -442,7 +605,13 @@ async fn managed_keys_are_scoped_to_modes_and_changes_take_effect_without_restar
     assert!(!saved.to_string().contains(drive_key));
     assert!(!saved.to_string().contains(walk_key));
     let (encrypted_drive, encrypted_walk): (Vec<u8>, Vec<u8>) = sqlx::query_as(
-        "SELECT encrypted_drive_key, encrypted_walk_key FROM osrm_settings WHERE id = 1",
+        r#"
+        SELECT
+            encrypted_drive_key,
+            encrypted_walk_key
+        FROM osrm_settings
+        WHERE id = 1
+        "#,
     )
     .fetch_one(&pool)
     .await
@@ -459,7 +628,13 @@ async fn managed_keys_are_scoped_to_modes_and_changes_take_effect_without_restar
     );
     // URL列を追加する以前の設定行を再現する。
     sqlx::query(
-        "UPDATE osrm_settings SET drive_base_url = NULL, walk_base_url = NULL WHERE id = 1",
+        r#"
+        UPDATE osrm_settings
+        SET
+            drive_base_url = NULL,
+            walk_base_url = NULL
+        WHERE id = 1
+        "#,
     )
     .execute(&pool)
     .await
@@ -500,11 +675,16 @@ async fn managed_keys_are_scoped_to_modes_and_changes_take_effect_without_restar
     .await;
     assert_eq!(saved["drive"]["baseUrl"], drive_url);
     assert_eq!(saved["drive"]["keyUsable"], true);
-    let retained: Vec<u8> =
-        sqlx::query_scalar("SELECT encrypted_drive_key FROM osrm_settings WHERE id = 1")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let retained: Vec<u8> = sqlx::query_scalar(
+        r#"
+        SELECT encrypted_drive_key
+        FROM osrm_settings
+        WHERE id = 1
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(retained, encrypted_drive);
     assert_eq!(
         mode_key(&pool, TravelMode::Drive, &second_process)
@@ -663,15 +843,23 @@ async fn connection_check_uses_candidate_key_without_changing_saved_settings() {
     .await;
     sqlx::query(
         r#"
-        INSERT INTO tileserver_model (id, layer_name, label, url, attribution, create_at, updated_at)
-        VALUES (1, 'osm', 'OSM', '/tile/{z}/{x}/{y}', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        INSERT INTO tileserver_model (
+            id, layer_name, label, url, attribution, create_at, updated_at
+        )
+        VALUES (
+            1, 'osm', 'OSM', '/tile/{z}/{x}/{y}', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        )
         "#,
-    ).execute(&pool).await.unwrap();
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     let normal_route = |service: Arc<Osrm>| {
         compute_osrm(
             Extension(admin.clone()),
             Extension(pool.clone()),
             Extension(service),
+            None,
             Json(input(TravelMode::Drive)),
         )
     };
@@ -684,6 +872,7 @@ async fn connection_check_uses_candidate_key_without_changing_saved_settings() {
             Extension(admin.clone()),
             Extension(pool.clone()),
             Extension(service),
+            None,
             Ok(Json(
                 serde_json::from_value(json!({
                     "revision": saved["revision"], "travelMode": "DRIVE", "baseUrl": base_url,

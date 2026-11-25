@@ -1,5 +1,6 @@
 use crate::{
     error::AppError,
+    routing::osrm_origins,
     tile_upstream::{PublicDns, is_public_ip},
 };
 use reqwest::{Client, Url, redirect::Policy};
@@ -23,24 +24,8 @@ impl UpstreamPolicy {
     }
 
     pub(super) fn with_timeout(origins: Option<&str>, timeout: Duration) -> Self {
-        let allowed_origins = origins
-            .unwrap_or_default()
-            .split(',')
-            .map(str::trim)
-            .filter(|entry| !entry.is_empty())
-            .filter_map(|entry| match Url::parse(entry) {
-                Ok(url)
-                    if matches!(url.scheme(), "http" | "https")
-                        && url.port() != Some(0)
-                        && url.origin().ascii_serialization() == entry =>
-                {
-                    Some(entry.to_owned())
-                },
-                _ => {
-                    tracing::warn!("Ignoring invalid OSRM_ALLOWED_ORIGINS entry");
-                    None
-                },
-            })
+        let allowed_origins = osrm_origins::allowed(origins.unwrap_or_default())
+            .map(str::to_owned)
             .collect();
         let client = || {
             Client::builder()
@@ -109,7 +94,7 @@ impl UpstreamPolicy {
             || host.parse::<IpAddr>().is_ok_and(|ip| !is_public_ip(ip))
         {
             return Err(AppError::Validation(
-                "HTTPまたは非公開のOSRM接続先は、サーバーのOSRM_ALLOWED_ORIGINSで許可してください。"
+                "HTTPまたは非公開のOSRM接続先は、設定JSONのosrm_allowed_originsで許可してください。"
                     .into(),
             ));
         }

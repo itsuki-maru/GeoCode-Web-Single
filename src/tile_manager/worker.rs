@@ -176,6 +176,18 @@ async fn execute_operation(
     receipt: &mut Receipt,
 ) -> Result<Value, String> {
     let accepted = match operation {
+        Operation::RouteBuild(build) => {
+            service.prepare_import_storage().await.map_err(failure)?;
+            let config = service.config.clone();
+            let paths = paths.clone();
+            let build = build.clone();
+            let receipt = receipt.clone();
+            return tokio::task::spawn_blocking(move || {
+                super::routing::build(&config, &build, &paths, receipt)
+            })
+            .await
+            .map_err(message)?;
+        },
         Operation::Import(request) => Some(
             service
                 .start_import(request.clone())
