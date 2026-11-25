@@ -26,8 +26,6 @@ pub struct Config {
     pub allow_origins: String,
     pub http_image_allowed_origins: Vec<String>,
     pub vector_tile_allowed_origins: Vec<String>,
-    pub tile_server_base_url: Option<String>,
-    pub tile_server_api_key: Option<String>,
     pub redis_url: Option<String>,
     pub redis_connect_timeout_seconds: u64,
     pub tile_cache_ttl_seconds: u64,
@@ -97,8 +95,6 @@ pub static CONFIG: Lazy<Config> = Lazy::new(|| Config {
         env::var("VECTOR_TILE_ALLOWED_ORIGINS").ok().as_deref(),
     )
     .unwrap_or_else(|message| panic!("Invalid VECTOR_TILE_ALLOWED_ORIGINS: {message}")),
-    tile_server_base_url: env::var("TILE_SERVER_BASE_URL").ok(),
-    tile_server_api_key: env::var("TILE_SERVER_API_KEY").ok(),
     redis_url: env::var("REDIS_URL").ok(),
     redis_connect_timeout_seconds: env::var("REDIS_CONNECT_TIMEOUT_SECONDS")
         .ok()

@@ -100,14 +100,6 @@ unsafe fn apply_env_vars(env: &ApplicationInitSetup, server_addr: &str) {
             format!("{},http://{}", &env.allow_origins, server_addr),
         );
         env::set_var(
-            "TILE_SERVER_BASE_URL",
-            &env.tile_server_base_url.as_deref().unwrap_or(""),
-        );
-        env::set_var(
-            "TILE_SERVER_API_KEY",
-            &env.tile_server_api_key.as_deref().unwrap_or(""),
-        );
-        env::set_var(
             "VECTOR_TILE_ALLOWED_ORIGINS",
             &env.vector_tile_allowed_origins,
         );
@@ -119,11 +111,22 @@ unsafe fn apply_env_vars(env: &ApplicationInitSetup, server_addr: &str) {
             "TILE_SETTINGS_ENCRYPTION_KEY",
             &env.tile_settings_encryption_key,
         );
-        // 従来の配備環境変数を優先し、未指定の場合だけ保存済みのAI用暗号鍵を使う。
+        // 従来の配備環境変数を優先し、未指定の場合だけ設定JSONの暗号鍵を使う。
         // 設定の読込時に検証・永続化を済ませてから、単一スレッドの起動処理で反映する。
-        if env::var_os("AI_ENCRYPTION_KEY").is_none() {
-            if let Some(key) = &env.ai_encryption_key {
-                env::set_var("AI_ENCRYPTION_KEY", key.as_ref());
+        for (name, key) in [
+            (
+                "AI_ENCRYPTION_KEY",
+                env.ai_encryption_key.as_ref().map(|key| key.as_str()),
+            ),
+            (
+                "OSRM_ENCRYPTION_KEY",
+                env.osrm_encryption_key.as_ref().map(|key| key.as_str()),
+            ),
+        ] {
+            if env::var_os(name).is_none()
+                && let Some(key) = key
+            {
+                env::set_var(name, key);
             }
         }
         for (name, value) in [
@@ -888,3 +891,6 @@ async fn setup_tile_cache() -> Option<redis::aio::ConnectionManager> {
 
 #[cfg(test)]
 mod ai_key_settings_tests;
+
+#[cfg(test)]
+mod osrm_key_settings_tests;

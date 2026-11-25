@@ -124,16 +124,32 @@
     visibility: hidden;
   }
 }
+.pc-map-popup-height .leaflet-popup:has(.popup-content-height-limited) {
+  min-width: 0;
+  width: min(522px, calc(100vw - 20px));
+}
+.pc-map-popup-height
+  .leaflet-popup:has(.popup-content-height-limited)
+  > .leaflet-popup-content-wrapper
+  > .leaflet-popup-content {
+  /* Leafletのインライン幅を上書きし、本文をポップアップ枠の幅に合わせる。 */
+  width: auto !important;
+}
 @media screen {
+  .pc-map-popup-height
+    .leaflet-popup:has(.popup-content-height-limited)
+    > .leaflet-popup-content-wrapper
+    > .leaflet-popup-content {
+    /* 本文の縦スクロールバーを右端に寄せ、枠との間に余白を残す。 */
+    margin-right: 7px;
+  }
   .pc-map-popup-height .popup-content-height-limited {
     display: flex;
     flex-direction: column;
     /* Leaflet の外枠 28px、アンカー・下余白など約 52〜58px に安全余白を加える。 */
     --geocode-popup-content-height: max(0px, calc(var(--geocode-popup-map-height, 100vh) - 100px));
     max-height: var(--geocode-popup-content-height);
-    /* 本文と見出しの幅を揃え、長い見出しだけで高さを使う場合も全体をスクロールできる。 */
-    width: 476px;
-    max-width: 100%;
+    /* 長い見出しだけで高さを使う場合も全体をスクロールできる。 */
     overflow-x: hidden;
     overflow-y: auto;
   }

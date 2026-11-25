@@ -196,9 +196,36 @@ pub(super) fn atomic_json(path: &Path, value: &impl Serialize) -> Result<(), Str
     serde_json::to_writer_pretty(&mut file, value).map_err(message)?;
     file.write_all(b"\n").map_err(message)?;
     file.as_file().sync_all().map_err(message)?;
-    file.persist(path).map_err(message)?;
-    Ok(())
+    let temporary = file.into_temp_path();
+    #[cfg(windows)]
+    let result = persist_with_retry(temporary, path, || {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    });
+    #[cfg(not(windows))]
+    let result = temporary.persist(path);
+    result.map_err(|error| format!("管理ファイルの確定に失敗しました: {error}"))
 }
+
+#[cfg(windows)]
+fn persist_with_retry(
+    mut temporary: tempfile::TempPath,
+    destination: &Path,
+    mut wait: impl FnMut(),
+) -> Result<(), tempfile::PathPersistError> {
+    // 管理画面が受付JSONを読んでいる間、Windowsでは既存ファイルの置換が拒否される。
+    // アクセス拒否・共有違反・ロック違反に限り、同じ一時ファイルで短時間再試行する。
+    for _ in 0..4 {
+        match temporary.persist(destination) {
+            Err(error) if matches!(error.error.raw_os_error(), Some(5 | 32 | 33)) => {
+                temporary = error.path;
+            },
+            result => return result,
+        }
+        wait();
+    }
+    temporary.persist(destination)
+}
+
 pub(super) fn is_link(meta: &fs::Metadata) -> bool {
     if meta.file_type().is_symlink() {
         return true;
@@ -212,3 +239,7 @@ pub(super) fn is_link(meta: &fs::Metadata) -> bool {
     }
     false
 }
+
+#[cfg(all(test, windows))]
+#[path = "protocol_tests.rs"]
+mod tests;

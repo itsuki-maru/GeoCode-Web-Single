@@ -5,6 +5,23 @@ import { captureMaplibreCanvases, replaceMaplibreCanvasClones } from "./canvas-s
 
 const EXCLUDED =
   ".leaflet-control-zoom, .leaflet-popup-close-button, .measurement-selection-help, .measurement-selection-summary:not(.has-selection), .geocode-content-load-more, .geocode-content-load-all, .print-memo-toolbar, .print-memo-editor, .route-search-overlay-print .route-search-handle, .route-search-overlay-print .route-search-actions";
+
+function isVisibleWithin(node: Element, bounds: DOMRect) {
+  if (node.closest(EXCLUDED)) return false;
+  const rect = node.getBoundingClientRect();
+  const style = node.ownerDocument.defaultView?.getComputedStyle(node);
+  return (
+    style?.display !== "none" &&
+    style?.visibility !== "hidden" &&
+    rect.width > 0 &&
+    rect.height > 0 &&
+    rect.right > bounds.left &&
+    rect.left < bounds.right &&
+    rect.bottom > bounds.top &&
+    rect.top < bounds.bottom
+  );
+}
+
 export function pdfScale(width: number, height: number): number {
   return Math.min(150 / 96, Math.sqrt(4_000_000 / (width * height)));
 }
@@ -108,21 +125,7 @@ export async function generateMapPdf(
   const width = paper.offsetWidth,
     height = paper.offsetHeight;
   const bounds = paper.getBoundingClientRect();
-  const visible = (node: Element) => {
-    if (node.closest(EXCLUDED)) return false;
-    const rect = node.getBoundingClientRect();
-    const style = getComputedStyle(node);
-    return (
-      style.display !== "none" &&
-      style.visibility !== "hidden" &&
-      rect.width > 0 &&
-      rect.height > 0 &&
-      rect.right > bounds.left &&
-      rect.left < bounds.right &&
-      rect.bottom > bounds.top &&
-      rect.top < bounds.bottom
-    );
-  };
+  const visible = (node: Element) => isVisibleWithin(node, bounds);
   // WebGL は複製DOMへ描画状態を引き継げないため、描画済みの背景だけ先に画像化する。
   const canvasImages = captureMaplibreCanvases(paper, signal, visible);
   const imgs = [...paper.querySelectorAll("img")];
@@ -196,6 +199,9 @@ export async function generateMapPdf(
     if (background.includes("url(")) backgrounds.set(index, background);
   }
   checkAbort(signal);
+  const chosen = PRINT_PAPERS[paperId];
+  const attributionLinks: { x: number; y: number; width: number; height: number; url: string }[] =
+    [];
   let canvas: HTMLCanvasElement | undefined;
   const temporary: { frame: Element | null } = { frame: null };
   try {
@@ -262,10 +268,24 @@ export async function generateMapPdf(
         await Promise.all([...clone.querySelectorAll("img")].map((img) => img.decode()));
         checkAbort(signal);
         renderMemoUnderline(clone);
+        // 操作ボタンを除いた後の位置で、画像化される出典とリンクの範囲を合わせる。
+        const captureBounds = clone.getBoundingClientRect();
+        for (const link of clone.querySelectorAll<HTMLAnchorElement>(
+          ".leaflet-control-attribution a, .route-search-overlay-print .route-search-attribution a",
+        )) {
+          if (!isVisibleWithin(link, captureBounds) || !/^https?:/.test(link.href)) continue;
+          const rect = link.getBoundingClientRect();
+          attributionLinks.push({
+            x: ((rect.left - captureBounds.left) / captureBounds.width) * chosen.width,
+            y: ((rect.top - captureBounds.top) / captureBounds.height) * chosen.height,
+            width: (rect.width / captureBounds.width) * chosen.width,
+            height: (rect.height / captureBounds.height) * chosen.height,
+            url: link.href,
+          });
+        }
       },
     });
     checkAbort(signal);
-    const chosen = PRINT_PAPERS[paperId];
     const pdf = new jsPDF({
       orientation: chosen.width > chosen.height ? "landscape" : "portrait",
       unit: "mm",
@@ -274,19 +294,8 @@ export async function generateMapPdf(
     });
     pdf.setProperties({ title: title || "地図", creator: "GeoCode-Web" });
     pdf.addImage(canvas, "PNG", 0, 0, chosen.width, chosen.height, undefined, "FAST");
-    // ページを画像化した後も、出典リンクをクリックできるようにする。
-    for (const link of paper.querySelectorAll<HTMLAnchorElement>(
-      ".leaflet-control-attribution a",
-    )) {
-      if (!visible(link) || !/^https?:/.test(link.href)) continue;
-      const r = link.getBoundingClientRect();
-      pdf.link(
-        ((r.left - bounds.left) / bounds.width) * chosen.width,
-        ((r.top - bounds.top) / bounds.height) * chosen.height,
-        (r.width / bounds.width) * chosen.width,
-        (r.height / bounds.height) * chosen.height,
-        { url: link.href },
-      );
+    for (const link of attributionLinks) {
+      pdf.link(link.x, link.y, link.width, link.height, { url: link.url });
     }
     return pdf.output("blob");
   } finally {

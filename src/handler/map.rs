@@ -4,6 +4,7 @@ use crate::model::{
     LayerObject, MapAnotherWindowQueryParams, MapObjectQueryResponse, MapObjectQuerySearchParams,
     MapReadQueryPrams, MarkerObject, ShapeObject,
 };
+use crate::routing::{Osrm, TravelMode};
 use crate::utils::{check_ismaster_handler, vec_to_hashmap};
 use axum::{
     Json,
@@ -20,6 +21,14 @@ use tokio::sync::Mutex;
 const DEFAULT_ANOTHER_MAP_LATITUDE: f64 = 37.65;
 const DEFAULT_ANOTHER_MAP_LONGITUDE: f64 = 138.0;
 const DEFAULT_ANOTHER_MAP_ZOOM: i32 = 6;
+
+async fn osrm_modes(pool: &SqlitePool) -> Vec<TravelMode> {
+    Osrm::configured()
+        .available_modes(pool)
+        .await
+        .inspect_err(|_| tracing::warn!("OSRM mode settings could not be loaded"))
+        .unwrap_or_default()
+}
 
 fn escape_like_term(term: &str) -> String {
     term.replace('\\', "\\\\")
@@ -277,6 +286,7 @@ pub async fn map_get_handler(
     if let Some(id) = basemaps.fallback_id {
         context.insert("fallbackTileServerId", &id.to_string());
     }
+    context.insert("osrmModes", &osrm_modes(&pool).await);
     context.insert("geocoderCsis", &crate::config::CONFIG.geocoder.uses_csis());
     context.insert("tileVisibilityAccountId", &user_id);
     context.insert(
@@ -355,6 +365,7 @@ pub async fn map_another_get_handler(
     if let Some(id) = basemaps.fallback_id {
         context.insert("fallbackTileServerId", &id.to_string());
     }
+    context.insert("osrmModes", &osrm_modes(&pool).await);
     context.insert("geocoderCsis", &crate::config::CONFIG.geocoder.uses_csis());
     context.insert("tileVisibilityAccountId", &user_id);
     context.insert(

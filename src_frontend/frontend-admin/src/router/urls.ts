@@ -20,3 +20,4 @@ export const adminAiSettingsUrl = baseUrl + "/admin/ai-settings";
 
 export const adminGoogleMapsSettingsUrl = baseUrl + "/admin/google-maps-settings";
 export const adminGoogleMapsRoutesSettingsUrl = adminGoogleMapsSettingsUrl + "/routes";
+export const adminOsrmSettingsUrl = baseUrl + "/admin/osrm-settings";

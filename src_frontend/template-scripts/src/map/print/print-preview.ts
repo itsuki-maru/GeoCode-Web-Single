@@ -47,6 +47,7 @@ export function createPrintPreview(
   document.head.append(style, pageStyle);
   const layout = document.createElement("main");
   layout.id = "print-layout";
+  const route = page === "map-anather" ? state.route : undefined;
   layout.innerHTML = `
     <aside id="print-settings" aria-label="印刷設定">
       <h1>地図の印刷</h1>
@@ -57,6 +58,15 @@ export function createPrintPreview(
         )
         .join("")}</select></label>
       <label class="print-field">タイトル（任意・40文字まで）<input id="print-title-input" type="text" maxlength="40" placeholder="例：避難場所の案内図"></label>
+      ${
+        route
+          ? `<div id="print-route-settings" hidden>
+        <label class="print-field">経路情報の文字サイズ<select id="print-route-font-size">
+          <option value="11">小</option><option value="12" selected>標準</option><option value="16">大</option>
+        </select></label>
+      </div>`
+          : ""
+      }
       <button id="print-memo-add" type="button" aria-expanded="false">メモを追加</button>
       <div class="print-actions"><button id="print-submit" type="button" disabled>印刷</button><button id="print-retry" type="button" hidden>再読み込み</button></div>
       <div id="print-status" role="status" aria-live="polite">地図を読み込んでいます…</div>
@@ -265,10 +275,21 @@ export function createPrintPreview(
   const resize = new ResizeObserver(fitPaper);
   resize.observe(viewport);
   updatePaper();
-  const printRoute =
-    page === "map-anather" && state.route
-      ? createPrintRoute(map, (window as any).L, state.route, markPrintChanged)
-      : undefined;
+  const printRoute = route
+    ? createPrintRoute(
+        map,
+        (window as any).L,
+        route,
+        markPrintChanged,
+        element("print-route-settings"),
+      )
+    : undefined;
+  if (route) {
+    const routeFontSize = element<HTMLSelectElement>("print-route-font-size");
+    routeFontSize.addEventListener("change", () => {
+      paper.style.setProperty("--print-route-font-size", `${routeFontSize.value}px`);
+    });
+  }
 
   const readiness = () => {
     const objects = runtime.getObjectLoadStatus?.() ?? { loading: false, failed: false };

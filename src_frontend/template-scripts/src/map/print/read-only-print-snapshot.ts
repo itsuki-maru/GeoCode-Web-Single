@@ -204,12 +204,13 @@ function hasValidFields(value: unknown): value is ReadOnlyPrintSnapshot {
     return false;
 
   const { state, layers, markers, shapes, tileServers, tileOverlays } = value;
+  const backgroundProvider = tileServers[state.tileServerId]?.provider ?? "generic";
   if (
     value.route !== undefined &&
     (value.sourcePage !== "map-anather" ||
       !isRoutePrintState(value.route) ||
       String(value.route.backgroundId) !== state.tileServerId ||
-      tileServers[state.tileServerId]?.provider !== "google")
+      backgroundProvider !== (value.route.provider === "osrm" ? "generic" : "google"))
   )
     return false;
   const markerIds = Object.keys(markers);

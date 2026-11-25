@@ -177,8 +177,16 @@ describe("PDF export browser contracts", () => {
     route.innerHTML = `
       <strong class="route-search-handle">経路</strong>
       <div class="route-search-actions"><button>経路を消す</button></div>
-      <p class="route-search-status">徒歩・約12分・3.4 km</p>`;
+      <p class="route-search-status">徒歩・約12分・3.4 km</p>
+      <p class="route-search-attribution">© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a></p>`;
     paper.append(route);
+    vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
+      if (this.matches(".route-search-attribution a")) {
+        const top = this.closest(".print-pdf-capture") ? 65 : 100;
+        return rect(30, top, 120, 14);
+      }
+      return rect();
+    });
     const attribution = document.createElement("div");
     attribution.className = "leaflet-control-attribution";
     attribution.innerHTML =
@@ -194,8 +202,18 @@ describe("PDF export browser contracts", () => {
     expect(clone.querySelector(".leaflet-control-zoom")).toBeNull();
     expect(clone.querySelector(".route-search-handle, .route-search-actions")).toBeNull();
     expect(clone.querySelector(".route-search-status")?.textContent).toBe("徒歩・約12分・3.4 km");
-    expect(mocks.link).toHaveBeenCalledTimes(1);
-    expect(mocks.link.mock.calls[0]![4]).toEqual({ url: "https://source.example/data" });
+    expect(clone.querySelector(".route-search-attribution")?.textContent).toBe(
+      "© OpenStreetMap contributors",
+    );
+    expect(mocks.link).toHaveBeenCalledTimes(2);
+    expect(mocks.link).toHaveBeenCalledWith(
+      expect.closeTo((30 / 400) * 210),
+      expect.closeTo((65 / 600) * 297),
+      expect.closeTo((120 / 400) * 210),
+      expect.closeTo((14 / 600) * 297),
+      { url: "https://www.openstreetmap.org/copyright" },
+    );
+    expect(mocks.link.mock.calls[1]![4]).toEqual({ url: "https://source.example/data" });
     expect(mocks.properties).toHaveBeenCalledWith({
       title: "地図タイトル",
       creator: "GeoCode-Web",

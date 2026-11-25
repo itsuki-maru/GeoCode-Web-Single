@@ -25,6 +25,7 @@ pub mod local_tiles;
 pub mod middleware;
 pub mod model;
 pub mod router;
+pub mod routing;
 pub mod shape_validation;
 pub mod tile_manager;
 pub mod tile_settings;

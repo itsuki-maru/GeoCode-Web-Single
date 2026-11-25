@@ -123,6 +123,26 @@ pub async fn load_available_tile_servers(
     Ok(load_basemap_catalog(executor).await?.into_available(scope))
 }
 
+pub(crate) async fn is_enabled_generic_background(
+    pool: &SqlitePool,
+    id: i64,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM tileserver_model
+            WHERE id = $1
+                AND provider = 'generic'
+                AND enabled
+        )
+        "#,
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+}
+
 /// 呼び出し元は書き込み開始時に排他を取り、採番と挿入を一括で確定する。
 pub(crate) async fn next_background_id(
     connection: &mut SqliteConnection,

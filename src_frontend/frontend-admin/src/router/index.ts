@@ -80,6 +80,19 @@ const routeSettings: RouteRecordRaw[] = [
     },
   },
   {
+    path: "/osrm-settings",
+    name: "OsrmSettings",
+    component: () => import("@/views/OsrmSettings.vue"),
+    beforeEnter: async (_to, _from, next) => {
+      try {
+        await apiClient.get(getUserUrl);
+        next();
+      } catch {
+        next({ name: "login" });
+      }
+    },
+  },
+  {
     path: "/tile-server-settings",
     name: "TileServerSettings",
     component: () => import("@/views/TileServerSettings.vue"),

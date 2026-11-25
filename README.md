@@ -77,7 +77,13 @@ AI・音声入力・作成保存は初期無効です。管理者が接続先と
 
 起動時マイグレーション24・25で背景定義とタイルサーバ設定を拡張する。既存ラスタ、保存済み共有v1／v2、表示状態を保存しない従来共有を読み取る。共有v2は種別とスタイルURLを保持する。ベクタ背景の印刷・PDFは現在のキャンバスを画像化して出力する。
 
-「タイルサーバ設定」では、ラスタ中継先とAPIキー、ベクタ配信元の接続許可を変更できる。暗号鍵は実行時設定JSONへ自動生成・保存する。[設定方法](docs/TILE_PROXY.md#管理画面からの設定)、[背景の取得・描画フロー](docs/MAP_VIEWING.md#basemap-flow)を参照する。
+「タイルサーバ設定」では、ラスタ中継先とAPIキー、ベクタ配信元の接続許可を管理する。キーの暗号鍵は実行時設定JSONへ自動生成・保存する。旧設定JSONや環境変数で中継を利用している場合は、更新前の版で管理画面から設定をDBに保存する。[設定方法](docs/TILE_PROXY.md#管理画面からの設定)・[旧設定からの移行](docs/TILE_PROXY.md#旧設定からの移行)
+
+### 経路検索
+
+ログイン後のPC・モバイルの通常地図とPCの全画面地図では、マーカーまたは図形のポップアップから現在地を起点に経路を検索できる。利用するサービスは選択中の背景で決まり、Google背景ではGoogle Routes API、その他の背景では接続先を登録したOSRMを使う。[Google背景地図と経路検索](docs/GOOGLE_MAPS.md)・[OSRMの接続・利用手順](docs/OSRM.md)
+
+OSRMのAPIキーを保護する暗号鍵は、通常起動時に設定JSONの `osrm_encryption_key` へ補完する。既存の `OSRM_ENCRYPTION_KEY` がある場合は、その値を実行時に優先する。HTTP・LAN内の接続先を許可する `OSRM_ALLOWED_ORIGINS` は起動プロセスの環境変数に設定する。[OSRMの暗号鍵と接続設定](docs/OSRM.md#接続設定)
 
 ### 重ね合わせタイル
 
@@ -391,7 +397,7 @@ Ctrl+C でグレースフルシャットダウンする。
 - `tauri-cli`
 - Windows では WebView2 が利用可能であること
 
-開発ツール用に `.env.example` を `.env` としてコピーする。配布アプリはこの `.env` を読み込まず、通常の実行時設定は `~/.geocode-web-single/geocode-web-single.env.json` を使用する。AIの配備鍵・接続例外許可は同JSONの項目ではなく、起動プロセスへ環境変数で供給する。詳しくは [AIの導入](docs/AI_ASSISTANT.md#管理者による導入) を参照する。
+開発ツール用に `.env.example` を `.env` としてコピーする。配布アプリの実行時設定は `~/.geocode-web-single/geocode-web-single.env.json` を使用する。AIとOSRMの接続例外許可は起動プロセスへ環境変数で供給する。[AIの導入](docs/AI_ASSISTANT.md#管理者による導入)・[OSRMの接続設定](docs/OSRM.md#接続設定)
 
 ```powershell
 Copy-Item .env.example .env

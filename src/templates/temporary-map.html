@@ -77,14 +77,6 @@
                 min-width: 500px;
                 max-width: 750px;
             }
-            .leaflet-popup:has(.popup-content-height-limited) {
-                min-width: 0;
-                width: min(522px, calc(100vw - 20px));
-            }
-            .leaflet-popup:has(.popup-content-height-limited) > .leaflet-popup-content-wrapper > .leaflet-popup-content {
-                /* Leaflet のインライン幅を上書きし、左右の余白を保ったまま枠内に収める。 */
-                width: auto !important;
-            }
             /* マークダウンコンテンツ（detail）のスタイル */
             .md-detail-contents {
                 width: 476px;

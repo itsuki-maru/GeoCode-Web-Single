@@ -119,11 +119,11 @@ PostgreSQL から SQLite を使用することによる差分吸収は **全て�
 - `ALLOW_USER_CREATE_ACCOUNT`
 - `ALLOW_USER_UPDATE_PASSWORD`
 - `ALLOW_ORIGINS`
-- `TILE_SERVER_BASE_URL`
-- `TILE_SERVER_API_KEY`
 - `VECTOR_TILE_ALLOWED_ORIGINS`
 - `TILE_PROXY_ALLOWED_ORIGINS`
 - `TILE_SETTINGS_ENCRYPTION_KEY`
+- `OSRM_ALLOWED_ORIGINS`（HTTP・内部ネットワークへの接続例外）
+- `OSRM_ENCRYPTION_KEY`（OSRM暗号鍵の任意の実行時優先指定）
 - `REDIS_URL`
 - `REDIS_CONNECT_TIMEOUT_SECONDS`
 - `TILE_CACHE_TTL_SECONDS`
@@ -138,6 +138,8 @@ PostgreSQL から SQLite を使用することによる差分吸収は **全て�
 - `LIVE_MAP_PASSWORD_WINDOW_MINUTES`（未設定時は10分）
 
 AIの配備鍵は設定JSONの `ai_encryption_key` に保存し、通常起動・サーバー単体モードとも未設定・`null` なら補完する。既存の環境変数 `AI_ENCRYPTION_KEY` があれば同じ値を採用し、なければ暗号学的乱数で32バイトを生成してBase64で保存する。実行時は環境変数を優先するが、既存JSON鍵は上書きしない。不正な明示鍵や、全鍵不在で本体DBに暗号化APIキーがある場合は再生成せず拒否する。読み取り専用のタイルCLIでは鍵の生成・保存をしない。`AI_ALLOWED_ORIGINS` は引き続き起動プロセスの環境変数で、配布アプリは `.env` を自動読込しない。[AIの導入](docs/AI_ASSISTANT.md#管理者による導入)を参照する。
+
+OSRMの暗号鍵は32バイトをBase64で表した値とし、設定JSONの `osrm_encryption_key` に保存する。通常起動・サーバー単体モードでは、項目が未指定または `null` の場合に既存の `OSRM_ENCRYPTION_KEY` から補完する。両方が未設定で暗号化済みのOSRM APIキーが存在しない場合は、暗号学的乱数で鍵を生成して設定JSONへ保存する。実行時には環境変数を優先し、保存済みのJSON鍵を保持する。不正な明示鍵や、暗号化済みのAPIキーがある状態で鍵が失われた場合は起動エラーとする。読み取り専用のローカル地図CLIは鍵の生成・保存を行わない。接続例外の `OSRM_ALLOWED_ORIGINS` は起動プロセスの環境変数から読み取る。[OSRMの接続設定](docs/OSRM.md#接続設定)
 
 設定 JSON は `src/model/common.rs` の `ApplicationInitSetup` に対応する。起動時の読み込みは `src/init.rs` の `read_env_json` が行い、環境変数への注入は `src/main.rs` の `apply_env_vars` が行う。
 
@@ -172,12 +174,11 @@ Redisは現在位置共有機能の必須構成ではない。接続がない場
 - `allow_user_create_account`
 - `allow_user_update_password`
 - `allow_origins`
-- `tile_server_base_url`
-- `tile_server_api_key`
 - `vector_tile_allowed_origins`（既定空、HTTPSオリジンをカンマ区切りで指定）
 - `tile_proxy_allowed_origins`（既定空、HTTP・LANの中継先を許可する場合に指定）
 - `tile_settings_encryption_key`（項目省略・`null`の場合は生成して設定JSONへ保存。不正な文字列は起動時に拒否）
 - `ai_encryption_key`（項目省略・`null`の場合は既存の環境変数から継承、または安全を確認して生成・保存。不正な明示鍵は起動時に拒否）
+- `osrm_encryption_key`（項目省略・`null`の場合は既存の環境変数から継承、または暗号化済みのOSRM APIキーがないことを確認して生成・保存）
 - `redis_url`
 - `redis_connect_timeout_seconds`
 - `tile_cache_ttl_seconds`
@@ -530,8 +531,9 @@ JSON として不正な場合、または必須項目が欠落している場合
 - 起動時マイグレーション28でGoogleの背景種別と接続設定を追加し、29で背景の利用可否と公開先別の代替設定を追加する。既存の背景を有効・共有可・ライブ利用可として移行する。管理画面とローカル地図登録は`BEGIN IMMEDIATE`で確保した同じ書き込み接続上で採番し、削除済みの背景IDを再利用しない。
 - 「Google Maps設定」でMap Tiles APIのキーと言語・地域・利用上限を保存できる。キーはSQLiteに暗号化して保存する。暗号鍵は通常、設定JSONの`tile_settings_encryption_key`を使用し、起動時に`GOOGLE_MAPS_ENCRYPTION_KEY`を明示した場合はそちらを優先する。中継は閲覧先と登録背景IDを確認し、タイル・出典取得のたびに利用可否を再検証する。
 - 起動時マイグレーション30で、Google Routes APIの有効化と利用上限を追加する。Map Tiles API用に暗号化して保存済みのキーを共用する。経路検索の既定値は無効、プロセスあたり60回/分。ログイン後の通常地図とPCの全画面地図で、利用可能なGoogle背景を選んだときに経路を検索できる。座標・経路は保存せず、PC印刷プレビューへ一時的に引き継ぐ。詳細は[Google背景地図と経路検索](docs/GOOGLE_MAPS.md)を参照する。
+- 起動時マイグレーション31・32で、OSRMの設定版、車・徒歩別の接続先URLと任意の暗号化APIキーを保存する。ログイン後の通常地図とPCの全画面地図で、有効な非Google背景を選ぶと設定済みの移動手段を利用できる。中継はプロセスあたり60回/分、アカウントあたり10回/分、同時8件。座標・結果を保存せず、印刷には元の背景とOpenStreetMapの出典を引き継ぐ。[OSRMによる経路検索](docs/OSRM.md)
 - 起動時マイグレーション25で`tile_server_settings`を追加し、ラスタ中継先・暗号化したAPIキー・ベクタ配信元の許可を管理する。中継先の接続確認・保存、設定版による更新競合検出、設定版ごとのタイルキャッシュを使用する。
-- 初期設定は実行時設定JSONの`tile_server_base_url`・`tile_server_api_key`・`vector_tile_allowed_origins`から取得する。管理画面から適用した設定はDBへ保存し、「環境変数へ戻す」で実行時設定JSON由来の設定へ戻す。
+- ラスタ中継先とAPIキーは管理画面からDBに保存する。未登録・無効時の中継要求は404とし、旧JSON項目と旧環境変数の中継先・キーは利用しない。ベクタ配信元は管理設定が未登録の場合や「接続許可先を環境変数に戻す」を選んだ場合、実行時設定JSONの`vector_tile_allowed_origins`を使う。
 - 実行時設定JSONへ`tile_proxy_allowed_origins`と`tile_settings_encryption_key`も追加する。暗号鍵は初回セットアップ時に生成し、既存JSONで項目省略・`null`の場合も生成・保存する。空文字列を含む不正な鍵は起動時に拒否する。管理設定を復元するため、SQLite DBと設定JSONを合わせて保管する。Tauri・サーバー単体の全起動経路でDBの管理設定を読み込み、運転中も5秒間隔で再取得する。詳細は[タイル配信プロキシ](docs/TILE_PROXY.md#管理画面からの設定)を参照する。
 - ベクタ背景の印刷ではWebGLキャンバスを画像化し、印刷後に復元する。PDFは背景も含めた用紙全体を画像として保存する。
 
@@ -613,6 +615,7 @@ JSON として不正な場合、または必須項目が欠落している場合
 - 一般ユーザー作成
 - ユーザーパスワード再設定
 - アカウントロック解除
+- Google Maps設定とOSRM設定による経路検索の管理
 
 ### 9.8 マーカー入力フォーム
 

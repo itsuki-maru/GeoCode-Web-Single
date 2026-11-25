@@ -92,6 +92,24 @@ describe("readMapBootstrap", () => {
     expect(readMapBootstrap()).toMatchObject({ page: "map-anather", isCluster: true });
   });
 
+  it("通常地図の利用可能なOSRMモードを読み取り、徒歩のみの設定と回答地図への混入を拒否する", () => {
+    const fullScreen = {
+      ...records,
+      initialView: { latitude: 37.65, longitude: 138, zoom: 6 },
+      isCluster: true,
+      page: "map-anather",
+      shapes: [],
+    };
+    window.__GEOCODE_MAP_BOOTSTRAP__ = { ...fullScreen, osrmModes: ["DRIVE", "WALK"] };
+    expect(readMapBootstrap()).toMatchObject({ osrmModes: ["DRIVE", "WALK"] });
+
+    window.__GEOCODE_MAP_BOOTSTRAP__ = { ...fullScreen, osrmModes: ["WALK"] };
+    expect(() => readMapBootstrap()).toThrow("Map bootstrap data is invalid");
+
+    window.__GEOCODE_MAP_BOOTSTRAP__ = { ...answerData(), osrmModes: ["DRIVE"] };
+    expect(() => readMapBootstrap()).toThrow("Map bootstrap data is invalid");
+  });
+
   it("背景メタデータは旧省略値を保ち、未知種別と背景1のベクタを拒否する", () => {
     const value = {
       ...answerData(),

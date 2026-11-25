@@ -315,9 +315,14 @@ export function initializeReadOnlyMapPage(
     mapDisposed = true;
     basemapMessages?.dispose();
   });
-  const fullScreenMap = expectedPage === "map-anather" && !isAnswerPreview && !isPrint;
+  const fullScreenMap = bootstrap.page === "map-anather" && !isAnswerPreview && !isPrint;
   const routeSearch = fullScreenMap
-    ? createRouteSearch({ map, leaflet: L, basemap: () => basemapController.getState() })
+    ? createRouteSearch({
+        map,
+        leaflet: L,
+        basemap: () => basemapController.getState(),
+        osrmModes: bootstrap.osrmModes,
+      })
     : undefined;
   const popupContent = !isSnapshotPrint
     ? createPopupContentRuntime({

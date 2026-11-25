@@ -94,32 +94,42 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="tile-settings">
-    <h1>タイル追加設定</h1>
-    <p>ユーザーが地図に重ねて表示できる画像タイルを登録します。</p>
+  <section class="page-shell" aria-labelledby="tile-overlays-title">
+    <div class="page-heading">
+      <div>
+        <h1 id="tile-overlays-title">タイル追加設定</h1>
+        <p class="page-description">ユーザーが地図に重ねて表示できる画像タイルを登録します。</p>
+      </div>
+    </div>
     <p v-if="error" role="alert">
-      {{ error }} <button :disabled="busy" @click="load">一覧を再読み込み</button>
+      {{ error }}
+      <button type="button" class="button-secondary" :disabled="busy" @click="load">
+        一覧を再読み込み
+      </button>
     </p>
     <p v-if="message" role="status">{{ message }}</p>
-    <form @submit.prevent="save">
+    <form class="admin-card tile-card" @submit.prevent="save">
       <fieldset :disabled="busy">
         <legend>{{ editing ? "タイルを編集" : "タイルを登録" }}</legend>
-        <label>表示名<input v-model="form.name" required maxlength="100" /></label>
-        <label
+        <label class="field">表示名<input v-model="form.name" required maxlength="100" /></label>
+        <label class="field"
           >画像タイルURL<input
             v-model="form.url"
             required
             maxlength="4096"
             placeholder="https://example.com/{z}/{x}/{y}.png"
+            aria-describedby="tile-overlay-url-help"
         /></label>
-        <p class="hint">HTTPSのURLに {z}・{x}・{y} を含めてください。</p>
-        <label
+        <p id="tile-overlay-url-help" class="field-help">
+          HTTPSのURLに {z}・{x}・{y} を含めてください。
+        </p>
+        <label class="field"
           >出典（テキスト・リンクHTML）<input
             v-model="form.attribution"
             maxlength="1000"
             aria-describedby="tile-attribution-help"
         /></label>
-        <p id="tile-attribution-help" class="hint">
+        <p id="tile-attribution-help" class="field-help">
           例：<code
             >&lt;a
             href="https://disaportal.gsi.go.jp/"&gt;ハザードマップポータルサイト&lt;/a&gt;</code
@@ -127,7 +137,7 @@ onMounted(load);
           HTTP・HTTPSのリンクは別タブで開きます。通常のテキストも入力できます。
         </p>
         <div class="number-fields">
-          <label
+          <label class="field"
             >最小ズーム<input
               v-model.number="form.min_zoom"
               type="number"
@@ -135,7 +145,7 @@ onMounted(load);
               max="22"
               required
           /></label>
-          <label
+          <label class="field"
             >最大ズーム<input
               v-model.number="form.max_zoom"
               type="number"
@@ -143,7 +153,7 @@ onMounted(load);
               max="22"
               required
           /></label>
-          <label
+          <label class="field"
             >不透明度（0〜1）<input
               v-model.number="form.opacity"
               type="number"
@@ -152,7 +162,7 @@ onMounted(load);
               step="0.05"
               required
           /></label>
-          <label
+          <label class="field"
             >表示順<input
               v-model.number="form.sort_order"
               type="number"
@@ -163,25 +173,33 @@ onMounted(load);
         </div>
         <label class="enabled"><input v-model="form.enabled" type="checkbox" />有効</label>
         <div class="actions">
-          <button type="submit">保存</button
-          ><button v-if="editing" type="button" @click="reset">編集をやめる</button>
+          <button type="submit" class="button-primary">保存</button>
+          <button v-if="editing" type="button" class="button-secondary" @click="reset">
+            編集をやめる
+          </button>
         </div>
       </fieldset>
     </form>
-    <h2>登録済みタイル</h2>
-    <p v-if="!busy && !tiles.length">登録されたタイルはありません。</p>
-    <ul class="tile-list">
-      <li v-for="tile in tiles" :key="tile.id">
-        <div>
-          <strong>{{ tile.name }}</strong> <span>{{ tile.enabled ? "有効" : "無効" }}</span>
-          <p>{{ tile.url }}</p>
-        </div>
-        <div class="actions">
-          <button :disabled="busy" @click="edit(tile)">編集</button
-          ><button :disabled="busy" @click="deleting = tile">削除</button>
-        </div>
-      </li>
-    </ul>
+    <section class="admin-card tile-card" aria-labelledby="tile-overlays-list-title">
+      <h2 id="tile-overlays-list-title">登録済みタイル</h2>
+      <p v-if="!busy && !tiles.length" class="empty-list">登録されたタイルはありません。</p>
+      <ul class="tile-list">
+        <li v-for="tile in tiles" :key="tile.id">
+          <div class="tile-details">
+            <strong>{{ tile.name }}</strong> <span>{{ tile.enabled ? "有効" : "無効" }}</span>
+            <p>{{ tile.url }}</p>
+          </div>
+          <div class="actions">
+            <button type="button" class="button-secondary" :disabled="busy" @click="edit(tile)">
+              編集
+            </button>
+            <button type="button" class="button-danger" :disabled="busy" @click="deleting = tile">
+              削除
+            </button>
+          </div>
+        </li>
+      </ul>
+    </section>
     <ConfirmModal
       :isOpen="deleting !== null"
       title="タイル設定の削除"
@@ -191,75 +209,100 @@ onMounted(load);
       @confirm="remove"
       @cancel="deleting = null"
     />
-  </div>
+  </section>
 </template>
 
 <style scoped>
-.tile-settings {
-  max-width: 1000px;
-  margin: 24px auto;
-  padding: 0 20px 40px;
-}
-h1,
-h2 {
-  margin: 20px 0 12px;
-}
-fieldset {
-  border: 1px solid #aaa;
-  border-radius: 8px;
+.tile-card {
   padding: 20px;
+}
+.tile-card + .tile-card {
   margin-top: 20px;
 }
-label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 12px 0;
+h2,
+legend {
+  margin-bottom: 12px;
+  font-size: 1.15rem;
+  font-weight: 700;
 }
-input:not([type="checkbox"]) {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 8px;
-  font-size: 16px;
+fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+legend {
+  padding: 0;
+}
+fieldset > .field + .field {
+  margin-top: 12px;
+}
+.field-help {
+  margin: 6px 0 12px;
+  overflow-wrap: anywhere;
 }
 .number-fields {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  gap: 12px;
 }
 .enabled {
-  flex-direction: row;
+  display: flex;
   align-items: center;
+  gap: 8px;
 }
-.hint {
-  font-size: 0.9rem;
+.enabled,
+fieldset > .actions {
+  margin-top: 16px;
 }
 .actions {
   display: flex;
-  gap: 12px;
   flex-wrap: wrap;
+  gap: 8px;
 }
-button {
-  padding: 8px 16px;
-  cursor: pointer;
+[role="alert"] {
+  color: var(--admin-danger);
+}
+.empty-list {
+  margin-bottom: 0;
+}
+[role="status"] {
+  color: var(--admin-success);
 }
 .tile-list {
   list-style: none;
+  margin: 0;
   padding: 0;
 }
 .tile-list li {
-  border-bottom: 1px solid #aaa;
-  padding: 18px 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 16px;
   flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 0;
 }
-.tile-list .actions {
-  align-items: center;
+.tile-list li + li {
+  border-top: 1px solid var(--admin-border);
 }
-.tile-list p {
+.tile-list li:first-child {
+  padding-top: 0;
+}
+.tile-list li:last-child {
+  padding-bottom: 0;
+}
+.tile-details {
+  flex: 1 1 18rem;
+  min-width: 0;
   overflow-wrap: anywhere;
+}
+.tile-details p {
+  margin: 4px 0 0;
+  color: var(--admin-text-muted);
+}
+@media (max-width: 600px) {
+  .tile-card {
+    padding: 16px;
+  }
 }
 </style>

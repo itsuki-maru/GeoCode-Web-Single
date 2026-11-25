@@ -23,6 +23,7 @@ const isLoginView = computed(() => route.name === "login");
           <RouterLink to="/live-maps">位置共有マップ</RouterLink>
           <RouterLink to="/background-maps">背景地図設定</RouterLink>
           <RouterLink to="/google-maps-settings">Google Maps設定</RouterLink>
+          <RouterLink to="/osrm-settings">OSRM設定</RouterLink>
           <RouterLink to="/tile-server-settings">タイルサーバ設定</RouterLink>
           <RouterLink to="/tile-overlays">タイル追加設定</RouterLink>
           <RouterLink to="/map-display-settings">地図表示設定</RouterLink>
@@ -83,17 +84,18 @@ const isLoginView = computed(() => route.name === "login");
 }
 .admin-nav {
   display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
   max-width: 100%;
   align-self: stretch;
   gap: 6px;
-  overflow-x: auto;
 }
 .admin-nav a {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
   min-height: 48px;
-  padding: 0 14px;
+  padding: 0 12px;
   border-bottom: 3px solid transparent;
   color: #d8d8d8;
   font-weight: 600;

@@ -1,119 +1,165 @@
-//! AI用配備鍵の補完。既存暗号文がある場合は鍵の再生成を禁止する。
+//! 配備鍵の補完。既存暗号文がある場合は鍵の再生成を禁止する。
 use super::EnvJsonReadError;
-use crate::model::AiEncryptionKey;
+use crate::model::{AiEncryptionKey, OsrmEncryptionKey};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use rand::RngCore;
 use rusqlite::{Connection, OpenFlags};
 use sqlx::{ConnectOptions, sqlite::SqliteConnectOptions};
 use std::{ffi::OsStr, str::FromStr, time::Duration};
 
-const INSPECTION_FAILED: &str =
-    "既存DBのAI設定を確認できません。設定JSONとDBを確認してから再起動してください。";
-const RESTORE_REQUIRED: &str = "保存済みAPIキーがありますがAI用暗号鍵がありません。元のai_encryption_keyまたはAI_ENCRYPTION_KEYを復元してください。";
+pub(super) const AI: KeyStorage<AiEncryptionKey> = KeyStorage {
+    service: "AI",
+    json_field: "ai_encryption_key",
+    environment: "AI_ENCRYPTION_KEY",
+    invalid_message: AiEncryptionKey::INVALID_MESSAGE,
+    parse: AiEncryptionKey::new,
+    table: "ai_settings",
+    query: r#"
+        SELECT EXISTS (
+            SELECT 1 FROM ai_settings
+            WHERE encrypted_api_key IS NOT NULL OR encrypted_speech_api_key IS NOT NULL
+        )
+    "#,
+};
 
-pub(super) fn complete(
-    stored: Option<AiEncryptionKey>,
-    inherited: Option<&OsStr>,
-    database_url: &str,
-) -> Result<AiEncryptionKey, EnvJsonReadError> {
-    // 明示された環境変数は、JSON側の鍵が存在する場合も検証する。
-    let inherited = inherited
-        .map(|raw| {
-            raw.to_str()
-                .ok_or(AiEncryptionKey::INVALID_MESSAGE)
-                .and_then(|raw| AiEncryptionKey::new(raw.to_owned()))
-                .map_err(|message| EnvJsonReadError::InvalidJson(message.into()))
-        })
-        .transpose()?;
-    if let Some(stored) = stored {
-        return Ok(stored);
-    }
-    if let Some(inherited) = inherited {
-        return Ok(inherited);
-    }
-    if has_encrypted_keys(database_url)? {
-        return Err(EnvJsonReadError::InvalidJson(RESTORE_REQUIRED.into()));
-    }
-    let mut bytes = [0_u8; 32];
-    rand::rngs::OsRng
-        .try_fill_bytes(&mut bytes)
-        .map_err(|_| EnvJsonReadError::Io("AI用暗号鍵を生成できません。".into()))?;
-    AiEncryptionKey::new(STANDARD.encode(bytes))
-        .map_err(|message| EnvJsonReadError::InvalidJson(message.into()))
+pub(super) const OSRM: KeyStorage<OsrmEncryptionKey> = KeyStorage {
+    service: "OSRM",
+    json_field: "osrm_encryption_key",
+    environment: "OSRM_ENCRYPTION_KEY",
+    invalid_message: OsrmEncryptionKey::INVALID_MESSAGE,
+    parse: OsrmEncryptionKey::new,
+    table: "osrm_settings",
+    query: r#"
+        SELECT EXISTS (
+            SELECT 1 FROM osrm_settings
+            WHERE encrypted_drive_key IS NOT NULL OR encrypted_walk_key IS NOT NULL
+        )
+    "#,
+};
+
+pub(super) struct KeyStorage<K> {
+    service: &'static str,
+    json_field: &'static str,
+    pub(super) environment: &'static str,
+    invalid_message: &'static str,
+    parse: fn(String) -> Result<K, &'static str>,
+    table: &'static str,
+    query: &'static str,
 }
 
-fn inspection_failed(_: impl std::fmt::Display) -> EnvJsonReadError {
-    // URL、パス、SQLエラーや保存された値はログ・画面へ渡さない。
-    EnvJsonReadError::InvalidJson(INSPECTION_FAILED.into())
-}
+impl<K> KeyStorage<K> {
+    pub(super) fn complete(
+        &self,
+        stored: Option<K>,
+        inherited: Option<&OsStr>,
+        database_url: &str,
+    ) -> Result<K, EnvJsonReadError> {
+        // 明示された環境変数は、JSON側の鍵が存在する場合も検証する。
+        let inherited = inherited
+            .map(|raw| {
+                raw.to_str()
+                    .ok_or(self.invalid_message)
+                    .and_then(|raw| (self.parse)(raw.to_owned()))
+                    .map_err(|message| EnvJsonReadError::InvalidJson(message.into()))
+            })
+            .transpose()?;
+        if let Some(key) = stored.or(inherited) {
+            return Ok(key);
+        }
+        if self.has_encrypted_keys(database_url)? {
+            return Err(EnvJsonReadError::InvalidJson(format!(
+                "保存済みAPIキーがありますが{}用暗号鍵がありません。元の{}または{}を復元してください。",
+                self.service, self.json_field, self.environment
+            )));
+        }
+        let mut bytes = [0_u8; 32];
+        rand::rngs::OsRng.try_fill_bytes(&mut bytes).map_err(|_| {
+            EnvJsonReadError::Io(format!("{}用暗号鍵を生成できません。", self.service))
+        })?;
+        (self.parse)(STANDARD.encode(bytes))
+            .map_err(|message| EnvJsonReadError::InvalidJson(message.into()))
+    }
 
-fn has_encrypted_keys(database_url: &str) -> Result<bool, EnvJsonReadError> {
-    let options = SqliteConnectOptions::from_str(database_url).map_err(inspection_failed)?;
-    let probe_url = options.clone().filename("ai-key-mode-probe").to_url_lossy();
-    let memory = probe_url
-        .query_pairs()
-        .any(|(key, value)| key == "mode" && value == "memory");
-    if memory {
-        return Ok(false);
+    fn inspection_failed(&self) -> EnvJsonReadError {
+        // URL、パス、SQLエラーや保存された値はログ・画面へ渡さない。
+        EnvJsonReadError::InvalidJson(format!(
+            "既存DBの{}設定を確認できません。設定JSONとDBを確認してから再起動してください。",
+            self.service
+        ))
     }
-    // SQLite URIや独自VFSはOSパスと接続対象が一致するとは限らない。
-    // 「DBなし」と誤判定して鍵を再生成する代わりに、明示鍵の復元を求める。
-    if probe_url.query_pairs().any(|(key, _)| key == "vfs")
-        || options
-            .get_filename()
-            .to_string_lossy()
-            .starts_with("file:")
-    {
-        return Err(inspection_failed("unsupported database path"));
-    }
-    match std::fs::metadata(options.get_filename()) {
-        Ok(metadata) if metadata.is_file() => {},
-        Ok(_) => return Err(inspection_failed("not a file")),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(inspection_failed(error)),
-    }
-    // 接続先はSQLxが解釈したファイル名を使用する。DBの新規作成やmigrationは行わない。
-    let database = Connection::open_with_flags(
-        options.get_filename(),
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(inspection_failed)?;
-    database
-        .busy_timeout(Duration::from_secs(5))
-        .map_err(inspection_failed)?;
-    let table_exists: bool = database
-        .query_row(
-            r#"
-                SELECT EXISTS (
-                    SELECT 1 FROM sqlite_schema
-                    WHERE type = 'table' AND name = 'ai_settings'
-                )
-            "#,
-            [],
-            |row| row.get(0),
+
+    fn has_encrypted_keys(&self, database_url: &str) -> Result<bool, EnvJsonReadError> {
+        let options =
+            SqliteConnectOptions::from_str(database_url).map_err(|_| self.inspection_failed())?;
+        let probe_url = options
+            .clone()
+            .filename("deployment-key-mode-probe")
+            .to_url_lossy();
+        if probe_url
+            .query_pairs()
+            .any(|(key, value)| key == "mode" && value == "memory")
+        {
+            return Ok(false);
+        }
+        // 独自VFSやSQLite URIの接続対象をOSパスとみなすと、既存DBを見落とす場合がある。
+        if probe_url.query_pairs().any(|(key, _)| key == "vfs")
+            || options
+                .get_filename()
+                .to_string_lossy()
+                .starts_with("file:")
+        {
+            return Err(self.inspection_failed());
+        }
+        match std::fs::metadata(options.get_filename()) {
+            Ok(metadata) if metadata.is_file() => {},
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            _ => return Err(self.inspection_failed()),
+        }
+        // SQLxが解釈したファイルを読み取り専用で開く。
+        let database = Connection::open_with_flags(
+            options.get_filename(),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
-        .map_err(inspection_failed)?;
-    if !table_exists {
-        return Ok(false);
+        .map_err(|_| self.inspection_failed())?;
+        database
+            .busy_timeout(Duration::from_secs(5))
+            .map_err(|_| self.inspection_failed())?;
+        let table_exists: bool = database
+            .query_row(
+                r#"
+                    SELECT EXISTS (
+                        SELECT 1 FROM sqlite_schema
+                        WHERE type = 'table' AND name = ?1
+                    )
+                "#,
+                [self.table],
+                |row| row.get(0),
+            )
+            .map_err(|_| self.inspection_failed())?;
+        if !table_exists {
+            return Ok(false);
+        }
+        database
+            .query_row(self.query, [], |row| row.get(0))
+            .map_err(|_| self.inspection_failed())
     }
-    database
-        .query_row(
-            r#"
-                SELECT EXISTS (
-                    SELECT 1 FROM ai_settings
-                    WHERE encrypted_api_key IS NOT NULL
-                       OR encrypted_speech_api_key IS NOT NULL
-                )
-            "#,
-            [],
-            |row| row.get(0),
-        )
-        .map_err(inspection_failed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const INSPECTION_FAILED: &str =
+        "既存DBのAI設定を確認できません。設定JSONとDBを確認してから再起動してください。";
+    const RESTORE_REQUIRED: &str = "保存済みAPIキーがありますがAI用暗号鍵がありません。元のai_encryption_keyまたはAI_ENCRYPTION_KEYを復元してください。";
+
+    fn complete(
+        stored: Option<AiEncryptionKey>,
+        inherited: Option<&OsStr>,
+        database_url: &str,
+    ) -> Result<AiEncryptionKey, EnvJsonReadError> {
+        AI.complete(stored, inherited, database_url)
+    }
 
     fn key(byte: u8) -> AiEncryptionKey {
         AiEncryptionKey::new(STANDARD.encode([byte; 32])).unwrap()

@@ -1,6 +1,7 @@
 import { getBasemapController } from "../common/basemap-controller";
 import { createRoutePanel } from "../common/route-panel";
 import {
+  createOsrmAttribution,
   decodePolyline,
   formatSummary,
   ROUTE_LINE_OPTIONS,
@@ -12,19 +13,23 @@ export function createPrintRoute(
   leaflet: any,
   route: RoutePrintState,
   onChange: () => void,
+  settings?: HTMLElement,
 ) {
   const panel = createRoutePanel({
     mapElement: map.getContainer(),
     print: true,
     onPositionChange: onChange,
   });
+  const isOsrm = route.provider === "osrm";
+  const doc = panel.element.ownerDocument;
   const travelMode = route.travelMode === "DRIVE" ? "車" : "徒歩";
   panel.status.textContent = `${travelMode}・${formatSummary(route.durationSeconds, route.distanceMeters)}`;
   for (const warning of route.warnings) {
-    const item = document.createElement("li");
+    const item = doc.createElement("li");
     item.textContent = warning;
     panel.warningList.append(item);
   }
+  if (isOsrm) panel.warningList.after(createOsrmAttribution(doc, true));
 
   let line: { remove(): void } | undefined;
   let dismissed = false;
@@ -34,9 +39,10 @@ export function createPrintRoute(
     line.remove();
     line = undefined;
     panel.hide();
+    if (settings) settings.hidden = true;
     onChange();
   };
-  const remove = document.createElement("button");
+  const remove = doc.createElement("button");
   remove.type = "button";
   remove.textContent = "経路を消す";
   remove.addEventListener("click", () => {
@@ -48,7 +54,13 @@ export function createPrintRoute(
   const update = () => {
     const controller = getBasemapController(map);
     const background = controller?.getState();
-    if (!background?.googleRoutesAvailable || background.id !== String(route.backgroundId)) {
+    if (
+      !background ||
+      background.id !== String(route.backgroundId) ||
+      (isOsrm
+        ? !background.ready || background.provider !== "generic"
+        : !background.googleRoutesAvailable)
+    ) {
       hide();
       return;
     }
@@ -67,12 +79,15 @@ export function createPrintRoute(
     next.addTo(map);
     line = next;
     panel.show();
+    if (settings) settings.hidden = false;
     onChange();
 
     if (!initialFraming) return;
     initialFraming = false;
-    const zoomLimits = controller?.getLayer?.()?.getGoogleRoutesBackground?.();
-    if (!zoomLimits) return;
+    const minZoom = isOsrm
+      ? (background.minZoom ?? map.getMinZoom())
+      : controller?.getLayer?.()?.getGoogleRoutesBackground?.()?.minZoom;
+    if (minZoom === undefined) return;
     // 用紙の縦横比が元の地図と異なる場合、端点が切れているときだけ初回の表示範囲を広げる。
     const bounds = next.getBounds();
     const padding = leaflet.point(24, 24);
@@ -81,8 +96,8 @@ export function createPrintRoute(
       map.containerPointToLatLng(map.getSize().subtract(padding)),
     );
     if (paddedView.contains(bounds)) return;
-    if (map.getBoundsZoom(bounds, false, padding.multiplyBy(2)) < zoomLimits.minZoom) {
-      map.setView(bounds.getCenter(), zoomLimits.minZoom, { animate: false });
+    if (map.getBoundsZoom(bounds, false, padding.multiplyBy(2)) < minZoom) {
+      map.setView(bounds.getCenter(), minZoom, { animate: false });
     } else {
       map.fitBounds(bounds, { padding, maxZoom: map.getZoom(), animate: false });
     }
@@ -97,6 +112,7 @@ export function createPrintRoute(
       map.off("basemapstatechange", update);
       line?.remove();
       panel.dispose();
+      if (settings) settings.hidden = true;
     },
   };
 }

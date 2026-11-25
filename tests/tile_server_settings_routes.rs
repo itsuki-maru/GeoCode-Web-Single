@@ -135,9 +135,9 @@ async fn csp(app: &Router) -> String {
         .to_owned()
 }
 
-/// 管理者認可・接続確認・設定保存・キャッシュの切替と切り戻しを確認する。
+/// 管理者認可、接続確認、中継の無効化、ベクタ配信元の切り戻しを確認する。
 #[tokio::test]
-async fn admin_changes_the_live_proxy_and_vector_policy_with_rollback() {
+async fn admin_changes_and_disables_the_live_proxy_independently_of_vector_policy() {
     let pool = common::test_pool().await;
     common::init_test_env();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -167,6 +167,13 @@ async fn admin_changes_the_live_proxy_and_vector_policy_with_rollback() {
         .into_future(),
     );
     let cache = tile_cache::CacheFixture::start().await;
+    {
+        let mut cache = cache.state.lock().unwrap();
+        cache
+            .values
+            .insert(b"tile:tile-settings-test:0:0:0".to_vec(), a.clone());
+        cache.calls.clear();
+    }
     let admin = common::create_test_admin(&pool, "tile-settings-admin").await;
     let user = common::create_test_user(&pool, "tile-settings-user").await;
     let token = create_token(&admin, 60, "access_token", 0).unwrap();
@@ -198,11 +205,25 @@ async fn admin_changes_the_live_proxy_and_vector_policy_with_rollback() {
     assert_eq!(initial["revision"], Value::Null);
     assert_eq!(
         initial["proxy"],
-        json!({"source": "environment", "baseUrl": base_a, "hasApiKey": true})
+        json!({"source": "unconfigured", "baseUrl": null, "hasApiKey": false})
     );
     assert_eq!(initial["keyStorageConfigured"], true);
     assert_eq!(proxy_revision(&app).await, None);
-    assert_tile(&app, TILE, &a, "MISS", IMMUTABLE).await;
+    let unavailable = request(&app, "GET", TILE, None, None).await;
+    assert_eq!(unavailable.status(), StatusCode::NOT_FOUND);
+    assert_eq!(unavailable.headers()[header::CACHE_CONTROL], "no-store");
+    assert!(cache.state.lock().unwrap().calls.is_empty());
+
+    let previous_env = json!({
+        "revision": null, "mode": "managed", "baseUrl": base_a,
+        "tile": {"z": 0, "x": 0, "y": 0}
+    });
+    assert_eq!(
+        request(&app, "POST", CHECK, Some(&token), Some(&previous_env))
+            .await
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
 
     let candidate = json!({
         "revision": null, "mode": "managed", "baseUrl": base_b,
@@ -219,7 +240,10 @@ async fn admin_changes_the_live_proxy_and_vector_policy_with_rollback() {
         response_text(failed).await;
     }
     assert_eq!(proxy_revision(&app).await, None);
-    assert_tile(&app, TILE, &a, "HIT", IMMUTABLE).await;
+    assert_eq!(
+        request(&app, "GET", TILE, None, None).await.status(),
+        StatusCode::NOT_FOUND
+    );
 
     let applied =
         response_json(request(&app, "PUT", PROXY, Some(&token), Some(&candidate)).await).await;
@@ -253,18 +277,55 @@ async fn admin_changes_the_live_proxy_and_vector_policy_with_rollback() {
     assert!(header.contains("worker-src 'self'"));
     assert_eq!(proxy_revision(&app).await, Some(revision_b));
 
-    let stale = json!({"revision": applied["revision"], "mode": "environment"});
+    for rejected in [
+        json!({"revision": policy["revision"], "mode": "environment"}),
+        json!({"revision": policy["revision"], "mode": "disabled", "apiKey": KEY_B}),
+    ] {
+        assert_eq!(
+            request(&app, "PUT", PROXY, Some(&token), Some(&rejected))
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+    let stale = json!({"revision": applied["revision"], "mode": "disabled"});
     assert_eq!(
         request(&app, "PUT", PROXY, Some(&token), Some(&stale))
             .await
             .status(),
         StatusCode::CONFLICT
     );
-    let rollback = json!({"revision": policy["revision"], "mode": "environment"});
-    let restored =
-        response_json(request(&app, "PUT", PROXY, Some(&token), Some(&rollback)).await).await;
-    assert_eq!(restored["proxy"], initial["proxy"]);
+    let disable = json!({"revision": policy["revision"], "mode": "disabled"});
+    let disabled =
+        response_json(request(&app, "PUT", PROXY, Some(&token), Some(&disable)).await).await;
+    assert_eq!(disabled["proxy"], initial["proxy"]);
+    assert_eq!(disabled["vectorOrigins"], policy["vectorOrigins"]);
+    let disabled_revision = proxy_revision(&app).await.unwrap();
+    assert_ne!(disabled_revision, revision_b);
+    cache.state.lock().unwrap().calls.clear();
+    let disabled_url = format!("{TILE}?v={disabled_revision}");
+    for path in [TILE, &url_b, &disabled_url] {
+        let response = request(&app, "GET", path, None, None).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    }
+    assert!(cache.state.lock().unwrap().calls.is_empty());
+
+    let reset = json!({"revision": disabled["revision"], "origins": null});
+    let reset =
+        response_json(request(&app, "PUT", ORIGINS, Some(&token), Some(&reset)).await).await;
+    assert_eq!(reset["vectorOrigins"], initial["vectorOrigins"]);
+    assert!(csp(&app).await.contains(ENV_ORIGIN));
+    assert_eq!(proxy_revision(&app).await, Some(disabled_revision));
+
+    let mut reconfigure = previous_env;
+    reconfigure["revision"] = reset["revision"].clone();
+    reconfigure["apiKey"] = json!(KEY_A);
+    let reconfigured =
+        response_json(request(&app, "PUT", PROXY, Some(&token), Some(&reconfigure)).await).await;
+    assert_eq!(reconfigured["proxy"]["source"], "managed");
     let revision_a = proxy_revision(&app).await.unwrap();
+    assert_ne!(revision_a, disabled_revision);
     assert_ne!(revision_a, revision_b);
     assert_tile(&app, &url_b, &a, "MISS", "no-store").await;
     assert_tile(
@@ -275,12 +336,5 @@ async fn admin_changes_the_live_proxy_and_vector_policy_with_rollback() {
         IMMUTABLE,
     )
     .await;
-
-    let reset = json!({"revision": restored["revision"], "origins": null});
-    let reset =
-        response_json(request(&app, "PUT", ORIGINS, Some(&token), Some(&reset)).await).await;
-    assert_eq!(reset["vectorOrigins"], initial["vectorOrigins"]);
-    assert!(csp(&app).await.contains(ENV_ORIGIN));
-    assert_eq!(proxy_revision(&app).await, Some(revision_a));
     upstream.abort();
 }

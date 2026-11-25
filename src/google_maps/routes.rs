@@ -4,6 +4,7 @@ use crate::{
     db::{BasemapScope, tiles::load_google_tile_type},
     error::AppError,
     handler::live_map::require_superuser,
+    routing::{Coordinate, RouteLimits, RouteResult, TravelMode},
 };
 use axum::{
     Json,
@@ -14,59 +15,26 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{Sqlite, SqlitePool};
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::{Duration, Instant},
-};
-use tokio::sync::{Mutex, Semaphore};
+use std::sync::Arc;
 use uuid::Uuid;
+
+pub use crate::routing::ComputeInput;
 
 const ROUTES_URL: &str = "https://routes.googleapis.com/directions/v2:computeRoutes";
 const ROUTE_FIELDS: &str =
     "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.warnings";
-const MAX_REQUESTS_PER_ACCOUNT: u32 = 10;
-const CONCURRENT_REQUESTS: usize = 8;
 
 pub(super) struct RoutesService {
     url: String,
-    limits: Mutex<HashMap<Option<String>, (Instant, u32)>>,
-    concurrent: Semaphore,
+    limits: RouteLimits,
 }
 
 impl Default for RoutesService {
     fn default() -> Self {
         Self {
             url: ROUTES_URL.into(),
-            limits: Mutex::new(HashMap::new()),
-            concurrent: Semaphore::new(CONCURRENT_REQUESTS),
+            limits: RouteLimits::default(),
         }
-    }
-}
-
-impl RoutesService {
-    async fn limit(&self, account: String, maximum: u32) -> Result<(), AppError> {
-        let now = Instant::now();
-        let mut limits = self.limits.lock().await;
-        limits.retain(|_, (start, _)| {
-            now.saturating_duration_since(*start) < Duration::from_secs(60)
-        });
-        let buckets = [
-            (None, maximum),
-            (Some(account), maximum.min(MAX_REQUESTS_PER_ACCOUNT)),
-        ];
-        if buckets
-            .iter()
-            .any(|(bucket, cap)| limits.get(bucket).is_some_and(|(_, count)| count >= cap))
-        {
-            return Err(AppError::TooManyRequests(
-                "経路検索の利用上限に達しました。時間をおいて再試行してください。".into(),
-            ));
-        }
-        for (bucket, _) in buckets {
-            limits.entry(bucket).or_insert((now, 0)).1 += 1;
-        }
-        Ok(())
     }
 }
 
@@ -177,37 +145,8 @@ pub async fn admin_update(
     Ok(([(header::CACHE_CONTROL, "no-store")], Json(next)))
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Coordinate {
-    lat: f64,
-    lng: f64,
-}
-
-impl Coordinate {
-    fn valid(&self) -> bool {
-        (-90.0..=90.0).contains(&self.lat) && (-180.0..=180.0).contains(&self.lng)
-    }
-
-    fn waypoint(&self) -> Value {
-        json!({ "location": { "latLng": { "latitude": self.lat, "longitude": self.lng } } })
-    }
-}
-
-#[derive(Clone, Copy, Deserialize, Serialize)]
-#[serde(rename_all = "UPPERCASE")]
-enum TravelMode {
-    Drive,
-    Walk,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ComputeInput {
-    background_id: i64,
-    origin: Coordinate,
-    destination: Coordinate,
-    travel_mode: TravelMode,
+fn waypoint(coordinate: &Coordinate) -> Value {
+    json!({ "location": { "latLng": { "latitude": coordinate.lat, "longitude": coordinate.lng } } })
 }
 
 #[derive(Deserialize)]
@@ -233,15 +172,6 @@ struct GooglePolyline {
     encoded_polyline: String,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RouteResult {
-    duration_seconds: f64,
-    distance_meters: u32,
-    encoded_polyline: String,
-    warnings: Vec<String>,
-}
-
 impl TryFrom<GoogleRoute> for RouteResult {
     type Error = AppError;
 
@@ -250,19 +180,13 @@ impl TryFrom<GoogleRoute> for RouteResult {
             .duration
             .strip_suffix('s')
             .and_then(|seconds| seconds.parse::<f64>().ok())
-            .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
             .ok_or(AppError::BadGateway)?;
-        let encoded_polyline = route.polyline.encoded_polyline;
-        if encoded_polyline.is_empty() || !encoded_polyline.bytes().all(|b| (63..=126).contains(&b))
-        {
-            return Err(AppError::BadGateway);
-        }
-        Ok(Self {
+        Self::new(
             duration_seconds,
-            distance_meters: route.distance_meters,
-            encoded_polyline,
-            warnings: route.warnings,
-        })
+            route.distance_meters,
+            route.polyline.encoded_polyline,
+            route.warnings,
+        )
     }
 }
 
@@ -276,8 +200,8 @@ async fn fetch_route(
     let mut key = HeaderValue::from_str(key).map_err(|_| AppError::InternalServerError)?;
     key.set_sensitive(true);
     let mut body = json!({
-        "origin": input.origin.waypoint(),
-        "destination": input.destination.waypoint(),
+        "origin": waypoint(&input.origin),
+        "destination": waypoint(&input.destination),
         "travelMode": input.travel_mode,
         "languageCode": language,
         "regionCode": region,
@@ -317,9 +241,7 @@ pub async fn compute(
     Extension(service): Extension<Arc<GoogleMaps>>,
     Json(input): Json<ComputeInput>,
 ) -> Result<impl IntoResponse, AppError> {
-    if !input.origin.valid() || !input.destination.valid() {
-        return Err(AppError::BadRequest);
-    }
+    input.validate_coordinates()?;
     let google = settings(&pool).await?;
     if !google.enabled
         || load_google_tile_type(&pool, input.background_id, BasemapScope::Normal)
@@ -335,14 +257,10 @@ pub async fn compute(
         return Err(AppError::Forbidden("経路検索は無効です。".into()));
     }
     let key = service.api_key(&google)?;
-    let _permit = service.routes.concurrent.try_acquire().map_err(|_| {
-        AppError::TooManyRequests(
-            "経路検索が混雑しています。時間をおいて再試行してください。".into(),
-        )
-    })?;
-    service
+    let _permit = service
         .routes
-        .limit(account, routes.requests_per_minute as u32)
+        .limits
+        .acquire(account, routes.requests_per_minute as u32)
         .await?;
     let route = fetch_route(&service, &key, &input, &google.language, &google.region).await?;
     Ok((
@@ -360,6 +278,8 @@ mod tests {
         http::{HeaderMap, StatusCode},
         routing::{get, post},
     };
+    use std::collections::HashMap;
+    use tokio::sync::Mutex;
 
     #[tokio::test]
     async fn routes_requests_use_basic_driving_and_walking_options() {
@@ -589,16 +509,16 @@ mod tests {
         let service = RoutesService::default();
         let first = Uuid::new_v4().to_string();
         let second = Uuid::new_v4().to_string();
-        for _ in 0..MAX_REQUESTS_PER_ACCOUNT {
-            service.limit(first.clone(), 11).await.unwrap();
+        for _ in 0..10 {
+            drop(service.limits.acquire(first.clone(), 11).await.unwrap());
         }
         assert!(matches!(
-            service.limit(first.clone(), 11).await,
+            service.limits.acquire(first, 11).await,
             Err(AppError::TooManyRequests(_))
         ));
-        service.limit(second.clone(), 11).await.unwrap();
+        drop(service.limits.acquire(second.clone(), 11).await.unwrap());
         assert!(matches!(
-            service.limit(second, 11).await,
+            service.limits.acquire(second, 11).await,
             Err(AppError::TooManyRequests(_))
         ));
     }

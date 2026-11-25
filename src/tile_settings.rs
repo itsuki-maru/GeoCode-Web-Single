@@ -107,10 +107,8 @@ impl ApiKeyCipher {
 }
 
 pub struct TileSettings {
-    environment_url: Option<String>,
-    environment_key: Option<String>,
     image_origins: Vec<String>,
-    environment_snapshot: TileSettingsSnapshot,
+    initial_snapshot: TileSettingsSnapshot,
     cipher: Option<ApiKeyCipher>,
     current: RwLock<TileSettingsSnapshot>,
     // 設定の再取得と公開を直列化し、保存直後のスナップショットがポーリングで置き換わることを防ぐ。
@@ -155,8 +153,6 @@ impl TileSettings {
                 cipher
             });
         Self::new(
-            CONFIG.tile_server_base_url.clone(),
-            CONFIG.tile_server_api_key.clone(),
             CONFIG.http_image_allowed_origins.clone(),
             CONFIG.vector_tile_allowed_origins.clone(),
             cipher,
@@ -164,13 +160,11 @@ impl TileSettings {
     }
 
     fn new(
-        environment_url: Option<String>,
-        environment_key: Option<String>,
         image_origins: Vec<String>,
         vector_origins: Vec<String>,
         cipher: Option<ApiKeyCipher>,
     ) -> Self {
-        let environment_snapshot = TileSettingsSnapshot {
+        let initial_snapshot = TileSettingsSnapshot {
             revision: None,
             proxy_revision: None,
             managed_upstream: None,
@@ -180,11 +174,9 @@ impl TileSettings {
             updated_at: None,
         };
         Self {
-            environment_url,
-            environment_key,
             image_origins,
-            current: RwLock::new(environment_snapshot.clone()),
-            environment_snapshot,
+            current: RwLock::new(initial_snapshot.clone()),
+            initial_snapshot,
             cipher,
             sync: Mutex::new(()),
         }
@@ -205,7 +197,7 @@ impl TileSettings {
             .await?;
         let snapshot = match row.as_ref() {
             Some(row) => self.load_snapshot(row)?,
-            None => self.environment_snapshot.clone(),
+            None => self.initial_snapshot.clone(),
         };
         self.publish(snapshot);
         Ok(())
@@ -227,7 +219,7 @@ impl TileSettings {
             Some(origins) => {
                 validate_vector_origins(&origins.0).map_err(|_| AppError::InternalServerError)?
             },
-            None => self.environment_snapshot.vector_origins.clone(),
+            None => self.initial_snapshot.vector_origins.clone(),
         };
         Ok(TileSettingsSnapshot {
             revision: Some(
@@ -262,15 +254,9 @@ impl TileSettings {
                 has_api_key: true,
             },
             None => ProxyView {
-                source: "environment",
-                base_url: self
-                    .environment_url
-                    .as_deref()
-                    .and_then(public_environment_url),
-                has_api_key: self
-                    .environment_key
-                    .as_ref()
-                    .is_some_and(|key| !key.is_empty()),
+                source: "unconfigured",
+                base_url: None,
+                has_api_key: false,
             },
         };
         TileSettingsView {
@@ -307,22 +293,15 @@ impl TileSettings {
         let base_url = validate_managed_base_url(base_url)?;
         let api_key = match api_key {
             Some(key) => validate_api_key(key)?,
-            None => self.retained_key(&snapshot, &base_url).ok_or_else(|| {
-                AppError::Validation("この接続先で使用するAPIキーを入力してください。".into())
-            })?,
+            None => snapshot
+                .managed_upstream
+                .filter(|upstream| upstream.base_url == base_url)
+                .map(|upstream| upstream.api_key)
+                .ok_or_else(|| {
+                    AppError::Validation("この接続先で使用するAPIキーを入力してください。".into())
+                })?,
         };
         Ok(ManagedTileUpstream { base_url, api_key })
-    }
-
-    fn retained_key(&self, snapshot: &TileSettingsSnapshot, base_url: &Url) -> Option<HeaderValue> {
-        if let Some(upstream) = &snapshot.managed_upstream {
-            return (upstream.base_url == *base_url).then(|| upstream.api_key.clone());
-        }
-        let current_url = validate_managed_base_url(self.environment_url.as_deref()?).ok()?;
-        if current_url != *base_url {
-            return None;
-        }
-        validate_api_key(self.environment_key.as_deref()?).ok()
     }
 
     pub(crate) async fn set_proxy(
@@ -440,18 +419,6 @@ impl TileSettings {
     }
 }
 
-fn public_environment_url(value: &str) -> Option<String> {
-    let mut url = Url::parse(value).ok()?;
-    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-        return None;
-    }
-    url.set_username("").ok()?;
-    url.set_password(None).ok()?;
-    url.set_query(None);
-    url.set_fragment(None);
-    Some(url.to_string())
-}
-
 fn validate_api_key(value: &str) -> Result<HeaderValue, AppError> {
     let invalid = || AppError::Validation("APIキーに使用できない文字が含まれています。".into());
     if value.is_empty()
@@ -515,8 +482,6 @@ mod tests {
 
     fn test_settings() -> TileSettings {
         TileSettings::new(
-            Some("https://tiles.example/tile".into()),
-            Some("original-test-key".into()),
             Vec::new(),
             vec!["https://vector-env.example".into()],
             Some(test_cipher()),
@@ -547,23 +512,13 @@ mod tests {
         assert!(cipher.open(&upstream.base_url, &corrupted).is_err());
     }
 
-    /// 保存済みキーは同じ接続先でのみ再利用し、応答本文へ含めない。
+    /// 初期状態は未設定で、登録には使用可能なAPIキーが必要。
     #[test]
-    fn saved_key_is_reused_only_for_the_same_validated_base_url() {
+    fn first_upstream_requires_a_valid_key() {
         let settings = test_settings();
-        let same = settings
-            .prepare_upstream(None, "https://tiles.example/tile/", None)
-            .unwrap();
-        assert_eq!(same.api_key, "original-test-key");
-        assert!(same.api_key.is_sensitive());
         assert!(
             settings
-                .prepare_upstream(None, "https://tiles.example/other", None)
-                .is_err()
-        );
-        assert!(
-            settings
-                .prepare_upstream(None, "https://other.example/tile", None)
+                .prepare_upstream(None, "https://tiles.example/tile", None)
                 .is_err()
         );
         assert!(
@@ -572,13 +527,10 @@ mod tests {
                 .is_err()
         );
 
-        let encoded = serde_json::to_string(&settings.view()).unwrap();
-        assert!(encoded.contains("\"hasApiKey\":true"));
-        assert!(!encoded.contains("original-test-key"));
-        assert_eq!(
-            public_environment_url("https://user:password@tiles.example/tile?key=secret#fragment"),
-            Some("https://tiles.example/tile".into())
-        );
+        let initial = settings.view();
+        assert_eq!(initial.proxy.source, "unconfigured");
+        assert!(initial.proxy.base_url.is_none());
+        assert!(!initial.proxy.has_api_key);
     }
 
     /// 配信元の形式を検証し、重複を正規化する。
@@ -605,9 +557,9 @@ mod tests {
         }
     }
 
-    /// 中継先と配信元許可を独立して保存・再取得・切り戻しできる。
+    /// 中継先の無効化とベクタ配信元の環境設定への切り戻しを独立して行える。
     #[tokio::test]
-    async fn proxy_and_vector_settings_persist_and_roll_back_independently() {
+    async fn proxy_and_vector_settings_persist_and_reset_independently() {
         let pool = test_pool().await;
         let admin = create_user_with_master_layer(&pool, "tile-setting-admin", "test-hash", true)
             .await
@@ -641,12 +593,15 @@ mod tests {
         .await
         .unwrap();
         assert_ne!(stored.as_slice(), b"new-test-key");
-        assert_eq!(
+        let reused = settings
+            .prepare_upstream(applied.revision, "https://new.example/tile/", None)
+            .unwrap();
+        assert_eq!(reused.api_key, "new-test-key");
+        assert!(reused.api_key.is_sensitive());
+        assert!(
             settings
-                .prepare_upstream(applied.revision, "https://new.example/tile", None)
-                .unwrap()
-                .api_key,
-            "new-test-key"
+                .prepare_upstream(applied.revision, "https://new.example/other", None)
+                .is_err()
         );
 
         let managed = settings
@@ -693,18 +648,32 @@ mod tests {
             "new-test-key"
         );
 
-        let rolled_back = other_process
+        let disabled = other_process
             .set_proxy(&pool, &admin, managed.revision, None)
             .await
             .unwrap();
-        assert_eq!(rolled_back.proxy.source, "environment");
-        assert_eq!(rolled_back.vector_origins.source, "managed");
+        assert_eq!(disabled.proxy.source, "unconfigured");
+        assert_eq!(disabled.vector_origins.source, "managed");
+        assert!(disabled.proxy.base_url.is_none());
+        assert!(!disabled.proxy.has_api_key);
+        assert!(
+            other_process
+                .prepare_upstream(disabled.revision, "https://new.example/tile", None)
+                .is_err()
+        );
+        let (url, key) = sqlx::query_as::<_, (Option<String>, Option<Vec<u8>>)>(
+            "SELECT proxy_base_url, encrypted_api_key FROM tile_server_settings WHERE id = 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(url.is_none() && key.is_none());
         assert_ne!(
             other_process.snapshot().proxy_revision,
             Some(proxy_revision)
         );
         let defaults = settings
-            .set_vector_origins(&pool, &admin, rolled_back.revision, None)
+            .set_vector_origins(&pool, &admin, disabled.revision, None)
             .await
             .unwrap();
         assert_eq!(defaults.vector_origins.source, "environment");

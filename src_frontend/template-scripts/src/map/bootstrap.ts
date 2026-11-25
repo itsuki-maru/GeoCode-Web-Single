@@ -45,6 +45,9 @@ export function readMapBootstrap(): MapBootstrap {
     typeof value.page !== "string" ||
     !MAP_PAGES.has(value.page as MapBootstrap["page"]) ||
     (value.clusteringMinZoom !== undefined && !isClusteringMinZoom(value.clusteringMinZoom)) ||
+    (value.osrmModes !== undefined &&
+      ((value.page !== "map" && value.page !== "map-mobile" && value.page !== "map-anather") ||
+        !isOsrmModes(value.osrmModes))) ||
     !isRecord(value.tileServers) ||
     (value.fallbackTileServerId !== undefined &&
       (typeof value.fallbackTileServerId !== "string" ||
@@ -113,6 +116,14 @@ export function readMapBootstrap(): MapBootstrap {
     jsonNode.remove();
   }
   return value as unknown as MapBootstrap;
+}
+
+function isOsrmModes(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    (value.length === 0 ||
+      (value[0] === "DRIVE" && (value.length === 1 || (value.length === 2 && value[1] === "WALK"))))
+  );
 }
 
 function isInitialView(value: unknown): boolean {

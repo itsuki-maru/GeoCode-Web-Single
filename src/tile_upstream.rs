@@ -40,7 +40,7 @@ static TRUSTED_ORIGINS: Lazy<Vec<String>> = Lazy::new(|| {
         .collect()
 });
 
-fn is_public_ip(ip: IpAddr) -> bool {
+pub(crate) fn is_public_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => match ip.octets() {
             [0 | 10 | 127 | 224..=255, ..]
@@ -68,7 +68,7 @@ fn is_public_ip(ip: IpAddr) -> bool {
     }
 }
 
-struct PublicDns;
+pub(crate) struct PublicDns;
 
 impl Resolve for PublicDns {
     fn resolve(&self, name: Name) -> Resolving {
