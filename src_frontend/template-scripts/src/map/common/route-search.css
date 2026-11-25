@@ -34,10 +34,6 @@
   pointer-events: auto;
 }
 
-.route-search-overlay-print .route-search-panel {
-  max-height: calc(100% - 16px);
-}
-
 .route-search-handle {
   flex: none;
   display: block;
@@ -99,13 +95,67 @@
   display: none;
 }
 
+.route-search-attribution {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.route-search-attribution a,
+.route-search-panel .route-search-google-link {
+  color: #1958b0;
+  text-decoration: underline;
+  touch-action: manipulation;
+}
+
 .route-search-panel .route-search-google-link {
   display: block;
   width: fit-content;
   margin-top: 6px;
-  color: #1958b0;
-  text-decoration: underline;
-  touch-action: manipulation;
+}
+
+.route-search-overlay-print .route-search-panel {
+  max-width: min(260px, calc(100% - 16px));
+  max-height: calc(100% - 16px);
+  padding: 6px 8px;
+  font-size: var(--print-route-font-size, 12px);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.route-search-overlay-print .route-search-handle {
+  margin: -2px -2px 2px;
+  padding: 2px;
+}
+
+.route-search-overlay-print .route-search-actions:not(:empty) {
+  margin-bottom: 4px;
+}
+
+.route-search-overlay-print .route-search-actions button {
+  min-height: 28px;
+  padding: 2px 6px;
+}
+
+.route-search-overlay-print .route-search-actions + .route-search-status {
+  margin-top: 0;
+}
+
+.route-search-overlay-print
+  :is(.route-search-status, .route-search-warnings, .route-search-warnings li) {
+  font-size: inherit;
+}
+
+.route-search-overlay-print .route-search-warnings {
+  margin-top: 4px;
+}
+
+.route-search-overlay-print .route-search-warnings li {
+  margin: 0;
+}
+
+.route-search-overlay-print .route-search-attribution {
+  margin-top: 4px;
+  font-size: max(10px, 0.85em);
 }
 
 @media print {
@@ -114,9 +164,5 @@
   .route-search-overlay-print .route-search-handle,
   .route-search-overlay-print .route-search-actions {
     display: none !important;
-  }
-
-  .route-search-overlay-print .route-search-actions + .route-search-status {
-    margin-top: 0;
   }
 }

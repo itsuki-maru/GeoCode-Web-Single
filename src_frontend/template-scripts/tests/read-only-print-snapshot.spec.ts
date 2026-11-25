@@ -151,6 +151,9 @@ describe("read-only print snapshot", () => {
     expect(snapshot.state).not.toHaveProperty("route");
     expect(isReadOnlyPrintSnapshot(snapshot)).toBe(true);
     expect(isReadOnlyPrintSnapshot({ ...snapshot, sourcePage: "temporary-map" })).toBe(false);
+    expect(isReadOnlyPrintSnapshot({ ...snapshot, route: { ...route, provider: "osrm" } })).toBe(
+      false,
+    );
     expect(isReadOnlyPrintSnapshot({ ...snapshot, route: { ...route, backgroundId: 1 } })).toBe(
       false,
     );
@@ -161,6 +164,42 @@ describe("read-only print snapshot", () => {
         route: { ...route, backgroundId: 1 },
       }),
     ).toBe(false);
+  });
+
+  it.each([
+    { kind: "raster" as const, style_url: null },
+    { kind: "vector" as const, style_url: "https://styles.example.test/style.json" },
+  ])("全画面の非Google $kind 背景のOSRM経路を印刷専用データに含める", (basemap) => {
+    const { source, state, keys } = fixture();
+    const route: RoutePrintState = {
+      backgroundId: 2,
+      provider: "osrm",
+      travelMode: "DRIVE",
+      durationSeconds: 720,
+      distanceMeters: 3_400,
+      encodedPolyline: "_p~iF~ps|U_ulLnnqC_mqNvxq`@",
+      warnings: [],
+    };
+    const snapshot = createReadOnlyPrintSnapshot(
+      {
+        ...source,
+        sourcePage: "map-anather",
+        route,
+        tileServers: {
+          ...source.tileServers,
+          "2": { ...source.tileServers["1"], ...basemap, id: 2, provider: "generic" },
+        },
+      },
+      { ...state, tileServerId: "2" },
+      keys,
+    );
+    expect(snapshot.route).toEqual(route);
+    expect(snapshot.tileServers["2"]).not.toHaveProperty("provider");
+    expect(isReadOnlyPrintSnapshot(snapshot)).toBe(true);
+    expect(isReadOnlyPrintSnapshot({ ...snapshot, sourcePage: "temporary-map" })).toBe(false);
+    expect(isReadOnlyPrintSnapshot({ ...snapshot, route: { ...route, provider: "other" } })).toBe(
+      false,
+    );
   });
 
   it("旧共有から表示対象のレコードと描画設定だけを固定する", () => {

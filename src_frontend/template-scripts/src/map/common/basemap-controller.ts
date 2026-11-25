@@ -11,6 +11,8 @@ export interface BasemapState {
   provider: BasemapProvider;
   ready: boolean;
   pending: boolean;
+  minZoom?: number;
+  maxZoom?: number;
   /** 背景側の表示条件。Routes APIの権限・有効化は別に確認する。 */
   googleRoutesAvailable: boolean;
 }
@@ -92,6 +94,8 @@ export function createBasemapController({
       provider,
       ready,
       pending,
+      minZoom: record?.min_zoom ?? 5,
+      maxZoom: record?.max_zoom ?? 18,
       googleRoutesAvailable: ready && provider === "google",
     };
   };

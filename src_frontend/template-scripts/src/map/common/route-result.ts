@@ -1,5 +1,6 @@
 export type RoutePrintState = {
   backgroundId: number;
+  provider?: "google" | "osrm";
   travelMode: "DRIVE" | "WALK";
   durationSeconds: number;
   distanceMeters: number;
@@ -15,7 +16,7 @@ export const ROUTE_LINE_OPTIONS = {
   className: "route-search-line",
 };
 
-// Routes API の上流レスポンスと同じ上限を印刷メッセージにも適用する。
+// 経路検索の上流レスポンスと同じ上限を印刷メッセージにも適用する。
 const MAX_ROUTE_TEXT_LENGTH = 1024 * 1024;
 
 export function isRoutePrintState(value: unknown): value is RoutePrintState {
@@ -24,6 +25,7 @@ export function isRoutePrintState(value: unknown): value is RoutePrintState {
   if (
     !Number.isSafeInteger(state.backgroundId) ||
     state.backgroundId <= 0 ||
+    (state.provider !== undefined && state.provider !== "google" && state.provider !== "osrm") ||
     (state.travelMode !== "DRIVE" && state.travelMode !== "WALK") ||
     !Number.isFinite(state.durationSeconds) ||
     state.durationSeconds < 0 ||
@@ -39,6 +41,7 @@ export function isRoutePrintState(value: unknown): value is RoutePrintState {
       (key) =>
         ![
           "backgroundId",
+          "provider",
           "travelMode",
           "durationSeconds",
           "distanceMeters",
@@ -67,7 +70,20 @@ export function validPoint(point: { lat: number; lng: number }): boolean {
   );
 }
 
-// Google の Encoded Polyline は、直前の点との差分を 5 ビットずつ格納する。
+export function createOsrmAttribution(doc: Document, print = false): HTMLElement {
+  const attribution = doc.createElement("p");
+  attribution.className = "route-search-attribution";
+  const source = doc.createElement("a");
+  source.href = "https://www.openstreetmap.org/copyright";
+  source.target = "_blank";
+  source.rel = "noopener noreferrer";
+  source.textContent = "OpenStreetMap contributors";
+  if (print) source.append(doc.createElement("br"), " (openstreetmap.org/copyright)");
+  attribution.append("経路データ © ", source);
+  return attribution;
+}
+
+// Encoded Polyline は、直前の点との差分を 5 ビットずつ格納する。
 export function decodePolyline(encoded: string, centerLongitude: number): [number, number][] {
   const points: [number, number][] = [];
   let index = 0;

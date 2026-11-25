@@ -14,7 +14,6 @@ use axum::{
     response::IntoResponse,
 };
 use redis::AsyncCommands;
-use reqwest::Client;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -39,12 +38,11 @@ pub async fn tile_proxy_revision_script(
 
 // タイルサーバ中継API
 pub async fn proxy_tile_handler(
-    Extension(client): Extension<Client>,
     Extension(tile_cache): Extension<Option<redis::aio::ConnectionManager>>,
-    settings: Option<Extension<Arc<TileSettings>>>,
+    Extension(settings): Extension<Arc<TileSettings>>,
     RawQuery(query): RawQuery,
     path: Result<Path<TilePathParams>, PathRejection>,
-) -> Result<impl IntoResponse, AppError> {
+) -> Result<Response<Body>, AppError> {
     // タイル座標を検証
     let Path(TilePathParams { z, x, y_png }) = path.map_err(|_| AppError::NotFound)?;
     let y = parse_y_png(&y_png)?;
@@ -52,72 +50,20 @@ pub async fn proxy_tile_handler(
 
     // 要求の処理中に管理者が別の設定を適用した場合も、
     // キャッシュ参照・取得・保存には同じ設定スナップショットを使用する。
-    let active = settings.map(|Extension(settings)| settings.snapshot());
-    let revision = active.as_ref().and_then(|settings| settings.proxy_revision);
+    let active = settings.snapshot();
+    let Some(upstream) = active.managed_upstream else {
+        return Ok(([(CACHE_CONTROL, "no-store")], AppError::NotFound).into_response());
+    };
+    let revision = active.proxy_revision.ok_or(AppError::InternalServerError)?;
     let cache_key = cache_key_for_revision(&CONFIG.tile_cache_namespace, revision, z, x, y);
     let cache_control = cache_control_for_revision(revision, query.as_deref());
     if let Some(tile_bytes) = get_cached_tile(tile_cache.as_ref(), &cache_key).await {
         return build_tile_response(tile_bytes, "HIT", cache_control);
     }
 
-    let tile_bytes = match active.and_then(|settings| settings.managed_upstream) {
-        Some(upstream) => fetch_managed_tile(&upstream, z, x, y).await?,
-        None => fetch_environment_tile(&client, z, x, y).await?,
-    };
+    let tile_bytes = fetch_managed_tile(&upstream, z, x, y).await?;
     set_cached_tile(tile_cache.as_ref(), &cache_key, &tile_bytes).await;
     build_tile_response(tile_bytes, "MISS", cache_control)
-}
-
-async fn fetch_environment_tile(
-    client: &Client,
-    z: u32,
-    x: u32,
-    y: u32,
-) -> Result<Vec<u8>, AppError> {
-    // タイルサーバのURLを構築
-    let upstream_base_url = CONFIG.tile_server_base_url.as_deref().ok_or_else(|| {
-        tracing::error!("TILE_SERVER_BASE_URL is not configured.");
-        AppError::NotFound
-    })?;
-
-    // タイルサーバのAPIキーを取得
-    let api_key = CONFIG.tile_server_api_key.as_deref().ok_or_else(|| {
-        tracing::error!("TILE_SERVER_API_KEY is not configured.");
-        AppError::NotFound
-    })?;
-
-    // タイルのURLを構築
-    let upstream_url = build_upstream_tile_url(upstream_base_url, z, x, y);
-
-    // タイルを取得
-    let upstream_response = client
-        .get(&upstream_url)
-        .header("X-API-Key", api_key)
-        .send()
-        .await
-        .map_err(map_upstream_error)?;
-
-    // タイルが見つからない場合は404を返す
-    if upstream_response.status() == StatusCode::NOT_FOUND {
-        return Err(AppError::NotFound);
-    }
-
-    // タイルが取得できない場合は502を返す
-    if !upstream_response.status().is_success() {
-        tracing::warn!(
-            status = %upstream_response.status(),
-            url = %upstream_url,
-            "Tile upstream returned non-success status."
-        );
-        return Err(AppError::BadGateway);
-    }
-
-    // タイルを取得
-    let tile_bytes = upstream_response
-        .bytes()
-        .await
-        .map_err(map_upstream_error)?;
-    Ok(tile_bytes.to_vec())
 }
 
 // タイルレスポンスを構築する
@@ -141,40 +87,19 @@ fn parse_y_png(y_png: &str) -> Result<u32, AppError> {
     y.parse::<u32>().map_err(|_| AppError::NotFound)
 }
 
-// タイルのURLを構築する
-fn build_upstream_tile_url(base_url: &str, z: u32, x: u32, y: u32) -> String {
-    format!("{}/{}/{}/{}.png", base_url.trim_end_matches('/'), z, x, y)
+fn cache_key_for_revision(namespace: &str, revision: Uuid, z: u32, x: u32, y: u32) -> String {
+    format!("tile:{namespace}:revision:{revision}:{z}:{x}:{y}")
 }
 
-// タイルキャッシュのキーを構築する
-fn build_tile_cache_key(namespace: &str, z: u32, x: u32, y: u32) -> String {
-    format!("tile:{}:{}:{}:{}", namespace, z, x, y)
-}
-
-fn cache_key_for_revision(
-    namespace: &str,
-    revision: Option<Uuid>,
-    z: u32,
-    x: u32,
-    y: u32,
-) -> String {
-    match revision {
-        Some(revision) => format!("tile:{namespace}:revision:{revision}:{z}:{x}:{y}"),
-        None => build_tile_cache_key(namespace, z, x, y),
-    }
-}
-
-fn cache_control_for_revision(revision: Option<Uuid>, query: Option<&str>) -> &'static str {
+fn cache_control_for_revision(revision: Uuid, query: Option<&str>) -> &'static str {
     let requested =
         query.and_then(|query| query.split('&').find_map(|item| item.strip_prefix("v=")));
-    match (revision, requested) {
-        (None, None) => TILE_PROXY_CACHE_CONTROL,
-        (Some(revision), Some(value)) if Uuid::parse_str(value).ok() == Some(revision) => {
-            TILE_PROXY_CACHE_CONTROL
-        },
+    if requested.and_then(|value| Uuid::parse_str(value).ok()) == Some(revision) {
+        TILE_PROXY_CACHE_CONTROL
+    } else {
         // 旧形式のURLや旧版を持つタブにも現在の画像を返す。
         // この応答はブラウザやCDNの長期キャッシュへ保存しない。
-        _ => "no-store",
+        "no-store"
     }
 }
 
@@ -218,22 +143,11 @@ async fn set_cached_tile(
     }
 }
 
-// タイルの取得に失敗した場合のエラーをマッピングする
-fn map_upstream_error(error: reqwest::Error) -> AppError {
-    if error.is_timeout() {
-        tracing::warn!(error = %error, "Tile upstream request timed out.");
-        AppError::BadGateway
-    } else {
-        tracing::error!(error = %error, "Tile upstream request failed.");
-        AppError::BadGateway
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        TILE_PROXY_CACHE_CONTROL, build_tile_cache_key, build_upstream_tile_url,
-        cache_control_for_revision, cache_key_for_revision, parse_y_png, validate_coordinates,
+        TILE_PROXY_CACHE_CONTROL, cache_control_for_revision, cache_key_for_revision, parse_y_png,
+        validate_coordinates,
     };
 
     #[test]
@@ -246,24 +160,10 @@ mod tests {
     }
 
     #[test]
-    fn builds_upstream_url_without_duplicate_slashes() {
-        let url = build_upstream_tile_url("https://tiles.example.com/", 14, 14523, 6342);
-        assert_eq!(url, "https://tiles.example.com/14/14523/6342.png");
-    }
-
-    #[test]
     fn parses_png_suffix_in_y_segment() {
         assert_eq!(parse_y_png("6342.png").unwrap(), 6342);
         assert!(parse_y_png("6342.jpg").is_err());
         assert!(parse_y_png("abc.png").is_err());
-    }
-
-    #[test]
-    fn builds_tile_cache_key() {
-        assert_eq!(
-            build_tile_cache_key("default", 14, 14523, 6342),
-            "tile:default:14:14523:6342"
-        );
     }
 
     /// 上流切替でキャッシュを分離し、有効な設定版と一致する要求だけを長期キャッシュする。
@@ -273,26 +173,25 @@ mod tests {
         let previous = uuid::Uuid::from_u128(2);
         let query = format!("v={current}");
         assert_eq!(
-            cache_control_for_revision(None, None),
+            cache_control_for_revision(current, Some(&query)),
             TILE_PROXY_CACHE_CONTROL
         );
         assert_eq!(
-            cache_control_for_revision(Some(current), Some(&query)),
-            TILE_PROXY_CACHE_CONTROL
-        );
-        assert_eq!(
-            cache_control_for_revision(Some(previous), Some(&query)),
+            cache_control_for_revision(previous, Some(&query)),
             "no-store"
         );
-        assert_eq!(cache_control_for_revision(Some(current), None), "no-store");
-        assert_eq!(cache_control_for_revision(None, Some(&query)), "no-store");
-        assert_ne!(
-            cache_key_for_revision("maps", Some(current), 0, 0, 0),
-            cache_key_for_revision("maps", Some(previous), 0, 0, 0)
+        assert_eq!(cache_control_for_revision(current, None), "no-store");
+        assert_eq!(
+            cache_control_for_revision(current, Some("v=invalid")),
+            "no-store"
         );
         assert_ne!(
-            cache_key_for_revision("maps", Some(current), 0, 0, 0),
-            cache_key_for_revision("maps", None, 0, 0, 0)
+            cache_key_for_revision("maps", current, 0, 0, 0),
+            cache_key_for_revision("maps", previous, 0, 0, 0)
+        );
+        assert_eq!(
+            cache_key_for_revision("maps", current, 0, 0, 0),
+            format!("tile:maps:revision:{current}:0:0:0")
         );
     }
 }

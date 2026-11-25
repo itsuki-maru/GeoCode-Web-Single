@@ -32,7 +32,7 @@ pub struct ProxyInput {
 #[serde(rename_all = "lowercase")]
 enum ProxyMode {
     Managed,
-    Environment,
+    Disabled,
 }
 
 #[derive(Deserialize)]
@@ -94,10 +94,14 @@ pub async fn update_proxy(
 ) -> Result<impl IntoResponse, AppError> {
     require_superuser(&user_id, &pool).await?;
     let Json(input) = input.map_err(|_| AppError::BadRequest)?;
-    let upstream = if input.mode == ProxyMode::Managed {
-        Some(check_candidate(&settings, &pool, &input).await?)
-    } else {
-        None
+    let upstream = match input.mode {
+        ProxyMode::Managed => Some(check_candidate(&settings, &pool, &input).await?),
+        ProxyMode::Disabled => {
+            if input.base_url.is_some() || input.api_key.is_some() || input.tile.is_some() {
+                return Err(AppError::BadRequest);
+            }
+            None
+        },
     };
     let response = settings
         .set_proxy(&pool, &user_id, input.revision, upstream)

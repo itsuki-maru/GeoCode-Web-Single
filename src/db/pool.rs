@@ -592,6 +592,20 @@ const MIGRATIONS: &[Migration] = &[
             "../../migrations/20261122120000_add_google_routes_settings.sql"
         )],
     },
+    Migration {
+        version: 31,
+        name: "add_osrm_settings",
+        statements: &[include_str!(
+            "../../migrations/20261123090000_add_osrm_settings.sql"
+        )],
+    },
+    Migration {
+        version: 32,
+        name: "add_osrm_base_urls",
+        statements: &[include_str!(
+            "../../migrations/20261124090000_add_osrm_base_urls.sql"
+        )],
+    },
 ];
 
 // データベース接続の確立
@@ -805,6 +819,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), Error> {
                 28 => Some("google_maps_settings"),
                 29 => Some("remember_background_map_id"),
                 30 => Some("google_routes_settings"),
+                31 => Some("osrm_settings"),
                 _ => None,
             };
             if let Some(name) = completion_marker {
@@ -814,6 +829,20 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), Error> {
                     "#,
                 )
                 .bind(name)
+                .fetch_one(&mut *tx)
+                .await?;
+                if exists {
+                    continue;
+                }
+            }
+            if migration.version == 32 {
+                let exists: bool = sqlx::query_scalar(
+                    r#"
+                    SELECT EXISTS (
+                        SELECT 1 FROM pragma_table_info('osrm_settings') WHERE name = 'walk_base_url'
+                    )
+                    "#,
+                )
                 .fetch_one(&mut *tx)
                 .await?;
                 if exists {

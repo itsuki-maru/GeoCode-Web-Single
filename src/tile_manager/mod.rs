@@ -78,16 +78,26 @@ impl Manager {
         match result {
             Ok(value) => Ok(value),
             Err(error) => {
-                let diagnosis = crate::local_tiles::catalog::rebind::run(
-                    self.config_path.clone(),
-                    crate::local_tiles::catalog::rebind::Request::Inspect,
-                    CancellationToken::new(),
-                )
-                .await
-                .ok();
+                let requests = process::list_receipts(&config, &self.config_path)?;
+                // 受付直後のworkerと、状態ポーリングの自動診断が同じcatalogの所有者ロックを競合しないようにする。
+                let rebind_active = requests.iter().any(|request| {
+                    request["action"] == "rebind"
+                        && request["state"].as_str().is_some_and(process::active)
+                });
+                let diagnosis = if rebind_active {
+                    None
+                } else {
+                    crate::local_tiles::catalog::rebind::run(
+                        self.config_path.clone(),
+                        crate::local_tiles::catalog::rebind::Request::Inspect,
+                        CancellationToken::new(),
+                    )
+                    .await
+                    .ok()
+                };
                 Ok(
                     json!({"configured":true,"config_path":self.config_path,"config":config_value(&config),"error":error,
-                    "datasets":[],"jobs":[],"requests":process::list_receipts(&config,&self.config_path)?,"owner_available":false,"rebind":diagnosis}),
+                    "datasets":[],"jobs":[],"requests":requests,"owner_available":false,"rebind":diagnosis}),
                 )
             },
         }

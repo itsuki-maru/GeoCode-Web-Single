@@ -83,9 +83,12 @@ describe("印刷の経路表示", () => {
     });
     const { line, leaflet } = createRenderer();
     const onChange = vi.fn();
-    const preview = createPrintRoute(map, leaflet, route, onChange);
+    const settings = document.createElement("div");
+    settings.hidden = true;
+    const preview = createPrintRoute(map, leaflet, route, onChange, settings);
     try {
       expect(leaflet.polyline).not.toHaveBeenCalled();
+      expect(settings.hidden).toBe(true);
       changeBackground({ ...ready, id: "3" });
       expect(leaflet.polyline).not.toHaveBeenCalled();
       changeBackground(ready);
@@ -97,6 +100,7 @@ describe("印刷の経路表示", () => {
         interactive: false,
       });
       expect(line.addTo).toHaveBeenCalledOnce();
+      expect(settings.hidden).toBe(false);
       expect(container.querySelector(".route-search-status")?.textContent).toBe(
         "徒歩・約12分・3.4 km",
       );
@@ -105,12 +109,15 @@ describe("印刷の経路表示", () => {
       );
       changeBackground({ ...ready, id: "1", provider: "generic", googleRoutesAvailable: false });
       expect(line.remove).toHaveBeenCalledOnce();
+      expect(settings.hidden).toBe(true);
       changeBackground(ready);
       expect(line.addTo).toHaveBeenCalledTimes(2);
+      expect(settings.hidden).toBe(false);
       const remove = container.querySelector<HTMLButtonElement>(".route-search-actions button")!;
       expect(remove.textContent).toBe("経路を消す");
       remove.click();
       expect(line.remove).toHaveBeenCalledTimes(2);
+      expect(settings.hidden).toBe(true);
       changeBackground(ready);
       expect(line.addTo).toHaveBeenCalledTimes(2);
       expect(onChange.mock.calls.length).toBeGreaterThanOrEqual(4);
@@ -133,6 +140,46 @@ describe("印刷の経路表示", () => {
     } finally {
       preview.dispose();
       map.remove();
+    }
+  });
+
+  it("元の非Google背景が確定するとOSRM経路と出典を再検索なしで表示する", () => {
+    const map = createMap();
+    const background: BasemapState = {
+      ...ready,
+      provider: "generic",
+      googleRoutesAvailable: false,
+      minZoom: 8,
+    };
+    const changeBackground = installBackground(map, { ...background, ready: false, pending: true });
+    const { line, leaflet } = createRenderer();
+    const fetch = vi.spyOn(globalThis, "fetch");
+    const setView = vi.spyOn(map, "setView");
+    const preview = createPrintRoute(map, leaflet, { ...route, provider: "osrm" }, vi.fn());
+    try {
+      expect(leaflet.polyline).not.toHaveBeenCalled();
+      changeBackground(ready);
+      changeBackground({ ...background, id: "3" });
+      expect(leaflet.polyline).not.toHaveBeenCalled();
+      changeBackground(background);
+      expect(line.addTo).toHaveBeenCalledOnce();
+      const link = map.getContainer().querySelector(".route-search-attribution a");
+      expect(link?.getAttribute("href")).toBe("https://www.openstreetmap.org/copyright");
+      expect(link?.textContent).toBe("OpenStreetMap contributors (openstreetmap.org/copyright)");
+      expect(link?.querySelector("br")).not.toBeNull();
+      expect(setView).toHaveBeenCalledExactlyOnceWith(
+        line.getBounds().getCenter(),
+        8,
+        expect.objectContaining({ animate: false }),
+      );
+      changeBackground({ ...background, id: "3" });
+      expect(map.getContainer().querySelector(".route-search-attribution")).toBeNull();
+      expect(line.remove).toHaveBeenCalledOnce();
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      preview.dispose();
+      map.remove();
+      fetch.mockRestore();
     }
   });
 

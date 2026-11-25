@@ -751,10 +751,12 @@ async fn gui_backend_can_diagnose_mismatch_and_worker_finishes_after_manager_is_
                 .iter()
                 .find(|r| r["id"] == id)
             {
-                if !matches!(
+                if matches!(
                     receipt["state"].as_str(),
                     Some("starting" | "running" | "accepted")
                 ) {
+                    assert!(snapshot["rebind"].is_null(), "実行中の移設は受付で確認する");
+                } else {
                     break receipt.clone();
                 }
             }

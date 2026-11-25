@@ -10,42 +10,31 @@
 flowchart TD
     A["ブラウザがタイルを要求"] --> B["座標とpng拡張子を検証"]
     B -->|不正| C["404"]
-    B -->|正常| D{"Redisにキャッシュがあるか"}
+    B -->|正常| F{"管理画面で中継先を設定済みか"}
+    F -->|未設定・無効| C
+    F -->|設定済み| D{"Redisに同じ設定版のキャッシュがあるか"}
     D -->|ある| E["HITとしてキャッシュを返す"]
-    D -->|ない・使用不可| F["上流URLとAPIキーを確認"]
-    F -->|未設定| C
-    F -->|設定済み| G["X-API-Key付きで上流へ要求"]
+    D -->|ない・使用不可| G["X-API-Key付きで上流へ要求"]
     G -->|成功| H["Redisへ保存を試みる"]
     H --> I["MISSとしてPNGを返す"]
     G -->|404| C
     G -->|タイムアウト・その他の失敗| J["502"]
 ```
 
-キャッシュを先に参照するため、有効期間内に保存済みのタイルは、上流キーが無効な間も取得できる。ブラウザのキャッシュとRedisのキャッシュは別に働く。
+中継設定が有効な間は、同じ設定版で保存されたタイルをRedisから取得できる。管理画面で中継を無効にすると、Redisを参照せず404を返す。ブラウザのキャッシュとRedisのキャッシュは独立している。
 
 ## サーバ設定
 
-通常のTauri起動・サーバー単体モードでは、実行時設定JSONの`tile_server_base_url`・`tile_server_api_key`・`redis_url`等を読み込む。以下は開発・検証時に内部サーバーへ渡す環境変数の例である。通常利用の設定ファイルと管理画面からの設定は、後述の[管理画面からの設定](#管理画面からの設定)を参照する。
+中継先URLとAPIキーは管理画面から本体DBへ保存する。Tauri起動・サーバー単体モードとも、Redisの接続や中継先の例外許可には実行時設定JSONを使用する。
 
-```dotenv
-TILE_SERVER_BASE_URL=https://tiles.example.com
-TILE_SERVER_API_KEY=<上流用APIキー>
-REDIS_URL=redis://redis:6379
-REDIS_CONNECT_TIMEOUT_SECONDS=3
-TILE_CACHE_TTL_SECONDS=604800
-TILE_CACHE_NAMESPACE=default
-```
-
-例のURL・キーは実環境に置き換える。Redisを使わない場合は`REDIS_URL`を未設定とする。秘密はGitやWebアセットへ含めない。
-
-| 設定 | 動作 |
+| 実行時設定JSON | 動作 |
 |---|---|
-| `TILE_SERVER_BASE_URL` | 上流のベースURL。末尾に`/{z}/{x}/{y}.png`を付ける |
-| `TILE_SERVER_API_KEY` | 上流へ送るキー。キャッシュMISS時に必要 |
-| `REDIS_URL` | 任意のRedis接続先 |
-| `REDIS_CONNECT_TIMEOUT_SECONDS` | 接続待機。既定3秒 |
-| `TILE_CACHE_TTL_SECONDS` | Redisの保持秒数。既定604800秒、0でキャッシュ無効 |
-| `TILE_CACHE_NAMESPACE` | キャッシュキーの名前空間。既定`default` |
+| `tile_settings_encryption_key` | 管理設定のAPIキーを暗号化する鍵 |
+| `tile_proxy_allowed_origins` | HTTP・LAN内の上流を利用する場合の許可オリジン |
+| `redis_url` | 任意のRedis接続先 |
+| `redis_connect_timeout_seconds` | 接続待機。既定3秒 |
+| `tile_cache_ttl_seconds` | Redisの保持秒数。既定604800秒、0でキャッシュ無効 |
+| `tile_cache_namespace` | キャッシュキーの名前空間。既定`default` |
 
 サーバから上流へのHTTP(S)通信と、利用する場合はRedisへの通信を可能にする。上流への要求は10秒で打ち切る。実行時設定JSONを編集した場合は再起動して反映する。管理画面から適用する設定は、運転中のサーバーへ反映する。
 
@@ -61,44 +50,42 @@ TILE_CACHE_NAMESPACE=default
 
 座標は`z <= 19`、`x < 2^z`、`y < 2^z`の非負整数。拡張子不正・座標範囲外は404。上流404も404、タイムアウトやその他の取得失敗は502を返す。
 
-中継設定の版がない初期状態の正常応答には、以下を設定する。管理設定の保存後は、後述する要求の版と有効設定の一致によってキャッシュを制御する。
+中継設定が未登録・無効の場合は404と `Cache-Control: no-store` を返す。正常応答には `Content-Type: image/png` と `X-Tile-Cache: HIT` または `MISS` を付ける。
 
-```text
-Content-Type: image/png
-Cache-Control: public, max-age=604800, immutable
-X-Tile-Cache: HIT または MISS
-```
-
-中継設定の版がない初期状態のRedisキーは`tile:{namespace}:{z}:{x}:{y}`。上流URLはキーに含まれないため、同じRedisで異なる上流を使う環境は名前空間を分ける。管理画面からの中継設定には設定の版を含むキーを使用する。Redisの読み込み失敗は上流取得へ進み、書き込み失敗でも取得済み画像を返す。
+Redisキーは `tile:{namespace}:revision:{proxy_revision}:{z}:{x}:{y}`。読込失敗時は上流取得へ進み、書込失敗でも取得済み画像を返す。
 
 `TILE_CACHE_TTL_SECONDS`はRedis用で、正常応答のブラウザキャッシュ期間を変更しない。上流変更時は名前空間に加えてブラウザ側に残るキャッシュも考慮する。TTLを0にすると共通Redis接続を使うライブマップの位置キャッシュにも影響する。
 
 ## 管理画面からの設定
 
-管理画面の「タイルサーバ設定」で、ラスタ中継先・APIキーとベクタ配信元の接続許可を保存できる。起動時マイグレーション25で`tile_server_settings`を追加する。初期状態では、実行時設定JSONの`tile_server_base_url`・`tile_server_api_key`・`vector_tile_allowed_origins`を使用する。
+管理画面の「タイルサーバ設定」で、ラスタ中継先・APIキーとベクタ配信元の接続許可を保存できる。起動時マイグレーション25で作成した `tile_server_settings` に保存する。ラスタ中継の初期状態は無効。
 
 実行時設定JSONは通常のTauri起動・サーバー単体モードともに`~/.geocode-web-single/geocode-web-single.env.json`を使用する。`tile_settings_encryption_key`は32バイトのBase64暗号鍵として初回セットアップ時に生成し、既存JSONで項目省略・`null`の場合も生成・保存する。空文字列を含む不正な文字列は起動時に拒否する。DB内の管理設定を復元するため、SQLite DBと設定JSONを合わせて保管する。
 
 1. 上流のベースURLと、上流で提供されるPNGの確認座標を入力する。同じURLのキーは空欄で引き継げる。URLを変える場合は新しいキーを入力する。
-2. 「接続確認」で候補の画像を取得し、「適用」で保存する。保存時にも取得を確認し、失敗時は現在の有効設定を使う。
+2. 「接続確認」で候補の画像を取得し、「中継設定を適用」で保存する。保存時にも取得を確認し、失敗時は現在の有効設定を使う。
 3. 地図を開き直し、`/tile/{z}/{x}/{y}.png`を使用する背景や重ね合わせタイルを確認する。
 
-画面の「環境変数へ戻す」は、起動時に実行時設定JSONから読み込んだ値へ戻す操作となる。キーの平文は設定取得APIへ返さず、DBでは暗号化して保存する。設定更新は版を照合し、他の管理者による更新後は最新の設定を再取得してから適用する。
+「中継を無効にする」でラスタ中継設定を解除する。キーをDBに暗号化して保存し、設定取得APIではキーの設定有無だけを返す。設定更新は版を照合し、他の管理者による更新後は最新の設定を再取得してから適用する。
 
 Tauri・サーバー単体の全起動経路で、DBへ保存した管理設定を読み込んでから配信を開始する。管理設定を適用したプロセスは直ちに切り替わり、他のプロセスは5秒間隔で再取得する。運転中のDB読み込みに失敗した場合は、直近の有効設定を使う。
 
 管理設定の上流は公開HTTPSを使用する。HTTPやLANの上流を使う場合は、実行時設定JSONの`tile_proxy_allowed_origins`へ`http://tile-server:8080`のようなオリジンをカンマ区切りで指定し、再起動する。接続確認ではリダイレクトを追わず、PNGを4MiB・縦横各2048ピクセル以内に制限する。
 
-中継設定の変更時は、Redisのキーへ設定の版を含めて切り替える。再読み込みした地図は描画用URLに`?v=<版>`を付ける。有効設定と版が一致する要求へ長期キャッシュを許可し、版なし・旧版の要求へは現在のタイルを`no-store`で返す。保存済み共有の背景定義を復元した場合も、中継画像は有効な上流から取得する。
+中継設定の変更時は、Redisのキーを設定版ごとに切り替える。再読み込みした地図は描画用URLに `?v=<版>` を付ける。有効設定と版が一致する要求に `Cache-Control: public, max-age=604800, immutable` を付け、版なし・旧版の要求へは現在のタイルを `no-store` で返す。保存済み共有の背景定義を復元した場合も、中継画像は有効な上流から取得する。
 
-「ベクタ配信元」には、スタイル・タイル・glyph・spriteが使うHTTPSオリジンを登録する。空の一覧を適用すると追加許可がなくなり、「環境変数へ戻す」で実行時設定JSONの`vector_tile_allowed_origins`を使用する。地図を開き直すとCSPへ反映される。保存済み共有が使う配信元も許可一覧へ含める。配信元側のCORSにも対応が必要となる。
+「ベクタ配信元」には、スタイル・タイル・glyph・spriteが使うHTTPSオリジンを登録する。空の一覧を適用すると追加許可がなくなり、「接続許可先を環境変数に戻す」で実行時設定JSONの `vector_tile_allowed_origins` を使用する。地図を開き直すとCSPへ反映される。保存済み共有が使う配信元も許可一覧へ含める。配信元側のCORSにも対応が必要となる。
 
 | 管理API | 用途 |
 |---|---|
 | `GET /admin/tile-server-settings` | 有効設定と版を取得 |
 | `POST /admin/tile-server-settings/proxy/check` | 指定座標のPNGを取得して確認 |
-| `PUT /admin/tile-server-settings/proxy` | 中継設定の適用・初期設定への復帰 |
+| `PUT /admin/tile-server-settings/proxy` | 中継設定の適用（`mode: "apply"`）・無効化（`mode: "disable"`） |
 | `PUT /admin/tile-server-settings/vector-origins` | ベクタ接続許可の適用・初期設定への復帰 |
+
+## 旧設定からの移行
+
+旧設定JSONの `tile_server_base_url`・`tile_server_api_key` または旧環境変数の `TILE_SERVER_BASE_URL`・`TILE_SERVER_API_KEY` で中継している場合は、更新前の版で「タイルサーバ設定」を開き、同じ中継先とキーを入力して「中継設定を適用」を実行する。DBへ保存した設定を更新後も使用する。移行せず更新済みの場合は、旧設定を参照して同画面へ中継先とキーを登録する。
 
 ## 導入順と戻し方
 

@@ -6,21 +6,21 @@ import TileServerSettings from "../TileServerSettings.vue";
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn() }));
 vi.mock("@/axiosClient", () => ({ default: api }));
 
-const environment = {
+const unconfigured = {
   revision: null as string | null,
-  proxy: { source: "environment", baseUrl: "https://old.example.test/tiles", hasApiKey: true },
+  proxy: { source: "unconfigured", baseUrl: null as string | null, hasApiKey: false },
   vectorOrigins: { source: "environment", origins: ["https://old-vector.example.test"] },
   keyStorageConfigured: true,
 };
 const managed = {
-  ...environment,
+  ...unconfigured,
   revision: "revision-1",
-  proxy: { ...environment.proxy, source: "managed" },
+  proxy: { source: "managed", baseUrl: "https://old.example.test/tiles", hasApiKey: true },
 };
 
 let wrapper: VueWrapper | undefined;
 
-async function open(data = environment) {
+async function open(data = unconfigured) {
   api.get.mockResolvedValueOnce({ data });
   wrapper = mount(TileServerSettings);
   await flushPromises();
@@ -60,15 +60,15 @@ afterEach(() => {
 
 describe("タイルサーバ設定", () => {
   it("同じURLのキーを表示せずに保持し、接続確認と適用を別々に行う", async () => {
-    const view = await open();
+    const view = await open(managed);
     const key = view.get<HTMLInputElement>("#tile-proxy-api-key");
     expect(key.element.value).toBe("");
     expect(key.element.type).toBe("password");
     expect(view.text()).toContain("設定済み");
     const request = {
-      revision: null,
+      revision: managed.revision,
       mode: "managed",
-      baseUrl: environment.proxy.baseUrl,
+      baseUrl: managed.proxy.baseUrl,
       tile: { z: 14, x: 14552, y: 6451 },
     };
     api.post.mockResolvedValueOnce({ data: { ok: true } });
@@ -83,7 +83,25 @@ describe("タイルサーバ設定", () => {
     await flushPromises();
     expect(api.put).toHaveBeenCalledWith(`${adminTileServerSettingsUrl}/proxy`, request);
     expectMessage("中継設定を適用");
-    expect(button("中継を環境変数に戻す").exists()).toBe(true);
+    expect(button("中継を無効にする").exists()).toBe(true);
+  });
+
+  it("ラスタ中継が未設定でも、新しい接続先とキーを適用できる", async () => {
+    const view = await open();
+    expect(view.text()).toContain("無効");
+    expect(view.findAll("button").map((item) => item.text())).not.toContain("中継を無効にする");
+    await view.get("#tile-proxy-url").setValue(managed.proxy.baseUrl);
+    await view.get("#tile-proxy-api-key").setValue("new-key");
+    api.put.mockResolvedValueOnce({ data: managed });
+    await view.get("form").trigger("submit");
+    await flushPromises();
+    expect(api.put).toHaveBeenCalledWith(`${adminTileServerSettingsUrl}/proxy`, {
+      revision: null,
+      mode: "managed",
+      baseUrl: managed.proxy.baseUrl,
+      apiKey: "new-key",
+      tile: { z: 14, x: 14552, y: 6451 },
+    });
   });
 
   it("接続先の変更でキーを求め、範囲外の確認座標を送らない", async () => {
@@ -102,7 +120,7 @@ describe("タイルサーバ設定", () => {
   });
 
   it("確認座標のPNGが404なら配信範囲内の座標へ案内する", async () => {
-    await open();
+    await open(managed);
     api.post.mockRejectedValueOnce({ isAxiosError: true, response: { status: 404 } });
     await click("接続確認");
     expectMessage("配信範囲内の座標を指定");
@@ -110,7 +128,7 @@ describe("タイルサーバ設定", () => {
   });
 
   it("中継設定のフォーム送信では不正なURLもメッセージで案内する", async () => {
-    api.get.mockResolvedValueOnce({ data: environment });
+    api.get.mockResolvedValueOnce({ data: unconfigured });
     wrapper = mount(TileServerSettings, { attachTo: document.body });
     await flushPromises();
     await wrapper.get("#tile-proxy-url").setValue("invalid-url");
@@ -146,17 +164,18 @@ describe("タイルサーバ設定", () => {
     expect(origins.element.value).toBe(originDraft);
     await closeMessage();
 
-    api.put.mockResolvedValueOnce({ data: environment });
-    await click("中継を環境変数に戻す");
+    api.put.mockResolvedValueOnce({ data: { ...unconfigured, revision: "revision-3" } });
+    await click("中継を無効にする");
     expect(api.put).toHaveBeenLastCalledWith(`${adminTileServerSettingsUrl}/proxy`, {
       revision: "revision-2",
-      mode: "environment",
+      mode: "disabled",
     });
-    expectMessage("中継を環境変数の設定に戻しました");
+    expectMessage("ラスタタイルの中継を無効にしました");
+    expect(origins.element.value).toBe(originDraft);
   });
 
   it("暗号鍵がなくても接続許可先を管理し、空一覧と環境変数への復帰を区別する", async () => {
-    const view = await open({ ...environment, keyStorageConfigured: false });
+    const view = await open({ ...unconfigured, keyStorageConfigured: false });
     expect(view.text()).toContain("TILE_SETTINGS_ENCRYPTION_KEY");
     expect(button("中継設定を適用").element.matches(":disabled")).toBe(true);
     const origins = view.get("#vector-tile-origins");
@@ -173,7 +192,7 @@ describe("タイルサーバ設定", () => {
     await origins.setValue("");
     api.put.mockResolvedValueOnce({
       data: {
-        ...environment,
+        ...unconfigured,
         revision: "origin-revision",
         keyStorageConfigured: false,
         vectorOrigins: { source: "managed", origins: [] },
@@ -186,7 +205,7 @@ describe("タイルサーバ設定", () => {
     });
     expectMessage("接続許可先を適用しました");
     await closeMessage();
-    api.put.mockResolvedValueOnce({ data: environment });
+    api.put.mockResolvedValueOnce({ data: unconfigured });
     await click("接続許可先を環境変数に戻す");
     expect(api.put).toHaveBeenLastCalledWith(`${adminTileServerSettingsUrl}/vector-origins`, {
       revision: "origin-revision",
@@ -245,7 +264,7 @@ describe("タイルサーバ設定", () => {
     await closeMessage();
     expect(button("接続許可先を適用").element.matches(":disabled")).toBe(true);
 
-    api.get.mockResolvedValueOnce({ data: environment });
+    api.get.mockResolvedValueOnce({ data: unconfigured });
     await click("最新の設定を取得");
     expectMessage("最新の設定を取得しました");
     await closeMessage();

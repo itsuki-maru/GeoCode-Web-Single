@@ -5,11 +5,10 @@ import apiClient from "@/axiosClient";
 import MessageModal from "@/components/common/MessageModal.vue";
 import { adminTileServerSettingsUrl } from "@/router/urls";
 
-type SettingSource = "environment" | "managed";
 type TileServerSettings = {
   revision: string | null;
-  proxy: { source: SettingSource; baseUrl: string | null; hasApiKey: boolean };
-  vectorOrigins: { source: SettingSource; origins: string[] };
+  proxy: { source: "managed" | "unconfigured"; baseUrl: string | null; hasApiKey: boolean };
+  vectorOrigins: { source: "environment" | "managed"; origins: string[] };
   keyStorageConfigured: boolean;
 };
 type ManagedProxyInput = {
@@ -36,10 +35,6 @@ const canKeepKey = computed(
   () => settings.value?.proxy.hasApiKey && baseUrl.value.trim() === settings.value.proxy.baseUrl,
 );
 const missingTile = "確認座標のPNGタイルが見つかりません。配信範囲内の座標を指定してください。";
-
-function sourceLabel(source: SettingSource) {
-  return source === "managed" ? "管理画面" : "環境変数";
-}
 
 function receiveSettings(
   next: TileServerSettings,
@@ -155,12 +150,10 @@ async function checkProxy() {
   );
 }
 
-async function applyProxy(mode: SettingSource) {
+async function applyProxy(mode: "managed" | "disabled") {
   if (blocked.value || !settings.value) return;
   const input =
-    mode === "managed"
-      ? managedProxyInput()
-      : { revision: settings.value.revision, mode: "environment" };
+    mode === "managed" ? managedProxyInput() : { revision: settings.value.revision, mode };
   if (!input) return;
   await run(
     async () => {
@@ -173,7 +166,7 @@ async function applyProxy(mode: SettingSource) {
       message.value =
         mode === "managed"
           ? "中継設定を適用しました。地図を開き直してください。"
-          : "中継を環境変数の設定に戻しました。地図を開き直してください。";
+          : "ラスタタイルの中継を無効にしました。地図を開き直してください。";
     },
     "中継設定を適用できませんでした。URL、APIキー、確認座標を確認してください。",
     mode === "managed" ? missingTile : undefined,
@@ -233,8 +226,8 @@ onMounted(load);
     <form class="admin-card settings-card" novalidate @submit.prevent="applyProxy('managed')">
       <h2>ラスタタイルの中継</h2>
       <dl v-if="settings" class="effective-settings">
-        <dt>設定元</dt>
-        <dd>{{ sourceLabel(settings.proxy.source) }}</dd>
+        <dt>中継の状態</dt>
+        <dd>{{ settings.proxy.source === "managed" ? "設定済み" : "無効" }}</dd>
         <dt>現在の上流URL</dt>
         <dd>{{ settings.proxy.baseUrl ?? "未設定" }}</dd>
         <dt>APIキー</dt>
@@ -305,15 +298,17 @@ onMounted(load);
         class="restore-button"
         type="button"
         :disabled="blocked"
-        @click="applyProxy('environment')"
+        @click="applyProxy('disabled')"
       >
-        中継を環境変数に戻す
+        中継を無効にする
       </button>
     </form>
 
     <form class="admin-card settings-card" @submit.prevent="applyOrigins(false)">
       <h2>ベクタ配信元の接続許可</h2>
-      <p v-if="settings">設定元 {{ sourceLabel(settings.vectorOrigins.source) }}</p>
+      <p v-if="settings">
+        設定元 {{ settings.vectorOrigins.source === "managed" ? "管理画面" : "環境変数" }}
+      </p>
       <fieldset :disabled="blocked">
         <legend>許可するHTTPSオリジン</legend>
         <label for="vector-tile-origins" class="hint">

@@ -71,6 +71,79 @@ async fn assert_background_metadata(response: Response) {
 }
 
 #[tokio::test]
+async fn signed_in_map_pages_reload_osrm_modes_from_database() {
+    let pool = common::test_pool().await;
+    let (user, tera) = fixture(&pool).await;
+    for (template, page) in [
+        ("map.html", "desktop"),
+        ("map-mobile.html", "mobile"),
+        ("map-anather.html", "fullscreen"),
+    ] {
+        tera.lock()
+            .await
+            .add_raw_template(
+                template,
+                &format!(
+                    r#"{{"page":"{page}","modes":{{{{ osrmModes | json_encode() | safe }}}}}}"#
+                ),
+            )
+            .unwrap();
+    }
+
+    // 設定を保存・解除した直後から、ページへ現在の移動手段だけを渡す。
+    let drive = "https://drive.example/";
+    let walk = "https://walk.example/";
+    for (drive, walk, modes) in [
+        (None, None, json!([])),
+        (Some(drive), None, json!(["DRIVE"])),
+        (Some(drive), Some(walk), json!(["DRIVE", "WALK"])),
+        (None, None, json!([])),
+    ] {
+        sqlx::query(
+            "UPDATE osrm_settings SET revision = $1, drive_base_url = $2, walk_base_url = $3 WHERE id = 1",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(drive)
+        .bind(walk)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        for (agent, page) in [("Desktop", "desktop"), ("Mobile", "mobile")] {
+            let mut headers = HeaderMap::new();
+            headers.insert("user-agent", agent.parse().unwrap());
+            let response = map_get_handler(
+                Extension(user.clone()),
+                Extension(pool.clone()),
+                Extension(tera.clone()),
+                Query(serde_json::from_value(json!({})).unwrap()),
+                headers,
+            )
+            .await
+            .unwrap()
+            .into_response();
+            assert_eq!(
+                read_backgrounds(response).await,
+                json!({"page": page, "modes": modes})
+            );
+        }
+        let response = map_another_get_handler(
+            Extension(user.clone()),
+            Extension(pool.clone()),
+            Extension(tera.clone()),
+            Query(serde_json::from_value(json!({})).unwrap()),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        assert_eq!(
+            read_backgrounds(response).await,
+            json!({"page": "fullscreen", "modes": modes})
+        );
+    }
+}
+
+#[tokio::test]
 async fn answer_map_page_receives_background_rendering_metadata() {
     let pool = common::test_pool().await;
     let (user, tera) = fixture(&pool).await;

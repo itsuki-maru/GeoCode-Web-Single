@@ -1,4 +1,5 @@
 import type { TileServerRecord } from "./common/basemap-definition";
+import type { RoutePrintState } from "./common/route-result";
 export type { TileServerRecord } from "./common/basemap-definition";
 
 export interface LayerRecord {
@@ -49,6 +50,7 @@ interface MapBootstrapBase {
 }
 
 export interface EditableMapBootstrap extends MapBootstrapBase {
+  osrmModes?: readonly RoutePrintState["travelMode"][];
   tileVisibilityAccountId?: string;
   initialView: InitialMapView;
   isMaster: boolean;
@@ -59,6 +61,7 @@ export interface EditableMapBootstrap extends MapBootstrapBase {
 }
 
 export interface AnotherMapBootstrap extends MapBootstrapBase {
+  osrmModes?: readonly RoutePrintState["travelMode"][];
   shareParentOrigins?: string[] | false;
   answerPreview?:
     | {
@@ -92,7 +95,7 @@ export interface TemporaryMapBootstrap extends MapBootstrapBase {
 
 export interface FormAnswerMapBootstrap extends Omit<
   AnotherMapBootstrap,
-  "page" | "answerPreview"
+  "page" | "answerPreview" | "osrmModes"
 > {
   page: "form-answer-map";
   answerPreview: Exclude<AnotherMapBootstrap["answerPreview"], false | undefined>;

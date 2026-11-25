@@ -2,48 +2,56 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use std::path::PathBuf;
 
-/// 設定JSONには保存するが、Debug出力には原文を含めないAI用配備鍵。
-#[derive(Clone, Serialize, PartialEq, Eq)]
-#[serde(transparent)]
-pub struct AiEncryptionKey(String);
+// 設定JSONへ保存する配備鍵。検証時のエラーやDebug出力に鍵の原文を含めない。
+macro_rules! deployment_key {
+    ($name:ident, $service:literal) => {
+        #[derive(Clone, Serialize, PartialEq, Eq)]
+        #[serde(transparent)]
+        pub struct $name(String);
 
-impl AiEncryptionKey {
-    pub const INVALID_MESSAGE: &str = "AI用暗号鍵は32バイトをBase64で指定してください。";
+        impl $name {
+            pub const INVALID_MESSAGE: &str =
+                concat!($service, "用暗号鍵は32バイトをBase64で指定してください。");
 
-    pub fn new(raw: String) -> Result<Self, &'static str> {
-        use base64::{Engine, engine::general_purpose::STANDARD};
-        if !STANDARD.decode(raw.trim()).is_ok_and(|key| key.len() == 32) {
-            return Err(Self::INVALID_MESSAGE);
+            pub fn new(raw: String) -> Result<Self, &'static str> {
+                use base64::{Engine, engine::general_purpose::STANDARD};
+                if !STANDARD.decode(raw.trim()).is_ok_and(|key| key.len() == 32) {
+                    return Err(Self::INVALID_MESSAGE);
+                }
+                Ok(Self(raw))
+            }
+
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
         }
-        Ok(Self(raw))
-    }
 
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+        impl AsRef<str> for $name {
+            fn as_ref(&self) -> &str {
+                self.as_str()
+            }
+        }
+
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(concat!(stringify!($name), "([REDACTED])"))
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                let serde_json::Value::String(raw) = serde_json::Value::deserialize(deserializer)?
+                else {
+                    return Err(serde::de::Error::custom(Self::INVALID_MESSAGE));
+                };
+                Self::new(raw).map_err(serde::de::Error::custom)
+            }
+        }
+    };
 }
 
-impl AsRef<str> for AiEncryptionKey {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-
-impl std::fmt::Debug for AiEncryptionKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("AiEncryptionKey([REDACTED])")
-    }
-}
-
-impl<'de> Deserialize<'de> for AiEncryptionKey {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        // 型が不正な場合も、入力値や鍵をエラー文字列に含めない。
-        let serde_json::Value::String(raw) = serde_json::Value::deserialize(deserializer)? else {
-            return Err(serde::de::Error::custom(Self::INVALID_MESSAGE));
-        };
-        Self::new(raw).map_err(serde::de::Error::custom)
-    }
-}
+deployment_key!(AiEncryptionKey, "AI");
+deployment_key!(OsrmEncryptionKey, "OSRM");
 
 // アプリケーション設定情報構造体
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -69,13 +77,13 @@ pub struct ApplicationInitSetup {
     pub allow_user_update_password: String,
     pub allow_origins: String,
     pub http_image_allowed_origins: String,
-    pub tile_server_base_url: Option<String>,
-    pub tile_server_api_key: Option<String>,
     pub vector_tile_allowed_origins: String,
     pub tile_proxy_allowed_origins: String,
     pub tile_settings_encryption_key: String,
     #[serde(default)]
     pub ai_encryption_key: Option<AiEncryptionKey>,
+    #[serde(default)]
+    pub osrm_encryption_key: Option<OsrmEncryptionKey>,
     pub camera_sharing_enabled: Option<String>,
     pub camera_turn_provider: Option<String>,
     pub camera_stun_urls: Option<String>,

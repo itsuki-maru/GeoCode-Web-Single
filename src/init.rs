@@ -1,4 +1,4 @@
-use crate::model::{AiEncryptionKey, ApplicationInitSetup};
+use crate::model::{AiEncryptionKey, ApplicationInitSetup, OsrmEncryptionKey};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use dirs::home_dir;
 use rand::RngCore;
@@ -8,7 +8,7 @@ use std::io::{self};
 use std::path::PathBuf;
 use uuid::Uuid;
 
-mod ai_key;
+mod deployment_key;
 mod persistence;
 
 pub(crate) fn protect_maintenance_file(
@@ -96,12 +96,11 @@ struct ApplicationInitSetupPartial {
     allow_user_update_password: Option<String>,
     allow_origins: Option<String>,
     http_image_allowed_origins: Option<String>,
-    tile_server_base_url: Option<String>,
-    tile_server_api_key: Option<String>,
     vector_tile_allowed_origins: Option<String>,
     tile_proxy_allowed_origins: Option<String>,
     tile_settings_encryption_key: Option<String>,
     ai_encryption_key: Option<AiEncryptionKey>,
+    osrm_encryption_key: Option<OsrmEncryptionKey>,
     camera_sharing_enabled: Option<String>,
     camera_turn_provider: Option<String>,
     camera_stun_urls: Option<String>,
@@ -244,22 +243,22 @@ fn read_env_json_at(
     env_json_path: &std::path::Path,
     persist_defaults: bool,
 ) -> Result<ApplicationInitSetup, EnvJsonReadError> {
-    let inherited = persist_defaults
-        .then(|| std::env::var_os("AI_ENCRYPTION_KEY"))
-        .flatten();
-    read_env_json_with_key(
+    let inherited = |name| persist_defaults.then(|| std::env::var_os(name)).flatten();
+    read_env_json_with_keys(
         setup_dir,
         env_json_path,
         persist_defaults,
-        inherited.as_deref(),
+        inherited(deployment_key::AI.environment).as_deref(),
+        inherited(deployment_key::OSRM.environment).as_deref(),
     )
 }
 
-fn read_env_json_with_key(
+fn read_env_json_with_keys(
     setup_dir: &PathBuf,
     env_json_path: &std::path::Path,
     persist_defaults: bool,
-    inherited: Option<&std::ffi::OsStr>,
+    inherited_ai: Option<&std::ffi::OsStr>,
+    inherited_osrm: Option<&std::ffi::OsStr>,
 ) -> Result<ApplicationInitSetup, EnvJsonReadError> {
     let mut value = read_env_value(env_json_path)?;
     // 移行が必要な場合だけ生成から保存までを直列化する。完成済み設定では
@@ -284,9 +283,14 @@ fn read_env_json_with_key(
         .map_err(EnvJsonReadError::InvalidJson)?;
 
     if persist_defaults {
-        env.ai_encryption_key = Some(ai_key::complete(
+        env.ai_encryption_key = Some(deployment_key::AI.complete(
             env.ai_encryption_key.take(),
-            inherited,
+            inherited_ai,
+            &env.database_url,
+        )?);
+        env.osrm_encryption_key = Some(deployment_key::OSRM.complete(
+            env.osrm_encryption_key.take(),
+            inherited_osrm,
             &env.database_url,
         )?);
     }
@@ -367,9 +371,22 @@ pub fn build_env_settings(
     validate_setup_form(&form)?;
     let defaults = env_defaults(setup_dir);
     let secret_key = Uuid::new_v4().to_string();
-    let inherited = std::env::var_os("AI_ENCRYPTION_KEY");
     let ai_encryption_key = Some(
-        ai_key::complete(None, inherited.as_deref(), &defaults.database_url)
+        deployment_key::AI
+            .complete(
+                None,
+                std::env::var_os(deployment_key::AI.environment).as_deref(),
+                &defaults.database_url,
+            )
+            .map_err(|error| error.to_string())?,
+    );
+    let osrm_encryption_key = Some(
+        deployment_key::OSRM
+            .complete(
+                None,
+                std::env::var_os(deployment_key::OSRM.environment).as_deref(),
+                &defaults.database_url,
+            )
             .map_err(|error| error.to_string())?,
     );
 
@@ -395,12 +412,11 @@ pub fn build_env_settings(
         allow_user_update_password: defaults.allow_user_update_password,
         allow_origins: defaults.allow_origins,
         http_image_allowed_origins: String::new(),
-        tile_server_base_url: None,
-        tile_server_api_key: None,
         vector_tile_allowed_origins: String::new(),
         tile_proxy_allowed_origins: String::new(),
         tile_settings_encryption_key: generate_tile_settings_key(),
         ai_encryption_key,
+        osrm_encryption_key,
         camera_sharing_enabled: None,
         camera_turn_provider: None,
         camera_stun_urls: None,
@@ -480,12 +496,11 @@ fn env_json_requires_migration(value: &serde_json::Value) -> bool {
         "allow_user_update_password",
         "allow_origins",
         "http_image_allowed_origins",
-        "tile_server_base_url",
-        "tile_server_api_key",
         "vector_tile_allowed_origins",
         "tile_proxy_allowed_origins",
         "tile_settings_encryption_key",
         "ai_encryption_key",
+        "osrm_encryption_key",
         "camera_sharing_enabled",
         "camera_turn_provider",
         "camera_stun_urls",
@@ -525,8 +540,10 @@ fn env_json_requires_migration(value: &serde_json::Value) -> bool {
     .iter()
     .any(|field| {
         !object.contains_key(*field)
-            || (matches!(*field, "tile_settings_encryption_key" | "ai_encryption_key")
-                && object[*field].is_null())
+            || (matches!(
+                *field,
+                "tile_settings_encryption_key" | "ai_encryption_key" | "osrm_encryption_key"
+            ) && object[*field].is_null())
             || ((field.starts_with("local_tile_")
                 || matches!(
                     *field,
@@ -649,12 +666,11 @@ fn complete_env(
             .unwrap_or(defaults.allow_user_update_password),
         allow_origins: partial.allow_origins.unwrap_or(defaults.allow_origins),
         http_image_allowed_origins,
-        tile_server_base_url: partial.tile_server_base_url,
-        tile_server_api_key: partial.tile_server_api_key,
         vector_tile_allowed_origins,
         tile_proxy_allowed_origins,
         tile_settings_encryption_key,
         ai_encryption_key: partial.ai_encryption_key,
+        osrm_encryption_key: partial.osrm_encryption_key,
         camera_sharing_enabled: partial.camera_sharing_enabled,
         camera_turn_provider: partial.camera_turn_provider,
         camera_stun_urls: partial.camera_stun_urls,
@@ -793,7 +809,7 @@ mod tests {
     }
 
     #[test]
-    fn concurrent_startup_persists_one_shared_ai_key_and_keeps_original_backup() {
+    fn concurrent_startup_persists_the_same_deployment_keys_and_keeps_original_backup() {
         let directory = tempfile::tempdir().unwrap();
         let setup_dir = directory.path().to_path_buf();
         write_env_json(&setup_dir, minimum_required_env_json());
@@ -807,10 +823,11 @@ mod tests {
             let barrier = barrier.clone();
             threads.push(std::thread::spawn(move || {
                 barrier.wait();
-                read_env_json_with_key(&setup_dir, &path, true, None)
-                    .unwrap()
-                    .ai_encryption_key
-                    .unwrap()
+                let env = read_env_json_with_keys(&setup_dir, &path, true, None, None).unwrap();
+                (
+                    env.ai_encryption_key.unwrap(),
+                    env.osrm_encryption_key.unwrap(),
+                )
             }));
         }
         let keys: Vec<_> = threads
@@ -819,7 +836,8 @@ mod tests {
             .collect();
         assert!(keys.iter().all(|key| key == &keys[0]));
         let saved: ApplicationInitSetup = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
-        assert_eq!(saved.ai_encryption_key.as_ref(), Some(&keys[0]));
+        assert_eq!(saved.ai_encryption_key.as_ref(), Some(&keys[0].0));
+        assert_eq!(saved.osrm_encryption_key.as_ref(), Some(&keys[0].1));
         assert_eq!(
             fs::read(setup_dir.join("geocode-web-single.env.json.bak")).unwrap(),
             original
@@ -834,18 +852,20 @@ mod tests {
         write_env_json(&setup_dir, minimum_required_env_json());
         let path = setup_dir.join("geocode-web-single.env.json");
         let original = fs::read(&path).unwrap();
-        let readonly = read_env_json_with_key(
+        let readonly = read_env_json_with_keys(
             &setup_dir,
             &path,
             false,
             Some(std::ffi::OsStr::new("invalid-environment-key")),
+            Some(std::ffi::OsStr::new("invalid-environment-key")),
         )
         .unwrap();
         assert!(readonly.ai_encryption_key.is_none());
+        assert!(readonly.osrm_encryption_key.is_none());
         assert_eq!(fs::read_dir(&setup_dir).unwrap().count(), 1);
         let backup = setup_dir.join("geocode-web-single.env.json.bak");
         fs::create_dir(&backup).unwrap();
-        assert!(read_env_json_with_key(&setup_dir, &path, true, None).is_err());
+        assert!(read_env_json_with_keys(&setup_dir, &path, true, None, None).is_err());
         assert_eq!(fs::read(path).unwrap(), original);
         assert!(!setup_dir.join("geocode-web.sqlite").exists());
     }
@@ -856,23 +876,135 @@ mod tests {
         let setup_dir = directory.path().to_path_buf();
         write_env_json(&setup_dir, minimum_required_env_json());
         let path = setup_dir.join("geocode-web-single.env.json");
-        let first = read_env_json_with_key(&setup_dir, &path, true, None).unwrap();
+        let first = read_env_json_with_keys(&setup_dir, &path, true, None, None).unwrap();
         let lock = setup_dir.join("geocode-web-single.env.json.lock");
         fs::remove_file(&lock).unwrap();
         // lockを作れない環境でも、移行済み設定を読み取れることを検証する。
         fs::create_dir(&lock).unwrap();
         let original = fs::read(&path).unwrap();
-        let reloaded = read_env_json_with_key(&setup_dir, &path, true, None).unwrap();
+        let reloaded = read_env_json_with_keys(&setup_dir, &path, true, None, None).unwrap();
         assert_eq!(first.ai_encryption_key, reloaded.ai_encryption_key);
+        assert_eq!(first.osrm_encryption_key, reloaded.osrm_encryption_key);
         assert_eq!(fs::read(path).unwrap(), original);
+    }
+
+    #[test]
+    fn null_osrm_key_is_persisted_in_an_otherwise_complete_configuration() {
+        let directory = tempfile::tempdir().unwrap();
+        let setup_dir = directory.path().to_path_buf();
+        let path = setup_dir.join("geocode-web-single.env.json");
+        write_env_json(&setup_dir, minimum_required_env_json());
+        let complete = read_env_json_with_keys(&setup_dir, &path, true, None, None).unwrap();
+        let mut config = serde_json::to_value(complete).unwrap();
+        config["osrm_encryption_key"] = serde_json::Value::Null;
+        write_env_json(&setup_dir, config);
+
+        let completed = read_env_json_with_keys(&setup_dir, &path, true, None, None).unwrap();
+        let saved: ApplicationInitSetup = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        assert!(completed.osrm_encryption_key.is_some());
+        assert_eq!(saved.osrm_encryption_key, completed.osrm_encryption_key);
+    }
+
+    #[test]
+    fn missing_osrm_key_with_encrypted_credentials_requires_restoration() {
+        let directory = tempfile::tempdir().unwrap();
+        let setup_dir = directory.path().to_path_buf();
+        let path = setup_dir.join("geocode-web-single.env.json");
+        let database_path = env_defaults(&setup_dir).sqlite_database_path;
+        let database = rusqlite::Connection::open(&database_path).unwrap();
+        // URL列が追加される前のスキーマでも、車・徒歩の暗号文を検出する。
+        database
+            .execute_batch(include_str!(
+                "../migrations/20261123090000_add_osrm_settings.sql"
+            ))
+            .unwrap();
+        for (column, explicit_null) in
+            [("encrypted_drive_key", false), ("encrypted_walk_key", true)]
+        {
+            let mut config = minimum_required_env_json();
+            if explicit_null {
+                config["osrm_encryption_key"] = serde_json::Value::Null;
+            }
+            write_env_json(&setup_dir, config);
+            database
+                .execute(
+                    &format!("UPDATE osrm_settings SET revision = 'legacy', {column} = X'010203'"),
+                    [],
+                )
+                .unwrap();
+            let original_config = fs::read(&path).unwrap();
+            let original_database = fs::read(&database_path).unwrap();
+            let error = read_env_json_with_keys(&setup_dir, &path, true, None, None).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("元のosrm_encryption_keyまたはOSRM_ENCRYPTION_KEYを復元")
+            );
+            assert_eq!(fs::read(&path).unwrap(), original_config);
+            assert_eq!(fs::read(&database_path).unwrap(), original_database);
+            assert!(!setup_dir.join("geocode-web-single.env.json.bak").exists());
+            database
+                .execute(&format!("UPDATE osrm_settings SET {column} = NULL"), [])
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn invalid_osrm_keys_are_rejected_without_exposing_values() {
+        let directory = tempfile::tempdir().unwrap();
+        let setup_dir = directory.path().to_path_buf();
+        let path = setup_dir.join("geocode-web-single.env.json");
+        let mut config = minimum_required_env_json();
+        let invalid_key = "invalid-osrm-secret";
+        for value in [
+            json!(invalid_key),
+            json!(12345),
+            json!(""),
+            json!(STANDARD.encode([0_u8; 31])),
+        ] {
+            config["osrm_encryption_key"] = value;
+            write_env_json(&setup_dir, config.clone());
+            let error = read_env_json_with_keys(&setup_dir, &path, true, None, None)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(OsrmEncryptionKey::INVALID_MESSAGE));
+            assert!(!error.contains(invalid_key));
+        }
+        config["osrm_encryption_key"] = json!(STANDARD.encode([0_u8; 32]));
+        write_env_json(&setup_dir, config);
+        let original = fs::read(&path).unwrap();
+        let error = read_env_json_with_keys(
+            &setup_dir,
+            &path,
+            true,
+            None,
+            Some(std::ffi::OsStr::new(invalid_key)),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains(OsrmEncryptionKey::INVALID_MESSAGE));
+        assert!(!error.contains(invalid_key));
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert!(!setup_dir.join("geocode-web-single.env.json.bak").exists());
     }
 
     #[test]
     // 旧設定を補完した暗号鍵は再読込でも保持し、手動指定の配信元も検証する。
     fn tile_settings_configuration_migrates_and_keeps_its_encryption_key() {
         let setup_dir = test_setup_dir("tile-settings-migration");
-        write_env_json(&setup_dir, minimum_required_env_json());
+        let mut original = minimum_required_env_json();
+        original["tile_server_base_url"] = json!("https://legacy.example");
+        original["tile_server_api_key"] = json!("legacy-fixture-key");
+        write_env_json(&setup_dir, original.clone());
         let first = read_env_json(&setup_dir).unwrap();
+        let backup = fs::read(setup_dir.join("geocode-web-single.env.json.bak")).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&backup).unwrap(),
+            original
+        );
+        let active = serde_json::to_value(&first).unwrap();
+        assert!(active.get("tile_server_base_url").is_none());
+        assert!(active.get("tile_server_api_key").is_none());
         assert_eq!(
             STANDARD
                 .decode(&first.tile_settings_encryption_key)
@@ -992,7 +1124,6 @@ mod tests {
         assert_eq!(env.live_map_viewer_session_minutes, "720");
         assert_eq!(env.live_map_password_attempt_limit, "5");
         assert_eq!(env.live_map_password_window_minutes, "10");
-        assert_eq!(env.tile_server_base_url, None);
         assert_eq!(env.geocoder_provider, None);
         assert_eq!(env.camera_sharing_enabled, None);
         assert_eq!(env.camera_cloudflare_turn_api_token, None);
@@ -1019,6 +1150,8 @@ mod tests {
         let migrated_text =
             fs::read_to_string(setup_dir.join("geocode-web-single.env.json")).unwrap();
         let migrated_value: serde_json::Value = serde_json::from_str(&migrated_text).unwrap();
+        assert!(migrated_value.get("tile_server_base_url").is_none());
+        assert!(migrated_value.get("tile_server_api_key").is_none());
         assert!(
             migrated_value
                 .get("redis_connect_timeout_seconds")

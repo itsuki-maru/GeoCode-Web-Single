@@ -18,7 +18,6 @@ use axum::{
 use sqlx::sqlite::SqlitePool;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
 use tera::Tera;
 use tokio::sync::Mutex;
 use tower_http::{cors::CorsLayer, set_header::SetResponseHeaderLayer};
@@ -119,12 +118,6 @@ pub fn build_router_with_local_tiles(
     tile_settings: Arc<TileSettings>,
     local_tiles: Arc<crate::local_tiles::LocalTiles>,
 ) -> Router {
-    // タイルプロキシ用のクライアントを作成
-    let tile_proxy_client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .expect("Failed to create reqwest client for tile proxy.");
-
     // CORSの設定
     let mut cors = CorsLayer::new()
         .allow_methods(vec![Method::GET, Method::POST, Method::PUT, Method::DELETE])
@@ -153,7 +146,7 @@ pub fn build_router_with_local_tiles(
         cors = cors.allow_origin(allowed_origins);
     }
 
-    let tile_settings_routes = Router::new()
+    let map_settings_routes = Router::new()
         .route(
             "/admin/google-maps-settings",
             get(crate::google_maps::admin_get).put(crate::google_maps::admin_update),
@@ -166,6 +159,16 @@ pub fn build_router_with_local_tiles(
             "/admin/google-maps-settings/routes",
             get(crate::google_maps::routes::admin_get)
                 .put(crate::google_maps::routes::admin_update),
+        )
+        .route(
+            "/admin/osrm-settings",
+            get(crate::routing::osrm_admin_get)
+                .put(crate::routing::osrm_admin_update)
+                .layer(DefaultBodyLimit::max(48 * 1024)),
+        )
+        .route(
+            "/admin/osrm-settings/check",
+            post(crate::routing::osrm_admin_check),
         )
         .route(
             "/admin/tile-server-settings",
@@ -187,7 +190,7 @@ pub fn build_router_with_local_tiles(
 
     // アクセストークンによる認可を要する
     let mut secured_routes = Router::new()
-        .merge(tile_settings_routes)
+        .merge(map_settings_routes)
         .merge(
             Router::new()
                 .route(
@@ -406,6 +409,7 @@ pub fn build_router_with_local_tiles(
         .route("/admin", get(admin_index_get_handler))
         .route("/tile-server-settings", get(admin_index_get_handler))
         .route("/google-maps-settings", get(admin_index_get_handler))
+        .route("/osrm-settings", get(admin_index_get_handler))
         .route("/admin/users", get(get_users_handler))
         .route(
             "/admin/user/password-reset/{update_user_id}",
@@ -528,11 +532,12 @@ pub fn build_router_with_local_tiles(
         .layer(DefaultBodyLimit::max(6 * 1024 * 1024))
         .layer(CookieValidator);
 
-    let google_routes = Router::new()
+    let route_search = Router::new()
         .route(
             "/google-maps/routes/compute",
             post(crate::google_maps::routes::compute),
         )
+        .route("/osrm/routes/compute", post(crate::routing::compute_osrm))
         .layer(DefaultBodyLimit::max(4 * 1024))
         .layer(CookieValidator)
         .layer(SetResponseHeaderLayer::overriding(
@@ -639,7 +644,7 @@ pub fn build_router_with_local_tiles(
         .merge(public_form_routes)
         .merge(image_upload_route)
         .merge(marker_icon_upload_route)
-        .merge(google_routes)
+        .merge(route_search)
         .merge(import_route)
         .merge(token_refresh_routes)
         .merge(flex_secured_routes)
@@ -652,7 +657,6 @@ pub fn build_router_with_local_tiles(
         .layer(Extension(
             crate::handler::geocoding::GeocoderClient::default(),
         ))
-        .layer(Extension(tile_proxy_client))
         .layer(Extension(tile_cache))
         .layer(Extension(tera))
         .layer(middleware::from_fn(print_request_response))
@@ -661,6 +665,7 @@ pub fn build_router_with_local_tiles(
         .layer(Extension(Arc::new(
             crate::google_maps::GoogleMaps::default(),
         )))
+        .layer(Extension(crate::routing::Osrm::configured()))
         .layer(Extension(local_tiles))
         .layer(DefaultBodyLimit::max(105 * 1024 * 1024))
         .fallback(crate::custom_not_found_handler)

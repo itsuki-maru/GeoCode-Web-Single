@@ -681,6 +681,7 @@
             clusteringMinZoom: {{ clusteringMinZoom }},
             {% endif %}
             tileServers: {{ tileServers | json_encode_for_html | safe }},
+            osrmModes: {{ osrmModes | json_encode_for_html | safe }},
             {% if fallbackTileServerId is defined %}
             fallbackTileServerId: {{ fallbackTileServerId | json_encode_for_html | safe }},
             {% endif %}

@@ -412,6 +412,7 @@ const routeSearch = createRouteSearch({
   map,
   leaflet: L,
   basemap: () => basemapController.getState(),
+  osrmModes: window.__GEOCODE_MAP_BOOTSTRAP__.osrmModes,
 });
 popupContent = createPopupContentRuntime({
   map,
