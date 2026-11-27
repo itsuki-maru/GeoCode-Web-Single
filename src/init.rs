@@ -1,4 +1,5 @@
 use crate::model::{AiEncryptionKey, ApplicationInitSetup, OsrmEncryptionKey};
+use crate::routing::osrm_origins;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use dirs::home_dir;
 use rand::RngCore;
@@ -10,6 +11,7 @@ use uuid::Uuid;
 
 mod deployment_key;
 mod persistence;
+pub(crate) mod routing_http;
 
 pub(crate) fn protect_maintenance_file(
     source: &std::path::Path,
@@ -24,10 +26,8 @@ pub(crate) fn create_maintenance_directory(
 ) -> io::Result<()> {
     persistence::create_maintenance_directory(source, destination)
 }
-use persistence::{
-    backup_configuration, create_json_file, lock_configuration, reject_non_regular_file,
-    write_to_json_file,
-};
+pub(crate) use persistence::{backup_configuration, lock_configuration, write_to_json_file};
+use persistence::{create_json_file, reject_non_regular_file};
 
 /// セットアップフォームの入力フィールド（Tauriコマンドで受け取る）
 #[derive(Debug, Deserialize)]
@@ -101,6 +101,8 @@ struct ApplicationInitSetupPartial {
     tile_settings_encryption_key: Option<String>,
     ai_encryption_key: Option<AiEncryptionKey>,
     osrm_encryption_key: Option<OsrmEncryptionKey>,
+    osrm_allowed_origins: Option<String>,
+    local_routing_http: Option<crate::local_routing::config::HttpSettings>,
     camera_sharing_enabled: Option<String>,
     camera_turn_provider: Option<String>,
     camera_stun_urls: Option<String>,
@@ -224,42 +226,50 @@ pub fn get_application_user_setup_path() -> PathBuf {
 /// 設定JSONファイルを読み込み、追加済みの任意項目が欠けていれば補完して保存する。
 pub fn read_env_json(setup_dir: &PathBuf) -> Result<ApplicationInitSetup, EnvJsonReadError> {
     let env_json_path = setup_dir.join("geocode-web-single.env.json");
-    read_env_json_at(setup_dir, &env_json_path, true)
+    read_env_json_at(setup_dir, &env_json_path, true, |name| {
+        std::env::var_os(name)
+    })
 }
 
 /// CLIの照会では任意項目をメモリ上で補完し、JSON・バックアップ・ディレクトリを作成しない。
 pub fn read_env_json_readonly(
     env_json_path: &std::path::Path,
 ) -> Result<ApplicationInitSetup, EnvJsonReadError> {
+    ensure_no_pending_move(env_json_path)?;
+    read_relocation_settings(env_json_path)
+}
+
+pub(crate) fn ensure_no_pending_move(path: &std::path::Path) -> Result<(), EnvJsonReadError> {
+    if crate::local_tiles::catalog::rebind::relocation::pending_path(path)
+        .try_exists()
+        .map_err(|e| EnvJsonReadError::Io(e.to_string()))?
+    {
+        return Err(EnvJsonReadError::Io(
+            "保存先の更新が中断しています。local-tiles gui の「データの保存先」で再開してください。".into(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn read_relocation_settings(
+    env_json_path: &std::path::Path,
+) -> Result<ApplicationInitSetup, EnvJsonReadError> {
     let setup_dir = env_json_path
         .parent()
         .ok_or_else(|| EnvJsonReadError::Io("設定ファイルの親ディレクトリがありません。".into()))?
         .to_path_buf();
-    read_env_json_at(&setup_dir, env_json_path, false)
+    read_env_json_at(&setup_dir, env_json_path, false, |_| None)
 }
 
 fn read_env_json_at(
     setup_dir: &PathBuf,
     env_json_path: &std::path::Path,
     persist_defaults: bool,
+    inherited: impl Fn(&str) -> Option<std::ffi::OsString>,
 ) -> Result<ApplicationInitSetup, EnvJsonReadError> {
-    let inherited = |name| persist_defaults.then(|| std::env::var_os(name)).flatten();
-    read_env_json_with_keys(
-        setup_dir,
-        env_json_path,
-        persist_defaults,
-        inherited(deployment_key::AI.environment).as_deref(),
-        inherited(deployment_key::OSRM.environment).as_deref(),
-    )
-}
-
-fn read_env_json_with_keys(
-    setup_dir: &PathBuf,
-    env_json_path: &std::path::Path,
-    persist_defaults: bool,
-    inherited_ai: Option<&std::ffi::OsStr>,
-    inherited_osrm: Option<&std::ffi::OsStr>,
-) -> Result<ApplicationInitSetup, EnvJsonReadError> {
+    if persist_defaults {
+        ensure_no_pending_move(env_json_path)?;
+    }
     let mut value = read_env_value(env_json_path)?;
     // 移行が必要な場合だけ生成から保存までを直列化する。完成済み設定では
     // 読取り専用の設定ディレクトリでも起動でき、照会CLIも何も作成しない。
@@ -276,21 +286,23 @@ fn read_env_json_with_keys(
     // 直接 ApplicationInitSetup に変換する前に、不足項目の有無を判定しておく。
     // 補完が必要な場合は、読み込み成功後にバックアップを取って書き戻す。
     let migrated = env_json_requires_migration(&value);
-    let partial: ApplicationInitSetupPartial =
-        serde_json::from_value(value).map_err(|e| EnvJsonReadError::InvalidJson(e.to_string()))?;
-    let mut env = complete_env(setup_dir, partial)?;
-    crate::local_tiles::config::LocalTileConfig::from_setup(&env)
-        .map_err(EnvJsonReadError::InvalidJson)?;
+    let mut env = parse_env_value(setup_dir, &value, || {
+        if persist_defaults {
+            inherited("OSRM_ALLOWED_ORIGINS")
+        } else {
+            None
+        }
+    })?;
 
     if persist_defaults {
         env.ai_encryption_key = Some(deployment_key::AI.complete(
             env.ai_encryption_key.take(),
-            inherited_ai,
+            inherited(deployment_key::AI.environment).as_deref(),
             &env.database_url,
         )?);
         env.osrm_encryption_key = Some(deployment_key::OSRM.complete(
             env.osrm_encryption_key.take(),
-            inherited_osrm,
+            inherited(deployment_key::OSRM.environment).as_deref(),
             &env.database_url,
         )?);
     }
@@ -303,6 +315,32 @@ fn read_env_json_with_keys(
             .map_err(|e| EnvJsonReadError::Io(e.to_string()))?;
     }
 
+    Ok(env)
+}
+
+fn parse_env_value(
+    setup_dir: &std::path::Path,
+    value: &serde_json::Value,
+    legacy_origins: impl FnOnce() -> Option<std::ffi::OsString>,
+) -> Result<ApplicationInitSetup, EnvJsonReadError> {
+    if let Some(origins) = value.get("osrm_allowed_origins")
+        && !(origins.is_null() || origins.is_string())
+    {
+        return Err(EnvJsonReadError::InvalidJson(
+            "osrm_allowed_origins はカンマ区切りの文字列で指定してください。".into(),
+        ));
+    }
+    let mut partial = ApplicationInitSetupPartial::deserialize(value)
+        .map_err(|e| EnvJsonReadError::InvalidJson(e.to_string()))?;
+    // nullや空文字は明示的な「例外なし」。項目そのものがない旧JSONでだけ引き継ぐ。
+    if value.get("osrm_allowed_origins").is_none()
+        && let Some(raw) = legacy_origins().and_then(|s| s.into_string().ok())
+    {
+        partial.osrm_allowed_origins = Some(osrm_origins::from_legacy(&raw));
+    }
+    let env = complete_env(setup_dir, partial)?;
+    crate::local_tiles::config::LocalTileConfig::from_setup(&env)
+        .map_err(EnvJsonReadError::InvalidJson)?;
     Ok(env)
 }
 
@@ -417,6 +455,8 @@ pub fn build_env_settings(
         tile_settings_encryption_key: generate_tile_settings_key(),
         ai_encryption_key,
         osrm_encryption_key,
+        osrm_allowed_origins: String::new(),
+        local_routing_http: None,
         camera_sharing_enabled: None,
         camera_turn_provider: None,
         camera_stun_urls: None,
@@ -501,6 +541,7 @@ fn env_json_requires_migration(value: &serde_json::Value) -> bool {
         "tile_settings_encryption_key",
         "ai_encryption_key",
         "osrm_encryption_key",
+        "osrm_allowed_origins",
         "camera_sharing_enabled",
         "camera_turn_provider",
         "camera_stun_urls",
@@ -542,7 +583,10 @@ fn env_json_requires_migration(value: &serde_json::Value) -> bool {
         !object.contains_key(*field)
             || (matches!(
                 *field,
-                "tile_settings_encryption_key" | "ai_encryption_key" | "osrm_encryption_key"
+                "tile_settings_encryption_key"
+                    | "ai_encryption_key"
+                    | "osrm_encryption_key"
+                    | "osrm_allowed_origins"
             ) && object[*field].is_null())
             || ((field.starts_with("local_tile_")
                 || matches!(
@@ -596,6 +640,11 @@ fn complete_env(
     if !missing.is_empty() {
         return Err(EnvJsonReadError::MissingRequiredFields(missing));
     }
+
+    let osrm_allowed_origins = partial.osrm_allowed_origins.unwrap_or_default();
+    osrm_origins::validate(&osrm_allowed_origins).map_err(|message| {
+        EnvJsonReadError::InvalidJson(format!("osrm_allowed_origins: {message}"))
+    })?;
 
     // 設定の補完・保存より前にHTTP画像配信元を検証する。
     let http_image_allowed_origins = partial.http_image_allowed_origins.unwrap_or_default();
@@ -671,6 +720,8 @@ fn complete_env(
         tile_settings_encryption_key,
         ai_encryption_key: partial.ai_encryption_key,
         osrm_encryption_key: partial.osrm_encryption_key,
+        osrm_allowed_origins,
+        local_routing_http: partial.local_routing_http,
         camera_sharing_enabled: partial.camera_sharing_enabled,
         camera_turn_provider: partial.camera_turn_provider,
         camera_stun_urls: partial.camera_stun_urls,
@@ -809,7 +860,7 @@ mod tests {
     }
 
     #[test]
-    fn concurrent_startup_persists_the_same_deployment_keys_and_keeps_original_backup() {
+    fn concurrent_startup_persists_one_set_of_keys_and_osrm_origins_and_keeps_original_backup() {
         let directory = tempfile::tempdir().unwrap();
         let setup_dir = directory.path().to_path_buf();
         write_env_json(&setup_dir, minimum_required_env_json());
@@ -817,16 +868,21 @@ mod tests {
         let original = fs::read(&path).unwrap();
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
         let mut threads = Vec::new();
-        for _ in 0..8 {
+        for i in 0..8 {
             let setup_dir = setup_dir.clone();
             let path = path.clone();
             let barrier = barrier.clone();
             threads.push(std::thread::spawn(move || {
                 barrier.wait();
-                let env = read_env_json_with_keys(&setup_dir, &path, true, None, None).unwrap();
+                let env = read_env_json_at(&setup_dir, &path, true, |name| {
+                    (name == "OSRM_ALLOWED_ORIGINS")
+                        .then(|| format!("http://localhost:500{i}").into())
+                })
+                .unwrap();
                 (
                     env.ai_encryption_key.unwrap(),
                     env.osrm_encryption_key.unwrap(),
+                    env.osrm_allowed_origins,
                 )
             }));
         }
@@ -838,6 +894,12 @@ mod tests {
         let saved: ApplicationInitSetup = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
         assert_eq!(saved.ai_encryption_key.as_ref(), Some(&keys[0].0));
         assert_eq!(saved.osrm_encryption_key.as_ref(), Some(&keys[0].1));
+        assert!(
+            saved
+                .osrm_allowed_origins
+                .starts_with("http://localhost:500")
+        );
+        assert_eq!(saved.osrm_allowed_origins, keys[0].2);
         assert_eq!(
             fs::read(setup_dir.join("geocode-web-single.env.json.bak")).unwrap(),
             original
@@ -852,20 +914,17 @@ mod tests {
         write_env_json(&setup_dir, minimum_required_env_json());
         let path = setup_dir.join("geocode-web-single.env.json");
         let original = fs::read(&path).unwrap();
-        let readonly = read_env_json_with_keys(
-            &setup_dir,
-            &path,
-            false,
-            Some(std::ffi::OsStr::new("invalid-environment-key")),
-            Some(std::ffi::OsStr::new("invalid-environment-key")),
-        )
+        let readonly = read_env_json_at(&setup_dir, &path, false, |_| {
+            panic!("読み取り専用操作は起動元の環境を参照しない")
+        })
         .unwrap();
         assert!(readonly.ai_encryption_key.is_none());
         assert!(readonly.osrm_encryption_key.is_none());
+        assert!(readonly.osrm_allowed_origins.is_empty());
         assert_eq!(fs::read_dir(&setup_dir).unwrap().count(), 1);
         let backup = setup_dir.join("geocode-web-single.env.json.bak");
         fs::create_dir(&backup).unwrap();
-        assert!(read_env_json_with_keys(&setup_dir, &path, true, None, None).is_err());
+        assert!(read_env_json_at(&setup_dir, &path, true, |_| None).is_err());
         assert_eq!(fs::read(path).unwrap(), original);
         assert!(!setup_dir.join("geocode-web.sqlite").exists());
     }
@@ -876,16 +935,85 @@ mod tests {
         let setup_dir = directory.path().to_path_buf();
         write_env_json(&setup_dir, minimum_required_env_json());
         let path = setup_dir.join("geocode-web-single.env.json");
-        let first = read_env_json_with_keys(&setup_dir, &path, true, None, None).unwrap();
+        let first = read_env_json_at(&setup_dir, &path, true, |_| None).unwrap();
+        assert!(first.osrm_allowed_origins.is_empty());
         let lock = setup_dir.join("geocode-web-single.env.json.lock");
         fs::remove_file(&lock).unwrap();
         // lockを作れない環境でも、移行済み設定を読み取れることを検証する。
         fs::create_dir(&lock).unwrap();
         let original = fs::read(&path).unwrap();
-        let reloaded = read_env_json_with_keys(&setup_dir, &path, true, None, None).unwrap();
+        let reloaded = read_env_json_at(&setup_dir, &path, true, |_| None).unwrap();
         assert_eq!(first.ai_encryption_key, reloaded.ai_encryption_key);
         assert_eq!(first.osrm_encryption_key, reloaded.osrm_encryption_key);
         assert_eq!(fs::read(path).unwrap(), original);
+    }
+
+    #[test]
+    fn osrm_origins_migrate_once_then_follow_json_including_empty_and_null() {
+        let directory = tempfile::tempdir().unwrap();
+        let setup_dir = directory.path().to_path_buf();
+        let path = setup_dir.join("geocode-web-single.env.json");
+        write_env_json(&setup_dir, minimum_required_env_json());
+        let complete = read_env_json_at(&setup_dir, &path, true, |_| None).unwrap();
+        let mut legacy = serde_json::to_value(complete).unwrap();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("osrm_allowed_origins");
+        write_env_json(&setup_dir, legacy);
+        let first = read_env_json_at(&setup_dir, &path, true, |name| {
+            (name == "OSRM_ALLOWED_ORIGINS").then(|| {
+                "http://localhost:5000,http://invalid.example/path,https://example.com".into()
+            })
+        })
+        .unwrap();
+        assert_eq!(
+            first.osrm_allowed_origins,
+            "http://localhost:5000,https://example.com"
+        );
+        let mut saved = read_env_value(&path).unwrap();
+        assert_eq!(saved["osrm_allowed_origins"], first.osrm_allowed_origins);
+        let json_only = |name: &str| {
+            assert_ne!(name, "OSRM_ALLOWED_ORIGINS");
+            None
+        };
+        let reloaded = read_env_json_at(&setup_dir, &path, true, json_only).unwrap();
+        assert_eq!(reloaded.osrm_allowed_origins, first.osrm_allowed_origins);
+        for (raw, expected) in [
+            (json!("http://localhost:3000"), "http://localhost:3000"),
+            (json!(""), ""),
+            (json!(null), ""),
+        ] {
+            saved["osrm_allowed_origins"] = raw;
+            write_env_json(&setup_dir, saved.clone());
+            let loaded = read_env_json_at(&setup_dir, &path, true, json_only).unwrap();
+            assert_eq!(loaded.osrm_allowed_origins, expected);
+            assert_eq!(
+                read_env_value(&path).unwrap()["osrm_allowed_origins"],
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_explicit_osrm_origins_do_not_rewrite_settings_or_echo_input() {
+        let directory = tempfile::tempdir().unwrap();
+        let setup_dir = directory.path().to_path_buf();
+        let path = setup_dir.join("geocode-web-single.env.json");
+        let mut value = minimum_required_env_json();
+        let sensitive = "https://user:fixture-password@example.com";
+        for raw in [json!(sensitive), json!([sensitive])] {
+            value["osrm_allowed_origins"] = raw;
+            write_env_json(&setup_dir, value.clone());
+            let original = fs::read(&path).unwrap();
+            let error = read_env_json_at(&setup_dir, &path, true, |_| None)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("osrm_allowed_origins"));
+            assert!(!error.contains("fixture-password"));
+            assert_eq!(fs::read(&path).unwrap(), original);
+            assert!(!setup_dir.join("geocode-web-single.env.json.bak").exists());
+        }
     }
 
     #[test]
@@ -894,12 +1022,12 @@ mod tests {
         let setup_dir = directory.path().to_path_buf();
         let path = setup_dir.join("geocode-web-single.env.json");
         write_env_json(&setup_dir, minimum_required_env_json());
-        let complete = read_env_json_with_keys(&setup_dir, &path, true, None, None).unwrap();
+        let complete = read_env_json_at(&setup_dir, &path, true, |_| None).unwrap();
         let mut config = serde_json::to_value(complete).unwrap();
         config["osrm_encryption_key"] = serde_json::Value::Null;
         write_env_json(&setup_dir, config);
 
-        let completed = read_env_json_with_keys(&setup_dir, &path, true, None, None).unwrap();
+        let completed = read_env_json_at(&setup_dir, &path, true, |_| None).unwrap();
         let saved: ApplicationInitSetup = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
         assert!(completed.osrm_encryption_key.is_some());
         assert_eq!(saved.osrm_encryption_key, completed.osrm_encryption_key);
@@ -934,7 +1062,7 @@ mod tests {
                 .unwrap();
             let original_config = fs::read(&path).unwrap();
             let original_database = fs::read(&database_path).unwrap();
-            let error = read_env_json_with_keys(&setup_dir, &path, true, None, None).unwrap_err();
+            let error = read_env_json_at(&setup_dir, &path, true, |_| None).unwrap_err();
             assert!(
                 error
                     .to_string()
@@ -964,7 +1092,7 @@ mod tests {
         ] {
             config["osrm_encryption_key"] = value;
             write_env_json(&setup_dir, config.clone());
-            let error = read_env_json_with_keys(&setup_dir, &path, true, None, None)
+            let error = read_env_json_at(&setup_dir, &path, true, |_| None)
                 .unwrap_err()
                 .to_string();
             assert!(error.contains(OsrmEncryptionKey::INVALID_MESSAGE));
@@ -973,13 +1101,9 @@ mod tests {
         config["osrm_encryption_key"] = json!(STANDARD.encode([0_u8; 32]));
         write_env_json(&setup_dir, config);
         let original = fs::read(&path).unwrap();
-        let error = read_env_json_with_keys(
-            &setup_dir,
-            &path,
-            true,
-            None,
-            Some(std::ffi::OsStr::new(invalid_key)),
-        )
+        let error = read_env_json_at(&setup_dir, &path, true, |name| {
+            (name == "OSRM_ENCRYPTION_KEY").then(|| invalid_key.into())
+        })
         .unwrap_err()
         .to_string();
         assert!(error.contains(OsrmEncryptionKey::INVALID_MESSAGE));
@@ -1073,6 +1197,7 @@ mod tests {
         let env = build_env_from_form(setup_dir.clone(), form).unwrap();
 
         assert!(env.http_image_allowed_origins.is_empty());
+        assert!(env.osrm_allowed_origins.is_empty());
 
         assert_eq!(env.admin_username, "geocodeweb");
         assert_eq!(env.admin_passwotd, "geocodeweb");
@@ -1082,6 +1207,7 @@ mod tests {
         assert_eq!(saved.admin_username, "geocodeweb");
         assert_eq!(saved.admin_passwotd, "geocodeweb");
         let saved_json: serde_json::Value = serde_json::from_str(&saved_text).unwrap();
+        assert_eq!(saved_json["osrm_allowed_origins"], "");
         for key in [
             "camera_sharing_enabled",
             "camera_turn_provider",
@@ -1099,12 +1225,115 @@ mod tests {
     }
 
     #[test]
+    fn gui_saves_routing_and_appends_origins_to_the_selected_config_atomically() {
+        use crate::local_routing::config::HttpSettings;
+        let dir = tempfile::tempdir().unwrap();
+        let (graphs, _) = crate::local_routing::http::app_with_graph(None);
+        let path = dir.path().join("管理画面 設定.json");
+        let mut original = minimum_required_env_json();
+        original["tile_dataset_path"] = json!(graphs.path());
+        original["future_setting"] = json!({"keep": [1, 2]});
+        let bytes = serde_json::to_vec(&original).unwrap();
+        fs::write(&path, &bytes).unwrap();
+        let off = HttpSettings::default();
+        let local = "http://127.0.0.1:3000";
+
+        for (name, origin) in [
+            ("不存在", local),
+            ("試験", ""),
+            ("試験", "http://localhost/local-routing/car"),
+            ("試験", "http://localhost,http://example.org"),
+        ] {
+            assert!(routing_http::save(&path, &off, Some(name), Some(origin)).is_err());
+            assert_eq!(fs::read(&path).unwrap(), bytes);
+        }
+        assert!(!path.with_added_extension("bak").exists());
+        routing_http::save(&path, &off, Some("試験"), Some(local)).unwrap();
+        let on = HttpSettings {
+            enabled: true,
+            dataset: "試験".into(),
+        };
+        let mut expected = original;
+        expected["local_routing_http"] = json!(on);
+        expected["osrm_allowed_origins"] = json!(local);
+        assert_eq!(read_env_value(&path).unwrap(), expected);
+        assert_eq!(fs::read(path.with_added_extension("bak")).unwrap(), bytes);
+        assert!(!dir.path().join("geocode-web-single.env.json").exists());
+
+        // 同じ表示状態から2画面で別々のオリジンを追加しても取りこぼさない。
+        std::thread::scope(|scope| {
+            for origin in ["https://example.org", "http://localhost:5050"] {
+                let (path, on) = (&path, &on);
+                scope.spawn(move || {
+                    routing_http::save(path, on, Some("試験"), Some(origin)).unwrap()
+                });
+            }
+        });
+        let allowed = read_env_json_readonly(&path).unwrap().osrm_allowed_origins;
+        let mut entries: Vec<_> = allowed.split(',').collect();
+        entries.sort_unstable();
+        assert_eq!(
+            entries,
+            [local, "http://localhost:5050", "https://example.org"]
+        );
+        let before_retry = fs::read(&path).unwrap();
+        routing_http::save(&path, &on, Some("試験"), Some(local)).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), before_retry);
+        assert!(routing_http::save(&path, &off, None, None).is_err());
+        assert_eq!(fs::read(&path).unwrap(), before_retry);
+
+        drop(graphs);
+        routing_http::save(&path, &on, None, None).unwrap();
+        expected["local_routing_http"]["enabled"] = json!(false);
+        expected["osrm_allowed_origins"] = json!(allowed);
+        assert_eq!(read_env_value(&path).unwrap(), expected);
+    }
+
+    #[test]
+    fn gui_only_publishes_a_graph_without_changing_omitted_or_null_origins() {
+        let dir = tempfile::tempdir().unwrap();
+        let (graphs, _) = crate::local_routing::http::app_with_graph(None);
+        let path = dir.path().join("geocode-web-single.env.json");
+        let mut old = minimum_required_env_json();
+        old["tile_dataset_path"] = json!(graphs.path());
+        for origin in [None, Some(serde_json::Value::Null), Some(json!(""))] {
+            if let Some(value) = &origin {
+                old["osrm_allowed_origins"] = value.clone();
+            }
+            fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+            routing_http::save(&path, &Default::default(), Some("試験"), None).unwrap();
+            assert_eq!(
+                read_env_value(&path).unwrap().get("osrm_allowed_origins"),
+                origin.as_ref()
+            );
+        }
+    }
+
+    #[test]
+    fn migration_preserves_explicit_local_routing_publication() {
+        let dir = tempfile::tempdir().unwrap();
+        let setup_dir = dir.path().to_path_buf();
+        let mut values = minimum_required_env_json();
+        values["local_routing_http"] = serde_json::json!({"enabled":true,"dataset":"日本"});
+        write_env_json(dir.path(), values);
+        for _ in 0..2 {
+            let settings = read_env_json(&setup_dir)
+                .unwrap()
+                .local_routing_http
+                .unwrap();
+            assert!(settings.enabled);
+            assert_eq!(settings.dataset, "日本");
+        }
+    }
+
+    #[test]
     fn read_env_json_complements_missing_optional_fields_and_writes_migrated_file() {
         let setup_dir = test_setup_dir("migrate");
         write_env_json(&setup_dir, minimum_required_env_json());
 
         let env = read_env_json(&setup_dir).unwrap();
         assert!(env.http_image_allowed_origins.is_empty());
+        assert!(env.local_routing_http.is_none());
 
         assert_eq!(env.app_title, "GeoCode Test");
         assert_eq!(env.service_name, "GeoCode Test");

@@ -9,7 +9,7 @@ use super::{
 };
 use crate::tilegen::{
     geometry::{Point, Rect, project},
-    operation::OperationContext,
+    operation::{OperationContext, OperationGuard, Stage},
 };
 use anyhow::{Context, Result, bail, ensure};
 use flate2::{
@@ -982,6 +982,8 @@ pub struct ElevationInspection {
     pub validation_complete: bool,
     pub datum_policy: ElevationDatumPolicy,
     pub input_grids: u64,
+    #[serde(skip)]
+    pub(super) input_cells: u64,
     pub source_coordinate_systems: Vec<String>,
     pub coordinate_system_counts: BTreeMap<String, u64>,
     pub mixed_input_coordinate_systems: bool,
@@ -1069,6 +1071,7 @@ pub fn inspect_input(
         validation_complete: false,
         datum_policy: policy,
         input_grids: 0,
+        input_cells: 0,
         source_coordinate_systems: Vec::new(),
         coordinate_system_counts: BTreeMap::new(),
         mixed_input_coordinate_systems: false,
@@ -1099,6 +1102,7 @@ pub fn inspect_input(
             if let Some(header) = item.read_header(context)? {
                 systems.insert(header.crs);
                 report.input_grids += 1;
+                report.input_cells += header.width as u64 * header.height as u64;
                 *report
                     .coordinate_system_counts
                     .entry(header.crs.as_str().to_owned())
@@ -1369,6 +1373,17 @@ pub fn import_into_with_policy_and_contours(
     contours: bool,
     context: &OperationContext,
 ) -> Result<(Vec<SourceInfo>, Value)> {
+    import_with_progress(connection, input, policy, contours, context, None)
+}
+
+pub(super) fn import_with_progress(
+    connection: &Connection,
+    input: &Path,
+    policy: ElevationDatumPolicy,
+    contours: bool,
+    context: &OperationContext,
+    guard: Option<&OperationGuard>,
+) -> Result<(Vec<SourceInfo>, Value)> {
     let inspection = inspect_input(input, policy, context);
     context.check()?;
     ensure!(
@@ -1413,7 +1428,10 @@ pub fn import_into_with_policy_and_contours(
     let mut coverage = None::<Rect>;
     let mut min_m = f32::INFINITY;
     let mut max_m = f32::NEG_INFINITY;
-    for item in &inputs {
+    for (index, item) in inputs.iter().enumerate() {
+        if let Some(g) = guard {
+            g.progress(index as u64, Some(inputs.len() as u64));
+        }
         context.check()?;
         let (grid, hash) = item.read_payload(context, true)?;
         ensure!(hash == item.hash, "標高入力が取り込み中に変更されました");
@@ -1477,11 +1495,17 @@ pub fn import_into_with_policy_and_contours(
             )
         })
         .collect::<BTreeMap<_, _>>();
-    for &resolution in &resolutions {
+    if let Some(g) = guard {
+        g.stage(Stage::ElevationPyramid);
+    }
+    for (index, &resolution) in resolutions.iter().enumerate() {
+        if let Some(g) = guard {
+            g.progress(index as u64, Some(resolutions.len() as u64));
+        }
         build_pyramid(connection, resolution, context, &mut batch)?;
     }
     let contour_count = if contours {
-        generate_contours(connection, &resolutions, context, &mut batch)?
+        generate_contours(connection, &resolutions, context, &mut batch, guard)?
     } else {
         identity.update(b"contour-data-off-v1");
         0
@@ -1891,7 +1915,11 @@ fn generate_contours(
     resolutions: &BTreeSet<u32>,
     context: &OperationContext,
     batch: &mut WriteBatch<'_>,
+    guard: Option<&OperationGuard>,
 ) -> Result<u64> {
+    if let Some(g) = guard {
+        g.stage(Stage::BuildingContours);
+    }
     let resolution = *resolutions.first().context("標高解像度がありません")?;
     ensure!(
         resolutions
@@ -1926,6 +1954,14 @@ fn generate_contours(
         )?;
     }
     // 一度に扱うのは128四方のセルと、その境界用近傍だけ。
+    let total_chunks: u64 =
+        connection.query_row("SELECT count(*) FROM standard_contour_chunks", [], |r| {
+            r.get(0)
+        })?;
+    let mut completed = 0;
+    if let Some(g) = guard {
+        g.progress(0, Some(total_chunks));
+    }
     let mut next_id = 0_i64;
     let mut count = 0;
     let mut statement =
@@ -1987,6 +2023,10 @@ fn generate_contours(
             }
         }
         count += store_contours(connection, segments, &mut next_id, context, batch)?;
+        completed += 1;
+        if let Some(g) = guard {
+            g.progress(completed, Some(total_chunks));
+        }
     }
     drop(rows);
     drop(statement);

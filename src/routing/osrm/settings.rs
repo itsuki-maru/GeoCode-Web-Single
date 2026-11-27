@@ -1,4 +1,4 @@
-use super::{Osrm, REQUESTS_PER_MINUTE};
+use super::{LocalRoutingListener, Osrm, REQUESTS_PER_MINUTE};
 use crate::{
     error::AppError,
     handler::live_map::require_superuser,
@@ -464,6 +464,7 @@ pub(crate) async fn osrm_admin_check(
     Extension(account): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
     Extension(service): Extension<Arc<Osrm>>,
+    local: Option<Extension<LocalRoutingListener>>,
     payload: Result<Json<CheckInput>, JsonRejection>,
 ) -> Result<impl IntoResponse, AppError> {
     require_superuser(&account, &pool).await?;
@@ -494,7 +495,14 @@ pub(crate) async fn osrm_admin_check(
     };
     let _permit = service.limits.acquire(account, REQUESTS_PER_MINUTE).await?;
     let route = service
-        .fetch_route(&endpoint, mode, &input.origin, &input.destination, api_key)
+        .fetch_route(
+            &endpoint,
+            mode,
+            &input.origin,
+            &input.destination,
+            api_key,
+            local.map(|Extension(listener)| listener),
+        )
         .await
         .map_err(|error| error.into_check_error())?;
     Ok((

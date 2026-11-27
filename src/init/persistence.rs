@@ -39,7 +39,7 @@ pub(super) fn reject_non_regular_file(path: &Path) -> io::Result<()> {
     }
 }
 
-pub(super) fn lock_configuration(config_path: &Path) -> io::Result<File> {
+pub(crate) fn lock_configuration(config_path: &Path) -> io::Result<File> {
     reject_non_regular_file(config_path)?;
     let mut path = config_path.as_os_str().to_os_string();
     path.push(".lock");
@@ -263,7 +263,7 @@ fn copy_existing_dacl(source: &Path, destination: &Path) -> io::Result<()> {
     Ok(())
 }
 
-pub(super) fn backup_configuration(source: &Path, backup: &Path) -> io::Result<()> {
+pub(crate) fn backup_configuration(source: &Path, backup: &Path) -> io::Result<()> {
     reject_non_regular_file(source)?;
     reject_non_regular_file(backup)?;
     if backup.try_exists()? {
@@ -280,7 +280,7 @@ pub(super) fn backup_configuration(source: &Path, backup: &Path) -> io::Result<(
     sync_parent(backup)
 }
 
-pub(super) fn write_to_json_file<T: Serialize>(file_path: PathBuf, data: &T) -> io::Result<()> {
+pub(crate) fn write_to_json_file<T: Serialize>(file_path: PathBuf, data: &T) -> io::Result<()> {
     write_json(file_path, data, true)
 }
 

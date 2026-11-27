@@ -84,6 +84,10 @@ pub struct ApplicationInitSetup {
     pub ai_encryption_key: Option<AiEncryptionKey>,
     #[serde(default)]
     pub osrm_encryption_key: Option<OsrmEncryptionKey>,
+    #[serde(default)]
+    pub osrm_allowed_origins: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_routing_http: Option<crate::local_routing::config::HttpSettings>,
     pub camera_sharing_enabled: Option<String>,
     pub camera_turn_provider: Option<String>,
     pub camera_stun_urls: Option<String>,

@@ -78,6 +78,8 @@ pub enum Stage {
     ImportElevation,
     /// 標高格子からの等高線生成。
     BuildingContours,
+    ElevationPyramid,
+    PreparingStore,
 }
 
 impl Stage {
@@ -98,6 +100,8 @@ impl Stage {
             13 => Self::ImportLandmask,
             14 => Self::ImportElevation,
             15 => Self::BuildingContours,
+            16 => Self::ElevationPyramid,
+            17 => Self::PreparingStore,
             _ => Self::NotStarted,
         }
     }
@@ -156,6 +160,11 @@ pub struct ProgressSnapshot {
     pub stage: Stage,
     pub completed: u64,
     pub total: Option<u64>,
+    /// この走査で、内部の地物をすべて処理し終えたPBFブロックの圧縮バイト数とファイル全体のバイト数。
+    pub scan_bytes: Option<(u64, u64)>,
+    pub stage_elapsed: Duration,
+    /// 標高資料を指定した場合に、ヘッダーの事前検査で判明した総セル数。
+    pub elevation_cells: u64,
     /// `start`より前の待機時間を除く実行時間。
     pub elapsed: Duration,
     pub diagnostics: Vec<Diagnostic>,
@@ -178,6 +187,10 @@ struct Inner {
     completed: AtomicU64,
     total: AtomicU64,
     has_total: AtomicU8,
+    scan_done: AtomicU64,
+    scan_size: AtomicU64,
+    elevation_cells: AtomicU64,
+    stage_started_ns: AtomicU64,
     started_ns: AtomicU64,
     finished_ns: AtomicU64,
     diagnostics: Mutex<Vec<Diagnostic>>,
@@ -239,6 +252,10 @@ impl OperationContext {
             completed: AtomicU64::new(0),
             total: AtomicU64::new(0),
             has_total: AtomicU8::new(0),
+            scan_done: AtomicU64::new(0),
+            scan_size: AtomicU64::new(0),
+            elevation_cells: AtomicU64::new(0),
+            stage_started_ns: AtomicU64::new(0),
             started_ns: AtomicU64::new(UNSET),
             finished_ns: AtomicU64::new(UNSET),
             diagnostics: Mutex::new(Vec::with_capacity(MAX_DIAGNOSTICS)),
@@ -372,7 +389,18 @@ impl fmt::Debug for OperationMonitor {
 
 impl OperationMonitor {
     pub fn snapshot(&self) -> ProgressSnapshot {
-        let (status, stage, completed, total, has_total, started, finished) = loop {
+        let (
+            status,
+            stage,
+            completed,
+            total,
+            has_total,
+            scan_done,
+            scan_size,
+            stage_start,
+            started,
+            finished,
+        ) = loop {
             let before = self.0.sequence.load(Ordering::Acquire);
             if before & 1 != 0 {
                 std::hint::spin_loop();
@@ -384,6 +412,9 @@ impl OperationMonitor {
                 self.0.completed.load(Ordering::Acquire),
                 self.0.total.load(Ordering::Acquire),
                 self.0.has_total.load(Ordering::Acquire),
+                self.0.scan_done.load(Ordering::Acquire),
+                self.0.scan_size.load(Ordering::Acquire),
+                self.0.stage_started_ns.load(Ordering::Acquire),
                 self.0.started_ns.load(Ordering::Acquire),
                 self.0.finished_ns.load(Ordering::Acquire),
             );
@@ -415,6 +446,10 @@ impl OperationMonitor {
             stage,
             completed,
             total: (has_total != 0).then_some(total),
+            scan_bytes: (scan_size > 0).then_some((scan_done, scan_size)),
+            elevation_cells: self.0.elevation_cells.load(Ordering::Acquire),
+            stage_elapsed: elapsed
+                .saturating_sub(Duration::from_nanos(stage_start.saturating_sub(started))),
             elapsed,
             diagnostics,
             dropped_diagnostics: self.0.dropped_diagnostics.load(Ordering::Relaxed),
@@ -437,7 +472,26 @@ impl OperationGuard {
             self.context.0.completed.store(0, Ordering::Release);
             self.context.0.total.store(0, Ordering::Release);
             self.context.0.has_total.store(0, Ordering::Release);
+            self.context.0.scan_size.store(0, Ordering::Release);
+            self.context
+                .0
+                .stage_started_ns
+                .store(self.context.0.now_ns(), Ordering::Release);
             self.context.0.stage.store(stage as u8, Ordering::Release);
+        });
+    }
+
+    pub(crate) fn set_elevation_cells(&self, cells: u64) {
+        self.context
+            .0
+            .elevation_cells
+            .store(cells, Ordering::Release);
+    }
+
+    pub(crate) fn scan_progress(&self, done: u64, total: u64) {
+        self.context.0.update(|| {
+            self.context.0.scan_done.store(done, Ordering::Release);
+            self.context.0.scan_size.store(total, Ordering::Release);
         });
     }
 

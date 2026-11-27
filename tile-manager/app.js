@@ -1,6 +1,8 @@
 (() => {
   'use strict';
 
+  const { displayPath, displayData, displayText } = globalThis.GeoCodeTilePaths;
+
   const ACTIVE_STATES = new Set(['starting', 'queued', 'running', 'cancelling']);
   const STATE_LABELS = {
     starting: '受付中', queued: '待機中', running: '実行中', cancelling: '取消処理中',
@@ -14,7 +16,7 @@
   const ACTION_LABELS = {
     import: 'PBFの取り込み', precompute: 'タイルの事前生成', resume: '事前生成の再開',
     register: 'データセットの登録', prepare: '描画条件の準備', background: '背景地図への登録',
-    rebind: '本体DBの対応付け更新',
+    rebind: '本体DBの対応付け更新', route_build: '道路網の作成',
   };
   const STAGE_LABELS = {
     NotStarted: '開始を待っています', Validating: '入力を検査しています', Searching: '地物を検索しています',
@@ -24,6 +26,11 @@
     ImportLandmask: '陸域ポリゴンを取り込んでいます', ImportElevation: '標高資料を取り込んでいます',
     BuildingContours: '等高線を作成しています', FinalValidation: '完成データを検査しています',
     Publishing: 'データセットを登録しています', Exporting: 'タイルを事前生成しています', Completed: '処理が完了しました',
+    ways: '通行できる道路を読み取っています', nodes: '道路上の地点を取り込んでいます',
+    restrictions: '通行規制を解決しています', sql_indexes: '道路の接続索引を構築しています',
+    publish_graph: '完成した道路網を公開しています', Registering: '完成DBを登録しています',
+    ElevationPyramid: '標高の縮尺別データを作成しています', PreparingStore: '完成DBの集計と整理をしています',
+    index: '道路の接続と検索索引を作成しています', validate: '道路網を検証しています',
     checking: 'DBの整合性と内容を照合しています', backup: 'catalogのバックアップを作成しています',
     before_backup: '更新前の保存先を確認しています', before_commit: '対応付けを更新しています', committing: '対応付けを確定しています', completed: '移設処理が完了しました', saving_proof: '移設記録を保存しています',
   };
@@ -31,7 +38,10 @@
     import: ['地図を取り込む', '取得済みのPBFから、この端末で使える地図を作成します。'],
     datasets: ['データセット', '取り込んだ地図と、描画条件を管理します。'],
     precompute: ['タイルを事前生成', '必要な範囲のPNGを、あらかじめこの端末へ保存します。'],
-    activity: ['処理状況・履歴', '実行中の進捗と、これまでの処理結果を確認します。'],
+    routes: ['経路', '端末内の道路網で、自動車・徒歩の経路を検索します。'],
+    activity: ['処理状況', '受付中・実行中の処理の進捗とログを確認します。'],
+    history: ['履歴', '終了した処理の結果とログを、新しい順に確認できます。'],
+    storage: ['データの保存先', '使用する本体DBとタイルの場所を選んでください。変更する項目だけ指定できます。'],
   };
   const count = value => new Intl.NumberFormat('ja-JP').format(Number(value) || 0);
   const text = value => value == null ? '' : String(value);
@@ -40,9 +50,24 @@
     if (typeof value !== 'string') return object(value);
     try { return object(JSON.parse(value)); } catch { return {}; }
   };
-  const errorMessage = error => typeof error === 'string' ? error : text(error?.message || error || '処理に失敗しました。');
+  const errorMessage = error => displayText(typeof error === 'string' ? error : text(error?.message || error || '処理に失敗しました。'));
   const shortId = id => id ? `${text(id).slice(0, 12)}…` : '未準備';
   const isActive = state => ACTIVE_STATES.has(state);
+
+  function activityEntries(jobs, requests) {
+    const entries = jobs.map(record => ({ record, receipt: null }));
+    const byJob = new Map(entries.map(entry => [entry.record.id, entry]));
+    const byRequest = new Map(entries.filter(entry => entry.record.request?.request_id)
+      .map(entry => [entry.record.request.request_id, entry]));
+    for (const receipt of requests) {
+      const entry = byJob.get(receipt.job_id || receipt.id) || byRequest.get(receipt.id);
+      if (entry) entry.receipt ??= receipt;
+      else entries.push({ record: receipt, receipt });
+    }
+    return entries;
+  }
+
+  const resultTime = record => record.updated_at || record.created_at;
 
   function duration(seconds) {
     if (!Number.isFinite(seconds) || seconds < 0) return '—';
@@ -57,29 +82,75 @@
     const completed = Number.isFinite(progress.completed) && progress.completed >= 0 ? progress.completed : 0;
     const total = Number.isFinite(progress.total) && progress.total > 0 ? progress.total : null;
     const active = isActive(job.state);
-    // 取り込みのcompleted/totalは各段階の値であり、PBF全体の割合にはしない。
-    const percentage = job.kind === 'precompute' && total !== null
-      ? Math.min(100, Math.max(0, completed / total * 100)) : null;
+    const estimate = progress.estimate;
+    let percentage = null;
+    if (job.kind === 'precompute' && total !== null) {
+      percentage = Math.min(job.state === 'succeeded' ? 100 : 99, completed / total * 100);
+    } else if (Number.isFinite(estimate?.percent)) {
+      percentage = Math.max(0, Math.min(99, estimate.percent));
+    }
+    if (job.state === 'succeeded') percentage = 100;
+    const eta = job.kind === 'precompute' ? progress.remaining_seconds : estimate?.remaining_seconds;
+    const sampled = Date.parse(progress.sampled_at);
+    const stale = !Number.isFinite(sampled) || now - sampled > 30000;
+    const remaining = job.state === 'running' && !stale && Number.isFinite(eta) && eta > 0 ? eta : null;
     const start = Date.parse(job.created_at);
     const end = active ? now : Date.parse(job.updated_at);
-    const elapsed = Number.isFinite(progress.elapsed_seconds) ? progress.elapsed_seconds
+    const sinceSample = job.state === 'running' && Number.isFinite(sampled) ? Math.max(0, (now - sampled) / 1000) : 0;
+    const elapsed = Number.isFinite(progress.elapsed_seconds) ? progress.elapsed_seconds + sinceSample
       : Number.isFinite(start) && Number.isFinite(end) ? (end - start) / 1000 : null;
     let stage = STAGE_LABELS[progress.stage] || text(progress.stage);
     if (job.state === 'queued') stage = '処理を開始できるまで待機しています';
     if (job.state === 'cancelling') stage = '取消を要求しました。実処理の終了を待っています';
     // 終端時のprogress.stageは最後に記録された工程。現在も処理中とは表示しない。
     if (TERMINAL_STAGE_LABELS[job.state]) stage = TERMINAL_STAGE_LABELS[job.state];
-    return { active, completed, total, percentage, elapsed, stage: stage || STATE_LABELS[job.state] || text(job.state) };
+    return { active, completed, total, percentage, elapsed, remaining, stage: stage || STATE_LABELS[job.state] || text(job.state) };
+  }
+
+  function remainingLabel(seconds) {
+    if (seconds === null) return '残り時間を計算中';
+    if (seconds < 5) return '残り 約5秒以内';
+    if (seconds < 60) return '残り 約' + (Math.ceil(seconds / 5) * 5) + '秒';
+    const minutes = seconds / 60;
+    const unit = minutes >= 180 ? '時間' : '分';
+    const value = unit === '時間' ? minutes / 60 : minutes;
+    const step = unit === '分' && value >= 20 ? 5 : 1;
+    const low = Math.max(1, Math.floor(value * 0.8 / step) * step);
+    const high = Math.ceil(value * 1.25 / step) * step;
+    return '残り 約' + low + '〜' + high + unit;
+  }
+
+  function workLabel(job, view) {
+    const stage = job.progress?.stage;
+    const bytes = job.progress?.scan_bytes || (stage === 'ImportLandmask' && view.total ? [view.completed, view.total] : null);
+    if (Array.isArray(bytes) && bytes.length === 2 && bytes[1] > 0) {
+      const power = Math.min(3, Math.floor(Math.log2(bytes[1]) / 10));
+      const scale = 1024 ** power;
+      const unit = ['B', 'KiB', 'MiB', 'GiB'][power];
+      return bytes.map(n => (n / scale).toLocaleString('ja-JP', { maximumFractionDigits: 2 })).join(' / ') + ' ' + unit;
+    }
+    if (view.total === null && !view.completed) return '';
+    const unit = job.kind === 'precompute' ? '枚' : ({
+      ImportElevation: '資料', ElevationPyramid: '解像度',
+      BuildingContours: '区画', index: '道路区間', restrictions: '件',
+    })[stage] || '件';
+    return count(view.completed) + (view.total === null ? '' : ' / ' + count(view.total)) + ' ' + unit;
+  }
+
+  function inputPathText(value) {
+    const path = text(value).trimStart();
+    // 拡張パスでは末尾の空白も実際のファイル名に含まれ得る。
+    return path.startsWith('\\\\?\\') || path.startsWith('\\\\.\\') ? path : path.trimEnd();
   }
 
   function importPayload(values) {
     const features = values.features || 'standard-v2';
-    const result = { name: text(values.name).trim(), input_path: text(values.input_path).trim(),
+    const result = { name: text(values.name).trim(), input_path: inputPathText(values.input_path),
       features, missing_nodes: values.missing_nodes || 'error' };
     if (!result.name || !result.input_path) throw new Error('PBFファイルと地図の名前を指定してください。');
     if (features !== 'roads-v1') {
-      const landmask = text(values.landmask_input).trim();
-      const elevation = text(values.elevation_input).trim();
+      const landmask = inputPathText(values.landmask_input);
+      const elevation = inputPathText(values.elevation_input);
       if (landmask) result.landmask_input = landmask;
       if (elevation) result.elevation_input = elevation;
       result.invalid_areas = values.invalid_areas || 'skip-feature';
@@ -153,10 +224,30 @@
 
   function mount() {
     const $ = id => document.getElementById(id);
+    const originalPaths = new WeakMap();
+    function pathInputValue(input) {
+      const saved = originalPaths.get(input);
+      return saved && input.value === saved.display ? saved.original : inputPathText(input.value);
+    }
+    function showInputPath(input) {
+      const original = input.value;
+      const display = displayPath(original);
+      if (display !== original) {
+        originalPaths.set(input, { original, display });
+        input.value = display;
+      }
+    }
+    function watchPathInput(input) {
+      input.addEventListener('input', event => {
+        originalPaths.delete(input);
+        if (event.inputType === 'insertFromPaste' || event.inputType === 'insertFromDrop') showInputPath(input);
+      });
+      input.addEventListener('blur', () => showInputPath(input));
+    }
     const state = { snapshot: null, view: 'import', selectedDataset: '', profiles: new Map(),
-      polling: false, initialized: false, seenRequests: new Map(), plan: null, planSignature: '',
+      polling: false, activeIds: new Set(), activity: [], plan: null, planSignature: '',
       datasetSignature: '', activitySignature: '', planning: false, initializing: false, settingsOpen: false,
-      pendingCancels: new Set(), logRequestId: '', rebindPlan: null, rebinding: false, rebindRevision: 0 };
+      pendingCancels: new Set(), logRequestId: '' };
     const nativeInvoke = async (command, args) => {
       const invoke = globalThis.__TAURI__?.core?.invoke;
       if (!invoke) throw new Error('専用ウィンドウを開けませんでした。local-tiles gui で起動してください。');
@@ -176,9 +267,22 @@
     const pendingRequests = () => (state.snapshot?.requests || []).filter(item => isActive(item.state));
     const ownerBusy = () => state.snapshot?.owner_available === false || pendingRequests().length > 0;
     const canWrite = () => state.snapshot?.configured && !state.snapshot?.error && !submission.pending && !ownerBusy();
+    const routeView = globalThis.createOfflineRouteView({
+      $, fillSelect, profileLabel, element, nativeInvoke, submit, duration, pathInputValue,
+      precompute({ dataset, profile, west, south, east, north, zoom }) {
+        state.profiles.set(dataset, profile);
+        chooseDataset(dataset);
+        for (const [key, value] of Object.entries({ west, south, east, north })) $('bbox-' + key).value = value;
+        $('precompute-min-zoom').value = zoom;
+        $('precompute-max-zoom').value = zoom;
+        invalidatePlan();
+        showView('precompute');
+      },
+    });
 
-    function notify(message, error = false) {
+    function notify(message, error = false, showHistory = false) {
       setText('notice-text', message);
+      $('notice-history').hidden = !showHistory;
       $('notice').classList.toggle('error', error);
       $('notice').hidden = false;
     }
@@ -193,6 +297,8 @@
       }
       const [title, description] = VIEW_LABELS[view];
       setText('page-title', title); setText('page-description', description);
+      if (view === 'routes') routeView.showMap();
+      if (view === 'storage' && !storageBusy) loadStorageSettings();
     }
     function updateWriterButtons() {
       for (const button of document.querySelectorAll('[data-writer]')) {
@@ -282,9 +388,9 @@
       }
       setText('dataset-detail-name', dataset.name);
       setText('dataset-detail-meta', `${count(dataset.info?.feature_count)} 地物 · 登録日 ${dateText(dataset.created_at)} · ${shortId(dataset.id)}`);
-      setText('dataset-detail-path', dataset.database_path || '—');
+      setText('dataset-detail-path', displayPath(dataset.database_path || '—'));
       $('dataset-detail-error').hidden = !dataset.error;
-      setText('dataset-detail-error', dataset.error || '');
+      setText('dataset-detail-error', displayText(dataset.error || ''));
       const profiles = usableProfiles(dataset);
       const options = profiles.map(item => ({ value: item.id, label: profileLabel(item) }));
       const previous = selectedProfile();
@@ -321,10 +427,11 @@
 
     function logPath(container, path, requestId) {
       if (!path) return;
+      const shown = displayPath(path);
       const line = element('div', 'job-log');
-      line.append(element('span', 'path-value', path));
+      line.append(element('span', 'path-value', shown));
       const copy = element('button', 'text-button', 'パスをコピー'); copy.type = 'button';
-      copy.addEventListener('click', () => copyText(path).then(() => notify('ログファイルのパスをコピーしました。')).catch(error => notify(errorMessage(error), true)));
+      copy.addEventListener('click', () => copyText(shown).then(() => notify('ログファイルのパスをコピーしました。')).catch(error => notify(errorMessage(error), true)));
       line.append(copy); container.append(line);
       if (requestId) {
         const open = element('button', 'button secondary small', 'ログを表示'); open.type = 'button';
@@ -332,14 +439,14 @@
       }
     }
 
-    function jobCard(job, openDetails) {
+    function jobCard(job, receipt, openDetails) {
       const view = progressView(job);
       const card = element('article', `card job-card${job.state === 'succeeded' ? ' complete' : ['failed', 'deadline_exceeded'].includes(job.state) ? ' failed' : ''}`);
       const heading = element('div', 'job-heading'), left = element('div');
       const dataset = state.snapshot?.datasets?.find(item => item.id === job.dataset_id);
       const name = job.request?.name || dataset?.name || '';
       left.append(element('h3', 'job-title', `${ACTION_LABELS[job.kind] || job.kind}${name ? ` ／ ${name}` : ''}`));
-      left.append(element('p', 'job-subtitle', `${dateText(job.created_at)} · ${shortId(job.id)}`));
+      left.append(element('p', 'job-subtitle', `${dateText(view.active ? job.created_at : resultTime(job))} · ${shortId(job.id)}`));
       const right = element('div', 'job-heading-right'); right.append(badgeFor(job.state));
       if (view.active) {
         const cancel = element('button', 'button danger small', job.state === 'cancelling' || state.pendingCancels.has(job.id) ? '取消処理中…' : '取消');
@@ -353,110 +460,148 @@
       heading.append(left, right); card.append(heading);
       const progress = element('div', 'job-progress'), caption = element('div', 'progress-caption');
       caption.append(element('span', '', view.stage));
-      let detail = view.total !== null ? `${count(view.completed)} / ${count(view.total)}${job.kind === 'precompute' ? ' 枚' : ''}` : `${count(view.completed)} 処理済み`;
-      if (view.percentage !== null) detail += ` · ${Math.floor(view.percentage)}%`;
-      detail += ` · ${duration(view.elapsed)}`;
-      caption.append(element('span', '', detail)); progress.append(caption);
-      // value属性で描画するため、style属性や外部スタイル挿入は必要ない。
-      const bar = element('progress', `native-progress${job.state === 'succeeded' ? ' complete' : ''}`);
-      bar.max = 100; bar.setAttribute('aria-label', view.stage);
-      if (view.percentage !== null) bar.value = view.percentage;
-      else if (!view.active) bar.value = job.state === 'succeeded' ? 100 : 0;
-      progress.append(bar);
+      const measured = job.kind === 'precompute';
+      const percentText = view.percentage === null ? '' : (measured || job.state === 'succeeded' ? '全体 ' : '全体 約') + Math.floor(view.percentage) + '%';
+      caption.append(element('span', '', percentText)); progress.append(caption);
+      if (view.active) {
+        const bar = element('progress', 'native-progress');
+        bar.max = 100; bar.setAttribute('aria-label', '全体の進捗');
+        if (percentText) bar.setAttribute('aria-valuetext', percentText);
+        if (view.percentage !== null) bar.value = view.percentage;
+        progress.append(bar);
+      }
+      const line = element('p', 'hint');
+      const work = workLabel(job, view);
+      if (work) line.append(work);
+      if (view.elapsed !== null) {
+        const elapsed = element('span', 'elapsed-time', '経過 ' + duration(view.elapsed));
+        if (job.state === 'running') elapsed.dataset.started = String(Date.now() - view.elapsed * 1000);
+        if (line.textContent) line.append(' · ');
+        line.append(elapsed);
+      }
+      if (job.state === 'running') {
+        const label = element('span', 'remaining-time', remainingLabel(view.remaining));
+        label.dataset.sampledAt = job.progress?.sampled_at || '';
+        if (line.textContent) line.append(' · ');
+        line.append(label);
+      }
+      if (line.textContent) progress.append(line);
       if (job.kind === 'precompute' && Number.isFinite(job.progress?.reused_tiles)) {
         progress.append(element('p', 'hint', `新規生成 ${count(job.progress.rendered_tiles)} 枚 · 既存PNGの再利用 ${count(job.progress.reused_tiles)} 枚`));
       }
       card.append(progress);
-      if (job.error) card.append(element('p', 'job-error', job.error));
+      const failure = displayText(job.error || '');
+      if (failure) card.append(element('p', 'job-error', failure));
       const details = element('details', 'job-details'); details.dataset.jobId = job.id; details.open = openDetails.has(job.id);
       details.append(element('summary', '', 'ログと詳細を表示'));
       const lines = [`ジョブID: ${job.id}`, `状態: ${STATE_LABELS[job.state] || job.state}`];
       if (job.dataset_id) lines.push(`データセット: ${job.dataset_id}`);
       const diagnostics = Array.isArray(job.progress?.diagnostics) ? job.progress.diagnostics : [];
-      for (const entry of diagnostics) lines.push(`[${entry.level || 'Info'}] ${entry.message || ''}`);
+      for (const entry of diagnostics) lines.push(`[${entry.level || 'Info'}] ${displayText(entry.message || '')}`);
       if (job.progress?.dropped_diagnostics) lines.push(`省略された診断: ${count(job.progress.dropped_diagnostics)}`);
-      if (job.error) lines.push(job.error);
-      lines.push('', '入力条件', JSON.stringify(job.request || {}, null, 2));
+      if (failure) lines.push(failure);
+      lines.push('', '入力条件', JSON.stringify(displayData(job.request || {}), null, 2));
       details.append(element('pre', '', lines.join('\n')));
-      const receipt = (state.snapshot?.requests || []).find(item => item.job_id === job.id);
       logPath(details, receipt?.log_path, receipt?.id);
       card.append(details); return card;
     }
 
+    function requestCard(request, openDetails) {
+      const card = element('article', 'card request-card');
+      const details = element('details');
+      details.dataset.jobId = request.id;
+      details.open = openDetails.has(request.id);
+      const summary = element('summary', 'job-title', ACTION_LABELS[request.action] || request.action);
+      const when = isActive(request.state) ? request.created_at : resultTime(request);
+      details.append(summary, element('p', 'job-subtitle', `${dateText(when)} · 受付 ${shortId(request.id)}`));
+      if (request.error) details.append(element('p', 'job-error', displayText(request.error)));
+      logPath(details, request.log_path, request.id);
+      if (request.result) details.append(element('pre', 'receipt-result', JSON.stringify(displayData(request.result), null, 2)));
+      card.append(details, badgeFor(request.state)); return card;
+    }
+
     function renderActivity(force = false) {
-      const jobs = state.snapshot?.jobs || [], requests = state.snapshot?.requests || [];
-      const signature = JSON.stringify([jobs, requests, submission.pending, ownerBusy(), [...state.pendingCancels]]);
-      if (!force && signature === state.activitySignature) return;
+      const signature = JSON.stringify([state.activity, submission.pending, ownerBusy(), [...state.pendingCancels]]);
+      if (!force && signature === state.activitySignature) {
+        for (const clock of $('activity-list').querySelectorAll('.elapsed-time[data-started]')) {
+          clock.textContent = '経過 ' + duration(Math.max(0, Date.now() - Number(clock.dataset.started)) / 1000);
+        }
+        for (const label of $('activity-list').querySelectorAll('.remaining-time[data-sampled-at]')) {
+          if (Date.now() - Date.parse(label.dataset.sampledAt) > 30000) label.textContent = remainingLabel(null);
+        }
+        return;
+      }
       const open = new Set([...document.querySelectorAll('[data-job-id][open]')].map(item => item.dataset.jobId));
-      $('job-list').replaceChildren(...jobs.map(job => jobCard(job, open)));
-      const visibleRequests = requests.filter(request => !request.job_id || !jobs.some(job => job.id === request.job_id));
-      $('request-list').replaceChildren(...visibleRequests.map(request => {
-        const card = element('article', 'card request-card');
-        const details = element('details');
-        const summary = element('summary', 'job-title', ACTION_LABELS[request.action] || request.action);
-        details.append(summary, element('p', 'job-subtitle', `${dateText(request.created_at)} · 受付 ${shortId(request.id)}`));
-        if (request.error) details.append(element('p', 'job-error', request.error));
-        logPath(details, request.log_path, request.id);
-        if (request.result) details.append(element('pre', 'receipt-result', JSON.stringify(request.result, null, 2)));
-        card.append(details, badgeFor(request.state)); return card;
-      }));
-      $('activity-empty').hidden = jobs.length > 0 || visibleRequests.length > 0;
+      const active = [], history = [];
+      for (const entry of state.activity) {
+        if (isActive(entry.record.state)) active.push(entry);
+        else history.push(entry);
+      }
+      const timestamp = entry => Date.parse(resultTime(entry.record)) || 0;
+      history.sort((a, b) => timestamp(b) - timestamp(a));
+      const card = ({ record, receipt }) => record === receipt ? requestCard(record, open) : jobCard(record, receipt, open);
+      $('activity-list').replaceChildren(...active.map(card));
+      $('history-list').replaceChildren(...history.map(card));
+      $('activity-empty').hidden = active.length > 0;
+      $('history-empty').hidden = history.length > 0;
+      setText('running-count', active.length);
+      setText('nav-job-count', active.length);
+      setText('completed-count', history.filter(entry => entry.record.state === 'succeeded').length);
       state.activitySignature = signature;
       updateWriterButtons();
     }
 
     function renderSettings() {
       const snapshot = state.snapshot || {}, config = snapshot.config || {};
-      const values = [['設定ファイル', snapshot.config_path], ['データセット', config.dataset_path],
-        ['PNGの保存先', config.cache_path], ['作業領域', config.work_path], ['地図の管理DB', config.catalog_database_path],
+      const values = [['設定ファイル', displayPath(snapshot.config_path)], ['データセット', displayPath(config.dataset_path)],
+        ['PNGの保存先', displayPath(config.cache_path)], ['作業領域', displayPath(config.work_path)], ['地図の管理DB', displayPath(config.catalog_database_path)],
         ['生成ワーカー数', config.workers], ['事前生成の受付上限', config.precompute_max_tiles == null ? null : `${count(config.precompute_max_tiles)} 枚`]];
       $('settings-values').replaceChildren(...values.flatMap(([label, value]) => [element('dt', '', label), element('dd', '', value ?? '未設定')]));
     }
 
     function applySnapshot(snapshot) {
       state.snapshot = snapshot;
-      if (snapshot.rebind && snapshot.rebind.binding_matches === false) $('rebind-panel').hidden = false;
-      $('show-rebind').disabled = !snapshot.configured;
       const configured = snapshot.configured === true;
       $('setup-panel').hidden = configured;
       $('workspace').hidden = !configured;
       $('navigation').setAttribute('aria-disabled', String(!configured));
       for (const button of document.querySelectorAll('#navigation button')) button.disabled = !configured;
-      setText('setup-config-path', snapshot.config_path || '');
+      setText('setup-config-path', displayPath(snapshot.config_path || ''));
       const jobs = snapshot.jobs || [], requests = snapshot.requests || [];
-      const running = jobs.filter(job => isActive(job.state)).length;
-      const preAccepted = requests.filter(request => isActive(request.state) && !request.job_id).length;
+      state.activity = activityEntries(jobs, requests);
       setText('dataset-count', (snapshot.datasets || []).filter(dataset => !dataset.retired).length);
       setText('nav-dataset-count', (snapshot.datasets || []).filter(dataset => !dataset.retired).length);
-      setText('running-count', running + preAccepted); setText('nav-job-count', running + preAccepted);
-      setText('completed-count', jobs.filter(job => job.state === 'succeeded').length);
       const badge = $('connection-status');
       badge.className = `badge${snapshot.error ? ' failed' : !configured ? ' neutral' : ownerBusy() ? ' busy' : ''}`;
       badge.textContent = snapshot.error ? '設定を確認' : !configured ? '初期設定が必要' : ownerBusy() ? '処理中' : '準備完了';
       $('owner-message').hidden = !configured || !ownerBusy();
       setText('owner-message-title', pendingRequests().length ? '生成処理を実行しています' : '別の処理が生成領域を使用しています');
       $('connection-error').hidden = !snapshot.error;
-      setText('connection-error', snapshot.error || '');
+      setText('connection-error-text', displayText(snapshot.error || ''));
+      $('open-storage').hidden = !configured || !snapshot.error;
+      updateStorageButtons();
       setText('refresh-time', `${new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} 更新`);
       for (const job of jobs) if (!isActive(job.state)) state.pendingCancels.delete(job.id);
-      if (state.initialized) {
-        for (const receipt of requests) {
-          const before = state.seenRequests.get(receipt.id);
-          if (before && isActive(before) && receipt.state === 'succeeded') {
-            notify(`${ACTION_LABELS[receipt.action] || '処理'}が完了しました。`);
-            const id = receipt.result?.dataset_id || receipt.result?.id;
-            if (id && (snapshot.datasets || []).some(dataset => dataset.id === id) && ['import', 'register', 'prepare'].includes(receipt.action)) {
-              state.selectedDataset = id;
-              if (receipt.result?.render_id) state.profiles.set(id, receipt.result.render_id);
-            }
-          } else if (before && isActive(before) && receipt.state === 'failed') {
-            notify(receipt.error || `${ACTION_LABELS[receipt.action] || '処理'}に失敗しました。処理状況を確認してください。`, true);
+      for (const { record, receipt } of state.activity) {
+        if (isActive(record.state)) {
+          state.activeIds.add(record.id);
+          if (receipt) state.activeIds.add(receipt.id);
+        } else {
+          const jobWasActive = state.activeIds.delete(record.id);
+          const receiptWasActive = receipt && state.activeIds.delete(receipt.id);
+          if (!jobWasActive && !receiptWasActive) continue;
+          const action = receipt?.action || record.kind;
+          const failure = ['failed', 'deadline_exceeded'].includes(record.state);
+          const label = ACTION_LABELS[action] || '処理';
+          notify(displayText(record.error || receipt?.error || `${label}（${STATE_LABELS[record.state] || record.state}）`), failure, true);
+          const id = record.dataset_id || receipt?.result?.dataset_id || receipt?.result?.id;
+          if (record.state === 'succeeded' && id && (snapshot.datasets || []).some(dataset => dataset.id === id) && ['import', 'register', 'prepare'].includes(action)) {
+            state.selectedDataset = id;
+            if (receipt?.result?.render_id) state.profiles.set(id, receipt.result.render_id);
           }
         }
       }
-      for (const receipt of requests) state.seenRequests.set(receipt.id, receipt.state);
-      state.initialized = true;
-      if (configured) { renderDatasets(); renderActivity(); }
+      if (configured) { renderDatasets(); renderActivity(); routeView.update(snapshot); }
       else { setText('page-title', 'ローカル地図の作成'); setText('page-description', '地図を作成するための準備を始めます。'); }
       renderSettings(); updateWriterButtons();
     }
@@ -468,7 +613,8 @@
       try { applySnapshot(await nativeInvoke('tile_manager_snapshot')); }
       catch (error) {
         $('connection-error').hidden = false;
-        setText('connection-error', errorMessage(error));
+        setText('connection-error-text', errorMessage(error));
+        $('open-storage').hidden = !state.snapshot?.configured;
         $('connection-status').className = 'badge failed'; setText('connection-status', '状態を確認できません');
       } finally {
         state.polling = false;
@@ -477,14 +623,19 @@
     }
 
     async function submit(action, payload) {
-      if (action !== 'rebind' && !canWrite()) { notify('ほかの処理が終了してから開始してください。状態の確認と取消は利用できます。', true); return; }
+      if (!canWrite()) { notify('ほかの処理が終了してから開始してください。状態の確認と取消は利用できます。', true); return; }
       const task = submission.submit(action, payload);
       updateWriterButtons();
       try {
         const receipt = await task;
-        if (receipt?.id) state.seenRequests.set(receipt.id, receipt.state || 'starting');
-        notify(`${ACTION_LABELS[action] || '処理'}を受け付けました。画面を閉じた後も処理は続きます。`);
-        showView('activity');
+        if (receipt?.id && !isActive(receipt.state || 'starting')) {
+          notify(`${ACTION_LABELS[action] || '処理'}（${STATE_LABELS[receipt.state] || receipt.state}）`, ['failed', 'deadline_exceeded'].includes(receipt.state), true);
+          showView('history');
+        } else {
+          if (receipt?.id) state.activeIds.add(receipt.id);
+          notify(`${ACTION_LABELS[action] || '処理'}を受け付けました。画面を閉じた後も処理は続きます。`);
+          showView('activity');
+        }
         await refresh();
       } catch (error) { notify(errorMessage(error), true); }
       finally { updateWriterButtons(); renderActivity(true); }
@@ -509,8 +660,8 @@
       try {
         const result = await nativeInvoke('tile_manager_query', { action: 'log', payload: { request_id: requestId } });
         if (state.logRequestId !== requestId) return;
-        setText('log-dialog-path', result.path || '');
-        setText('log-dialog-text', result.text || 'まだログ出力がありません。');
+        setText('log-dialog-path', displayPath(result.path || ''));
+        setText('log-dialog-text', displayText(result.text || 'まだログ出力がありません。'));
         setText('log-dialog-note', result.truncated ? 'ログが大きいため、末尾の64KiBを表示しています。' : '実行中の処理は「ログを更新」で最新の出力を確認できます。');
       } catch (error) { setText('log-dialog-text', errorMessage(error)); setText('log-dialog-note', 'ログを読み取れませんでした。'); }
       finally { $('refresh-log').disabled = false; }
@@ -534,56 +685,198 @@
 
     for (const button of document.querySelectorAll('[data-view]')) button.addEventListener('click', () => showView(button.dataset.view));
     $('dismiss-notice').addEventListener('click', () => { $('notice').hidden = true; });
-    $('refresh-button').addEventListener('click', refresh);
+    $('refresh-button').addEventListener('click', () => {
+      refresh();
+      if (state.view === 'storage' && !storageBusy) loadStorageSettings();
+    });
     $('show-settings').addEventListener('click', () => { renderSettings(); $('settings-dialog').showModal(); });
-    const invalidateRebind = () => { state.rebindRevision++; state.rebindPlan = null; $('rebind-apply').disabled = true; };
-    for (const id of ['rebind-source', 'rebind-proof']) $(id).addEventListener('input', invalidateRebind);
-    $('show-rebind').addEventListener('click', () => { $('rebind-panel').hidden = !$('rebind-panel').hidden; });
-    const rebindQuery = async (action, payload) => {
-      if (state.rebinding || submission.pending) return null;
-      state.rebinding = true; $('rebind-plan').disabled = true; $('rebind-inspect').disabled = true;
-      try { return await nativeInvoke('tile_manager_query', { action, payload }); }
-      finally { state.rebinding = false; $('rebind-plan').disabled = false; $('rebind-inspect').disabled = false; }
-    };
-    $('rebind-inspect').addEventListener('click', async () => {
-      invalidateRebind();
+    const tileDirectories = { catalog: 'catalog.sqlite', datasets: 'datasets', cache: 'png', work: 'work' };
+    const storageFields = ['database', 'tiles', ...Object.keys(tileDirectories)];
+    const customDirectories = new Set(), mapFiles = new Map();
+    const storageRequest = request => nativeInvoke('tile_manager_storage', { request });
+    const storageInput = key => $('storage-' + key);
+    let storageInfo = null, storageRead = 0, storageRevision = 0, storageLoading = false, storageBusy = '';
+
+    function joinedPath(root, leaf) {
+      const separator = root.includes('\\') ? '\\' : '/';
+      return root.replace(/[\\/]+$/, '') + separator + leaf;
+    }
+    function tilesRoot(paths) {
+      const match = paths.catalog?.match(/^(.*[\\/])catalog\.sqlite$/i);
+      if (!match) return '';
+      const root = match[1].replace(/([^:\\/])[\\/]$/, '$1');
+      return Object.entries(tileDirectories).every(([key, leaf]) =>
+        displayPath(paths[key])?.replace(/\\/g, '/') === displayPath(joinedPath(root, leaf)).replace(/\\/g, '/')) ? root : '';
+    }
+    function setPath(input, path) {
+      originalPaths.delete(input);
+      input.value = path || '';
+      showInputPath(input);
+    }
+    function updateTileInputs() {
+      if (!storageInfo) return;
+      const root = pathInputValue(storageInput('tiles'));
+      for (const [key, leaf] of Object.entries(tileDirectories)) {
+        if (!customDirectories.has(key)) setPath(storageInput(key), root ? joinedPath(root, leaf) : storageInfo.current[key]);
+      }
+    }
+    function resetStorageInputs() {
+      const paths = storageInfo.current;
+      setPath(storageInput('database'), paths.database);
+      setPath(storageInput('tiles'), tilesRoot(paths));
+      storageInput('tiles').placeholder = '個別の保存先を使用中';
+      customDirectories.clear(); updateTileInputs();
+      mapFiles.clear(); $('storage-files').replaceChildren();
+      storageRevision++;
+    }
+    function readStorageSelection() {
+      const selection = { files: Object.fromEntries(mapFiles) };
+      const root = pathInputValue(storageInput('tiles'));
+      const database = pathInputValue(storageInput('database'));
+      if (root && root !== tilesRoot(storageInfo.current)) selection.tiles = root;
+      if (database && database !== storageInfo.current.database) selection.database = database;
+      for (const key of customDirectories) {
+        const path = pathInputValue(storageInput(key));
+        if (path) selection[key] = path;
+      }
+      return selection;
+    }
+    function updateStorageButtons() {
+      const pending = Boolean(storageInfo?.pending || state.snapshot?.relocation_pending);
+      const unavailable = storageLoading || !storageInfo?.expected || pending;
+      $('storage-fields').disabled = unavailable || Boolean(storageBusy && storageBusy !== 'check');
+      $('storage-apply').disabled = unavailable || Boolean(storageBusy);
+      $('storage-show-files').disabled = unavailable || Boolean(storageBusy);
+      $('storage-recover').hidden = !pending;
+      $('storage-recover').disabled = storageLoading || Boolean(storageBusy);
+      $('storage-init').hidden = pending || !storageInfo?.can_initialize_catalog;
+      $('storage-initialize').disabled = $('storage-init').hidden || unavailable || Boolean(storageBusy)
+        || Object.keys(readStorageSelection()).length > 1 || mapFiles.size > 0;
+    }
+    async function loadStorageSettings(reset = false) {
+      const request = ++storageRead;
+      storageLoading = true; updateStorageButtons();
       try {
-        const result = await rebindQuery('rebind_inspect', {});
-        if (result) $('rebind-diagnosis').textContent = `${result.message}\n記録された本体DB: ${result.previous.path}\n現在の本体DB: ${result.target.path}\ncatalog: ${result.catalog.path}`;
-      } catch (error) { notify(errorMessage(error), true); }
+        const latest = await storageRequest({ action: 'current' });
+        if (request !== storageRead) return;
+        const changed = storageInfo?.expected !== latest.expected;
+        const first = !storageInfo;
+        const wasUnavailable = storageInfo?.pending || storageInfo?.catalog_missing;
+        storageInfo = latest;
+        if (latest.current && (first || changed || reset)) resetStorageInputs();
+        if (latest.pending) setText('storage-status', '前回の更新が中断しています。再開して保存先の更新を完了してください。');
+        else if (latest.catalog_missing && !latest.can_initialize_catalog) {
+          setText('storage-status', 'タイル管理DBが見つかりません。ドライブを接続するか、使用する保存先を選び直してください。');
+        } else if (!first && changed && !reset) {
+          setText('storage-status', '現在の保存先を読み直しました。選択内容を確認してください。');
+        } else if (wasUnavailable && !latest.catalog_missing) {
+          setText('storage-status', '');
+        }
+      } catch (error) {
+        if (request === storageRead) {
+          storageInfo = null;
+          setText('storage-status', errorMessage(error));
+        }
+      } finally {
+        if (request === storageRead) { storageLoading = false; updateStorageButtons(); }
+      }
+    }
+    for (const key of storageFields) storageInput(key).addEventListener('input', () => {
+      if (key === 'tiles') updateTileInputs();
+      if (Object.hasOwn(tileDirectories, key)) {
+        if (storageInput(key).value) customDirectories.add(key); else customDirectories.delete(key);
+      }
+      if (['tiles', 'catalog', 'datasets'].includes(key)) {
+        mapFiles.clear();
+        $('storage-files').replaceChildren();
+      }
+      storageRevision++;
+      setText('storage-status', '');
+      updateStorageButtons();
     });
-    $('rebind-plan').addEventListener('click', async () => {
-      invalidateRebind();
-      const revision = state.rebindRevision;
+    function showStorageFiles(maps) {
+      const list = $('storage-files');
+      list.replaceChildren();
+      if (!maps.length) return;
+      const section = element('div', 'form-section');
+      section.append(element('h3', '', '地図ごとの完成DB'));
+      for (const map of maps) {
+        const field = element('div', 'field'), row = element('div', 'path-input');
+        const input = element('input');
+        input.id = 'storage-map-' + map.id;
+        input.spellcheck = false;
+        const label = element('label', '', map.name); label.htmlFor = input.id;
+        setPath(input, mapFiles.get(map.id) || map.path); watchPathInput(input);
+        input.addEventListener('input', () => {
+          const path = pathInputValue(input);
+          if (path) mapFiles.set(map.id, path); else mapFiles.delete(map.id);
+          storageRevision++; setText('storage-status', ''); updateStorageButtons();
+        });
+        const pick = element('button', 'button secondary', 'ファイルを選択');
+        pick.type = 'button';
+        pick.addEventListener('click', async () => {
+          try {
+            const path = await nativeInvoke('tile_manager_pick_path', { kind: 'database' });
+            if (path && input.isConnected) { input.value = path; input.dispatchEvent(new Event('input')); showInputPath(input); }
+          } catch (error) { notify(errorMessage(error), true); }
+        });
+        row.append(input, pick); field.append(label, row);
+        if (map.error) field.append(element('p', 'hint', displayText(map.error)));
+        section.append(field);
+      }
+      list.append(section);
+    }
+    async function useStorage(action) {
+      if (storageBusy || (!storageInfo?.expected && action !== 'recover')) return;
+      const revision = storageRevision;
+      storageBusy = action; updateStorageButtons();
+      setText('storage-status', action === 'check' ? '登録済みの地図を確認しています…' : '保存先を更新しています…');
       try {
-        const result = await rebindQuery('rebind_plan', { source_database: $('rebind-source').value.trim() || null, proof: $('rebind-proof').value.trim() || null });
-        if (!result || revision !== state.rebindRevision) return;
-        state.rebindPlan = result;
-        const plan = result.payload;
-        $('rebind-diagnosis').textContent = `同一性を確認しました。\n変更前: ${plan.previous.path}\n変更後: ${plan.target.path}\n確認方法: ${plan.evidence}\nデータセット: ${plan.catalog_contents.rows.local_tile_datasets || 0}件\nジョブ履歴: ${plan.catalog_contents.rows.local_tile_jobs || 0}件\n適用前にcatalogのバックアップを作成します。`;
-        $('rebind-apply').disabled = false;
-      } catch (error) { notify(errorMessage(error), true); }
-    });
-    $('rebind-apply').addEventListener('click', async () => {
-      const plan = state.rebindPlan;
-      if (!plan || state.rebinding || submission.pending) return;
-      invalidateRebind();
-      await submit('rebind', { kind: 'apply', plan });
-    });
-    $('rebind-prepare').addEventListener('click', async () => {
-      const output = $('rebind-output').value.trim();
-      if (!output || state.rebinding || submission.pending) { if (!output) notify('移設記録の保存先を入力してください。', true); return; }
-      await submit('rebind', { kind: 'prepare', output });
-    });
+        const request = { action };
+        if (action === 'apply' || action === 'check') request.selection = readStorageSelection();
+        if (action === 'apply' || action === 'initialize_catalog') request.expected = storageInfo.expected;
+        const result = await storageRequest(request);
+        if (action === 'check' && revision !== storageRevision) return;
+        if (action === 'check' || result.state === 'needs_files') {
+          showStorageFiles(result.maps);
+          const missing = result.maps.filter(map => map.error).length;
+          setText('storage-status', missing ? '完成DBを確認できない地図が' + missing + '件あります。該当する地図のファイルを選んでください。'
+            : result.maps.length ? '完成DBを個別に選べます。変更した後に「この保存先を使う」を押してください。' : '登録された地図はありません。');
+          return;
+        }
+        invalidatePlan();
+        $('dataset-url-result').hidden = true;
+        await Promise.all([loadStorageSettings(true), refresh()]);
+        if (storageInfo) {
+          const message = action === 'initialize_catalog' ? 'タイル管理DBを作成しました。' : '保存先を更新しました。';
+          setText('storage-status', [message, ...(result.warnings || []).map(displayText)].join('\n'));
+        }
+      } catch (error) {
+        await loadStorageSettings();
+        setText('storage-status', errorMessage(error));
+      } finally {
+        storageBusy = ''; updateStorageButtons();
+      }
+    }
+    $('storage-apply').addEventListener('click', () => useStorage('apply'));
+    $('storage-show-files').addEventListener('click', () => useStorage('check'));
+    $('storage-recover').addEventListener('click', () => useStorage('recover'));
+    $('storage-initialize').addEventListener('click', () => useStorage('initialize_catalog'));
     $('close-settings').addEventListener('click', () => $('settings-dialog').close());
     $('close-log').addEventListener('click', () => $('log-dialog').close());
     $('refresh-log').addEventListener('click', () => { if (state.logRequestId) openLog(state.logRequestId); });
     for (const button of document.querySelectorAll('[data-pick]')) {
+      const input = $(button.dataset.target);
+      watchPathInput(input);
       button.addEventListener('click', async () => {
         button.disabled = true;
         try {
           const path = await nativeInvoke('tile_manager_pick_path', { kind: button.dataset.pick });
-          if (path) { $(button.dataset.target).value = path; $(button.dataset.target).dispatchEvent(new Event('input', { bubbles: true })); }
+          if (path) {
+            input.value = path;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            showInputPath(input);
+          }
         } catch (error) { notify(errorMessage(error), true); }
         finally { button.disabled = false; }
       });
@@ -609,12 +902,17 @@
     $('import-form').addEventListener('submit', event => {
       event.preventDefault();
       try {
-        const values = Object.fromEntries(new FormData(event.currentTarget)); values.contour_data = $('import-contour-data').checked;
+        const form = event.currentTarget;
+        const values = Object.fromEntries(new FormData(form));
+        for (const name of ['input_path', 'landmask_input', 'elevation_input']) {
+          values[name] = pathInputValue(form.elements.namedItem(name));
+        }
+        values.contour_data = $('import-contour-data').checked;
         submit('import', importPayload(values));
       } catch (error) { notify(errorMessage(error), true); }
     });
     $('register-form').addEventListener('submit', event => {
-      event.preventDefault(); submit('register', { database: $('register-database').value.trim(), name: $('register-name').value.trim() });
+      event.preventDefault(); submit('register', { database: pathInputValue($('register-database')), name: $('register-name').value.trim() });
     });
     $('prepare-custom').addEventListener('change', () => { $('prepare-spec-fields').hidden = !$('prepare-custom').checked; });
     $('spec-labels').addEventListener('change', () => { $('spec-language').disabled = !$('spec-labels').checked; });

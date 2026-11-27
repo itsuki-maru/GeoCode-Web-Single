@@ -1,5 +1,6 @@
 //! 管理DBへの接続はこのモジュールに限定し、本体のマイグレーションから独立させる。
 
+use crate::local_tiles::config::{DatabaseReplacement, LocalTileConfig};
 use fs2::FileExt;
 use rusqlite::{Connection, OpenFlags};
 use sha2::{Digest, Sha256};
@@ -8,11 +9,10 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
 };
 use std::{
-    collections::HashMap,
     fs::{self, File, OpenOptions},
     path::{Component, Path, PathBuf},
     sync::{
-        Arc, OnceLock, Weak,
+        Arc,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
@@ -43,6 +43,7 @@ type PrepareHook = Arc<dyn Fn() + Send + Sync>;
 
 struct OpenRequest {
     configured_path: PathBuf,
+    require_existing: bool,
     storage_roots: Vec<PathBuf>,
     app_pool: SqlitePool,
     closed: Arc<AtomicBool>,
@@ -51,10 +52,11 @@ struct OpenRequest {
     prepare_hook: Option<PrepareHook>,
 }
 
-/// 独立した識別情報を持ち、単一の本体DBと継続して対応付ける管理DB。
+/// 地図・描画世代・処理履歴を、本体DBとは独立して保存する管理DB。
 /// 管理DBの操作へ本体DBの接続プールを誤って渡せない構成にする。
 pub struct TileCatalog {
     configured_path: PathBuf,
+    require_existing: bool,
     storage_roots: Vec<PathBuf>,
     app_pool: SqlitePool,
     opened: Arc<OnceCell<OpenCatalog>>,
@@ -70,6 +72,7 @@ impl TileCatalog {
     pub fn new(path: PathBuf, app_pool: SqlitePool) -> Self {
         Self {
             configured_path: path,
+            require_existing: false,
             storage_roots: Vec::new(),
             app_pool,
             opened: Arc::new(OnceCell::new()),
@@ -104,6 +107,15 @@ impl TileCatalog {
         self
     }
 
+    pub fn with_config(mut self, config: &LocalTileConfig) -> Self {
+        self.require_existing = config.require_existing_catalog;
+        self.with_storage_roots([
+            config.dataset_path.clone(),
+            config.cache_path.clone(),
+            config.work_path.clone(),
+        ])
+    }
+
     pub async fn initialize(&self) -> Result<(), String> {
         let lifecycle = self.lifecycle.clone().lock_owned().await;
         if self.closed.load(Ordering::Acquire) {
@@ -114,6 +126,7 @@ impl TileCatalog {
         }
         let request = OpenRequest {
             configured_path: self.configured_path.clone(),
+            require_existing: self.require_existing,
             storage_roots: self.storage_roots.clone(),
             app_pool: self.app_pool.clone(),
             closed: self.closed.clone(),
@@ -145,6 +158,11 @@ impl TileCatalog {
     async fn open(request: OpenRequest) -> Result<OpenCatalog, String> {
         // PRAGMAはメモリDBも含め、実際のmain接続の情報を返す。
         // SQLxがメモリDB用に合成したURIを、ディスク上のファイル名として扱わない。
+        if request.require_existing {
+            crate::db::pool::validate_existing_schema(&request.app_pool)
+                .await
+                .map_err(message)?;
+        }
         let rows = sqlx::query("PRAGMA database_list")
             .fetch_all(&request.app_pool)
             .await
@@ -154,11 +172,10 @@ impl TileCatalog {
             .find(|row| row.get::<String, _>("name") == "main")
             .ok_or("本体DBの接続先を確認できません。")?
             .get::<String, _>("file");
-        let memory_id = memory_binding(&request.app_pool);
         let path = request.configured_path;
         let roots = request.storage_roots;
         let access = request.access;
-        let (path, identity) = tokio::task::spawn_blocking(move || {
+        let (path, file) = tokio::task::spawn_blocking(move || {
             #[cfg(test)]
             if let Some(hook) = request.prepare_hook {
                 hook();
@@ -168,10 +185,13 @@ impl TileCatalog {
             }
             prepare(
                 &path,
-                &roots,
+                if access == Access::Writer {
+                    &roots
+                } else {
+                    &[]
+                },
                 &app_path,
-                &memory_id,
-                access == Access::Writer,
+                access == Access::Writer && !request.require_existing,
             )
         })
         .await
@@ -189,7 +209,8 @@ impl TileCatalog {
             )
             .await
             .map_err(message)?;
-        if file_identity(&path).map(|value| value.id) != Ok(identity) {
+        // Windowsでは接続中の置き換えを共有モードで防ぎ、識別子を得られる媒体では再照合も行う。
+        if !matches!(same_open_file(&file, &path), Ok(true)) {
             close_pool(&pool).await;
             return Err(
                 "タイル管理DBが初期化中に置換されました。再起動して保存先を確認してください。"
@@ -291,27 +312,6 @@ async fn close_pool(pool: &SqlitePool) {
     }
 }
 
-/// 接続プール設定のアドレスは実行中の検索キーに限り、永続化するIDには使わない。
-/// 弱参照と新しいUUIDを組み合わせ、アドレスの再利用によって保存済みの管理DBが
-/// 後から作られた無関係なメモリDBへ対応付けられることを防ぐ。
-fn memory_binding(pool: &SqlitePool) -> String {
-    type Entry = (Weak<SqliteConnectOptions>, String);
-    static BINDINGS: OnceLock<std::sync::Mutex<HashMap<usize, Entry>>> = OnceLock::new();
-    let options = pool.connect_options();
-    let mut bindings = BINDINGS.get_or_init(Default::default).lock().unwrap();
-    bindings.retain(|_, (weak, _)| weak.strong_count() > 0);
-    bindings
-        .entry(Arc::as_ptr(&options) as usize)
-        .or_insert_with(|| {
-            (
-                Arc::downgrade(&options),
-                format!("memory:{}", uuid::Uuid::new_v4()),
-            )
-        })
-        .1
-        .clone()
-}
-
 fn lock_path(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
     name.push(".owner.lock");
@@ -324,8 +324,9 @@ struct FileIdentity {
     links: u64,
 }
 
+/// 同一操作中だけ必要なファイル情報。外部媒体ではファイル番号を取得できないことがある。
 #[cfg(windows)]
-fn file_identity(path: &Path) -> Result<FileIdentity, String> {
+fn handle_identity(file: &File) -> Result<FileIdentity, String> {
     use std::os::windows::io::AsRawHandle;
     use windows::Win32::{
         Foundation::HANDLE,
@@ -334,42 +335,100 @@ fn file_identity(path: &Path) -> Result<FileIdentity, String> {
             GetFileInformationByHandleEx,
         },
     };
-    let file = File::open(path).map_err(message)?;
     let handle = HANDLE(file.as_raw_handle());
-    let mut information = BY_HANDLE_FILE_INFORMATION::default();
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    if unsafe { GetFileInformationByHandle(handle, &mut info) }.is_err() {
+        // 一部の媒体では通常のファイル操作ができてもハンドルの追加情報を返さない。
+        return Ok(FileIdentity {
+            id: String::new(),
+            links: 0,
+        });
+    }
     let mut identifier = FILE_ID_INFO::default();
-    unsafe {
-        GetFileInformationByHandle(handle, &mut information).map_err(message)?;
+    let extended = unsafe {
         GetFileInformationByHandleEx(
             handle,
             FileIdInfo,
             (&mut identifier as *mut FILE_ID_INFO).cast(),
             std::mem::size_of::<FILE_ID_INFO>() as u32,
         )
-        .map_err(message)?;
-    }
-    let file_id: String = identifier
-        .FileId
-        .Identifier
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
+    };
+    let id = if extended.is_ok() && identifier.FileId.Identifier.iter().any(|v| *v != 0) {
+        let value: String = identifier
+            .FileId
+            .Identifier
+            .iter()
+            .map(|v| format!("{v:02x}"))
+            .collect();
+        format!("windows:{}:{value}", identifier.VolumeSerialNumber)
+    } else if info.nFileIndexHigh != 0 || info.nFileIndexLow != 0 {
+        format!(
+            "win32:{}:{:08x}{:08x}",
+            info.dwVolumeSerialNumber, info.nFileIndexHigh, info.nFileIndexLow
+        )
+    } else {
+        String::new()
+    };
     Ok(FileIdentity {
-        id: format!("windows:{}:{file_id}", identifier.VolumeSerialNumber),
-        links: information.nNumberOfLinks.into(),
+        id,
+        links: info.nNumberOfLinks.into(),
     })
 }
 
 #[cfg(unix)]
-fn file_identity(path: &Path) -> Result<FileIdentity, String> {
+fn handle_identity(file: &File) -> Result<FileIdentity, String> {
     use std::os::unix::fs::MetadataExt;
-    let metadata = File::open(path)
-        .and_then(|file| file.metadata())
-        .map_err(message)?;
+    let metadata = file.metadata().map_err(message)?;
     Ok(FileIdentity {
         id: format!("unix:{}:{}", metadata.dev(), metadata.ino()),
         links: metadata.nlink(),
     })
+}
+
+// 旧版の署名付き移設記録を検証するときだけ、識別子を必須とする。
+fn file_identity(path: &Path) -> Result<FileIdentity, String> {
+    let info = handle_identity(&File::open(path).map_err(message)?)?;
+    if info.id.is_empty() {
+        return Err("この媒体では旧版の移設記録に必要なファイル識別子を取得できません。".into());
+    }
+    Ok(info)
+}
+
+fn open_catalog_file(path: &Path) -> Result<File, String> {
+    if !fs::metadata(path).map_err(message)?.is_file() {
+        return Err(format!(
+            "タイル管理DBの保存先が通常のファイルではありません。「データの保存先」で選び直してください。 {}",
+            path.display()
+        ));
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE};
+        options.share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE).0);
+    }
+    let file = options.open(path).map_err(message)?;
+    if handle_identity(&file)?.links > 1 {
+        return Err(
+            "タイル管理DBのhard linkを使用できません。独立したファイルを指定してください。".into(),
+        );
+    }
+    Ok(file)
+}
+
+fn same_open_file(file: &File, path: &Path) -> Result<bool, String> {
+    let previous = handle_identity(file)?;
+    let current = handle_identity(&open_catalog_file(path)?)?;
+    Ok(previous.id.is_empty() || current.id.is_empty() || previous.id == current.id)
+}
+
+pub(crate) fn missing_catalog_message(path: &Path) -> String {
+    format!(
+        "タイル管理DBが見つからないか、空です。ドライブを接続するか「データの保存先」で選び直してください。 {}",
+        path.display()
+    )
 }
 
 /// パスを作成せずに既存のリンクを解決する。親階層だけが存在する場合も扱う。
@@ -395,6 +454,15 @@ fn path_key(path: &Path) -> String {
         value.to_lowercase()
     } else {
         value.into_owned()
+    }
+}
+
+impl DatabaseReplacement {
+    /// 旧版の移設記録で指定された本体DB・管理DBを照合する。
+    fn matches(&self, database_path: &Path, catalog_path: &Path, catalog_file_id: &str) -> bool {
+        path_key(&self.database_path) == path_key(database_path)
+            && path_key(&self.catalog_path) == path_key(catalog_path)
+            && self.catalog_file_id == catalog_file_id
     }
 }
 
@@ -443,64 +511,134 @@ fn validate_filename(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// 明示的な新規作成だけが使う。通常の起動時には選択済みの保存先を作成しない。
+pub(crate) fn create_empty_catalog(
+    catalog: &Path,
+    roots: &[PathBuf],
+    app: &Path,
+) -> Result<(), String> {
+    validate_filename(catalog)?;
+    let path = physical_path(catalog)?;
+    let app = app.canonicalize().map_err(message)?;
+    if path_key(&path) == path_key(&app) {
+        return Err("本体DBとタイル管理DBには別のファイルを指定してください。".into());
+    }
+    for root in roots {
+        let root = physical_path(root)?;
+        if same_or_below(&path, &root) || same_or_below(&root, &path) {
+            return Err("タイル管理DBとタイルの保存先が重なっています。".into());
+        }
+    }
+    let parent = path
+        .parent()
+        .ok_or("タイル管理DBの親ディレクトリがありません。")?;
+    if path.try_exists().map_err(message)? {
+        return Err(format!(
+            "タイル管理DBの保存先に既存のファイルがあります。 {}",
+            path.display()
+        ));
+    }
+    fs::create_dir_all(parent).map_err(message)?;
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_path(&path))
+        .map_err(message)?;
+    lock.try_lock_exclusive()
+        .map_err(|_| "ほかの処理がタイル管理DBを使用しています。".to_string())?;
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let mut sidecar = path.as_os_str().to_os_string();
+        sidecar.push(suffix);
+        match fs::symlink_metadata(Path::new(&sidecar)) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+            Err(error) => return Err(message(error)),
+            Ok(_) => {
+                return Err(
+                    "SQLiteの関連ファイルが残っています。元の管理DBの場所を確認してください。"
+                        .into(),
+                );
+            },
+        }
+    }
+    // 新規DBを同じファイルシステムで完成させ、競合して先に作られたDBも上書きしない。
+    let staging = tempfile::tempdir_in(parent).map_err(message)?;
+    let fresh = tempfile::NamedTempFile::new_in(staging.path())
+        .map_err(message)?
+        .into_temp_path();
+    let app = app
+        .to_str()
+        .ok_or("本体DBのパスを文字列として解釈できません。")?;
+    let (_, file) = prepare(&fresh, roots, app, true)?;
+    drop(file);
+    File::options()
+        .write(true)
+        .open(&fresh)
+        .and_then(|file| file.sync_all())
+        .map_err(message)?;
+    fresh.persist_noclobber(&path).map_err(message)?;
+    Ok(())
+}
+
+/// 初期設定の再試行では、先に公開済みの正しいカタログをそのまま利用できる。
+pub(crate) fn initialize_setup_catalog(
+    settings: &crate::model::ApplicationInitSetup,
+) -> Result<(), String> {
+    let config = LocalTileConfig::from_setup(settings)?;
+    let roots = [config.dataset_path, config.cache_path, config.work_path];
+    let path = &config.catalog_database_path;
+    let app = &settings.sqlite_database_path;
+    if path.try_exists().map_err(message)? {
+        prepare(
+            path,
+            &roots,
+            app.to_str().ok_or("本体DBのパスを読み取れません。")?,
+            false,
+        )?;
+        return Ok(());
+    }
+    create_empty_catalog(path, &roots, app)
+}
+
 fn prepare(
     configured: &Path,
     roots: &[PathBuf],
     app_path: &str,
-    memory_id: &str,
     allow_create: bool,
-) -> Result<(PathBuf, String), String> {
+) -> Result<(PathBuf, File), String> {
     validate_filename(configured)?;
+    if !allow_create && !configured.try_exists().map_err(message)? {
+        return Err(missing_catalog_message(configured));
+    }
     let path = physical_path(configured)?;
     // 照会・取消は生成保存先を操作しない。別ディスクの障害でも既存履歴を読めるようにする。
-    if allow_create {
-        for root in roots {
-            let root = physical_path(root)?;
-            if same_or_below(&path, &root) || same_or_below(&root, &path) {
-                return Err(
-                    "タイル管理DBを完成DB・PNG・作業ディレクトリと重なる場所には保存できません。"
-                        .into(),
-                );
-            }
-        }
-    }
-    let (app_path, app_id) = if app_path.is_empty() {
-        (String::new(), memory_id.to_string())
-    } else {
-        let actual = Path::new(app_path).canonicalize().map_err(message)?;
-        let identity = file_identity(&actual)?;
-        if path_key(&actual) == path_key(&path) {
-            return Err("本体DBとタイル管理DBには別のファイルを指定してください。".into());
-        }
-        if path.exists() && file_identity(&path)?.id == identity.id {
-            return Err("本体DBと同一ファイルをタイル管理DBに指定できません。".into());
-        }
-        (
-            actual
-                .to_str()
-                .ok_or("本体DBのパスを解釈できません。")?
-                .to_string(),
-            identity.id,
-        )
-    };
-    if path.exists() {
-        let identity = file_identity(&path)?;
-        if identity.links != 1 {
+    for root in roots {
+        let root = physical_path(root)?;
+        if same_or_below(&path, &root) || same_or_below(&root, &path) {
             return Err(
-                "タイル管理DBにhard linkを使用できません。独立したファイルを指定してください。"
+                "タイル管理DBを完成DB・PNG・作業ディレクトリと重なる場所には保存できません。"
                     .into(),
             );
         }
-        match inspect(&path, &app_path, &app_id)? {
-            Existing::Catalog => return Ok((path, identity.id)),
-            Existing::Empty => {},
+    }
+    let app_path = if app_path.is_empty() {
+        PathBuf::new()
+    } else {
+        let actual = Path::new(app_path).canonicalize().map_err(message)?;
+        if path_key(&actual) == path_key(&path) {
+            return Err("本体DBとタイル管理DBには別のファイルを指定してください。".into());
+        }
+        actual
+    };
+    if path.try_exists().map_err(message)? {
+        let file = open_catalog_file(&path)?;
+        if matches!(inspect(&path)?, Existing::Catalog) {
+            return Ok((path, file));
         }
     }
     if !allow_create {
-        return Err(
-            "初期化済みのタイル管理DBがありません。先に登録または取り込みを実行してください。"
-                .into(),
-        );
+        return Err(missing_catalog_message(&path));
     }
     fs::create_dir_all(path.parent().ok_or("タイル管理DBの親がありません。")?).map_err(message)?;
     // 新規作成とスキーマ更新の両方を、実行基盤と同じ所有者ロックで保護する。
@@ -515,13 +653,10 @@ fn prepare(
     lock.try_lock_exclusive()
         .map_err(|_| "別プロセスがタイル管理DBを初期化・使用しています。".to_string())?;
     // 事前検査からロック取得までの間に、別の接続元が先に作成を終えている場合がある。
-    if path.exists() {
-        let identity = file_identity(&path)?;
-        if identity.links != 1 || identity.id == app_id {
-            return Err("タイル管理DBの保存先に同一ファイル・hard linkの競合があります。".into());
-        }
-        if matches!(inspect(&path, &app_path, &app_id)?, Existing::Catalog) {
-            return Ok((path, identity.id));
+    if path.try_exists().map_err(message)? {
+        let file = open_catalog_file(&path)?;
+        if matches!(inspect(&path)?, Existing::Catalog) {
+            return Ok((path, file));
         }
     }
     let mut connection = Connection::open(&path).map_err(message)?;
@@ -542,10 +677,7 @@ fn prepare(
     let tx = connection
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(message)?;
-    let identity = file_identity(&path)?;
-    if identity.links != 1 || identity.id == app_id {
-        return Err("タイル管理DBの保存先に同一ファイル・hard linkの競合があります。".into());
-    }
+    let file = open_catalog_file(&path)?;
     // 実際の書込接続でも再検査し、読取専用の事前検査から所有者ロック取得までの間に
     // 出現したDBを誤って初期化しない。
     if !empty_database(&tx)? {
@@ -562,12 +694,18 @@ fn prepare(
         (VERSION, checksum()),
     )
     .map_err(message)?;
+    // 旧版の移設CLI向けに作成時の情報を残す。通常の利用にはこの行の一致を要求しない。
+    let app_id = if app_path.as_os_str().is_empty() {
+        String::new()
+    } else {
+        handle_identity(&File::open(&app_path).map_err(message)?)?.id
+    };
     tx.execute(
         r#"
         INSERT INTO tile_catalog_binding (id, app_database_path, app_file_id)
         VALUES (1, ?, ?)
         "#,
-        (&app_path, &app_id),
+        (app_path.to_string_lossy(), &app_id),
     )
     .map_err(message)?;
     tx.pragma_update(None, "application_id", APPLICATION_ID)
@@ -576,12 +714,8 @@ fn prepare(
         .map_err(message)?;
     tx.commit().map_err(message)?;
     drop(connection);
-    let identity = file_identity(&path)?;
-    if identity.links != 1 {
-        return Err("タイル管理DBのhard linkを検出しました。".into());
-    }
-    inspect(&path, &app_path, &app_id)?;
-    Ok((path, identity.id))
+    inspect(&path)?;
+    Ok((path, file))
 }
 
 enum Existing {
@@ -634,7 +768,7 @@ fn schema(connection: &Connection) -> Result<Vec<SchemaEntry>, String> {
         .map_err(message)
 }
 
-fn inspect(path: &Path, app_path: &str, app_id: &str) -> Result<Existing, String> {
+fn inspect(path: &Path) -> Result<Existing, String> {
     let connection = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -647,27 +781,17 @@ fn inspect(path: &Path, app_path: &str, app_id: &str) -> Result<Existing, String
         return Ok(Existing::Empty);
     }
     validate_catalog(&connection)?;
-    let binding: (String, String) = connection
-        .query_row(
-            "SELECT app_database_path, app_file_id FROM tile_catalog_binding WHERE id = 1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(message)?;
-    if path_key(Path::new(&binding.0)) != path_key(Path::new(app_path)) || binding.1 != app_id {
-        return Err("このタイル管理DBは別の本体DBに対応しています。本体DBの移設・復元時は対応付けを確認してください。".into());
-    }
     Ok(Existing::Catalog)
 }
 
-fn validate_catalog(connection: &Connection) -> Result<(), String> {
+fn validate_catalog_format(connection: &Connection) -> Result<(), String> {
     let application_id: i32 = connection
         .pragma_query_value(None, "application_id", |row| row.get(0))
         .map_err(message)?;
     let version: i32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(message)?;
-    let actual_schema = schema(&connection)?;
+    let actual_schema = schema(connection)?;
     if application_id == 0 && version == 0 && actual_schema.is_empty() {
         return Err("初期化済みのタイル管理DBがありません。".into());
     }
@@ -704,6 +828,11 @@ fn validate_catalog(connection: &Connection) -> Result<(), String> {
     if stored_checksum != checksum() {
         return Err("タイル管理DBのschema履歴が一致しません。".into());
     }
+    Ok(())
+}
+
+fn validate_catalog(connection: &Connection) -> Result<(), String> {
+    validate_catalog_format(connection)?;
     let check: String = connection
         .query_row("PRAGMA quick_check", [], |row| row.get(0))
         .map_err(message)?;
@@ -728,6 +857,118 @@ fn validate_catalog(connection: &Connection) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn configured_startup_verifies_existing_app_and_never_recreates_a_missing_catalog() {
+        use crate::db::pool::setup_database_pool_with_settings;
+        use crate::init::read_env_json;
+        use crate::local_tiles::cli::{self, Command, Invocation};
+        use serde_json::json;
+
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().to_path_buf();
+        fs::write(directory.join("geocode-web-single.env.json"), json!({
+            "app_title":"地図", "access_token_exp_minutes":"30", "refresh_token_exp_minutes":"60",
+            "secret_key":"test-secret", "admin_username":"admin", "admin_passwotd":"test-password",
+            "failed_account_lock":"5", "next_challenge_minutes":"5", "challenge_limit_time_failed_count":"3"
+        }).to_string()).unwrap();
+        let settings = read_env_json(&directory).unwrap();
+        let app = settings.sqlite_database_path.clone();
+        let catalog = PathBuf::from(&settings.tile_catalog_database_path);
+        assert!(setup_database_pool_with_settings(&settings).await.is_err());
+        assert!(!app.exists());
+        let original = SqlitePoolOptions::new()
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&app)
+                    .create_if_missing(true),
+            )
+            .await
+            .unwrap();
+        crate::db::run_migrations(&original).await.unwrap();
+        let writer = TileCatalog::new(catalog.clone(), original.clone());
+        writer.initialize().await.unwrap();
+        writer.close().await;
+        close_pool(&original).await;
+        let config = LocalTileConfig::from_setup(&settings).unwrap();
+        let previous = directory.join("元の本体DB.sqlite");
+        fs::rename(&app, &previous).unwrap();
+        assert!(setup_database_pool_with_settings(&settings).await.is_err());
+        assert!(!app.exists());
+        let mut mismatched = settings.clone();
+        mismatched.sqlite_database_path = directory.join("別の保存先.sqlite");
+        assert!(
+            setup_database_pool_with_settings(&mismatched)
+                .await
+                .is_err()
+        );
+        assert!(!mismatched.sqlite_database_path.exists());
+
+        // 別用途のSQLiteを通常起動が自動でマイグレーションする前に拒否する。
+        Connection::open(&app)
+            .unwrap()
+            .execute_batch("CREATE TABLE other (id INTEGER)")
+            .unwrap();
+        let original_bytes = fs::read(&app).unwrap();
+        assert!(
+            setup_database_pool_with_settings(&settings)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("本体DBを指定")
+        );
+        assert_eq!(fs::read(&app).unwrap(), original_bytes);
+        fs::rename(&app, directory.join("別形式.sqlite")).unwrap();
+        fs::copy(&previous, &app).unwrap();
+        // 対応する旧版のバックアップは、従来の通常起動でアップグレードできる。
+        let old = Connection::open(&app).unwrap();
+        old.execute_batch("DELETE FROM schema_migrations WHERE version >= 32")
+            .unwrap();
+        drop(old);
+        let pool = setup_database_pool_with_settings(&settings).await.unwrap();
+        crate::db::pool::validate_existing_schema(&pool)
+            .await
+            .unwrap();
+        let reader = TileCatalog::read_only(catalog.clone(), pool.clone()).with_config(&config);
+        reader.initialize().await.unwrap();
+        reader.close().await;
+
+        // 設定済みカタログの消失時は、照会を未使用とみなしたり空のDBを作ったりしない。
+        fs::rename(&catalog, directory.join("移動した管理DB.sqlite")).unwrap();
+        let status = Invocation {
+            command: Command::Status,
+            json: true,
+            config_path: None,
+        };
+        let error = cli::execute(&status, config.clone(), Some(pool.clone()))
+            .await
+            .err()
+            .expect("登録済みのカタログの消失を通知する");
+        assert!(error.to_string().contains("データの保存先"));
+        let writer = TileCatalog::new(catalog.clone(), pool.clone()).with_config(&config);
+        assert!(
+            writer
+                .initialize()
+                .await
+                .unwrap_err()
+                .contains("データの保存先")
+        );
+        assert!(!catalog.exists());
+        fs::write(&catalog, []).unwrap();
+        assert!(
+            writer
+                .initialize()
+                .await
+                .unwrap_err()
+                .contains("データの保存先")
+        );
+        assert_eq!(fs::metadata(&catalog).unwrap().len(), 0);
+        writer.close().await;
+        close_pool(&pool).await;
+        fs::rename(&app, directory.join("バックアップ.sqlite")).unwrap();
+        assert!(setup_database_pool_with_settings(&settings).await.is_err());
+        assert!(!app.exists());
+    }
 
     #[tokio::test]
     async fn shutdown_drains_a_connection_returned_during_the_final_permit_wait() {

@@ -60,11 +60,7 @@ impl LocalTiles {
     pub fn new(config: LocalTileConfig, pool: SqlitePool) -> Arc<Self> {
         let catalog = Arc::new(
             TileCatalog::new(config.catalog_database_path.clone(), pool.clone())
-                .with_storage_roots([
-                    config.dataset_path.clone(),
-                    config.cache_path.clone(),
-                    config.work_path.clone(),
-                ]),
+                .with_config(&config),
         );
         Self::with_catalog(config, pool, catalog)
     }
@@ -73,11 +69,7 @@ impl LocalTiles {
     pub fn reader(config: LocalTileConfig, pool: SqlitePool) -> Arc<Self> {
         let catalog = Arc::new(
             TileCatalog::read_only(config.catalog_database_path.clone(), pool.clone())
-                .with_storage_roots([
-                    config.dataset_path.clone(),
-                    config.cache_path.clone(),
-                    config.work_path.clone(),
-                ]),
+                .with_config(&config),
         );
         Self::with_catalog(config, pool, catalog)
     }

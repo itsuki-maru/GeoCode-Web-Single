@@ -1,14 +1,25 @@
 //! ローカルタイルの保存先と実行上限の設定。
 
 use crate::model::ApplicationInitSetup;
+use serde::{Deserialize, Serialize};
 use std::{
     env,
     path::{Component, Path, PathBuf},
 };
 
+/// 旧版で作成された移設記録を扱うための識別情報。通常の保存先選択には使わない。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DatabaseReplacement {
+    pub database_path: PathBuf,
+    pub catalog_path: PathBuf,
+    pub catalog_file_id: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct LocalTileConfig {
     pub catalog_database_path: PathBuf,
+    pub require_existing_catalog: bool,
     pub dataset_path: PathBuf,
     pub cache_path: PathBuf,
     pub work_path: PathBuf,
@@ -26,6 +37,7 @@ impl LocalTileConfig {
         let tiles = setup_dir.join("tiles");
         Self {
             catalog_database_path: tiles.join("catalog.sqlite"),
+            require_existing_catalog: false,
             dataset_path: tiles.join("datasets"),
             cache_path: tiles.join("png"),
             work_path: tiles.join("work"),
@@ -138,10 +150,8 @@ impl LocalTileConfig {
                 .ok_or_else(|| format!("{name}には1〜{maximum}の整数文字列を指定してください。"))
         }
         let catalog_database_path = absolute_path("tile_catalog_database_path", catalog)?;
-        if catalog_database_path.file_name().is_none()
-            || catalog_database_path.is_dir()
-            || catalog.ends_with(['/', '\\'])
-        {
+        // 媒体の取り外しや差し替え後にも設定を読めるよう、実ファイルは接続時に確認する。
+        if catalog_database_path.file_name().is_none() || catalog.ends_with(['/', '\\']) {
             return Err(
                 "tile_catalog_database_pathにはDBファイルの絶対パスを指定してください。".into(),
             );
@@ -173,6 +183,7 @@ impl LocalTileConfig {
         }
         Ok(Self {
             catalog_database_path,
+            require_existing_catalog: true,
             dataset_path,
             cache_path,
             work_path,
@@ -200,7 +211,7 @@ impl LocalTileConfig {
 }
 
 /// 未作成のパスも、作成やディスクの接続を要求せず、文字列表現で比較する。
-fn normalized_path(path: &Path) -> Vec<String> {
+pub(super) fn normalized_path(path: &Path) -> Vec<String> {
     let mut parts = Vec::new();
     for component in path.components() {
         match component {

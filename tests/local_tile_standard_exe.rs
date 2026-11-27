@@ -16,7 +16,7 @@ use std::{
 
 use geocode_web_single::{
     db::run_migrations,
-    local_tiles::config::LocalTileConfig,
+    local_tiles::{catalog::TileCatalog, config::LocalTileConfig},
     tilegen::{
         cancel::CancellationToken,
         dataset::{Dataset, RenderOptions},
@@ -156,7 +156,16 @@ impl Executable {
     }
 }
 
-fn write_settings(root: &Path, database: &Path, config: &LocalTileConfig) -> PathBuf {
+async fn write_settings(
+    root: &Path,
+    database: &Path,
+    config: &LocalTileConfig,
+    pool: &sqlx::SqlitePool,
+) -> PathBuf {
+    let catalog =
+        TileCatalog::new(config.catalog_database_path.clone(), pool.clone()).with_config(config);
+    catalog.initialize().await.unwrap();
+    catalog.close().await;
     let path = root.join("geocode-web-single.env.json");
     fs::write(&path,serde_json::to_vec_pretty(&json!({
         "app_title":"標準地図の実exe試験","access_token_exp_minutes":"30","refresh_token_exp_minutes":"60",
@@ -251,9 +260,9 @@ async fn verify_offline_executable(features: &str, schema: u32) {
         .await
         .unwrap();
     run_migrations(&pool).await.unwrap();
-    pool.close().await;
     let config = LocalTileConfig::defaults(root_path);
-    let settings = write_settings(root_path, &database, &config);
+    let settings = write_settings(root_path, &database, &config, &pool).await;
+    pool.close().await;
     let settings_before = fs::read(&settings).unwrap();
     let cli = Executable {
         path: executable.clone(),
@@ -538,10 +547,10 @@ async fn import_real_mixed_datum_elevation_into_isolated_storage_and_verify_back
         .await
         .unwrap();
     run_migrations(&pool).await.unwrap();
+    let config = LocalTileConfig::defaults(&root);
+    let settings = write_settings(&root, &app_database, &config, &pool).await;
     pool.close().await;
     drop(pool);
-    let config = LocalTileConfig::defaults(&root);
-    let settings = write_settings(&root, &app_database, &config);
     let settings_before = fs::read(&settings).unwrap();
     let cli = Executable {
         path: executable,

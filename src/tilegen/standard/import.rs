@@ -21,7 +21,7 @@ use super::{
 };
 use crate::tilegen::{
     geometry::{Point, project},
-    import::{ImportReport, MissingNodes},
+    import::{ImportReport, MissingNodes, publish_store},
     operation::{DiagnosticLevel, OperationContext, OperationGuard, Stage},
     pbf::{self, MemberKind, Object, Relation},
     store::StoreMetadata,
@@ -91,6 +91,7 @@ fn run(
         for warning in &inspected.warnings {
             context.diagnostic(DiagnosticLevel::Warning, warning);
         }
+        guard.set_elevation_cells(inspected.input_cells);
         Some(inspected)
     } else {
         None
@@ -166,6 +167,7 @@ fn run(
         }),
         labels: None,
     };
+    let mut geometry_rows = 0u64;
     let before = input_fingerprint(&base.input)?;
     let first_started = Instant::now();
     guard.stage(Stage::ImportPass1);
@@ -202,6 +204,7 @@ fn run(
                         "INSERT INTO label_relations VALUES(?,?)",
                         params![relation.id, document],
                     )?;
+                    geometry_rows += 1;
                     batch.record(&staging, document.len() + 32)?;
                     if labels::category(&relation.tags) == Some("water.river") {
                         for member in &relation.members {
@@ -235,6 +238,7 @@ fn run(
                 "INSERT INTO relations VALUES(?1,?2)",
                 params![relation.id, document],
             )?;
+            geometry_rows += 1;
             batch.record(&staging, document.len() + 32)?;
             for (index, member) in relation.members.iter().enumerate() {
                 if index.is_multiple_of(1024) {
@@ -248,6 +252,7 @@ fn run(
             Ok(())
         },
         || context.check(),
+        |done, total| guard.scan_progress(done, total),
     )?;
     batch.sample();
     staging.execute_batch("COMMIT")?;
@@ -312,6 +317,7 @@ fn run(
             Ok(())
         },
         || context.check(),
+        |done, total| guard.scan_progress(done, total),
     )?;
     batch.sample();
     staging.execute_batch("COMMIT")?;
@@ -342,6 +348,7 @@ fn run(
                             "INSERT INTO node_labels VALUES(?,?)",
                             params![node.id, document],
                         )?;
+                        geometry_rows += 1;
                         batch.record(&staging, document.len() + 32)?;
                     },
                     Err(reason) => {
@@ -379,9 +386,19 @@ fn run(
         Ok(())
     };
     let third = if extended {
-        pbf::scan_with_node_tags_with_check(&base.input, resolve_node, || context.check())?
+        pbf::scan_with_node_tags_with_check(
+            &base.input,
+            resolve_node,
+            || context.check(),
+            |done, total| guard.scan_progress(done, total),
+        )?
     } else {
-        pbf::scan_with_check(&base.input, resolve_node, || context.check())?
+        pbf::scan_with_check(
+            &base.input,
+            resolve_node,
+            || context.check(),
+            |done, total| guard.scan_progress(done, total),
+        )?
     };
     batch.sample();
     staging.execute_batch("COMMIT")?;
@@ -394,6 +411,16 @@ fn run(
     let missing_node_references = needed_node_count - resolved;
     let geometry_started = Instant::now();
     guard.stage(Stage::BuildingGeometry);
+    let total_geometry = geometry_rows + selected_way_count;
+    let mut processed = 0;
+    guard.progress(0, Some(total_geometry));
+    // 現在の行に入る前に処理済みの行数を報告する。読み飛ばした地物や除外した地物も数える。
+    let mut next_geometry = || {
+        if processed % 64 == 0 {
+            guard.progress(processed, Some(total_geometry));
+        }
+        processed += 1;
+    };
 
     let filename = base
         .store
@@ -417,6 +444,7 @@ fn run(
         let mut statement = staging.prepare("SELECT document FROM node_labels ORDER BY id")?;
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
+            next_geometry();
             context.check()?;
             let label: labels::LabelCandidate = serde_json::from_str(&row.get::<_, String>(0)?)?;
             labels::insert(&output, &label)?;
@@ -425,6 +453,7 @@ fn run(
         let mut statement = staging.prepare("SELECT document FROM label_relations ORDER BY id")?;
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
+            next_geometry();
             context.check()?;
             let relation: Relation = serde_json::from_str(&row.get::<_, String>(0)?)?;
             let anchor = relation_label_anchor(&staging, &relation)?.or(
@@ -475,6 +504,7 @@ fn run(
     let mut statement = staging.prepare("SELECT document FROM relations ORDER BY id")?;
     let mut rows = statement.query([])?;
     while let Some(row) = rows.next()? {
+        next_geometry();
         context.check()?;
         let relation: Relation = serde_json::from_str(&row.get::<_, String>(0)?)?;
         let kind = match relation_kind(&staging, &relation, context) {
@@ -573,6 +603,7 @@ fn run(
         staging.prepare("SELECT id,node_ids,tags FROM selected_ways ORDER BY id")?;
     let mut rows = statement.query([])?;
     while let Some(row) = rows.next()? {
+        next_geometry();
         context.check()?;
         let way_id: i64 = row.get(0)?;
         let ids = decode_ids(&row.get::<_, Vec<u8>>(1)?)?;
@@ -695,6 +726,7 @@ fn run(
     }
     drop(rows);
     drop(statement);
+    guard.progress(processed, Some(total_geometry));
     output_batch.sample();
     output.execute_batch("COMMIT")?;
     metadata.sources.push(SourceInfo {
@@ -705,25 +737,30 @@ fn run(
     });
     if let Some(path) = &options.landmask_input {
         guard.stage(Stage::ImportLandmask);
-        metadata
-            .sources
-            .push(super::landmask::import_into(&output, path, context)?);
+        metadata.sources.push(super::landmask::import_with_progress(
+            &output,
+            path,
+            context,
+            |done, total| guard.progress(done, Some(total)),
+        )?);
     }
     if let Some(path) = &options.elevation_input {
         guard.stage(Stage::ImportElevation);
         if let Some(inspected) = &elevation_inspection {
             inspected.verify_unchanged(context)?;
         }
-        let (sources, details) = super::elevation::import_into_with_policy_and_contours(
+        let (sources, details) = super::elevation::import_with_progress(
             &output,
             path,
             options.elevation_datum_policy,
             options.contour_data == ContourData::On,
             context,
+            Some(guard),
         )?;
         metadata.sources.extend(sources);
         metadata.elevation = Some(details);
     }
+    guard.stage(Stage::PreparingStore);
     if extended {
         let duplicates = labels::deduplicate(&output, context)?;
         if duplicates > 0 {
@@ -818,16 +855,14 @@ fn run(
     let store_bytes = fs::metadata(&building_path)?.len();
     guard.stage(Stage::Publishing);
     context.check()?;
-    fs::hard_link(&building_path, &base.store)
+    publish_store(&building_path, &base.store)
         .context("新完成DBの公開に失敗しました。既存ファイルは変更しません")?;
     // 公開後の補助ファイル清掃失敗で、確定済み成功を取り消さない。
-    for path in [&building_path, &staging_path] {
-        if let Err(e) = fs::remove_file(path) {
-            context.diagnostic(
-                DiagnosticLevel::Warning,
-                format!("作業ファイルを削除できません: {e}"),
-            );
-        }
+    if let Err(e) = fs::remove_file(&staging_path) {
+        context.diagnostic(
+            DiagnosticLevel::Warning,
+            format!("作業ファイルを削除できません: {e}"),
+        );
     }
     let _ = fs::remove_dir(&base.work_dir);
     Ok(ImportReport {

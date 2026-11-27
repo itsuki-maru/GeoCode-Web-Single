@@ -793,6 +793,11 @@ pub async fn execute_with_cancellation(
         Err(error) => return Err(catalog_error(error)),
     };
     if catalog_missing {
+        if config.require_existing_catalog {
+            return Err(CliError::missing(&super::catalog::missing_catalog_message(
+                &config.catalog_database_path,
+            )));
+        }
         return match invocation.command {
             Command::Status => Ok(CommandOutput::success(
                 json!({"config":config_json(&config),"catalog_exists":false,"owner_available":true,
@@ -821,11 +826,7 @@ pub async fn execute_with_cancellation(
     } else {
         TileCatalog::read_only(config.catalog_database_path.clone(), pool)
     }
-    .with_storage_roots([
-        config.dataset_path.clone(),
-        config.cache_path.clone(),
-        config.work_path.clone(),
-    ]);
+    .with_config(&config);
     let result = execute_reader(&catalog, &config, invocation, &cancellation).await;
     catalog.close().await;
     result

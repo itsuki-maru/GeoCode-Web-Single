@@ -4,7 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>GeoCode-Web ローカル地図管理</title>
+  <link rel="stylesheet" href="/assets/leaflet.css">
   <link rel="stylesheet" href="style.css">
+  <script src="/assets/leaflet.js" defer></script>
+  <script src="paths.js" defer></script>
+  <script src="routes.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -16,7 +20,10 @@
           <button type="button" class="nav-item active" data-view="import" aria-current="page"><span>地図を取り込む</span></button>
           <button type="button" class="nav-item" data-view="datasets"><span>データセット</span><span class="nav-count" id="nav-dataset-count">0</span></button>
           <button type="button" class="nav-item" data-view="precompute"><span>タイルを事前生成</span></button>
-          <button type="button" class="nav-item" data-view="activity"><span>処理状況・履歴</span><span class="nav-count" id="nav-job-count">0</span></button>
+          <button type="button" class="nav-item" data-view="routes"><span>経路</span></button>
+          <button type="button" class="nav-item" data-view="activity"><span>処理状況</span><span class="nav-count" id="nav-job-count">0</span></button>
+          <button type="button" class="nav-item" data-view="history"><span>履歴</span></button>
+          <button type="button" class="nav-item" data-view="storage"><span>データの保存先</span></button>
         </nav>
       </div>
     </header>
@@ -24,9 +31,8 @@
     <main>
       <header class="page-header"><div><h1 id="page-title">地図を取り込む</h1><p class="page-description" id="page-description">取得済みのPBFから、この端末で使える地図を作成します。</p></div><div class="header-status"><span class="badge neutral" id="connection-status">接続を確認中</span><span class="refresh-time" id="refresh-time"></span><button type="button" class="icon-button" id="refresh-button" title="状態を更新" aria-label="状態を更新">↻</button></div></header>
       <div class="workspace-toolbar"><p class="background-note">画面を閉じた後も、実行中の処理は続きます。</p><button type="button" class="text-button" id="show-settings">保存先と設定を確認</button></div>
-      <button type="button" class="text-button" id="show-rebind">本体DBの移設・対応付け</button>
-      <div id="notice" class="notice" role="status" aria-live="polite" hidden><span id="notice-text"></span><button type="button" id="dismiss-notice" aria-label="通知を閉じる">×</button></div>
-      <div id="connection-error" class="inline-message error" role="alert" hidden></div>
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden><span id="notice-text"></span><button type="button" class="text-button" id="notice-history" data-view="history" hidden>履歴を開く</button><button type="button" id="dismiss-notice" aria-label="通知を閉じる">×</button></div>
+      <div id="connection-error" class="inline-message error" role="alert" hidden><span id="connection-error-text"></span><button type="button" class="text-button" id="open-storage" data-view="storage" hidden>データの保存先を開く</button></div>
 
       <section id="setup-panel" class="setup-panel" hidden aria-labelledby="setup-title">
         <div class="setup-heading"><span class="step-label">はじめに</span><h2 id="setup-title">最初の準備</h2><p>アプリの設定と保存先を準備します。完了後、この画面で地図の作成を始められます。</p></div>
@@ -40,15 +46,6 @@
         </form>
       </section>
 
-      <section id="rebind-panel" class="card form-card" hidden aria-labelledby="rebind-title">
-        <div class="section-heading"><div><h2 id="rebind-title">本体DBの移設・対応付け</h2><p>設定JSONの本体DBとタイル管理DBを検査し、元と同じDBだと確認できる場合だけ対応付けを更新します。通常アプリ・サーバー・生成処理を終了してから実行してください。</p></div></div>
-        <button type="button" class="button secondary" id="rebind-inspect">現在の対応先を確認</button>
-        <pre id="rebind-diagnosis" class="log-content" aria-live="polite"></pre>
-        <div class="field"><label for="rebind-source">移動前の本体DB <span class="optional">必要な場合</span></label><div class="path-input"><input id="rebind-source" placeholder="catalogが記録した元の実ファイル"><button type="button" class="button secondary" data-pick="database" data-target="rebind-source">ファイルを選択</button></div><p class="hint">通常のバックアップコピーはファイル識別子が異なるため、そのまま元ファイルの証明には使えません。</p></div>
-        <div class="field"><label for="rebind-proof">移設前に保存した移設記録 <span class="optional">元DBの代わりに使用</span></label><div class="path-input"><input id="rebind-proof" placeholder="移設前に作成したJSON"><button type="button" class="button secondary" data-pick="proof" data-target="rebind-proof">ファイルを選択</button></div></div>
-        <div class="form-footer"><p>確認した計画は15分間有効です。適用時に内容と保存先を再検査します。</p><button type="button" class="button secondary" id="rebind-plan">移設内容を検証</button><button type="button" class="button primary" id="rebind-apply" disabled>確認した対応付けを適用</button></div>
-        <details class="form-section"><summary>これから本体DBを移す場合</summary><p class="hint">移設前の正しい対応付けで、改ざん検証付きの移設記録を保存できます。元の設定JSONと暗号鍵も引き継ぎ、完了までDBの内容を変更しないでください。</p><div class="field"><label for="rebind-output">移設記録の保存先（新しいJSONファイルの絶対パス）</label><input id="rebind-output" placeholder="C:/backup/catalog-relocation.json"></div><button type="button" class="button secondary" id="rebind-prepare">移設前の記録を保存</button></details>
-      </section>
       <div id="workspace" hidden>
         <section class="metrics" aria-label="現在の状態"><div class="metric"><span>登録済みデータセット</span><strong id="dataset-count">0</strong></div><div class="metric"><span>実行・待機中</span><strong id="running-count">0</strong></div><div class="metric"><span>完了した処理</span><strong id="completed-count">0</strong></div></section>
         <div id="owner-message" class="inline-message" hidden><span class="status-dot" aria-hidden="true"></span><div><strong id="owner-message-title">生成領域を使用しています</strong><p id="owner-message-text">状態の確認と取消は引き続き利用できます。新しい生成は処理の終了後に開始できます。</p></div></div>
@@ -59,7 +56,7 @@
             <div class="form-grid"><div class="field span-two"><label for="import-pbf">PBFファイル <span class="required">必須</span></label><div class="path-input"><input id="import-pbf" name="input_path" placeholder="取得済みの .osm.pbf ファイル" required><button type="button" class="button secondary" data-pick="pbf" data-target="import-pbf">ファイルを選択</button></div></div><div class="field"><label for="import-name">地図の名前</label><input id="import-name" name="name" value="全国・名称付き" maxlength="120" required></div><div class="field"><label for="import-features">地図の内容</label><select id="import-features" name="features"><option value="standard-v2">地名・ランドマーク付きの標準地図</option><option value="standard-v1">標準地形図（名称なし）</option><option value="roads-v1">道路のみ</option></select></div></div>
           <div id="import-standard-fields" class="form-section"><h3>陸域と標高の資料 <span class="optional">任意</span></h3><div class="field"><label for="import-landmask">陸域ポリゴン</label><div class="path-input"><input id="import-landmask" name="landmask_input" placeholder="分割WGS84版の .shp ファイル"><button type="button" class="button secondary" data-pick="landmask" data-target="import-landmask">ファイルを選択</button></div><p class="hint">.shp と同じ場所に、対応する .shx・.dbf などのファイルも保持してください。</p></div><div class="field"><label for="import-elevation">標高資料のフォルダまたは入力ファイル</label><div class="path-input"><input id="import-elevation" name="elevation_input" placeholder="地形を追加する場合に指定"><button type="button" class="button secondary" data-pick="elevation" data-target="import-elevation">フォルダを選択</button></div><p class="hint">XML・ZIPなどの入力ファイルを単体で指定する場合は、絶対パスを直接入力してください。</p></div><label class="check-line" id="import-contour-option"><input id="import-contour-data" name="contour_data" type="checkbox"><span>等高線データも作成する<small>標高資料がある場合に利用できます。表示の有無は、作成後の描画条件で選べます。</small></span></label></div>
             <details class="advanced-settings"><summary>詳細設定</summary><div class="form-grid"><div class="field"><label for="import-missing">必要なノードが欠けている場合</label><select id="import-missing" name="missing_nodes"><option value="error">処理を停止する</option><option value="skip-way">該当する道路を除外する</option></select></div><div class="field" id="import-area-option"><label for="import-invalid">面地物を構築できない場合</label><select id="import-invalid" name="invalid_areas"><option value="skip-feature" selected>該当する面地物を除外する</option><option value="error">処理を停止する</option></select></div><div class="field span-two" id="import-datum-option"><label for="import-datum">標高資料の標高基準</label><select id="import-datum" name="elevation_datum_policy"><option value="strict">混在を検出したら停止する</option><option value="allow-jgd2000-2011">JGD2000・JGD2011の混在を許可する</option></select></div></div></details>
-            <div class="form-footer"><p>開始後は「処理状況・履歴」で進捗を確認できます。</p><button type="submit" class="button primary" data-writer id="import-submit">取り込みを開始</button></div>
+            <div class="form-footer"><p>開始後は「処理状況」で進捗を確認できます。</p><button type="submit" class="button primary" data-writer id="import-submit">取り込みを開始</button></div>
           </form>
         </section>
 
@@ -79,11 +76,105 @@
           <div id="plan-result" class="card plan-result" hidden><div><span class="step-label">生成計画</span><h3><span id="plan-count">0</span><small>枚</small></h3><p id="plan-description"></p><p class="hint" id="plan-zooms"></p></div><button type="button" class="button primary" data-writer id="precompute-run">この内容で生成を開始</button></div>
         </section>
 
-        <section id="view-activity" class="view" hidden aria-labelledby="activity-heading"><div class="section-heading"><div><h2 id="activity-heading">処理状況・履歴</h2><p>この画面を閉じた後も、実行中の処理は続きます。再度開くと進捗を確認できます。</p></div></div><div id="request-list" class="request-list"></div><div id="job-list" class="job-list"></div><div id="activity-empty" class="card empty-state" hidden><h3>実行した処理がここに表示されます</h3><p>取り込みと事前生成の進捗・結果を確認できます。</p></div></section>
+        <section id="view-routes" class="view" hidden aria-label="経路">
+          <p id="route-catalog-error" class="inline-message error" role="alert" hidden></p>
+          <details id="route-http-panel" class="card register-card">
+            <summary><strong>GeoCode-Webへの経路配信</strong><span id="route-http-current"></span></summary>
+            <form id="route-http-form" class="form-card">
+              <label class="check-line"><input id="route-http-enabled" type="checkbox"><span>HTTP配信を有効にする</span></label>
+              <div class="field"><label for="route-http-dataset">配信する道路網</label><select id="route-http-dataset" disabled></select></div>
+              <label class="check-line"><input id="route-http-allow" type="checkbox" checked disabled><span>このSingle版からの接続も許可する</span></label>
+              <div class="field">
+                <label for="route-http-origin">許可するオリジン</label>
+                <input id="route-http-origin" type="text" inputmode="url" spellcheck="false" value="http://127.0.0.1:3000" aria-describedby="route-http-origins route-http-origin-error" disabled>
+                <p id="route-http-origins" class="hint"></p>
+                <p id="route-http-origin-error" class="inline-message error" role="alert" hidden></p>
+              </div>
+              <div class="form-footer"><p>次回のSingle本体起動時に反映されます。</p><button id="route-http-save" type="submit" class="button primary" disabled>配信設定を保存</button></div>
+              <p id="route-http-status" role="status" aria-live="polite" hidden></p>
+            </form>
+          </details>
+          <section id="route-workspace" class="card form-card" aria-labelledby="route-search-heading" hidden>
+            <h2 id="route-search-heading">経路を検索</h2>
+            <form id="route-search-form">
+              <div class="form-grid">
+                <div class="field"><label for="route-dataset">道路網</label><select id="route-dataset" required></select></div>
+                <div class="field"><label for="route-mode">移動手段</label><select id="route-mode"><option value="car">自動車</option><option value="foot">徒歩</option></select></div>
+              </div>
+              <div class="route-layout">
+                <div class="route-places">
+                  <p class="hint">地図上の地点を選ぶか、緯度・経度を入力してください。</p>
+                  <fieldset class="route-point"><legend>出発地</legend>
+                    <div class="route-coordinate-pair">
+                      <div class="field"><label for="route-start-lat">緯度</label><input id="route-start-lat" type="number" min="-90" max="90" step="any" required></div>
+                      <div class="field"><label for="route-start-lon">経度</label><input id="route-start-lon" type="number" min="-180" max="180" step="any" required></div>
+                    </div>
+                    <button id="route-pick-start" class="button secondary small" type="button" aria-pressed="true">地図で出発地を指定</button>
+                  </fieldset>
+                  <fieldset class="route-point"><legend>目的地</legend>
+                    <div class="route-coordinate-pair">
+                      <div class="field"><label for="route-end-lat">緯度</label><input id="route-end-lat" type="number" min="-90" max="90" step="any" required></div>
+                      <div class="field"><label for="route-end-lon">経度</label><input id="route-end-lon" type="number" min="-180" max="180" step="any" required></div>
+                    </div>
+                    <button id="route-pick-end" class="button secondary small" type="button" aria-pressed="false">地図で目的地を指定</button>
+                  </fieldset>
+                  <div class="button-row"><button type="submit" id="route-search" class="button primary">経路を検索</button><button type="button" id="route-swap" class="text-button">出発地と目的地を入れ替え</button></div>
+                  <p id="route-search-status" role="status" aria-live="polite"></p>
+                </div>
+                <div class="route-preview">
+                  <div class="field"><label for="route-background">背景地図</label><select id="route-background"></select></div>
+                  <div id="route-map" role="region" aria-label="経路の地図"></div>
+                  <p id="route-attribution" class="hint"></p>
+                  <p id="route-map-status" class="hint" role="status"></p>
+                  <button id="route-to-precompute" type="button" class="text-button" hidden>表示範囲をタイルの事前生成に渡す</button>
+                </div>
+              </div>
+            </form>
+            <div id="route-result" class="subtle-box route-result" hidden>
+              <strong id="route-summary"></strong><span id="route-snaps"></span>
+              <span>白丸は指定地点、色付きの小丸は道路に合わせた地点です。</span>
+            </div>
+            <details class="form-section"><summary>道路網の情報と出典</summary><dl id="route-info" class="settings-list"></dl></details>
+          </section>
+          <details id="route-build-panel" class="card register-card" open>
+            <summary><strong>道路網を作成する</strong><span>OSM PBFから自動車・徒歩の検索用データを作成します。</span></summary>
+            <form id="route-build-form" class="form-card">
+              <div class="field"><label for="route-pbf">PBFファイル</label><div class="path-input"><input id="route-pbf" placeholder="取得済みの .osm.pbf ファイル" required><button type="button" class="button secondary" data-pick="pbf" data-target="route-pbf">ファイルを選択</button></div></div>
+              <div class="field"><label for="route-name">道路網の名前</label><input id="route-name" maxlength="120" required placeholder="例：関東"></div>
+              <div class="form-footer"><p>同じ名前で再作成すると、完成後に新しい道路網へ切り替わります。</p><button id="route-build" type="submit" class="button primary" data-writer>道路網の作成を開始</button></div>
+            </form>
+          </details>
+        </section>
+        <section id="view-activity" class="view" hidden aria-label="処理状況">
+          <div id="activity-list" class="job-list"></div>
+          <div id="activity-empty" class="card empty-state" hidden><h2>実行・待機中の処理はありません</h2><button type="button" class="text-button" data-view="history">履歴を開く</button></div>
+        </section>
+        <section id="view-history" class="view" hidden aria-label="履歴">
+          <div id="history-list" class="job-list"></div>
+          <div id="history-empty" class="card empty-state" hidden><h2>終了した処理はありません</h2></div>
+        </section>
+        <section id="view-storage" class="view card form-card" hidden aria-label="データの保存先">
+          <fieldset id="storage-fields" aria-label="使用する保存先" disabled>
+            <div class="field"><label for="storage-database">使用する本体DB（geocode-web.sqlite）</label><div class="path-input"><input id="storage-database" type="text" spellcheck="false"><button type="button" class="button secondary" data-pick="database" data-target="storage-database">ファイルを選択</button></div></div>
+            <div class="field"><label for="storage-tiles">使用する tiles フォルダー</label><div class="path-input"><input id="storage-tiles" type="text" spellcheck="false"><button type="button" class="button secondary" data-pick="folder" data-target="storage-tiles">フォルダーを選択</button></div></div>
+            <details id="storage-details" class="form-section"><summary>タイルの保存先を個別に指定</summary>
+              <div class="field"><label for="storage-catalog">タイル管理DB（catalog.sqlite）</label><div class="path-input"><input id="storage-catalog" type="text" spellcheck="false"><button type="button" class="button secondary" data-pick="database" data-target="storage-catalog">ファイルを選択</button></div></div>
+              <div class="field"><label for="storage-datasets">データセットのフォルダー（datasets）</label><div class="path-input"><input id="storage-datasets" type="text" spellcheck="false"><button type="button" class="button secondary" data-pick="folder" data-target="storage-datasets">フォルダーを選択</button></div></div>
+              <div class="field"><label for="storage-cache">PNGのフォルダー（png）</label><div class="path-input"><input id="storage-cache" type="text" spellcheck="false"><button type="button" class="button secondary" data-pick="folder" data-target="storage-cache">フォルダーを選択</button></div></div>
+              <div class="field"><label for="storage-work">作業フォルダー（work）</label><div class="path-input"><input id="storage-work" type="text" spellcheck="false"><button type="button" class="button secondary" data-pick="folder" data-target="storage-work">フォルダーを選択</button></div></div>
+              <button type="button" class="button secondary" id="storage-show-files">地図ごとの完成DBを表示</button>
+            </details>
+            <div id="storage-files"></div>
+            <div class="form-footer"><p>ファイルを移動するときは、通常アプリ・サーバー・生成処理を終了してください。</p><button type="button" class="button primary" id="storage-apply">この保存先を使う</button></div>
+          </fieldset>
+          <div id="storage-init" class="form-section" hidden><p>タイル管理DBが見つかりません。既存の地図を使う場合は、外付けドライブを接続するか、上で保存先を選び直してください。初めて利用するときは現在の設定先に作成できます。</p><button type="button" class="button secondary" id="storage-initialize">タイル管理DBを新規作成</button></div>
+          <button type="button" class="button primary" id="storage-recover" hidden>中断した保存先の更新を再開</button>
+          <p id="storage-status" role="status" aria-live="polite"></p>
+        </section>
       </div>
     </main>
   </div>
-  <dialog id="settings-dialog" aria-labelledby="settings-dialog-title"><div class="dialog-header"><h2 id="settings-dialog-title">保存先と設定</h2><button type="button" class="icon-button" id="close-settings" aria-label="設定の表示を閉じる">×</button></div><dl id="settings-values" class="settings-list"></dl><p class="hint">保存先の変更は、すべての処理を終了してから設定ファイルで行ってください。</p></dialog>
+  <dialog id="settings-dialog" aria-labelledby="settings-dialog-title"><div class="dialog-header"><h2 id="settings-dialog-title">保存先と設定</h2><button type="button" class="icon-button" id="close-settings" aria-label="設定の表示を閉じる">×</button></div><dl id="settings-values" class="settings-list"></dl><p class="hint">本体DBとタイルの場所は「データの保存先」タブで変更できます。</p></dialog>
   <dialog id="log-dialog" aria-labelledby="log-dialog-title"><div class="dialog-header"><h2 id="log-dialog-title">処理ログ</h2><button type="button" class="icon-button" id="close-log" aria-label="処理ログを閉じる">×</button></div><p id="log-dialog-path" class="path-value"></p><p id="log-dialog-note" class="hint"></p><pre id="log-dialog-text" class="log-content"></pre><div class="dialog-actions"><button type="button" class="button secondary" id="refresh-log">ログを更新</button></div></dialog>
 </body>
 </html>

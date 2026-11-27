@@ -27,6 +27,15 @@ pub fn import_into(
     input: &Path,
     context: &OperationContext,
 ) -> Result<SourceInfo> {
+    import_with_progress(connection, input, context, |_, _| {})
+}
+
+pub(super) fn import_with_progress(
+    connection: &Connection,
+    input: &Path,
+    context: &OperationContext,
+    mut progress: impl FnMut(u64, u64),
+) -> Result<SourceInfo> {
     context.check()?;
     let before = fs::metadata(input)?;
     ensure!(
@@ -113,6 +122,7 @@ pub fn import_into(
     let mut points_count = 0_u64;
     let mut skipped = 0_u64;
     while position < declared {
+        progress(position, declared);
         context.check()?;
         ensure!(
             position + 8 <= declared,
@@ -241,6 +251,7 @@ pub fn import_into(
         points_count += n_points as u64;
     }
     context.check()?;
+    progress(position, declared);
     let after = fs::metadata(input)?;
     let prj_after = fs::metadata(&prj_path)?;
     ensure!(

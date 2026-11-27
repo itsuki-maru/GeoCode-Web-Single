@@ -12,11 +12,13 @@ use std::{
     process::{Command, Stdio},
 };
 
+#[derive(Clone)]
 pub(super) struct Paths {
     pub request: PathBuf,
     pub receipt: PathBuf,
     pub lock: PathBuf,
     pub log: PathBuf,
+    pub cancel: PathBuf,
 }
 impl Paths {
     pub fn new(root: &Path, id: &str) -> Self {
@@ -25,6 +27,7 @@ impl Paths {
             receipt: root.join(format!("{id}.receipt.json")),
             lock: root.join(format!("{id}.lock")),
             log: root.join(format!("{id}.log")),
+            cancel: root.join(format!("{id}.cancel")),
         }
     }
 }
@@ -108,7 +111,7 @@ pub(super) fn existing_request(
         return Err("同じ受付IDに異なる処理条件は指定できません。".into());
     }
     if paths.receipt.exists() {
-        Ok(Some(read_receipt(&paths)?))
+        Ok(Some(read_receipt(config, &paths)?))
     } else {
         let mut receipt = Receipt::new(id.into(), operation.name(), paths.log);
         receipt.update("interrupted");
@@ -175,6 +178,10 @@ fn submit_with_spawn(
         operation,
     };
     let mut receipt = Receipt::new(id.clone(), request.operation.name(), paths.log.clone());
+    if let Operation::RouteBuild(build) = &request.operation {
+        receipt.job_id = Some(id.clone());
+        receipt.result = Some(serde_json::json!({"request":build}));
+    }
     protocol::atomic_json(&paths.request, &request)?;
     receipt.request_sha256 = protocol::file_hash(&paths.request)?;
     protocol::atomic_json(&paths.receipt, &receipt)?;
@@ -241,9 +248,17 @@ fn submit_with_spawn(
 }
 
 pub(super) fn active(state: &str) -> bool {
-    matches!(state, "starting" | "running" | "accepted")
+    matches!(state, "starting" | "running" | "accepted" | "cancelling")
 }
-fn read_receipt(paths: &Paths) -> Result<Receipt, String> {
+pub(super) fn read_receipt(config: &LocalTileConfig, paths: &Paths) -> Result<Receipt, String> {
+    let mut receipt = inspect_receipt(paths)?;
+    if receipt.action == "route_build" && receipt.state == "interrupted" {
+        super::routing::recover_publication(config, &mut receipt);
+    }
+    Ok(receipt)
+}
+
+fn inspect_receipt(paths: &Paths) -> Result<Receipt, String> {
     let mut receipt: Receipt = protocol::read_json(&paths.receipt)?;
     if !active(&receipt.state) {
         return Ok(receipt);
@@ -283,6 +298,12 @@ fn read_receipt(paths: &Paths) -> Result<Receipt, String> {
             receipt.error =
                 Some("生成プロセスの所有権がありません。中断状態とログを確認してください。".into());
         }
+    }
+    if receipt.action == "route_build"
+        && active(&receipt.state)
+        && paths.cancel.try_exists().map_err(message)?
+    {
+        receipt.state = "cancelling".to_owned();
     }
     Ok(receipt)
 }
@@ -338,7 +359,7 @@ pub(super) fn list_receipts(
             return Err("管理受付IDが不正です。".into());
         }
         let paths = Paths::new(&root, &id);
-        let receipt = read_receipt(&paths)?;
+        let receipt = read_receipt(config, &paths)?;
         if receipt.id != id {
             return Err("受付結果のIDが一致しません。".into());
         }

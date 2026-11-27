@@ -4,6 +4,7 @@ pub mod cli;
 pub mod config;
 pub mod jobs;
 pub mod profile;
+pub(crate) mod progress;
 pub mod runtime;
 pub mod service;
 

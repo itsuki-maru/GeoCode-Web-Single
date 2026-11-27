@@ -4,16 +4,18 @@
 use geocode_web_single::{
     build_tera_from_embed,
     config::CONFIG,
-    db::{check_and_insert_initial_data, setup_database_pool},
-    init::{SetupForm, build_env_from_form, get_application_user_setup_path, read_env_json},
+    db::{check_and_insert_initial_data, pool::setup_database_pool_with_settings},
+    init::{SetupForm, get_application_user_setup_path, read_env_json},
     model::ApplicationInitSetup,
     router,
+    routing::LocalRoutingListener,
     tile_settings::TileSettings,
     utils,
 };
 use std::env;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::net::TcpListener;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time::timeout;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -107,6 +109,7 @@ unsafe fn apply_env_vars(env: &ApplicationInitSetup, server_addr: &str) {
             "TILE_PROXY_ALLOWED_ORIGINS",
             &env.tile_proxy_allowed_origins,
         );
+        env::set_var("OSRM_ALLOWED_ORIGINS", &env.osrm_allowed_origins);
         env::set_var(
             "TILE_SETTINGS_ENCRYPTION_KEY",
             &env.tile_settings_encryption_key,
@@ -250,7 +253,12 @@ async fn complete_setup(
     let setup_dir = get_application_user_setup_path();
 
     // フォームデータから設定を構築・JSON保存
-    let env = build_env_from_form(setup_dir, form)?;
+    geocode_web_single::tile_manager::setup::initialize_desktop(
+        &setup_dir.join("geocode-web-single.env.json"),
+        form,
+    )
+    .await?;
+    let env = read_env_json(&setup_dir).map_err(|error| error.to_string())?;
 
     // 環境変数を設定（Rust 2024: unsafeが必要）
     unsafe {
@@ -264,7 +272,7 @@ async fn complete_setup(
     tracing::info!("==================== Server Startup (after setup) ====================");
 
     // DB接続・初期データ投入
-    let pool = setup_database_pool()
+    let pool = setup_database_pool_with_settings(&env)
         .await
         .map_err(|e| format!("DB error: {}", e))?;
     check_and_insert_initial_data(&pool)
@@ -280,15 +288,9 @@ async fn complete_setup(
 
     // axum ルーター
     let _camera_cleanup = geocode_web_single::handler::live_camera::start_cleanup(pool.clone());
-    let (app_router, local_tiles) = build_router_with_tile_settings(pool, tera, tile_cache).await?;
+    let (listener, app_router, local_tiles) =
+        prepare_http_server(pool, tera, tile_cache, &env, SERVER_ADDR).await?;
     *app.state::<DesktopTileShutdown>().runtime.lock().unwrap() = Some(local_tiles.clone());
-
-    // TCP バインド
-    let listener = tokio::net::TcpListener::bind(SERVER_ADDR)
-        .await
-        .map_err(|e| format!("Bind error: {}", e))?;
-
-    tracing::info!("========== Listening on http://{} ==========", SERVER_ADDR);
 
     // シャットダウンチャネルを生成し、 State に格納
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
@@ -319,14 +321,17 @@ async fn complete_setup(
     // axum をバックグラウンドで起動（invoke はここで返る）
     tokio::spawn(async move {
         let _camera_cleanup = _camera_cleanup;
-        axum::serve(listener, app_router)
-            .with_graceful_shutdown(async move {
-                shutdown_rx.await.ok();
-                local_tiles.shutdown().await;
-                tracing::info!("==================== Server Shutdown ====================");
-            })
-            .await
-            .unwrap();
+        axum::serve(
+            listener,
+            app_router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
+            shutdown_rx.await.ok();
+            local_tiles.shutdown().await;
+            tracing::info!("==================== Server Shutdown ====================");
+        })
+        .await
+        .unwrap();
     });
 
     Ok(())
@@ -365,7 +370,7 @@ fn run_server_mode(bind_addr: String) {
         init_tracing();
         tracing::info!("==================== Server Mode Startup ====================");
 
-        let pool = match setup_database_pool().await {
+        let pool = match setup_database_pool_with_settings(&env).await {
             Ok(p) => p,
             Err(e) => {
                 tracing::error!("Failed to create DB pool: {}", e);
@@ -380,26 +385,17 @@ fn run_server_mode(bind_addr: String) {
         let tile_cache = setup_tile_cache().await;
 
         let _camera_cleanup = geocode_web_single::handler::live_camera::start_cleanup(pool.clone());
-        let (app_router, local_tiles) = match build_router_with_tile_settings(pool, tera, tile_cache).await {
-            Ok(router) => router,
+        let server = prepare_http_server(pool, tera, tile_cache, &env, &bind_addr).await;
+        let (listener, app_router, local_tiles) = match server {
+            Ok(server) => server,
             Err(error) => {
-                tracing::error!(%error, "タイルサーバ設定を読み込めません。");
-                return;
-            },
-        };
-
-        let listener = match tokio::net::TcpListener::bind(&bind_addr).await {
-            Ok(l) => l,
-            Err(e) => {
-                tracing::error!("Failed to bind {}: {}", bind_addr, e);
+                tracing::error!(%error, "サーバーを起動できません。");
                 std::process::exit(1);
             },
         };
-
-        tracing::info!("========== Listening on http://{} ==========", bind_addr);
         tracing::info!("Press Ctrl+C to stop the server.");
 
-        axum::serve(listener, app_router)
+        axum::serve(listener, app_router.into_make_service_with_connect_info::<std::net::SocketAddr>())
             .with_graceful_shutdown(async move {
                 tokio::signal::ctrl_c()
                     .await
@@ -510,7 +506,7 @@ fn main() {
 
                 let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    let pool = match setup_database_pool().await {
+                    let pool = match setup_database_pool_with_settings(&env).await {
                         Ok(pool) => pool,
                         Err(e) => {
                             tracing::error!("Failed to create pool: {}", e);
@@ -527,14 +523,15 @@ fn main() {
 
                     let _camera_cleanup =
                         geocode_web_single::handler::live_camera::start_cleanup(pool.clone());
-                    let (app_router, local_tiles) =
-                        match build_router_with_tile_settings(pool, tera, tile_cache).await {
-                            Ok(router) => router,
-                            Err(error) => {
-                                tracing::error!(%error, "タイルサーバ設定を読み込めません。");
-                                return;
-                            },
-                        };
+                    let server =
+                        prepare_http_server(pool, tera, tile_cache, &env, SERVER_ADDR).await;
+                    let (listener, app_router, local_tiles) = match server {
+                        Ok(server) => server,
+                        Err(error) => {
+                            tracing::error!(%error, "サーバーを起動できません。");
+                            return;
+                        },
+                    };
 
                     *app_handle
                         .state::<DesktopTileShutdown>()
@@ -542,29 +539,20 @@ fn main() {
                         .lock()
                         .unwrap() = Some(local_tiles.clone());
 
-                    let listener = match tokio::net::TcpListener::bind(SERVER_ADDR).await {
-                        Ok(l) => l,
-                        Err(e) => {
-                            tracing::error!("Failed to bind {}: {}", SERVER_ADDR, e);
-                            return;
-                        },
-                    };
-
-                    tracing::info!("========== Listening on http://{} ==========", SERVER_ADDR);
-
                     // Tauriウィンドウ作成前にサーバ準備完了を通知
                     let _ = ready_tx.send(());
 
-                    axum::serve(listener, app_router)
-                        .with_graceful_shutdown(async move {
-                            shutdown_rx.await.ok();
-                            local_tiles.shutdown().await;
-                            tracing::info!(
-                                "==================== Server Shutdown ===================="
-                            );
-                        })
-                        .await
-                        .unwrap();
+                    axum::serve(
+                        listener,
+                        app_router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+                    )
+                    .with_graceful_shutdown(async move {
+                        shutdown_rx.await.ok();
+                        local_tiles.shutdown().await;
+                        tracing::info!("==================== Server Shutdown ====================");
+                    })
+                    .await
+                    .unwrap();
                 });
 
                 // axumが起動するまで最大30秒待機
@@ -794,20 +782,31 @@ async fn open_existing_cli_database(
     Ok(pool)
 }
 
-/// 全起動経路で管理済み設定を読み込み、運転中も定期的に再取得する。
-async fn build_router_with_tile_settings(
+/// 本体の待受を確保し、タイル設定とローカル経路配信をルーターに反映する。
+async fn prepare_http_server(
     pool: sqlx::SqlitePool,
     tera: Arc<TokioMutex<tera::Tera>>,
     tile_cache: Option<redis::aio::ConnectionManager>,
+    env: &ApplicationInitSetup,
+    bind_addr: &str,
 ) -> Result<
     (
+        TcpListener,
         axum::Router,
         Arc<geocode_web_single::local_tiles::LocalTiles>,
     ),
     String,
 > {
-    let local_tiles =
-        geocode_web_single::local_tiles::LocalTiles::new(CONFIG.local_tiles.clone(), pool.clone());
+    let config = geocode_web_single::local_tiles::config::LocalTileConfig::from_setup(env)?;
+    let routing_http = env.local_routing_http.clone().unwrap_or_default();
+    let local_routes = routing_http.routes(&config.dataset_path)?;
+    let listener = TcpListener::bind(bind_addr)
+        .await
+        .map_err(|error| format!("待受アドレス {bind_addr} を確保できません: {error}"))?;
+    let local_addr = listener
+        .local_addr()
+        .map_err(|error| format!("待受アドレスを取得できません: {error}"))?;
+    let local_tiles = geocode_web_single::local_tiles::LocalTiles::new(config, pool.clone());
     if let Err(error) = local_tiles.initialize().await {
         tracing::warn!(reason=%error.message, "ローカル地図を初期化できません。本体の他機能は継続します。");
     }
@@ -831,16 +830,19 @@ async fn build_router_with_tile_settings(
             }
         }
     });
-    Ok((
-        router::build_router_with_local_tiles(
-            pool,
-            tera,
-            tile_cache,
-            settings,
-            local_tiles.clone(),
-        ),
-        local_tiles,
-    ))
+    let mut app_router = router::build_router_with_local_services(
+        pool,
+        tera,
+        tile_cache,
+        settings,
+        local_tiles.clone(),
+        local_routes,
+    );
+    if routing_http.enabled {
+        app_router = app_router.layer(axum::Extension(LocalRoutingListener(local_addr)));
+    }
+    tracing::info!("========== Listening on http://{} ==========", local_addr);
+    Ok((listener, app_router, local_tiles))
 }
 
 async fn setup_tile_cache() -> Option<redis::aio::ConnectionManager> {

@@ -29,6 +29,13 @@ const BATCH_UPDATES: usize = 50_000;
 const BATCH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_LAT: f64 = 85.051_128_779_806_6;
 
+/// 同じディレクトリで完成済みDBを公開する。公開先が既にある場合は構築中のDBを保全する。
+pub(super) fn publish_store(building: &Path, target: &Path) -> std::io::Result<()> {
+    let mut source = tempfile::TempPath::try_from_path(building)?;
+    source.disable_cleanup(true);
+    source.persist_noclobber(target).map_err(|e| e.error)
+}
+
 #[cfg(test)]
 use crate::tilegen::test_support;
 
@@ -275,6 +282,7 @@ fn run_checked(
                 Ok(())
             },
             || context.check(),
+            |done, total| guard.scan_progress(done, total),
         )?;
         guard.progress(visited_objects, None);
         journal_peak_bytes = journal_peak_bytes.max(batch.sample_journal());
@@ -345,6 +353,7 @@ fn run_checked(
                 Ok(())
             },
             || context.check(),
+            |done, total| guard.scan_progress(done, total),
         )?;
         guard.progress(resolved_nodes, Some(needed_node_count));
         journal_peak_bytes = journal_peak_bytes.max(batch.sample_journal());
@@ -598,18 +607,10 @@ fn run_checked(
     stage.close().map_err(|(_, error)| error)?;
     let store_bytes = fs::metadata(&building_path)?.len();
 
-    // 新しいハードリンクの作成により、並行作成中または既存のストアを置き換えずに
-    // 原子的に公開する。構築中ファイルは同じディレクトリ・ファイルシステムへ置く。
     guard.stage(Stage::Publishing);
     context.check()?;
-    fs::hard_link(&building_path, &options.store)
+    publish_store(&building_path, &options.store)
         .with_context(|| format!("publish completed store {}", options.store.display()))?;
-    if let Err(error) = fs::remove_file(&building_path) {
-        context.diagnostic(
-            DiagnosticLevel::Warning,
-            format!("could not remove building-store link: {error}"),
-        );
-    }
     if let Err(error) = fs::remove_file(&staging_path) {
         context.diagnostic(
             DiagnosticLevel::Warning,
@@ -775,6 +776,19 @@ fn hex_hash(data: impl AsRef<[u8]>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preserve_both_stores_if_the_destination_appears_before_publication() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let building = directory.path().join("data.building.sqlite");
+        let target = directory.path().join("data.sqlite");
+        fs::write(&building, b"new")?;
+        fs::write(&target, b"existing")?;
+        assert!(publish_store(&building, &target).is_err());
+        assert_eq!(fs::read(&target)?, b"existing");
+        assert_eq!(fs::read(&building)?, b"new");
+        Ok(())
+    }
 
     #[test]
     fn cancellation_during_final_validation_keeps_the_store_unpublished() -> Result<()> {

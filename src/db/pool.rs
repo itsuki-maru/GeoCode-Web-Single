@@ -6,8 +6,8 @@ use chrono::{TimeDelta, Utc};
 use sqlx::query_as;
 use sqlx::sqlite::SqlitePool;
 use sqlx::{Error, Row};
-use std::fs;
 use std::path::Path;
+use std::str::FromStr;
 use tracing::info;
 use uuid::Uuid;
 
@@ -608,15 +608,38 @@ const MIGRATIONS: &[Migration] = &[
     },
 ];
 
-// データベース接続の確立
+/// 設定済みの本体DBを開き、既知の旧版のみ通常のマイグレーションで更新する。
 pub async fn setup_database_pool() -> Result<SqlitePool, Error> {
-    if !Path::new(&CONFIG.database_path).exists() {
-        info!("The SQLite database file does not exists so create it.");
-        fs::File::create(&CONFIG.database_path).expect("Faild to create SQLite database file.");
-        info!("The SQLite database created...Ok");
-    }
+    open_application_database(Path::new(&CONFIG.database_path), &CONFIG.database_url).await
+}
 
-    let pool = SqlitePool::connect(&CONFIG.database_url).await?;
+pub async fn setup_database_pool_with_settings(
+    settings: &crate::model::ApplicationInitSetup,
+) -> Result<SqlitePool, Error> {
+    open_application_database(&settings.sqlite_database_path, &settings.database_url).await
+}
+
+async fn open_application_database(path: &Path, url: &str) -> Result<SqlitePool, Error> {
+    if !path.is_file() {
+        return Err(Error::Protocol(format!(
+            "本体DBが見つかりません。ドライブを接続するか「データの保存先」で選び直してください。 {}",
+            path.display()
+        )));
+    }
+    let options = sqlx::sqlite::SqliteConnectOptions::from_str(url)?.create_if_missing(false);
+    if !options.get_filename().is_absolute()
+        || options.get_filename().canonicalize()? != path.canonicalize()?
+    {
+        return Err(Error::Protocol("設定JSONの本体DBと接続URLが別のファイルを指しています。「データの保存先」で選び直してください。".into()));
+    }
+    let pool = SqlitePool::connect_with(options).await?;
+    if let Err(error) = validate_schema_versions(&pool, true).await {
+        pool.close().await;
+        return Err(Error::Protocol(format!(
+            "このバージョンのGeoCode-Webで利用できる本体DBを指定してください。 {}　{error}",
+            path.display()
+        )));
+    }
     run_migrations(&pool).await?;
     info!("The SQLite database migration...Ok");
     Ok(pool)
@@ -729,6 +752,10 @@ pub async fn create_user_with_master_layer(
 
 /// CLIでは初期化・migrationをせず、既存本体DBがこの版のschemaかを検査する。
 pub async fn validate_existing_schema(pool: &SqlitePool) -> Result<(), Error> {
+    validate_schema_versions(pool, false).await
+}
+
+async fn validate_schema_versions(pool: &SqlitePool, allow_upgrade: bool) -> Result<(), Error> {
     let rows: Vec<(i64, String)> = sqlx::query_as(
         r#"
             SELECT
@@ -740,12 +767,7 @@ pub async fn validate_existing_schema(pool: &SqlitePool) -> Result<(), Error> {
     )
     .fetch_all(pool)
     .await?;
-    if rows.len() != MIGRATIONS.len()
-        || MIGRATIONS
-            .iter()
-            .zip(rows.iter())
-            .any(|(expected, actual)| expected.version != actual.0 || expected.name != actual.1)
-    {
+    if !known_schema_versions(&rows, allow_upgrade) {
         return Err(Error::Protocol(
             "本体DBのschemaがこのアプリの適用済み構成と一致しません。通常起動で更新を確認してください。".into(),
         ));
@@ -753,10 +775,30 @@ pub async fn validate_existing_schema(pool: &SqlitePool) -> Result<(), Error> {
     Ok(())
 }
 
-/// 移設専用の読み取り接続でも、通常CLIと同じmigration契約を検査する。
+fn known_schema_versions(rows: &[(i64, String)], allow_upgrade: bool) -> bool {
+    !rows.is_empty()
+        && rows.len() <= MIGRATIONS.len()
+        && (allow_upgrade || rows.len() == MIGRATIONS.len())
+        && MIGRATIONS
+            .iter()
+            .zip(rows)
+            .all(|(expected, actual)| expected.version == actual.0 && expected.name == actual.1)
+}
+
+/// 差し替えと移設の読み取り接続でも、通常CLIと同じマイグレーション履歴を検査する。
 pub(crate) fn validate_existing_schema_sync(
     connection: &rusqlite::Connection,
 ) -> Result<(), String> {
+    if existing_schema_needs_upgrade(connection)? {
+        return Err("本体DBが旧版です。本体アプリを一度起動してDBを更新してください。".into());
+    }
+    Ok(())
+}
+
+/// 本体アプリで更新できる既知の旧版DBを、読み取りだけで識別する。
+pub(crate) fn existing_schema_needs_upgrade(
+    connection: &rusqlite::Connection,
+) -> Result<bool, String> {
     let mut query = connection
         .prepare("SELECT version, name FROM schema_migrations ORDER BY version")
         .map_err(|error| error.to_string())?;
@@ -767,15 +809,13 @@ pub(crate) fn validate_existing_schema_sync(
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
-    if rows.len() != MIGRATIONS.len()
-        || MIGRATIONS
-            .iter()
-            .zip(&rows)
-            .any(|(expected, actual)| expected.version != actual.0 || expected.name != actual.1)
-    {
-        return Err("本体DBのschemaがこのアプリの適用済み構成と一致しません。移設処理ではmigrationを実行しません。".into());
+    if !known_schema_versions(&rows, true) {
+        return Err(
+            "本体DBのスキーマがこのバージョンと一致しません。通常起動で更新を確認してください。"
+                .into(),
+        );
     }
-    Ok(())
+    Ok(rows.len() != MIGRATIONS.len())
 }
 
 // データベースのマイグレーション

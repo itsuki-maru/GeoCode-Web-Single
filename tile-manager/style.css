@@ -429,6 +429,23 @@ main {
   padding: 24px;
 }
 
+#storage-fields {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+#view-storage details[open] > summary {
+  margin-bottom: 16px;
+}
+
+#storage-status:not(:empty) {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -716,7 +733,17 @@ summary {
   background: #fdf0f1;
 }
 
-.notice button {
+#notice-text,
+#connection-error-text {
+  flex: 1;
+}
+
+#notice-history,
+#open-storage {
+  flex: 0 0 auto;
+}
+
+#dismiss-notice {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -918,16 +945,12 @@ summary {
   color: var(--admin-warning);
 }
 
-.job-list,
-.request-list {
+.job-list {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.request-list {
-  margin-bottom: 16px;
-}
 
 .job-card {
   padding: 24px;
@@ -1003,21 +1026,9 @@ summary {
   transition: width 0.35s ease;
 }
 
-.native-progress.complete::-webkit-progress-value {
-  background: var(--admin-success);
-}
-
-.job-card.failed .native-progress::-webkit-progress-value {
-  background: var(--admin-danger);
-}
-
 .native-progress::-moz-progress-bar {
   border-radius: 8px;
   background: var(--admin-primary);
-}
-
-.native-progress.complete::-moz-progress-bar {
-  background: var(--admin-success);
 }
 
 .native-progress:not([value]),
@@ -1404,6 +1415,55 @@ dialog::backdrop {
     max-height: calc(100dvh - 24px);
     padding: 20px;
   }
+}
+
+.route-layout {
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.8fr) minmax(0, 1.65fr);
+  align-items: start;
+  gap: 24px;
+  margin-top: 20px;
+}
+
+.route-places, .route-preview, .route-point {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.route-point {
+  margin: 0;
+  padding: 10px 14px 14px;
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+}
+
+.route-point legend { font-weight: 700; }
+#route-http-panel { margin: 0 0 20px; }
+#route-http-form .check-line { margin-bottom: 12px; }
+#route-http-origins { overflow-wrap: anywhere; }
+#route-http-status { margin-top: 12px; }
+#route-http-status.error { color: var(--admin-danger); }
+.route-point button { justify-self: start; }
+.route-point button[aria-pressed="true"] { color: var(--admin-primary); border-color: currentColor; }
+.route-coordinate-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.route-places .button-row { flex-wrap: wrap; }
+#route-map {
+  height: clamp(320px, 46vh, 520px);
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+  background: #f0f2f4;
+  isolation: isolate;
+}
+#route-map .leaflet-interactive { cursor: crosshair; }
+#route-to-precompute { justify-self: start; }
+.route-result { display: grid; gap: 4px; }
+.route-result span { font-size: 0.9rem; }
+#route-info { overflow-wrap: anywhere; }
+#route-search-status.error { color: var(--admin-danger); }
+
+@media (max-width: 760px) {
+  .route-layout { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (prefers-reduced-motion: reduce) {

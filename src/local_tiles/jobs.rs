@@ -4,6 +4,7 @@ use super::{
     LocalTiles,
     catalog::{self, JobRecord},
     profile,
+    progress::Estimate,
     runtime::{Failure, Result},
     service::{catalog_failure, execution_diagnostics},
 };
@@ -126,6 +127,61 @@ struct Manifest {
     reused_tiles: u64,
     state: String,
     resume_from: Option<String>,
+    #[serde(skip)]
+    timing: TileTiming,
+}
+
+#[derive(Debug, Default, Clone)]
+struct TileTiming {
+    expected_cached: u64,
+    elapsed: f64,
+    active_seconds: f64,
+    fresh: Option<f64>,
+    cached: Option<f64>,
+}
+
+impl TileTiming {
+    fn observe(&mut self, hit: bool, seconds: f64) {
+        self.active_seconds += seconds;
+        let average = if hit {
+            &mut self.cached
+        } else {
+            &mut self.fresh
+        };
+        *average = Some(average.map_or(seconds, |old| old * 0.9 + seconds * 0.1));
+    }
+
+    fn remaining(&self, m: &Manifest) -> Option<f64> {
+        if self.elapsed < 3. || m.completed_tiles < 2 || self.active_seconds <= 0. {
+            return None;
+        }
+        let left = m.total_tiles.saturating_sub(m.completed_tiles);
+        let cached = self
+            .expected_cached
+            .saturating_sub(m.reused_tiles)
+            .min(left);
+        // 新規ジョブには既存タイルの記録がない。新規描画と再利用の両方を観測できたら、
+        // これまでの再利用率から残りの内訳を推定し、それぞれの処理時間を使う。
+        let cached = if m.resume_from.is_none() && self.fresh.is_some() {
+            (left as f64 * m.reused_tiles as f64 / m.completed_tiles as f64).round() as u64
+        } else {
+            cached
+        };
+        let new = left - cached.min(left);
+        // 再利用だけが続く間は、新規描画にかかる時間をまだ推定できない。
+        let fresh_time = if new == 0 {
+            0.
+        } else {
+            self.fresh? * new as f64
+        };
+        let cache_time = if cached == 0 {
+            0.
+        } else {
+            self.cached.or(self.fresh)? * cached as f64
+        };
+        let concurrency = (self.active_seconds / self.elapsed).max(1.);
+        Some((fresh_time + cache_time) / concurrency)
+    }
 }
 
 struct JobAdmission {
@@ -368,6 +424,47 @@ impl LocalTiles {
         } else {
             None
         };
+        let source_bytes = tokio::fs::metadata(&request.input_path)
+            .await
+            .map(|m| m.len())
+            .unwrap_or(0);
+        let standard_map = standard.is_some();
+        let mut estimate = None;
+        let mut previous_report = None;
+        // 履歴は取り込み前に一度だけ照会する。古いカタログで履歴を取得できない場合は初期配分を使う。
+        if let Ok(jobs) = catalog::list_jobs(&self.catalog, 32, 0).await {
+            for job in jobs
+                .into_iter()
+                .filter(|job| job.kind == "import" && job.state == "succeeded")
+            {
+                let Ok(old) = serde_json::from_str::<ImportRequest>(&job.request_json) else {
+                    continue;
+                };
+                if old.input_path != request.input_path
+                    || old.features != request.features
+                    || old.landmask_input != request.landmask_input
+                    || old.elevation_input != request.elevation_input
+                    || old.contour_data != request.contour_data
+                    || old.elevation_datum_policy != request.elevation_datum_policy
+                    || old.missing_nodes != request.missing_nodes
+                    || old.invalid_areas != request.invalid_areas
+                {
+                    continue;
+                }
+                if let Ok(result) = serde_json::from_str::<Value>(&job.progress_json) {
+                    if result["pbf_bytes"]
+                        .as_u64()
+                        .is_some_and(|n| n != source_bytes)
+                    {
+                        continue;
+                    }
+                    if result["report"].is_object() {
+                        previous_report = Some(result["report"].clone());
+                        break;
+                    }
+                }
+            }
+        }
         let monitor = context.monitor();
         #[cfg(test)]
         let worker_hook = self.import_worker_hook.lock().unwrap().clone();
@@ -392,7 +489,39 @@ impl LocalTiles {
             };
             // 終了直前に追加された原因診断も、失敗状態を確定する前に保存する。
             let snapshot = monitor.snapshot();
-            let progress = json!({"stage":format!("{:?}", snapshot.stage),
+            let elapsed = snapshot.elapsed.as_secs_f64();
+            let stage = if snapshot.stage == crate::tilegen::operation::Stage::Completed {
+                "Registering".to_owned()
+            } else {
+                format!("{:?}", snapshot.stage)
+            };
+            let forecast = if request.elevation_input.is_none() || snapshot.elevation_cells > 0 {
+                let model = estimate.get_or_insert_with(|| {
+                    let mut model = Estimate::import(
+                        standard_map,
+                        request.landmask_input.is_some(),
+                        snapshot.elevation_cells,
+                        request.contour_data == "on",
+                        source_bytes,
+                    );
+                    if let Some(report) = &previous_report {
+                        model.use_import_report(report);
+                    }
+                    model
+                });
+                model.sample(
+                    &stage,
+                    snapshot.completed,
+                    snapshot.total,
+                    snapshot.scan_bytes,
+                    elapsed,
+                    snapshot.stage_elapsed.as_secs_f64(),
+                )
+            } else {
+                Value::Null
+            };
+            let progress = json!({"stage":stage, "estimate":forecast, "scan_bytes":snapshot.scan_bytes,
+                "sampled_at":chrono::Utc::now().to_rfc3339(),
                 "completed":snapshot.completed,"total":snapshot.total,
                 "elapsed_seconds":snapshot.elapsed.as_secs_f64(),
                 "work_path":work,"database_path":store,
@@ -429,7 +558,9 @@ impl LocalTiles {
                 .await
                 .map_err(catalog_failure)?;
         }
-        Ok(json!({"stage":"Completed","dataset":registered,"report":report}))
+        Ok(
+            json!({"stage":"Completed","dataset":registered,"report":report,"pbf_bytes":source_bytes}),
+        )
     }
 
     pub async fn plan_precompute(self: &Arc<Self>, request: PrecomputeRequest) -> Result<Value> {
@@ -564,10 +695,12 @@ impl LocalTiles {
                 "対象枚数が生成上限を超えています。範囲またはズームを減らしてください。",
             ));
         }
-        if let Some(previous_id) = &request.resume_job_id {
+        let expected_cached = if let Some(previous_id) = &request.resume_job_id {
             self.verify_resume(&request, &render_id, previous_id)
-                .await?;
-        }
+                .await?
+        } else {
+            0
+        };
         let admission = self.admit_job(self.precompute_slot.clone())?;
         let id = request_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let token = CancellationToken::new();
@@ -590,6 +723,10 @@ impl LocalTiles {
             reused_tiles: 0,
             state: "queued".into(),
             resume_from: request.resume_job_id.clone(),
+            timing: TileTiming {
+                expected_cached,
+                ..Default::default()
+            },
         };
         let manifest_path = self.manifest_path(&manifest.dataset_id, &manifest.render_id, &id);
         write_manifest(&manifest_path, &manifest).await?;
@@ -639,7 +776,7 @@ impl LocalTiles {
         request: &PrecomputeRequest,
         render_id: &str,
         previous_id: &str,
-    ) -> Result<()> {
+    ) -> Result<u64> {
         if uuid::Uuid::parse_str(previous_id).is_err() {
             return Err(Failure::new(400, "再開ジョブIDが不正です。"));
         }
@@ -673,7 +810,7 @@ impl LocalTiles {
                 "再開時は元のデータセット・描画世代・範囲・ズームを指定してください。",
             ));
         }
-        Ok(())
+        Ok(manifest.completed_tiles)
     }
 
     /// 旧要求JSONに世代がない場合も、保存済みmanifestからだけ再開世代を復元する。
@@ -998,6 +1135,7 @@ where
         return Err(Failure::new(400, "事前生成の並列数は1以上にしてください。"));
     }
     let mut tiles = tiles.peekable();
+    let started = Instant::now();
     let mut pending = FuturesUnordered::new();
     let stop = CancellationToken::new();
     let mut failure: Option<Failure> = None;
@@ -1005,7 +1143,11 @@ where
     loop {
         while failure.is_none() && !cancellation.is_cancelled() && pending.len() < window {
             let Some(tile) = tiles.next() else { break };
-            pending.push(render(tile, stop.clone()));
+            let future = render(tile, stop.clone());
+            pending.push(async move {
+                let start = Instant::now();
+                future.await.map(|hit| (hit, start.elapsed().as_secs_f64()))
+            });
         }
         if pending.is_empty() {
             if let Some(error) = failure {
@@ -1034,7 +1176,9 @@ where
             }
         };
         match completed.expect("pending precompute request") {
-            Ok(hit) => {
+            Ok((hit, seconds)) => {
+                manifest.timing.observe(hit, seconds);
+                manifest.timing.elapsed = started.elapsed().as_secs_f64();
                 manifest.completed_tiles += 1;
                 manifest.reused_tiles += u64::from(hit);
             },
@@ -1087,7 +1231,8 @@ fn job_value(record: JobRecord) -> Value {
 fn manifest_progress(manifest: &Manifest) -> Value {
     json!({"stage":"Exporting","render_id":manifest.render_id,"completed":manifest.completed_tiles,
         "total":manifest.total_tiles,"reused_tiles":manifest.reused_tiles,
-        "rendered_tiles":manifest.completed_tiles-manifest.reused_tiles})
+        "rendered_tiles":manifest.completed_tiles-manifest.reused_tiles, "elapsed_seconds":manifest.timing.elapsed,
+        "remaining_seconds":manifest.timing.remaining(manifest), "sampled_at":chrono::Utc::now().to_rfc3339()})
 }
 
 async fn write_manifest(path: &Path, manifest: &Manifest) -> Result<()> {
@@ -1173,11 +1318,33 @@ mod precompute_window_tests {
             reused_tiles: 0,
             state: "running".into(),
             resume_from: None,
+            timing: Default::default(),
         }
     }
 
     fn tiles(count: u32) -> impl Iterator<Item = TileId> {
         (0..count).map(|x| TileId { z: 4, x, y: 0 })
+    }
+
+    #[test]
+    fn resumed_cache_hits_do_not_predict_the_cost_of_uncached_tiles() {
+        let mut m = manifest(100);
+        m.resume_from = Some("previous".into());
+        m.completed_tiles = 40;
+        m.reused_tiles = 40;
+        m.timing.expected_cached = 80;
+        m.timing.elapsed = 4.;
+        for _ in 0..40 {
+            m.timing.observe(true, 0.1);
+        }
+        assert!(m.timing.remaining(&m).is_none());
+        m.timing.observe(false, 2.);
+        m.timing.elapsed = 6.;
+        m.completed_tiles += 1;
+        let eta = m.timing.remaining(&m).unwrap();
+        assert!((eta - 42.).abs() < 0.01);
+        m.timing.expected_cached = 100;
+        assert!(m.timing.remaining(&m).unwrap() < eta);
     }
 
     type Request = (u32, CancellationToken, oneshot::Sender<Result<bool>>);

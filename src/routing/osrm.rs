@@ -1,5 +1,7 @@
 use super::{ComputeInput, Coordinate, RouteLimits, RouteResult, TravelMode};
-use crate::{db::tiles::is_enabled_generic_background, error::AppError};
+use crate::{
+    db::tiles::is_enabled_generic_background, error::AppError, local_routing::SNAP_RADIUS_M,
+};
 use axum::{
     Json,
     extract::Extension,
@@ -10,7 +12,10 @@ use reqwest::Url;
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::SqlitePool;
-use std::sync::{Arc, LazyLock};
+use std::{
+    net::{IpAddr, SocketAddr, UdpSocket},
+    sync::{Arc, LazyLock},
+};
 
 mod settings;
 mod upstream;
@@ -20,8 +25,43 @@ use upstream::UpstreamPolicy;
 
 const REQUESTS_PER_MINUTE: u32 = 60;
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
-// 上流の道路データがない地点を離れた道路に吸着させないよう、両端を100 mに制限する。
-const ROUTE_QUERY: &str = "alternatives=false&steps=false&geometries=polyline&overview=simplified&annotations=false&radiuses=100;100&generate_hints=false";
+const ROUTE_QUERY: &str = "alternatives=false&steps=false&geometries=polyline&overview=simplified&annotations=false&generate_hints=false";
+
+/// この本体がローカル経路を配信している実際の待受アドレス。
+#[derive(Clone, Copy)]
+pub struct LocalRoutingListener(pub SocketAddr);
+
+impl LocalRoutingListener {
+    fn serves(self, endpoint: &Url, mode: TravelMode) -> bool {
+        let path = match mode {
+            TravelMode::Drive => "/local-routing/car",
+            TravelMode::Walk => "/local-routing/foot",
+        };
+        if endpoint.scheme() != "http"
+            || endpoint.port_or_known_default() != Some(self.0.port())
+            || endpoint.path().strip_suffix('/').unwrap_or(endpoint.path()) != path
+        {
+            return false;
+        }
+        let listen_ip = self.0.ip();
+        let host = endpoint.host_str().unwrap_or_default();
+        if host.trim_end_matches('.') == "localhost" {
+            return listen_ip.is_unspecified()
+                || listen_ip == std::net::Ipv4Addr::LOCALHOST
+                || listen_ip == std::net::Ipv6Addr::LOCALHOST;
+        }
+        let Ok(ip) = host.trim_matches(['[', ']']).parse::<IpAddr>() else {
+            return false;
+        };
+        if !listen_ip.is_unspecified() {
+            return ip == listen_ip;
+        }
+        // 全インターフェースで待受中の場合、同じポートの別マシンを自己配信と扱わない。
+        ip.is_ipv4() == listen_ip.is_ipv4()
+            && !ip.is_unspecified()
+            && (ip.is_loopback() || UdpSocket::bind((ip, 0)).is_ok())
+    }
+}
 
 pub struct Osrm {
     upstream: UpstreamPolicy,
@@ -59,12 +99,13 @@ impl Osrm {
         origin: &Coordinate,
         destination: &Coordinate,
         api_key: Option<HeaderValue>,
+        local: Option<LocalRoutingListener>,
     ) -> Result<Option<RouteResult>, RouteFetchError> {
         let client = self
             .upstream
             .client(endpoint)
             .map_err(|_| AppError::BadGateway)?;
-        let url = route_url(endpoint, mode, origin, destination)?;
+        let url = route_url(endpoint, mode, origin, destination, local)?;
         let mut request = client.get(url);
         if let Some(api_key) = api_key {
             request = request.header("X-API-Key", api_key);
@@ -149,6 +190,7 @@ fn route_url(
     mode: TravelMode,
     origin: &Coordinate,
     destination: &Coordinate,
+    local: Option<LocalRoutingListener>,
 ) -> Result<Url, AppError> {
     let profile = match mode {
         TravelMode::Drive => "driving",
@@ -163,7 +205,13 @@ fn route_url(
         .map_err(|_| AppError::InternalServerError)?
         .pop_if_empty()
         .extend(["route", "v1", profile, &coordinates]);
-    url.set_query(Some(ROUTE_QUERY));
+    // 自己配信には管理GUIと共通の半径を、外部のOSRMには従来の100 mを指定する。
+    let radius = if local.is_some_and(|listener| listener.serves(endpoint, mode)) {
+        SNAP_RADIUS_M
+    } else {
+        100.0
+    };
+    url.set_query(Some(&format!("{ROUTE_QUERY}&radiuses={radius};{radius}")));
     Ok(url)
 }
 
@@ -202,6 +250,7 @@ pub(crate) async fn compute_osrm(
     Extension(account): Extension<String>,
     Extension(pool): Extension<SqlitePool>,
     Extension(service): Extension<Arc<Osrm>>,
+    local: Option<Extension<LocalRoutingListener>>,
     Json(input): Json<ComputeInput>,
 ) -> Result<impl IntoResponse, AppError> {
     input.validate_coordinates()?;
@@ -221,6 +270,7 @@ pub(crate) async fn compute_osrm(
             &input.origin,
             &input.destination,
             api_key,
+            local.map(|Extension(listener)| listener),
         )
         .await
         .map_err(RouteFetchError::into_route_error)?;

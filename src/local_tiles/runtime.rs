@@ -210,13 +210,16 @@ pub fn lock_directory(path: &Path) -> Result<File> {
     // PNGと完成DBの公開には、同一ファイルシステム上で既存ファイルを上書きしない操作が必要となる。
     let source = tempfile::NamedTempFile::new_in(&path).map_err(Failure::internal)?;
     let destination = path.join(format!(".publish-probe-{}", uuid::Uuid::new_v4()));
-    fs::hard_link(source.path(), &destination).map_err(|error| {
-        tracing::warn!(%error, "Tile storage does not support atomic no-clobber publication");
-        Failure::new(
-            503,
-            "保存先で安全なファイル公開を利用できません。別の保存先を指定してください。",
-        )
-    })?;
+    source
+        .into_temp_path()
+        .persist_noclobber(&destination)
+        .map_err(|error| {
+            tracing::warn!(%error, "Tile storage does not support atomic no-clobber publication");
+            Failure::new(
+                503,
+                "保存先で安全なファイル公開を利用できません。別の保存先を指定してください。",
+            )
+        })?;
     fs::remove_file(destination).map_err(Failure::internal)?;
     Ok(file)
 }

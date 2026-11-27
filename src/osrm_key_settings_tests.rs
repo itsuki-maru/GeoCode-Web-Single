@@ -24,8 +24,9 @@ const TEST_NAME: &str =
 const CONFIG_FILE: &str = "geocode-web-single.env.json";
 const ADMIN: &str = "osrm-startup-admin";
 const API_KEY: &str = "startup-test-osrm-api-key";
-// 設定のGET・PUTは接続せず、保存と復号だけを行う。
-const BASE_URL: &str = "https://osrm.example.test/routed-car";
+// 保存・復号に使うローカルURLは、JSONの許可先が起動時に反映された場合だけ登録できる。
+const ALLOWED_ORIGIN: &str = "http://127.0.0.1:5000";
+const BASE_URL: &str = "http://127.0.0.1:5000/routed-car";
 
 #[test]
 fn startup_loads_osrm_keys_and_preserves_decryption_across_processes() {
@@ -44,6 +45,11 @@ fn startup_loads_osrm_keys_and_preserves_decryption_across_processes() {
     assert_eq!(STANDARD.decode(generated_key).unwrap().len(), 32);
     run_child("read", generated.path(), None);
     assert!(fs::read(generated.path().join(CONFIG_FILE)).unwrap() == persisted);
+    // 親環境に許可が残っていても、JSONを空にすれば既存のHTTP接続先も無効になる。
+    let mut disabled: Value = serde_json::from_slice(&persisted).unwrap();
+    disabled["osrm_allowed_origins"] = json!("");
+    fs::write(generated.path().join(CONFIG_FILE), disabled.to_string()).unwrap();
+    run_child("origins-cleared", generated.path(), None);
 
     // 環境変数だけで暗号化した既存データを残し、同じ鍵をJSONへ継承する。
     let inherited = tempfile::tempdir().unwrap();
@@ -77,8 +83,13 @@ fn run_child(case: &str, directory: &Path, encryption_key: Option<&str>) {
         .args(["--exact", TEST_NAME, "--test-threads=1", "--nocapture"])
         .env(CHILD, case)
         .env(DIRECTORY, directory)
-        .env("OSRM_ALLOWED_ORIGINS", "")
+        .env_remove("OSRM_ALLOWED_ORIGINS")
         .env_remove("AI_ENCRYPTION_KEY");
+    if case == "read" {
+        command.env("OSRM_ALLOWED_ORIGINS", "http://127.0.0.1:5001");
+    } else if case == "origins-cleared" {
+        command.env("OSRM_ALLOWED_ORIGINS", ALLOWED_ORIGIN);
+    }
     if let Some(key) = encryption_key {
         command.env("OSRM_ENCRYPTION_KEY", key);
     } else {
@@ -102,6 +113,7 @@ fn write_settings(directory: &Path, encryption_key: Option<&str>) {
         "admin_username": "admin",
         "admin_passwotd": "test-only-password",
         "failed_account_lock": "5",
+        "osrm_allowed_origins": ALLOWED_ORIGIN,
         "next_challenge_minutes": "5",
         "challenge_limit_time_failed_count": "3"
     });
@@ -137,6 +149,10 @@ fn exercise_startup(case: &str, directory: &Path) {
     }
     // 他のテストと分離したプロセスで、ランタイムを作成する前に起動時と同じ設定を適用する。
     unsafe { apply_env_vars(&configuration, "127.0.0.1:3000") };
+    assert_eq!(
+        std::env::var("OSRM_ALLOWED_ORIGINS").unwrap(),
+        configuration.osrm_allowed_origins
+    );
     assert!(std::env::var("OSRM_ENCRYPTION_KEY").ok().as_deref() == Some(effective));
     let create = matches!(case, "save" | "legacy-save");
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -160,11 +176,17 @@ fn exercise_startup(case: &str, directory: &Path) {
                 .unwrap()
                 .id
         } else {
-            sqlx::query_scalar("SELECT id FROM user_model WHERE username = $1")
-                .bind(ADMIN)
-                .fetch_one(&pool)
-                .await
-                .unwrap()
+            sqlx::query_scalar(
+                r#"
+                SELECT id
+                FROM user_model
+                WHERE username = $1
+                "#,
+            )
+            .bind(ADMIN)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
         };
         let token = create_token(&admin, 60, "access_token", 0).unwrap();
         // 実ルーターは Osrm::configured で設定を初期化する。
@@ -176,11 +198,16 @@ fn exercise_startup(case: &str, directory: &Path) {
             });
             let view = request_settings(&app, &token, Some(input), effective).await;
             assert_eq!(view["drive"]["keyUsable"], true);
-            let encrypted: Vec<u8> =
-                sqlx::query_scalar("SELECT encrypted_drive_key FROM osrm_settings WHERE id = 1")
-                    .fetch_one(&pool)
-                    .await
-                    .unwrap();
+            let encrypted: Vec<u8> = sqlx::query_scalar(
+                r#"
+                SELECT encrypted_drive_key
+                FROM osrm_settings
+                WHERE id = 1
+                "#,
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
             assert!(encrypted.len() > API_KEY.len());
             assert!(
                 !encrypted
@@ -192,7 +219,10 @@ fn exercise_startup(case: &str, directory: &Path) {
         assert_eq!(view["keyStorageConfigured"], true);
         assert_eq!(view["drive"]["baseUrl"], BASE_URL);
         assert_eq!(view["drive"]["hasApiKey"], true);
-        assert_eq!(view["drive"]["keyUsable"], case != "wrong-key");
+        assert_eq!(
+            view["drive"]["keyUsable"],
+            !matches!(case, "wrong-key" | "origins-cleared")
+        );
         pool.close().await;
     });
 }

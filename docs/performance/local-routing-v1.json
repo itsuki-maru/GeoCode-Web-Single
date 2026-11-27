@@ -1,0 +1,169 @@
+{
+  "format": 1,
+  "date_jst": "2026-11-25",
+  "environment": {
+    "os": "Windows x64, build 26300",
+    "cpu": "Intel Core i5-13500",
+    "logical_cpus": 20,
+    "physical_memory_bytes": 34088411136,
+    "rustc": "1.99.1",
+    "target": "x86_64-pc-windows-msvc",
+    "build": "release"
+  },
+  "source_attribution": "© OpenStreetMap contributors",
+  "profile_version": "car-foot-jp-v1",
+  "graph_schema_version": 1,
+  "method": {
+    "program": "examples/measure_local_routing.rs",
+    "timing": "各回で元PBFから一時SQLiteを構築し、直後に同じ2地点を普通車5回、徒歩5回の順に検索。初回は各モードの1回目。OSのキャッシュは消去せず、HTTP、GUI、描画時間は含まない。",
+    "memory": "実行中、WindowsプロセスのPeakWorkingSet64を約500ミリ秒間隔で採取。構築・検索を通した最大観測値。",
+    "work_storage": "全国は取り込み開始約4分後の道路抽出中から別サンプラーで一時道路網フォルダー内の各ファイルを開き、論理バイト数を合計。観測した最大値と完成DBサイズの大きい方を掲載。OSのTEMPを含まず、必要な空き容量はこの値を上回り得る。ほかの範囲ではNTFSのディレクトリ列挙が更新前のファイル長を返したため作業容量を掲載しない。",
+    "scope": "市域・四国・全国で同じ高松市内経路を計測。四国では高松から坂出の県内経路も計測。全国道路網での長距離検索は計測対象外。",
+    "load": "他の処理の稼働を固定していない。四国の県内経路の計測は全国道路網の構築と同時に実行。"
+  },
+  "datasets": {
+    "takamatsu": {
+      "name": "高松市中心部。東経134.015～134.095度・北緯34.29～34.37度内にノードがある道路、該当する規制Relation、参照先を抽出。",
+      "file": "takamatsu.osm.pbf",
+      "source_sha256": "ad7c80c4d13f5cca104f017397b5b78aea4ebe8e1ef52a8e6c1bfddd66e2725f",
+      "input_bytes": 808401,
+      "graph_bytes": 14028800,
+      "nodes": 62334,
+      "segments": 74148,
+      "resolved_restriction_relations": 37,
+      "conservatively_excluded_restriction_relations": 4,
+      "outside_restriction_relations": 1
+    },
+    "shikoku": {
+      "name": "四国全域",
+      "file": "shikoku-261114.osm.pbf",
+      "source_sha256": "ecf914fd451f911b976ef8c37d672c43f8c0234cd2016e8305c8c107551f7c6d",
+      "input_bytes": 92206331,
+      "graph_bytes": 954589184,
+      "nodes": 4672035,
+      "segments": 4872651,
+      "resolved_restriction_relations": 442,
+      "conservatively_excluded_restriction_relations": 98,
+      "outside_restriction_relations": 5
+    },
+    "japan": {
+      "name": "日本全国",
+      "file": "japan-261111.osm.pbf",
+      "source_sha256": "5da1c5512392ebd3911e7277a021d2a468d99eea7064579dc986ca04407860b3",
+      "input_bytes": 2573762684,
+      "graph_bytes": 15360479232,
+      "nodes": 72667949,
+      "segments": 77922385,
+      "resolved_restriction_relations": 22968,
+      "conservatively_excluded_restriction_relations": 4538,
+      "outside_restriction_relations": 211
+    }
+  },
+  "routes": {
+    "takamatsu_city": {
+      "name": "高松駅付近から高松市中心部",
+      "start": {
+        "lat": 34.3506377,
+        "lon": 134.0476454
+      },
+      "end": {
+        "lat": 34.3380275,
+        "lon": 134.0521998
+      }
+    },
+    "takamatsu_sakaide": {
+      "name": "高松駅付近から坂出駅付近",
+      "start": {
+        "lat": 34.3506377,
+        "lon": 134.0476454
+      },
+      "end": {
+        "lat": 34.3121728,
+        "lon": 133.85639805
+      }
+    }
+  },
+  "runs": [
+    {
+      "dataset": "takamatsu",
+      "route": "takamatsu_city",
+      "build_seconds": 1.024,
+      "peak_working_set_bytes": 27672576,
+      "car": {
+        "distance_m": 1890.88,
+        "duration_s": 157.28,
+        "first_search_ms": 31.742,
+        "median_search_ms": 28.267,
+        "max_search_ms": 31.742
+      },
+      "foot": {
+        "distance_m": 1842.17,
+        "duration_s": 1473.73,
+        "first_search_ms": 23.877,
+        "median_search_ms": 22.937,
+        "max_search_ms": 23.877
+      }
+    },
+    {
+      "dataset": "shikoku",
+      "route": "takamatsu_city",
+      "build_seconds": 66.302,
+      "peak_working_set_bytes": 256413696,
+      "car": {
+        "distance_m": 1890.88,
+        "duration_s": 157.28,
+        "first_search_ms": 38.517,
+        "median_search_ms": 34.513,
+        "max_search_ms": 38.517
+      },
+      "foot": {
+        "distance_m": 1842.17,
+        "duration_s": 1473.73,
+        "first_search_ms": 22.777,
+        "median_search_ms": 22.777,
+        "max_search_ms": 24.604
+      }
+    },
+    {
+      "dataset": "shikoku",
+      "route": "takamatsu_sakaide",
+      "build_seconds": 60.442,
+      "peak_working_set_bytes": 258523136,
+      "car": {
+        "distance_m": 22758.75,
+        "duration_s": 1651.7,
+        "first_search_ms": 1598.065,
+        "median_search_ms": 1624.805,
+        "max_search_ms": 1811.835
+      },
+      "foot": {
+        "distance_m": 20969.14,
+        "duration_s": 16775.31,
+        "first_search_ms": 473.338,
+        "median_search_ms": 396.46,
+        "max_search_ms": 473.338
+      }
+    },
+    {
+      "dataset": "japan",
+      "route": "takamatsu_city",
+      "build_seconds": 3838.072,
+      "peak_working_set_bytes": 279068672,
+      "sampled_peak_work_bytes": 15360479232,
+      "car": {
+        "distance_m": 1890.88,
+        "duration_s": 157.28,
+        "first_search_ms": 116.112,
+        "median_search_ms": 50.974,
+        "max_search_ms": 116.112
+      },
+      "foot": {
+        "distance_m": 1842.17,
+        "duration_s": 1473.73,
+        "first_search_ms": 29.255,
+        "median_search_ms": 26.108,
+        "max_search_ms": 29.255
+      }
+    }
+  ]
+}
